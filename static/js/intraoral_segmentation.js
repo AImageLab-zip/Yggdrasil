@@ -25,6 +25,8 @@
         selected: 0.24,
         normal: 0.14,
     };
+    const minProposalSegmentPx = 24;
+    const toothIconCache = {};
 
     const state = {
         container: null,
@@ -115,6 +117,37 @@
         if ((q === 1 || q === 2) && t >= 1 && t <= 8) return gradientColor(q === 1 ? 8 - t : 8 + t - 1, 16);
         if ((q === 3 || q === 4) && t >= 1 && t <= 8) return gradientColor(q === 4 ? 8 - t : 8 + t - 1, 16);
         return palette[0];
+    }
+
+    function toothIconSource(code) {
+        const q = code[0];
+        const t = code[1];
+        if (q === '2') return `1${t}`;
+        if (q === '4') return t === '7' ? '36' : `3${t}`;
+        if (code === '37') return '36';
+        return code;
+    }
+
+    function toothIconMirrored(code) {
+        return code[0] === '2' || code[0] === '4';
+    }
+
+    function normalizeToothSvg(svgText) {
+        return svgText
+            .replace(/<\?xml[\s\S]*?\?>/g, '')
+            .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
+            .replace(/fill="#b2f2bb"/gi, 'fill="currentColor"')
+            .replace(/<svg\b/i, '<svg aria-hidden="true" focusable="false"');
+    }
+
+    function loadToothSvg(source) {
+        if (!toothIconCache[source]) {
+            toothIconCache[source] = fetch(`/static/icons/teeth/${source}.svg`)
+                .then(response => (response.ok ? response.text() : ''))
+                .then(normalizeToothSvg)
+                .catch(() => '');
+        }
+        return toothIconCache[source];
     }
 
     function hexToRgba(hex, alpha) {
@@ -574,7 +607,21 @@
             btn.classList.toggle('no-mask', count === 0);
             btn.dataset.tooth = code;
             btn.style.setProperty('--tooth-color', toothColor(code));
-            btn.textContent = code;
+            btn.setAttribute('aria-label', `Tooth ${code}`);
+
+            const icon = document.createElement('span');
+            icon.className = 'seg-tooth-icon';
+            icon.classList.toggle('mirrored', toothIconMirrored(code));
+            icon.setAttribute('aria-hidden', 'true');
+            btn.appendChild(icon);
+            loadToothSvg(toothIconSource(code)).then((svg) => {
+                if (icon.isConnected) icon.innerHTML = svg;
+            });
+
+            const codeText = document.createElement('span');
+            codeText.className = 'seg-tooth-code';
+            codeText.textContent = code;
+            btn.appendChild(codeText);
             if (count > 0) {
                 const badge = document.createElement('span');
                 badge.className = 'seg-count';
@@ -704,10 +751,19 @@
             if (node.getAttr('proposalTooth') !== tooth || node.getAttr('proposalPolygonIndex') !== polygonIndex) return;
             const edgeIndex = node.getAttr('proposalEdgeIndex');
             if (!Number.isInteger(edgeIndex) || edgeIndex >= polygon.length) return;
+            node.visible(isProposalSegmentLongEnough(polygon, edgeIndex));
+            if (!node.visible()) return;
             const mid = curveMidpoint(polygon, edgeIndex);
             node.position({ x: mid[0] * state.scale, y: mid[1] * state.scale });
         });
         state.handleLayer.batchDraw();
+    }
+
+    function isProposalSegmentLongEnough(polygon, idx) {
+        const start = polygon[idx];
+        const end = polygon[(idx + 1) % polygon.length];
+        if (!start || !end) return false;
+        return Math.hypot(end[0] - start[0], end[1] - start[1]) * state.scale * state.zoom >= minProposalSegmentPx;
     }
 
     function displayPointerOriginal(node) {
@@ -772,6 +828,7 @@
         });
 
         polygon.forEach((_point, idx) => {
+            if (!isProposalSegmentLongEnough(polygon, idx)) return;
             const mid = curveMidpoint(polygon, idx);
             let insertedIndex = null;
             let didDrag = false;
