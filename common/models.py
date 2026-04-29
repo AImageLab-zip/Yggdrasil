@@ -181,7 +181,7 @@ class Job(models.Model):
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 
 	# IO
-	input_file_path = models.CharField(max_length=500, help_text='Path to primary input file in /dataset', blank=True)
+	input_file_path = models.CharField(max_length=500, help_text='Primary input object key', blank=True)
 	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output file paths and metadata')
 
 	# Timing and metadata
@@ -318,7 +318,7 @@ class ProcessingJob(models.Model):
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 
 	# File paths
-	input_file_path = models.CharField(max_length=500, help_text='Path to input file in /dataset')
+	input_file_path = models.CharField(max_length=500, help_text='Input object key')
 	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output file paths and metadata')
 
 	# Processing info

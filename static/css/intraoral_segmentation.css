@@ -1,0 +1,276 @@
+.intraoral-segmentation-box {
+    border: 1px solid #d9dfe6;
+    background: linear-gradient(180deg, #f8fbff 0%, #fff 100%);
+}
+
+.intraoral-segmentation-box:not(.has-selected-image) .intraoral-segmentation-teeth-grid,
+.intraoral-segmentation-box:not(.has-selected-image) .intraoral-segmentation-controls {
+    display: none;
+}
+
+.intraoral-segmentation-box.has-selected-image .seg-empty-hint {
+    display: none;
+}
+
+.seg-empty-hint {
+    color: #617085;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0.15rem 0;
+}
+
+.intraoral-segmentation-teeth-grid {
+    display: grid;
+    grid-template-columns: repeat(16, minmax(0, 1fr));
+    gap: 0.18rem;
+}
+
+.seg-tooth-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #172033;
+    font-size: 0.62rem;
+    font-weight: 700;
+    overflow: visible;
+}
+
+.seg-tooth-icon {
+    position: absolute;
+    inset: -3px 0;
+    z-index: 1;
+    color: var(--tooth-color, #dfe8ff);
+    opacity: 0.92;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.seg-tooth-icon.mirrored {
+    transform: scaleX(-1);
+}
+
+.seg-tooth-code {
+    position: relative;
+    z-index: 2;
+    line-height: 1;
+    text-shadow: 0 1px 2px #fff, 0 -1px 2px #fff, 1px 0 2px #fff, -1px 0 2px #fff;
+}
+
+.seg-tooth-icon svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.seg-tooth-btn.no-mask {
+    filter: grayscale(1);
+    opacity: 0.36;
+}
+
+.seg-tooth-btn.selected {
+    filter: none;
+    opacity: 1;
+    box-shadow: none;
+}
+
+.seg-tooth-btn.selected .seg-tooth-icon {
+    filter: drop-shadow(0 0 3px rgba(11, 94, 215, 0.9));
+}
+
+.seg-tooth-btn .seg-count {
+    position: absolute;
+    z-index: 2;
+    top: -6px;
+    right: -5px;
+    min-width: 13px;
+    height: 13px;
+    border-radius: 999px;
+    background: #111827;
+    color: #fff;
+    font-size: 0.52rem;
+    line-height: 13px;
+}
+
+.intraoral-segmentation-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    margin-top: 0.45rem;
+}
+
+.seg-filter-btn {
+    border: 1px solid #c9d4e2;
+    border-radius: 999px;
+    background: #fff;
+    color: #42526a;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.28rem 0.55rem;
+}
+
+.seg-filter-btn.active {
+    border-color: #0b5ed7;
+    background: #0b5ed7;
+    color: #fff;
+}
+
+.seg-filter-btn.confirmed {
+    border-color: #198754;
+    background: #198754;
+    color: #fff;
+}
+
+.intraoral-seg-workspace {
+    min-height: 500px;
+}
+
+.intraoral-seg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
+    align-items: stretch;
+}
+
+.intraoral-seg-card {
+    border: 1px solid #d9dfe7;
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+    cursor: zoom-in;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.intraoral-seg-card:hover {
+    border-color: #0d6efd;
+    box-shadow: 0 8px 22px rgba(13, 110, 253, 0.13);
+    transform: translateY(-1px);
+}
+
+.intraoral-seg-card img {
+    width: 100%;
+    height: clamp(150px, 23vh, 260px);
+    object-fit: contain;
+    display: block;
+    background: #f6f8fb;
+}
+
+.intraoral-seg-caption {
+    padding: 0.35rem 0.5rem;
+    color: #617085;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.intraoral-seg-selected {
+    display: none;
+}
+
+.intraoral-seg-workspace.is-focused .intraoral-seg-grid {
+    display: none;
+}
+
+.intraoral-seg-workspace.is-focused .intraoral-seg-selected {
+    display: block;
+}
+
+.intraoral-seg-strip {
+    display: flex;
+    gap: 0.45rem;
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+    margin-bottom: 0.5rem;
+}
+
+.intraoral-seg-thumb {
+    position: relative;
+    min-width: 78px;
+    max-width: 78px;
+    border: 1px solid #d1d8e2;
+    border-radius: 9px;
+    padding: 0.15rem;
+    background: #fff;
+    cursor: pointer;
+}
+
+.seg-confirmed-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    background: #198754;
+    box-shadow: 0 2px 6px rgba(25, 135, 84, 0.35);
+}
+
+.seg-confirmed-badge::before {
+    content: "\2713";
+    display: block;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 900;
+    line-height: 14px;
+    text-align: center;
+}
+
+.intraoral-seg-thumb.active {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.18);
+}
+
+.intraoral-seg-thumb img {
+    width: 100%;
+    height: 52px;
+    object-fit: cover;
+    border-radius: 7px;
+    display: block;
+}
+
+.intraoral-seg-stage-shell {
+    position: relative;
+    border: 1px solid #d7dee8;
+    border-radius: 14px;
+    background: #f4f7fb;
+    overflow: auto;
+    min-height: 420px;
+}
+
+.intraoral-seg-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.45rem;
+}
+
+.intraoral-seg-stage {
+    width: max-content;
+    margin: 0 auto;
+    line-height: 0;
+}
+
+.intraoral-seg-hint {
+    color: #6b7789;
+    font-size: 0.8rem;
+    margin-top: 0.45rem;
+}
+
+@media (max-width: 991.98px) {
+    .intraoral-seg-card img {
+        height: 180px;
+    }
+
+    .intraoral-seg-stage-shell {
+        min-height: 280px;
+    }
+}

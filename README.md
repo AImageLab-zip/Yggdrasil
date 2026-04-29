@@ -18,6 +18,43 @@ ToothFairy4M is a comprehensive platform designed for dental and maxillofacial i
 
 Live instance: [https://toothfairy4m.ing.unimore.it](https://toothfairy4m.ing.unimore.it)
 
+## Environment variables
+
+Minimum required for the web stack:
+
+- `SECRET_KEY` (Django)
+- `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` (MySQL)
+- `RUNNER_API_TOKENS` (token(s) accepted by runner callback API)
+
+Notes:
+
+- Django accepts either `DB_NAME/DB_USER/DB_PASSWORD` or the `MYSQL_*` variables above.
+- `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` must point to Redis reachable by both web app and runners.
+- Object storage is S3-compatible (Garage/MinIO) via `OBJECT_STORAGE_*`.
+
+## Running web stack
+
+```bash
+docker compose --env-file .env up -d
+```
+
+This starts Django, MySQL, and Redis for distributed runners.
+
+## Distributed runners (hard cutover)
+
+CBCT/IOS preprocessing is executed by external Celery runners.
+
+- Web app enqueues `RUNNER_TASK_NAME` (default: `toothfairy4m_runner.process_job`).
+- Job routing uses `RUNNER_DEFAULT_QUEUE` with optional `RUNNER_QUEUE_BY_MODALITY` / `RUNNER_QUEUE_BY_PROJECT`.
+- For two-stage IOS workflows and speech-to-text, map queues by modality, for example:
+  - `{"ios":"runner_ios_dev","bite_classification":"runner_bite_dev","cbct":"runner_cbct_dev","audio":"runner_audio_dev"}`
+- External runner claims/completes/fails through token-protected endpoints:
+  - `POST /api/runner/jobs/<id>/claim/`
+  - `POST /api/runner/jobs/<id>/complete/`
+  - `POST /api/runner/jobs/<id>/fail/`
+
+Use `toothfairy4m-runner` (cookiecutter template) to run worker nodes.
+
 ## Contact
 
 For more information or to request an account, please contact:

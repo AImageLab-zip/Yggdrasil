@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import json as _json
 from pathlib import Path
 from decouple import config
 
@@ -22,26 +23,28 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # SECURITY: No default secret key - must be provided via environment variable
-SECRET_KEY = config('SECRET_KEY', default=None)
+SECRET_KEY = config("SECRET_KEY", default=None)
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY environment variable must be set for security reasons")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # SECURITY: Debug disabled by default for security
-DEBUG = config('DEBUG', default=False, cast=bool)
+DEBUG = config("DEBUG", default=False, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=str).split(',')
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=str).split(
+    ","
+)
 
 # Environment-aware SSL settings
-ENABLE_SSL = config('ENABLE_SSL', default=False, cast=bool)
-ENABLE_HTTPS_REDIRECT = config('ENABLE_HTTPS_REDIRECT', default=False, cast=bool)
-FORCE_HTTPS = config('FORCE_HTTPS', default=False, cast=bool)
+ENABLE_SSL = config("ENABLE_SSL", default=False, cast=bool)
+ENABLE_HTTPS_REDIRECT = config("ENABLE_HTTPS_REDIRECT", default=False, cast=bool)
+FORCE_HTTPS = config("FORCE_HTTPS", default=False, cast=bool)
 
 # Disable HTTPS redirect in development (DEBUG mode)
 # HTTPS can be handled by reverse proxy (e.g., nginx) via proxy-net
 if ENABLE_SSL and not DEBUG:
     # HTTPS settings - enforce HTTPS everywhere (production only)
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = ENABLE_HTTPS_REDIRECT or FORCE_HTTPS
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
@@ -54,7 +57,7 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
     # Still set proxy header for reverse proxy scenarios, but don't enforce redirect
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 USE_X_FORWARDED_HOST = True
 USE_X_FORWARDED_PORT = True
@@ -115,22 +118,21 @@ WSGI_APPLICATION = "toothfairy.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": config('DB_NAME', default=None),
-        "USER": config('DB_USER', default=None),
-        "PASSWORD": config('DB_PASSWORD', default=None),
-        "HOST": config('DB_HOST', default='localhost'),
-        "PORT": config('DB_PORT', default='3306'),
-        "OPTIONS": {
-        },
+        "NAME": config("DB_NAME", default=None),
+        "USER": config("DB_USER", default=None),
+        "PASSWORD": config("DB_PASSWORD", default=None),
+        "HOST": config("DB_HOST", default="localhost"),
+        "PORT": config("DB_PORT", default="3306"),
+        "OPTIONS": {},
     }
 }
 
 # Validate required database credentials
-if not DATABASES['default']['NAME']:
+if not DATABASES["default"]["NAME"]:
     raise ValueError("DB_NAME environment variable must be set")
-if not DATABASES['default']['USER']:
+if not DATABASES["default"]["USER"]:
     raise ValueError("DB_USER environment variable must be set")
-if not DATABASES['default']['PASSWORD']:
+if not DATABASES["default"]["PASSWORD"]:
     raise ValueError("DB_PASSWORD environment variable must be set")
 
 # Password validation
@@ -171,13 +173,9 @@ STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
 
-# Media files (uploaded files)
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "storage"
-
 # File Upload Settings
-DATA_UPLOAD_MAX_MEMORY_SIZE = 1048576000*5  # 5GB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 1048576000*5  # 5GB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB
 DATA_UPLOAD_MAX_NUMBER_FILES = 1500  # large DICOM folder uploads
 
 
@@ -188,126 +186,194 @@ if ENABLE_SSL:
         "https://127.0.0.1:8000",
     ]
 else:
-    CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', 
-                                 default='http://localhost:8000,http://127.0.0.1:8000', cast=str).split(',')
+    CORS_ALLOWED_ORIGINS = config(
+        "CORS_ALLOWED_ORIGINS",
+        default="http://localhost:8000,http://127.0.0.1:8000",
+        cast=str,
+    ).split(",")
 
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', 
-                              default='https://toothfairy4m.ing.unimore.it,http://localhost:8000,http://127.0.0.1:8000', 
-                              cast=str).split(',')
+CSRF_TRUSTED_ORIGINS = config(
+    "CSRF_TRUSTED_ORIGINS",
+    default="https://toothfairy4m.ing.unimore.it,http://localhost:8000,http://127.0.0.1:8000",
+    cast=str,
+).split(",")
 
 # SECURITY: Enhanced CSRF and Session Security
 CSRF_USE_SESSIONS = True  # Store CSRF token in session for better security
 CSRF_COOKIE_HTTPONLY = True  # Prevent XSS attacks on CSRF cookie
-CSRF_COOKIE_SAMESITE = 'Strict'  # Prevent CSRF attacks
+CSRF_COOKIE_SAMESITE = "Strict"  # Prevent CSRF attacks
 SESSION_COOKIE_HTTPONLY = True  # Prevent XSS attacks on session cookie
-SESSION_COOKIE_SAMESITE = 'Strict'  # Prevent session fixation attacks
+SESSION_COOKIE_SAMESITE = "Strict"  # Prevent session fixation attacks
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Login URLs
-LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
+LOGIN_URL = "/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/"
 
 # Email settings
-EMAIL_BACKEND = config('EMAIL_BACKEND')
-EMAIL_HOST = config('EMAIL_HOST')
-EMAIL_PORT = config('EMAIL_PORT', cast=int)
-EMAIL_HOST_USER = config('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool)
-EMAIL_USE_SSL = config('EMAIL_USE_SSL', cast=bool)
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
+EMAIL_BACKEND = config("EMAIL_BACKEND")
+EMAIL_HOST = config("EMAIL_HOST")
+EMAIL_PORT = config("EMAIL_PORT", cast=int)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool)
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", cast=bool)
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
 
-# Dataset path configuration
-DATASET_PATH = config('DATASET_PATH', default='/dataset')
+# Object storage (S3-compatible, e.g. Garage)
+OBJECT_STORAGE_ENDPOINT_URL = config(
+    "OBJECT_STORAGE_ENDPOINT_URL", default="http://garage:3900"
+)
+OBJECT_STORAGE_REGION = config("OBJECT_STORAGE_REGION", default="")
+OBJECT_STORAGE_ACCESS_KEY_ID = config(
+    "OBJECT_STORAGE_ACCESS_KEY_ID", default="garage-access-key"
+)
+OBJECT_STORAGE_SECRET_ACCESS_KEY = config(
+    "OBJECT_STORAGE_SECRET_ACCESS_KEY", default="garage-secret-key"
+)
+OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET", default="toothfairy4m")
+OBJECT_STORAGE_USE_SSL = config("OBJECT_STORAGE_USE_SSL", default=False, cast=bool)
+OBJECT_STORAGE_VERIFY_SSL = config("OBJECT_STORAGE_VERIFY_SSL", default=True, cast=bool)
+OBJECT_STORAGE_ADDRESSING_STYLE = config(
+    "OBJECT_STORAGE_ADDRESSING_STYLE", default="path"
+)
+OBJECT_STORAGE_KEY_PREFIX = config("OBJECT_STORAGE_KEY_PREFIX", default="")
+
+# Async jobs (distributed runners)
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://redis:6379/0")
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default="redis://redis:6379/1")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = config("CELERY_TIMEZONE", default="UTC")
+
+RUNNER_DEFAULT_QUEUE = config("RUNNER_DEFAULT_QUEUE", default="runner")
+RUNNER_QUEUE_BY_MODALITY = _json.loads(config("RUNNER_QUEUE_BY_MODALITY", default="{}"))
+if not isinstance(RUNNER_QUEUE_BY_MODALITY, dict):
+    RUNNER_QUEUE_BY_MODALITY = {}
+RUNNER_QUEUE_BY_PROJECT = _json.loads(config("RUNNER_QUEUE_BY_PROJECT", default="{}"))
+if not isinstance(RUNNER_QUEUE_BY_PROJECT, dict):
+    RUNNER_QUEUE_BY_PROJECT = {}
+RUNNER_TASK_NAME = config("RUNNER_TASK_NAME", default="toothfairy4m_runner.process_job")
+
+
+def _parse_runner_tokens(raw: str):
+    raw = (raw or "").strip()
+    if not raw:
+        return set()
+
+    if raw.startswith("{") or raw.startswith("["):
+        try:
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                return {str(v).strip() for v in parsed if str(v).strip()}
+            if isinstance(parsed, dict):
+                vals = []
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        vals.extend(v)
+                    else:
+                        vals.append(v)
+                return {str(v).strip() for v in vals if str(v).strip()}
+        except Exception:
+            pass
+
+    return {tok.strip() for tok in raw.split(",") if tok.strip()}
+
+
+RUNNER_API_TOKENS = _parse_runner_tokens(config("RUNNER_API_TOKENS", default=""))
+CELERY_TASK_ROUTES = {
+    RUNNER_TASK_NAME: {"queue": RUNNER_DEFAULT_QUEUE},
+}
 
 # Logging Configuration
-LOG_LEVEL = config('LOG_LEVEL', default='DEBUG' if DEBUG else 'INFO')
+LOG_LEVEL = config("LOG_LEVEL", default="DEBUG" if DEBUG else "INFO")
 
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-            'style': '{',
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
         },
-        'simple': {
-            'format': '{levelname} {message}',
-            'style': '{',
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
         },
-        'detailed': {
-            'format': '[{asctime}] {levelname} {name} {funcName}:{lineno} - {message}',
-            'style': '{',
-        },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'detailed',
-            'level': LOG_LEVEL,
-        },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
-            'formatter': 'detailed',
-            'level': LOG_LEVEL,
+        "detailed": {
+            "format": "[{asctime}] {levelname} {name} {funcName}:{lineno} - {message}",
+            "style": "{",
         },
     },
-    'loggers': {
-        'django': {
-            'handlers': ['console', 'file'],
-            'level': 'INFO',
-            'propagate': False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "detailed",
+            "level": LOG_LEVEL,
         },
-        'django.request': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
+        "file": {
+            "class": "logging.FileHandler",
+            "filename": BASE_DIR / "logs" / "django.log",
+            "formatter": "detailed",
+            "level": LOG_LEVEL,
         },
-        'django.server': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
         },
-        'django.db.backends': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
+        "django.request": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False,
         },
-        'maxillo': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
+        "django.server": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False,
         },
-        'toothfairy': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "maxillo": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+        "toothfairy": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False,
         },
         # Add specific logger for the middleware
-        'toothfairy.middleware': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
+        "toothfairy.middleware": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",
+            "propagate": False,
         },
     },
-    'root': {
-        'handlers': ['console', 'file'],
-        'level': 'INFO',
+    "root": {
+        "handlers": ["console", "file"],
+        "level": "INFO",
     },
 }
 
 # In production, ensure we capture all errors
 if not DEBUG:
-    LOGGING['loggers']['django']['level'] = 'WARNING'
-    LOGGING['loggers']['django.request']['level'] = 'ERROR'
-    LOGGING['loggers']['django.server']['level'] = 'ERROR'
+    LOGGING["loggers"]["django"]["level"] = "WARNING"
+    LOGGING["loggers"]["django.request"]["level"] = "ERROR"
+    LOGGING["loggers"]["django.server"]["level"] = "ERROR"
     # But keep our app logs at DEBUG level
-    LOGGING['loggers']['maxillo']['level'] = 'DEBUG'
-    LOGGING['loggers']['toothfairy']['level'] = 'DEBUG'
-    LOGGING['loggers']['toothfairy.middleware']['level'] = 'DEBUG'
+    LOGGING["loggers"]["maxillo"]["level"] = "DEBUG"
+    LOGGING["loggers"]["toothfairy"]["level"] = "DEBUG"
+    LOGGING["loggers"]["toothfairy.middleware"]["level"] = "DEBUG"
 
-os.makedirs(BASE_DIR / 'logs', exist_ok=True)
+os.makedirs(BASE_DIR / "logs", exist_ok=True)

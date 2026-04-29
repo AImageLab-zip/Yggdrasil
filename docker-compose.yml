@@ -1,55 +1,62 @@
-name: toothfairy4m${DOCKER_SUFFIX:+-${DOCKER_SUFFIX}}
+name: toothfairy4m-$DOCKER_SUFFIX
 
 services:
   web:
     build: .
-    container_name: web${DOCKER_SUFFIX:+-${DOCKER_SUFFIX}}
+    container_name: toothfairy4m-web-$DOCKER_SUFFIX
     volumes:
       - .:/app
-      - /dataset:/dataset:rw
     command: /app/entrypoint.sh
     ports:
-      - "${WEB_EXTERNAL_PORT:-8000}:8000"
+      - "$WEB_EXTERNAL_PORT:8000"
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
-      DB_HOST: prod-db
       VIRTUAL_HOST: ${DOMAIN:-}
-      VIRTUAL_PORT: 8000
+      VIRTUAL_PORT: ${WEB_EXTERNAL_PORT:-}
       LETSENCRYPT_HOST: ${DOMAIN:-}
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
+      DB_HOST: toothfairy4m-db-$DOCKER_SUFFIX
+
     env_file:
-      - .env
-    user: "${UID:-1000}:${GID:-1000}"
+      - ${ENV_FILE:-.env-$DOCKER_SUFFIX}
+    user: "$UID:$GID"
     restart: unless-stopped
     networks:
-      - proxy-net
       - app-net
+      - proxy-net
 
   db:
     image: mysql:8.0
-    container_name: db${DOCKER_SUFFIX:+-${DOCKER_SUFFIX}}
+    container_name: toothfairy4m-db-$DOCKER_SUFFIX
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: $MYSQL_DATABASE
+      MYSQL_USER: $MYSQL_USER
+      MYSQL_PASSWORD: $MYSQL_PASSWORD
+      MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
-      - "${DB_EXTERNAL_PORT:-3306}:3306"
+      - "$DB_EXTERNAL_PORT:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$MYSQL_ROOT_PASSWORD"]
       timeout: 20s
       retries: 10
       interval: 10s
       start_period: 30s
     restart: unless-stopped
     networks:
-      app-net:
-        aliases:
-          - prod-db
+      - app-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: toothfairy4m-redis-$DOCKER_SUFFIX
+    restart: unless-stopped
+    networks:
+      - app-net
 
 volumes:
   mysql_data:
@@ -58,4 +65,5 @@ networks:
   proxy-net:
     external: true
   app-net:
-    internal: true
+    name: app-net-$DOCKER_SUFFIX
+    external: true

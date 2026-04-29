@@ -85,6 +85,34 @@
                     </div>
                 </div>
 
+                <!-- Content Type Card -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong><i class="fas fa-check-square me-2"></i>Content Type</strong>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#contentTypeCollapse" aria-expanded="true" aria-controls="contentTypeCollapse">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
+                    </div>
+                    <div id="contentTypeCollapse" class="collapse show">
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">Choose which file versions to export for selected modalities:</p>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input content-checkbox" type="checkbox" name="include_raw" id="include_raw" value="1" checked>
+                                <label class="form-check-label" for="include_raw">
+                                    Raw files
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input content-checkbox" type="checkbox" name="include_processed" id="include_processed" value="1" checked>
+                                <label class="form-check-label" for="include_processed">
+                                    Processed files
+                                </label>
+                            </div>
+                            <small class="text-muted d-block">You can export either one, or both.</small>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Filters Card -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">

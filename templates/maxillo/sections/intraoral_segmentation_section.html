@@ -1,0 +1,19 @@
+<div class="mb-4" id="intraoralSegmentationSection" data-patient-id="{{ patient.patient_id }}" data-can-modify="{% if can_modify_segmentation %}true{% else %}false{% endif %}">
+    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#intraoralSegmentationCollapse" aria-expanded="true" aria-controls="intraoralSegmentationCollapse" style="cursor: pointer;">
+        <h6 class="mb-0"><i class="fas fa-draw-polygon me-2"></i>Segmentation Labels</h6>
+        <i class="fas fa-chevron-down collapse-indicator"></i>
+    </div>
+
+    <div class="collapse show" id="intraoralSegmentationCollapse">
+        <div class="scan-management-box intraoral-segmentation-box" data-segmentation-root>
+            <div class="seg-empty-hint" id="segEmptyHint">Select an image to start annotation.</div>
+            <div id="intraoralSegmentationTeethGrid" class="intraoral-segmentation-teeth-grid"></div>
+            <div class="intraoral-segmentation-controls">
+                <button type="button" class="seg-filter-btn" id="segConfirmBtn">Mark done</button>
+                <button type="button" class="seg-filter-btn" id="segOnlySelectedBtn">Only selected</button>
+                <button type="button" class="seg-filter-btn" id="segResetViewBtn">Reset view</button>
+            </div>
+            <small class="text-muted d-block mt-2" id="segStatusText">Select an image to start annotation.</small>
+        </div>
+    </div>
+</div>

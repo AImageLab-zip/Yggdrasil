@@ -14,31 +14,37 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.contrib import admin
 from django.urls import path, include
 from django.contrib.auth import views as auth_views
-from django.conf import settings
-from django.conf.urls.static import static
 from maxillo import views as scans_views
 from common import views as common_views
 
 urlpatterns = [
     # App-agnostic admin control panel (must come before Django admin route)
-    path('admin/control-panel/', common_views.admin_control_panel, name='admin_control_panel'),
-    path('admin/', admin.site.urls),
-    path('', scans_views.home, name='home'),
-    path('maxillo/', include('maxillo.urls')),
-    path('brain/', include('brain.urls')),
+    path(
+        "admin/control-panel/",
+        common_views.admin_control_panel,
+        name="admin_control_panel",
+    ),
+    path("admin/", admin.site.urls),
+    path("", scans_views.home, name="home"),
+    path("maxillo/", include("maxillo.urls")),
+    path("brain/", include("brain.urls")),
     # API root
-    path('api/', include(('maxillo.api_urls', 'api'), namespace='api')),
-    path('login/', auth_views.LoginView.as_view(), name='login'),
-    path('logout/', auth_views.LogoutView.as_view(template_name='registration/logged_out.html'), name='logout'),
-    path('register/', scans_views.register, name='register'),
-    path('invitations/', scans_views.invitation_list, name='invitation_list'),
-    path('invitations/<str:code>/delete/', scans_views.delete_invitation, name='delete_invitation'),
+    path("api/", include(("maxillo.api_urls", "api"), namespace="api")),
+    path("login/", auth_views.LoginView.as_view(), name="login"),
+    path(
+        "logout/",
+        auth_views.LogoutView.as_view(template_name="registration/logged_out.html"),
+        name="logout",
+    ),
+    path("register/", scans_views.register, name="register"),
+    path("invitations/", scans_views.invitation_list, name="invitation_list"),
+    path(
+        "invitations/<str:code>/delete/",
+        scans_views.delete_invitation,
+        name="delete_invitation",
+    ),
 ]
-
-# Serve media files in development
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    # Static files are automatically served by Django's staticfiles app in development

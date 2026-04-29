@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
                 ('modality_slug', models.CharField(help_text='Slug for modality (e.g., cbct, ios, audio, bite_classification)', max_length=60)),
                 ('status', models.CharField(choices=[('pending', 'Pending'), ('dependency', 'Waiting for Dependencies'), ('processing', 'Processing'), ('completed', 'Completed'), ('failed', 'Failed'), ('retrying', 'Retrying')], default='pending', max_length=20)),
                 ('priority', models.IntegerField(default=0, help_text='Higher values = higher priority')),
-                ('input_file_path', models.CharField(blank=True, help_text='Path to primary input file in /dataset', max_length=500)),
+                ('input_file_path', models.CharField(blank=True, help_text='Primary input object key', max_length=500)),
                 ('output_files', models.JSONField(blank=True, default=dict, help_text='Dict of output file paths and metadata')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('started_at', models.DateTimeField(blank=True, null=True)),

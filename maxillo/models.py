@@ -503,8 +503,63 @@ class Patient(models.Model):
         bite_job.add_dependency(ios_job)
         
         return bite_job
-    
 
+
+class IntraoralToothSegmentation(models.Model):
+    """Vector tooth polygons per intraoral image."""
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name='intraoral_segmentations',
+    )
+    image_file = models.ForeignKey(
+        FileRegistry,
+        on_delete=models.CASCADE,
+        related_name='intraoral_segmentations',
+    )
+    teeth = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Map FDI tooth code to polygon sets [[[x, y], ...], ...] in image coordinates.',
+    )
+    is_confirmed = models.BooleanField(
+        default=False,
+        help_text='True when this image segmentation is reviewed and locked.',
+    )
+    confirmed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='confirmed_intraoral_segmentations',
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_intraoral_segmentations',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['patient_id', 'image_file_id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['patient', 'image_file'],
+                name='uniq_maxillo_seg_patient_image',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['patient', 'updated_at'], name='maxillo_int_patient_d8b901_idx'),
+            models.Index(fields=['image_file'], name='maxillo_int_image_f_d24f72_idx'),
+        ]
+
+    def __str__(self):
+        return f"IntraoralSegmentation {self.patient_id}:{self.image_file_id}"
 
 
 class Classification(models.Model):

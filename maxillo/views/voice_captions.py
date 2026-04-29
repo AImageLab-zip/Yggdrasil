@@ -8,6 +8,8 @@ import json
 import os
 import logging
 
+from common.file_access import exists as artifact_exists
+
 from .domain import get_domain_models, is_brain_namespace
 
 logger = logging.getLogger(__name__)
@@ -69,7 +71,7 @@ def upload_voice_caption(request, patient_id):
         # Get audio file URL from FileRegistry
         audio_file = voice_caption.get_audio_file()
         audio_url = None
-        if audio_file and os.path.exists(audio_file.file_path):
+        if audio_file and artifact_exists(audio_file.file_path):
             namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
             audio_url = reverse(f'{namespace}:api_serve_file', kwargs={'file_id': audio_file.id})
             # Ensure HTTPS for audio URLs too

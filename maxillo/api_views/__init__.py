@@ -9,13 +9,15 @@ from .health import health_check
 
 # Jobs
 from .jobs import (
-    get_pending_jobs,
-    get_pending_jobs_compat,
-    mark_job_processing,
-    mark_job_completed_api,
-    mark_job_failed_api,
     get_job_status,
     ProcessingJobListView,
+)
+
+# Runner callbacks
+from .runner import (
+    runner_claim_job,
+    runner_complete_job,
+    runner_fail_job,
 )
 
 # Files
@@ -34,24 +36,22 @@ from .projects import (
 # Export all functions
 __all__ = [
     # Health
-    'health_check',
+    "health_check",
     # Jobs
-    'get_pending_jobs',
-    'get_pending_jobs_compat',
-    'mark_job_processing',
-    'mark_job_completed_api',
-    'mark_job_failed_api',
-    'get_job_status',
-    'ProcessingJobListView',
+    "get_job_status",
+    "ProcessingJobListView",
+    # Runner callbacks
+    "runner_claim_job",
+    "runner_complete_job",
+    "runner_fail_job",
     # Files
-    'serve_file',
-    'get_file_registry',
+    "serve_file",
+    "get_file_registry",
     # Projects
-    'project_upload_api',
-    'get_project_folders',
-    'project_patients_handler',
-    'get_project_patients_and_modalities',
-    'get_patient_files',
-    'get_multiple_patients_files',
+    "project_upload_api",
+    "get_project_folders",
+    "project_patients_handler",
+    "get_project_patients_and_modalities",
+    "get_patient_files",
+    "get_multiple_patients_files",
 ]
-

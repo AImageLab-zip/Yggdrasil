@@ -25,6 +25,8 @@ function updateStatistics() {
     const folderCheckboxes = document.querySelectorAll('.folder-checkbox:checked');
     const modalityCheckboxes = document.querySelectorAll('.modality-checkbox:checked');
     const filterCheckboxes = document.querySelectorAll('.filter-checkbox:checked');
+    const includeRaw = document.getElementById('include_raw')?.checked ?? true;
+    const includeProcessed = document.getElementById('include_processed')?.checked ?? true;
     
     const folderIds = Array.from(folderCheckboxes).map(cb => cb.value);
     const modalitySlugs = Array.from(modalityCheckboxes).map(cb => cb.value);
@@ -38,7 +40,7 @@ function updateStatistics() {
     });
     
     // Don't make request if no folders or modalities selected
-    if (folderIds.length === 0 || modalitySlugs.length === 0) {
+    if (folderIds.length === 0 || modalitySlugs.length === 0 || (!includeRaw && !includeProcessed)) {
         // Reset statistics
         document.getElementById('stat-patients').textContent = '0';
         document.getElementById('stat-folders').textContent = '0';
@@ -76,6 +78,8 @@ function updateStatistics() {
             folder_ids: folderIds,
             modality_slugs: modalitySlugs,
             filters: filters,
+            include_raw: includeRaw,
+            include_processed: includeProcessed,
         }),
     })
     .then(response => response.json())
@@ -105,6 +109,7 @@ function initExportPage() {
     const folderCheckboxes = document.querySelectorAll('.folder-checkbox');
     const modalityCheckboxes = document.querySelectorAll('.modality-checkbox');
     const filterCheckboxes = document.querySelectorAll('.filter-checkbox');
+    const contentCheckboxes = document.querySelectorAll('.content-checkbox');
     
     folderCheckboxes.forEach(cb => {
         cb.addEventListener('change', debouncedUpdateStatistics);
@@ -115,6 +120,10 @@ function initExportPage() {
     });
     
     filterCheckboxes.forEach(cb => {
+        cb.addEventListener('change', debouncedUpdateStatistics);
+    });
+
+    contentCheckboxes.forEach(cb => {
         cb.addEventListener('change', debouncedUpdateStatistics);
     });
     

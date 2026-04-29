@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.models import User
-from .models import Dataset, Patient, Classification, VoiceCaption, Export
+from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
 from common.models import Project, Modality, ProjectAccess, Job, FileRegistry, Invitation
 from .models import Tag, Folder
 
@@ -83,6 +83,24 @@ class ClassificationAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         qs = super().get_queryset(request)
         if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
             # Student developers can only see classifications for debug patients
+            return qs.filter(patient__visibility='debug')
+        return qs
+
+
+@admin.register(IntraoralToothSegmentation)
+class IntraoralToothSegmentationAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ['id', 'patient', 'image_file', 'polygon_count', 'updated_by', 'updated_at']
+    list_filter = ['updated_at', 'updated_by']
+    search_fields = ['patient__patient_id', 'image_file__id']
+    readonly_fields = ['created_at', 'updated_at', 'polygon_count']
+
+    def polygon_count(self, obj):
+        return sum(len(polygons) for polygons in (obj.teeth or {}).values() if isinstance(polygons, list))
+    polygon_count.short_description = 'Polygons'
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related('patient', 'image_file', 'updated_by')
+        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
             return qs.filter(patient__visibility='debug')
         return qs
 

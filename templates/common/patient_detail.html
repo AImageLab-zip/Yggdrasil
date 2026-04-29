@@ -4,8 +4,12 @@
 {% block title %}Patient {{ patient.name }} - ToothFairy4M{% endblock %}
 
 {% block extra_css %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
 <link rel="stylesheet" href="{% static 'css/patient_detail.css' %}">
 <link rel="stylesheet" href="{% static 'css/image_viewer.css' %}">
+{% if ns == 'maxillo' %}
+<link rel="stylesheet" href="{% static 'css/intraoral_segmentation.css' %}">
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -50,6 +54,10 @@
 
 {# Main patient detail controller #}
 <script src="{% static 'js/patient_detail.js' %}"></script>
+{% if ns == 'maxillo' %}
+<script src="https://cdn.jsdelivr.net/npm/konva@9.3.20/konva.min.js"></script>
+<script src="{% static 'js/intraoral_segmentation.js' %}"></script>
+{% endif %}
 
 {# Additional features #}
 <script src="{% static 'js/vocal_caption.js' %}"></script>
@@ -57,4 +65,3 @@
 <script src="{% static 'js/collapse_sections.js' %}"></script>
 <script src="{% static 'js/cbct_upload.js' %}"></script>
 {% endblock %}
-

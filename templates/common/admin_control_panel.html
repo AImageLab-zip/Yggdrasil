@@ -81,22 +81,15 @@
 			</div>
 			<div class="health-grid">
 				<div class="health-card">
-					<div class="health-label">Borg Backup</div>
+					<div class="health-label">Object Storage</div>
 					<div class="health-value">
-						{% if system_health.backup.status == 'up' %}
-							<span class="badge text-bg-success">{{ system_health.backup.label }}</span>
-						{% elif system_health.backup.status == 'warn' %}
-							<span class="badge text-bg-warning">{{ system_health.backup.label }}</span>
-						{% elif system_health.backup.status == 'down' %}
-							<span class="badge text-bg-danger">{{ system_health.backup.label }}</span>
+						{% if system_health.object_storage.status == 'up' %}
+							<span class="badge text-bg-success">{{ system_health.object_storage.label }}</span>
 						{% else %}
-							<span class="badge text-bg-secondary">{{ system_health.backup.label }}</span>
+							<span class="badge text-bg-danger">{{ system_health.object_storage.label }}</span>
 						{% endif %}
 					</div>
-					<div class="health-meta">{{ system_health.backup.message }}</div>
-					{% if system_health.backup.last_success_h %}
-						<div class="health-meta">Last success: {{ system_health.backup.last_success_h }}</div>
-					{% endif %}
+					<div class="health-meta">{{ system_health.object_storage.message }}</div>
 				</div>
 
 				<div class="health-card">
@@ -110,63 +103,12 @@
 					</div>
 					<div class="health-meta">{{ system_health.database.message }}</div>
 				</div>
-
-				<div class="health-card">
-					<div class="health-label">Host Load</div>
-					{% if system_health.load %}
-						<div class="health-value">{{ system_health.load.one|floatformat:2 }} / {{ system_health.load.five|floatformat:2 }} / {{ system_health.load.fifteen|floatformat:2 }}</div>
-					{% else %}
-						<div class="health-value text-muted">N/A</div>
-					{% endif %}
-					<div class="health-meta">1m / 5m / 15m</div>
-					{% if system_health.uptime %}
-						<div class="health-meta">Uptime: {{ system_health.uptime.human }}</div>
-					{% endif %}
-				</div>
-
-				<div class="health-card">
-					<div class="health-label">Memory</div>
-					{% if system_health.memory %}
-						<div class="health-value">{{ system_health.memory.used_h }} / {{ system_health.memory.total_h }}</div>
-						<div class="health-meta">{{ system_health.memory.percent_used|floatformat:1 }}% used</div>
-					{% else %}
-						<div class="health-value text-muted">N/A</div>
-					{% endif %}
-				</div>
-			</div>
-
-			<div class="health-pills">
-				{% for d in system_health.disks %}
-					{% if d.available %}
-						<span class="health-pill" title="{{ d.path }}">{{ d.label }} {{ d.percent_used|floatformat:1 }}% used</span>
-					{% else %}
-						<span class="health-pill" title="{{ d.path }}">{{ d.label }} N/A</span>
-					{% endif %}
-				{% endfor %}
 			</div>
 		</div>
 	</div>
 
 	<div class="row g-4">
-		<div class="col-12 col-md-6">
-			<div class="card h-100">
-				<div class="card-body">
-					<h5 class="card-title">Dataset Storage (/dataset)</h5>
-					{% if dataset_usage %}
-						<p class="mb-1"><strong>Total:</strong> {{ dataset_usage.total_h }}</p>
-						<p class="mb-1"><strong>Used:</strong> {{ dataset_usage.used_h }} ({{ dataset_usage.percent_used|floatformat:1 }}%)</p>
-						<p class="mb-3"><strong>Free:</strong> {{ dataset_usage.free_h }}</p>
-						<div class="progress" style="height: 10px;">
-							<div class="progress-bar" role="progressbar" style="width: {{ dataset_usage.percent_used }}%" aria-valuenow="{{ dataset_usage.percent_used }}" aria-valuemin="0" aria-valuemax="100"></div>
-						</div>
-					{% else %}
-						<div class="alert alert-warning mb-0">Dataset path not found.</div>
-					{% endif %}
-				</div>
-			</div>
-		</div>
-
-		<div class="col-12 col-md-6">
+		<div class="col-12">
 			<div class="card h-100">
 				<div class="card-body">
 					<h5 class="card-title">Jobs</h5>

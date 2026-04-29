@@ -426,6 +426,9 @@
         <!-- Classification Column -->
         <div class="col-lg-4">
             {% include 'maxillo/sections/bite_classification_section.html' %}
+            {% if has_intraoral_modality %}
+            {% include 'maxillo/sections/intraoral_segmentation_section.html' %}
+            {% endif %}
             {% include 'common/sections/vocal_caption_section.html' %}
             {% include 'common/sections/scan_settings_section.html' %}
             {% include 'common/sections/nifti_metadata_section.html' %}

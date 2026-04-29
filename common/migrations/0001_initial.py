@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
                 ('job_type', models.CharField(choices=[('cbct', 'CBCT Processing'), ('ios', 'IOS Processing'), ('audio', 'Audio Speech-to-Text'), ('bite_classification', 'Bite Classification')], max_length=20)),
                 ('status', models.CharField(choices=[('pending', 'Pending'), ('dependency', 'Waiting for Dependencies'), ('processing', 'Processing'), ('completed', 'Completed'), ('failed', 'Failed'), ('retrying', 'Retrying')], default='pending', max_length=20)),
                 ('priority', models.IntegerField(default=0, help_text='Higher values = higher priority')),
-                ('input_file_path', models.CharField(help_text='Path to input file in /dataset', max_length=500)),
+                ('input_file_path', models.CharField(help_text='Input object key', max_length=500)),
                 ('output_files', models.JSONField(blank=True, default=dict, help_text='Dict of output file paths and metadata')),
                 ('docker_image', models.CharField(help_text='Docker image used for processing', max_length=200)),
                 ('docker_command', models.JSONField(default=list, help_text='Docker command arguments')),

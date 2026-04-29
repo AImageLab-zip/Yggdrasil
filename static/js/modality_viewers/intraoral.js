@@ -46,47 +46,14 @@ window.IntraoralViewer = {
                     return;
                 }
                 
-                // Clear existing content
-                if (grid) grid.innerHTML = '';
-                
-                // Create image thumbnails
-                data.images.forEach((image, index) => {
-                    const col = document.createElement('div');
-                    col.className = 'col-lg-3 col-md-4 col-sm-6';
-                    
-                    const card = document.createElement('div');
-                    card.className = 'card h-100';
-                    card.style.cursor = 'pointer';
-                    
-                    const img = document.createElement('img');
-                    img.src = image.url;
-                    img.className = 'card-img-top';
-                    img.style.height = '200px';
-                    img.style.objectFit = 'cover';
-                    img.alt = image.original_filename || `Intraoral photo ${image.index}`;
-                    
-                    const cardBody = document.createElement('div');
-                    cardBody.className = 'card-body p-2';
-                    
-                    const cardText = document.createElement('small');
-                    cardText.className = 'text-muted';
-                    cardText.textContent = image.original_filename || '';
-                    
-                    if (image.original_filename) {
-                        cardBody.appendChild(cardText);
+                if (grid) {
+                    grid.innerHTML = '';
+                    if (window.IntraoralSegmentation && typeof window.IntraoralSegmentation.mount === 'function') {
+                        window.IntraoralSegmentation.mount(grid, data.images);
+                    } else {
+                        this.renderFallbackGrid(grid, data.images);
                     }
-                    
-                    card.appendChild(img);
-                    card.appendChild(cardBody);
-                    col.appendChild(card);
-                    
-                    // Add click handler for fullscreen view
-                    card.addEventListener('click', () => {
-                        this.showFullscreenImage(image.url, `Intraoral Photo ${image.index}`);
-                    });
-                    
-                    grid.appendChild(col);
-                });
+                }
                 
                 if (content) content.style.display = 'block';
             })
@@ -97,6 +64,39 @@ window.IntraoralViewer = {
             });
     },
     
+    renderFallbackGrid: function(grid, images) {
+        images.forEach((image) => {
+            const col = document.createElement('div');
+            col.className = 'col-lg-3 col-md-4 col-sm-6';
+
+            const card = document.createElement('div');
+            card.className = 'card h-100';
+            card.style.cursor = 'pointer';
+
+            const img = document.createElement('img');
+            img.src = image.url;
+            img.className = 'card-img-top';
+            img.style.height = '200px';
+            img.style.objectFit = 'cover';
+            img.alt = image.original_filename || `Intraoral photo ${image.index}`;
+
+            const cardBody = document.createElement('div');
+            cardBody.className = 'card-body p-2';
+
+            const cardText = document.createElement('small');
+            cardText.className = 'text-muted';
+            cardText.textContent = image.original_filename || '';
+
+            if (image.original_filename) cardBody.appendChild(cardText);
+
+            card.appendChild(img);
+            card.appendChild(cardBody);
+            col.appendChild(card);
+            card.addEventListener('click', () => this.showFullscreenImage(image.url, `Intraoral Photo ${image.index}`));
+            grid.appendChild(col);
+        });
+    },
+
     showFullscreenImage: function(src, title) {
         const modal = document.getElementById('fullscreenImageModal');
         const modalTitle = document.getElementById('fullscreenImageModalLabel');
@@ -111,6 +111,5 @@ window.IntraoralViewer = {
         }
     }
 };
-
 
 
