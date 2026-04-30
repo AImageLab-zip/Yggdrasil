@@ -1105,15 +1105,7 @@ def mark_job_completed(job_id, output_files, logs=None):
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")
-        if job_patient and job.modality_slug == "cbct":
-            logger.info(f"Updating patient CBCT processing status")
-            job_patient.cbct_processing_status = "processed"
-            job_patient.save()
-        elif job_patient and job.modality_slug == "ios":
-            logger.info(f"Updating patient IOS processing status")
-            job_patient.ios_processing_status = "processed"
-            job_patient.save()
-        elif job_voice_caption and job.modality_slug == "audio":
+        if job_voice_caption and job.modality_slug == "audio":
             job_voice_caption.processing_status = "completed"
 
             # Use logs parameter directly if it contains transcription text
@@ -1310,13 +1302,7 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         job_voice_caption = _job_voice_caption(job)
         job.mark_failed(error_msg, can_retry)
 
-        if job_patient and job.modality_slug == "cbct":
-            job_patient.cbct_processing_status = "failed"
-            job_patient.save()
-        elif job_patient and job.modality_slug == "ios":
-            job_patient.ios_processing_status = "failed"
-            job_patient.save()
-        elif job_voice_caption and job.modality_slug == "audio":
+        if job_voice_caption and job.modality_slug == "audio":
             job_voice_caption.processing_status = "failed"
             job_voice_caption.save()
         elif job_patient and job.modality_slug == "bite_classification":

@@ -50,8 +50,6 @@ def patient_detail(request, patient_id):
         raw_cbct = patient.get_cbct_raw_file()
         if raw_cbct and artifact_exists(raw_cbct.file_path):
             has_cbct = True
-        elif patient.cbct:  # Fallback to old field
-            has_cbct = True
     except:
         pass
 
@@ -135,9 +133,6 @@ def patient_detail(request, patient_id):
                 
                 if reprocess_ios and (has_upper_scan or has_lower_scan):
                     patient.classifications.filter(classifier='pipeline').delete()
-                    patient.upper_scan_norm = None
-                    patient.lower_scan_norm = None
-                    patient.ios_processing_status = 'processing'
                     patient.save()
                     
                     try:
@@ -154,9 +149,6 @@ def patient_detail(request, patient_id):
                         messages.error(request, f'Error uploading IOS scan(s): {e}')
                 
                 if reprocess_cbct and (has_cbct_file or has_cbct_folder):
-                    patient.cbct_processing_status = 'processing'
-                    patient.save()
-                    
                     if has_cbct_folder:
                         try:
                             from ..file_utils import save_cbct_folder_to_dataset

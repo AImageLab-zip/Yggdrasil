@@ -75,10 +75,6 @@ def upload_patient(request):
                     modality = Modality.objects.get(slug='cbct')
                     patient.modalities.add(modality)
                     
-                    # Update processing status
-                    patient.cbct_processing_status = 'processing'
-                    patient.save()
-                    
                     if cbct_file:
                         from ..file_utils import save_generic_modality_file
                         fr, job = save_generic_modality_file(patient, 'cbct', cbct_file)
@@ -103,10 +99,6 @@ def upload_patient(request):
                 try:
                     modality = Modality.objects.get(slug='ios')
                     patient.modalities.add(modality)
-                    
-                    # Update processing status
-                    patient.ios_processing_status = 'processing'
-                    patient.save()
                     
                     from ..file_utils import save_ios_to_dataset
                     ios_result = save_ios_to_dataset(patient, ios_upper, ios_lower)

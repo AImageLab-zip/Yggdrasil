@@ -305,12 +305,6 @@ class Patient(models.Model):
 
     def save(self, *args, **kwargs):
         creating = self._state.adding
-        if self.upper_scan_raw and self.lower_scan_raw:
-            if self.ios_processing_status == 'not_uploaded':
-                self.ios_processing_status = 'processing'
-        if self.cbct:
-            if self.cbct_processing_status == 'not_uploaded':
-                self.cbct_processing_status = 'processing'
 
         # First save to ensure patient_id is assigned
         super().save(*args, **kwargs)
@@ -381,13 +375,33 @@ class Patient(models.Model):
             logger.error(f"Error checking CBCT files for patient {self.patient_id}: {e}", exc_info=True)
             return False
         
+    def _processing_status(self, modality_slug):
+        job = self.jobs.filter(modality_slug=modality_slug).order_by('-created_at').first()
+        if not job:
+            return 'not_uploaded'
+        if job.status in ('pending', 'processing', 'retrying'):
+            return 'processing'
+        if job.status == 'failed':
+            return 'failed'
+        if job.status == 'completed':
+            return 'processed'
+        return 'not_uploaded'
+
+    @property
+    def ios_job_status(self):
+        return self._processing_status('ios')
+
+    @property
+    def cbct_job_status(self):
+        return self._processing_status('cbct')
+
     def is_ios_processed(self):
         """Check if IOS processing is complete"""
-        return self.ios_processing_status == 'processed'
-        
+        return self.ios_job_status == 'processed'
+
     def is_cbct_processed(self):
         """Check if CBCT processing is complete"""
-        return self.cbct_processing_status == 'processed'
+        return self.cbct_job_status == 'processed'
     
     # New methods for working with FileRegistry system
     def has_rgb_images(self):

@@ -281,8 +281,8 @@ def project_upload_api(request, project_slug):
             ],
             'tags': [tag.name for tag in patient.tags.all()],
             'processing_status': {
-                'ios': patient.ios_processing_status,
-                'cbct': patient.cbct_processing_status,
+                'ios': patient.ios_job_status,
+                'cbct': patient.cbct_job_status,
             },
             'upload_results': upload_results,
         }
