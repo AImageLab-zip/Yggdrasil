@@ -3,6 +3,7 @@ import hashlib
 import contextlib
 import logging
 import traceback
+import io
 from pathlib import Path
 import tempfile
 from django.utils import timezone
@@ -880,7 +881,7 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
     saved_entries = []
     errors = []
     saved_files = []
-    summary_key = f"{_raw_key_prefix_for(patient, 'intraoral')}/intraoral_patient_{patient.patient_id}_summary.txt"
+    summary_key = f"{_raw_key_prefix_for(patient, 'intraoral')}/intraoral_patient_{patient.patient_id}_manifest.json"
 
     # Resolve modality FK for FileRegistry
     modality_fk = None
@@ -916,31 +917,43 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
                 },
             )
             saved_entries.append(entry)
-            saved_files.append(key)
+            saved_files.append({
+                "file_id": entry.id,
+                "path": key,
+                "index": idx + 1,
+            })
         except Exception as e:
             logger.error(f"Error saving intraoral image {idx}: {e}", exc_info=True)
             errors.append(f"Failed to save image {idx + 1}: {str(e)}")
 
-    # Create completed job (intraoral photos don't need processing)
+    # Create pending job for external intraoral segmentation worker.
     job = None
     if saved_files:
         try:
-            # Store input manifest directly as JSON in Job for runner consumption
+            manifest = {
+                "schema_version": 1,
+                "patient_id": patient.patient_id,
+                "modality": "intraoral-photo",
+                "images": saved_files,
+            }
+            manifest_bytes = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+            get_object_storage().upload_fileobj(
+                io.BytesIO(manifest_bytes),
+                key=summary_key,
+                content_type="application/json",
+            )
 
             job = Job.objects.create(
                 modality_slug="intraoral-photo",
                 **_entity_fk_kwargs(patient),
-                input_file_path=json.dumps({"files": saved_files}),
-                status="completed",
+                input_file_path=summary_key,
+                status="pending",
                 output_files={
+                    "input_manifest": summary_key,
                     "input_type": "multiple_images",
                     "file_count": len(saved_files),
-                    "files": saved_files,
                 },
             )
-            job.started_at = timezone.now()
-            job.completed_at = timezone.now()
-            job.save()
         except Exception as e:
             logger.error(f"Error creating intraoral job: {e}", exc_info=True)
 
@@ -1065,6 +1078,123 @@ def mark_job_completed(job_id, output_files, logs=None):
                     f"CBCT FileRegistry entry created with {len(processed_files)} output files"
                 )
 
+        elif job.modality_slug == "intraoral-photo":
+            segmentation_key = output_files.get("segmentation_json")
+            if not segmentation_key:
+                logger.error(
+                    "Intraoral completion missing output_files.segmentation_json for job %s",
+                    job.id,
+                )
+                return True
+
+            fh, _ = open_binary(segmentation_key)
+            try:
+                segmentation_payload = json.loads(
+                    fh.read().decode("utf-8", errors="replace")
+                )
+            finally:
+                with contextlib.suppress(Exception):
+                    fh.close()
+
+            schema_version = segmentation_payload.get("schema_version")
+            if schema_version != 1:
+                logger.error(
+                    "Unsupported intraoral segmentation schema_version=%s for job %s",
+                    schema_version,
+                    job.id,
+                )
+                return True
+
+            if not job_patient:
+                logger.error("Intraoral job %s has no patient", job.id)
+                return True
+
+            payload_patient_id = segmentation_payload.get("patient_id")
+            if payload_patient_id != getattr(job_patient, "patient_id", None):
+                logger.error(
+                    "Segmentation patient_id mismatch for job %s: payload=%s expected=%s",
+                    job.id,
+                    payload_patient_id,
+                    getattr(job_patient, "patient_id", None),
+                )
+                return True
+
+            segmentations = segmentation_payload.get("segmentations")
+            if not isinstance(segmentations, dict):
+                logger.error(
+                    "Invalid segmentations payload type for job %s: %s",
+                    job.id,
+                    type(segmentations).__name__,
+                )
+                return True
+
+            from .models import IntraoralToothSegmentation
+            from .views.intraoral_segmentation import _normalize_teeth_payload
+
+            file_ids = []
+            for file_id_raw in segmentations.keys():
+                try:
+                    file_ids.append(int(str(file_id_raw)))
+                except Exception as exc:
+                    logger.error(
+                        "Invalid intraoral file_id key for job %s: %s (%s)",
+                        job.id,
+                        file_id_raw,
+                        exc,
+                    )
+                    return True
+
+            valid_file_ids = set(
+                FileRegistry.objects.filter(
+                    id__in=file_ids,
+                    file_type__in=["intraoral_raw", "intraoral_processed"],
+                    **_job_entity_fk_kwargs(job),
+                ).values_list("id", flat=True)
+            )
+            invalid_file_ids = sorted([fid for fid in file_ids if fid not in valid_file_ids])
+            if invalid_file_ids:
+                logger.error(
+                    "Invalid intraoral file ids in segmentation payload for job %s: %s",
+                    job.id,
+                    invalid_file_ids,
+                )
+                return True
+
+            updated_count = 0
+            skipped_confirmed_count = 0
+            for file_id_raw, teeth_payload in segmentations.items():
+                file_id = int(str(file_id_raw))
+                if file_id not in valid_file_ids:
+                    continue
+
+                normalized_teeth = _normalize_teeth_payload(teeth_payload)
+                row = IntraoralToothSegmentation.objects.filter(
+                    patient=job_patient,
+                    image_file_id=file_id,
+                ).first()
+
+                if row and row.is_confirmed:
+                    skipped_confirmed_count += 1
+                    continue
+
+                IntraoralToothSegmentation.objects.update_or_create(
+                    patient=job_patient,
+                    image_file_id=file_id,
+                    defaults={
+                        "teeth": normalized_teeth,
+                        "updated_by": None,
+                        "is_confirmed": False,
+                        "confirmed_by": None,
+                        "confirmed_at": None,
+                    },
+                )
+                updated_count += 1
+
+            output_files = dict(output_files or {})
+            output_files["applied_segmentations"] = updated_count
+            output_files["skipped_confirmed_segmentations"] = skipped_confirmed_count
+            job.output_files = output_files
+            job.save(update_fields=["output_files"])
         else:
             # For non-CBCT modalities, register simple outputs idempotently.
             # Bite classification has a dedicated handler below.
