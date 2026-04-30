@@ -12,6 +12,8 @@ from common.models import Modality
 logger = logging.getLogger(__name__)
 
 
+# Kept for migration compatibility (referenced by brain/migrations/0004_initial.py).
+# These are not used by the current Patient model — files go through FileRegistry.
 def brain_scan_upload_path(instance, filename):
     return f"brain/patient_{instance.patient_id}/raw/{filename}"
 
@@ -105,13 +107,6 @@ class Patient(models.Model):
         ('debug', 'Debug'),
     ]
 
-    PROCESSING_STATUS_CHOICES = [
-        ('not_uploaded', 'Not Uploaded'),
-        ('processing', 'Processing'),
-        ('processed', 'Processed'),
-        ('failed', 'Processing Failed'),
-    ]
-
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
     dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
@@ -123,25 +118,6 @@ class Patient(models.Model):
     )
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
-
-    upper_scan_raw = models.FileField(upload_to=brain_scan_upload_path, blank=True, null=True)
-    lower_scan_raw = models.FileField(upload_to=brain_scan_upload_path, blank=True, null=True)
-    upper_scan_norm = models.FileField(upload_to=brain_normalized_scan_path, blank=True, null=True)
-    lower_scan_norm = models.FileField(upload_to=brain_normalized_scan_path, blank=True, null=True)
-    cbct = models.FileField(upload_to=brain_cbct_upload_path, blank=True, null=True)
-
-    ios_processing_status = models.CharField(
-        max_length=20,
-        choices=PROCESSING_STATUS_CHOICES,
-        default='not_uploaded',
-        help_text='Processing status for intra-oral scans (upper and lower)',
-    )
-    cbct_processing_status = models.CharField(
-        max_length=20,
-        choices=PROCESSING_STATUS_CHOICES,
-        default='not_uploaded',
-        help_text='Processing status for CBCT scan',
-    )
 
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
     deleted = models.BooleanField(default=False, db_index=True)
@@ -202,9 +178,6 @@ class Patient(models.Model):
             super().save(update_fields=['name'])
 
     def has_ios_scans(self):
-        if self.upper_scan_raw and self.lower_scan_raw:
-            return True
-
         try:
             upper_raw = self.files.filter(file_type='ios_raw_upper').exists()
             lower_raw = self.files.filter(file_type='ios_raw_lower').exists()
@@ -216,9 +189,6 @@ class Patient(models.Model):
             return False
 
     def has_cbct_scan(self):
-        if self.cbct:
-            return True
-
         try:
             has_raw = self.files.filter(file_type='cbct_raw').exists()
             has_processed = self.files.filter(file_type='cbct_processed').exists()

@@ -14,66 +14,62 @@ import zipfile
 import tarfile
 
 
+# Kept for migration compatibility (referenced by maxillo/migrations/0001_initial.py).
+# These are not used by the current Patient model — files go through FileRegistry.
+def scan_upload_path(instance, filename):
+    return f"scans/patient_{instance.patient_id}/raw/{filename}"
+
+
+def normalized_scan_path(instance, filename):
+    return f"scans/patient_{instance.patient_id}/normalized/{filename}"
+
+
+def cbct_upload_path(instance, filename):
+    return f"scans/patient_{instance.patient_id}/cbct/{filename}"
+
+
+def voice_caption_upload_path(instance, filename):
+    return f"scans/patient_{instance.patient.patient_id}/voice_captions/{filename}"
+
+
 def validate_cbct_file(value):
     """
-    Validator for CBCT files that supports multiple formats:
-    - DICOM: .dcm files, zip/tar archives containing .dcm files, or DICOMDIR
-    - NIfTI: .nii, .nii.gz
-    - MetaImage: .mha, .mhd
-    - NRRD: .nrrd, .nhdr
-    
-    Note: This validator is for single file uploads. Folder uploads are validated separately.
+    Validator for CBCT files.
+    Kept for migration compatibility (0001_initial).
     """
-    if hasattr(value, 'temporary_file_path'):
-        file_path = value.temporary_file_path()
-    else:
-        file_path = value.name
-    
     filename = value.name.lower()
     valid_extensions = [
-        '.dcm', '.dicom',  # DICOM
-        '.nii', '.nii.gz', '.gz',  # NIfTI
-        '.mha', '.mhd',  # MetaImage
-        '.nrrd', '.nhdr',  # NRRD
-        '.zip', '.tar', '.tar.gz', '.tgz'  # Archives that might contain DICOM
+        '.dcm', '.dicom',
+        '.nii', '.nii.gz', '.gz',
+        '.mha', '.mhd',
+        '.nrrd', '.nhdr',
+        '.zip', '.tar', '.tar.gz', '.tgz',
     ]
-    
-    # Check if file has a valid extension
     has_valid_extension = any(filename.endswith(ext) for ext in valid_extensions)
-    
-    # Special case for DICOMDIR files (no extension)
     if filename == 'dicomdir' or filename.endswith('/dicomdir'):
         return
-    
     if not has_valid_extension:
         raise ValidationError(
-            f'Unsupported file format. Supported formats: DICOM (.dcm, .zip, .tar), '
-            f'NIfTI (.nii, .nii.gz), MetaImage (.mha, .mhd), NRRD (.nrrd, .nhdr)'
+            'Unsupported file format. Supported formats: DICOM (.dcm, .zip, .tar), '
+            'NIfTI (.nii, .nii.gz), MetaImage (.mha, .mhd), NRRD (.nrrd, .nhdr)'
         )
-    
-    # For archives, check if they contain DICOM files
     if filename.endswith(('.zip', '.tar', '.tar.gz', '.tgz')):
         try:
-            # Check if archive contains DICOM files
             if filename.endswith('.zip'):
                 with zipfile.ZipFile(value, 'r') as zf:
                     file_list = zf.namelist()
-                    has_dicom = any(f.lower().endswith('.dcm') or f.lower() == 'dicomdir' 
-                                   for f in file_list)
+                    has_dicom = any(f.lower().endswith('.dcm') or f.lower() == 'dicomdir'
+                                    for f in file_list)
                     if not has_dicom:
-                        raise ValidationError(
-                            'Archive must contain DICOM files (.dcm) or DICOMDIR file'
-                        )
+                        raise ValidationError('Archive must contain DICOM files')
             elif filename.endswith(('.tar', '.tar.gz', '.tgz')):
                 mode = 'r:gz' if filename.endswith(('.tar.gz', '.tgz')) else 'r'
                 with tarfile.open(fileobj=value, mode=mode) as tf:
                     file_list = tf.getnames()
-                    has_dicom = any(f.lower().endswith('.dcm') or f.lower().endswith('/dicomdir') 
-                                   for f in file_list)
+                    has_dicom = any(f.lower().endswith('.dcm') or f.lower().endswith('/dicomdir')
+                                    for f in file_list)
                     if not has_dicom:
-                        raise ValidationError(
-                            'Archive must contain DICOM files (.dcm) or DICOMDIR file'
-                        )
+                        raise ValidationError('Archive must contain DICOM files')
         except Exception as e:
             raise ValidationError(f'Error reading archive file: {str(e)}')
 
@@ -201,21 +197,6 @@ class Tag(models.Model):
         return self.name
 
 
-def scan_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/raw/{filename}"
-
-
-def normalized_scan_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/normalized/{filename}"
-
-
-def cbct_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/cbct/{filename}"
-
-
-def voice_caption_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient.patient_id}/voice_captions/{filename}"
-
 
 class ActivePatientManager(models.Manager):
     """Default manager that hides soft-deleted patients."""
@@ -232,65 +213,12 @@ class Patient(models.Model):
         ('debug', 'Debug'),
     ]
     
-    PROCESSING_STATUS_CHOICES = [
-        ('not_uploaded', 'Not Uploaded'),
-        ('processing', 'Processing'),
-        ('processed', 'Processed'),
-        ('failed', 'Processing Failed'),
-    ]
-    
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
     dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     modalities = models.ManyToManyField(Modality, blank=True, related_name='patients', help_text='Modalities available for this patient')
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
-    
-    upper_scan_raw = models.FileField(
-        upload_to=scan_upload_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    lower_scan_raw = models.FileField(
-        upload_to=scan_upload_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    
-    upper_scan_norm = models.FileField(
-        upload_to=normalized_scan_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    lower_scan_norm = models.FileField(
-        upload_to=normalized_scan_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    
-    cbct = models.FileField(
-        upload_to=cbct_upload_path,
-        validators=[validate_cbct_file],
-        blank=True,
-        null=True
-    )
-    
-    ios_processing_status = models.CharField(
-        max_length=20, 
-        choices=PROCESSING_STATUS_CHOICES, 
-        default='not_uploaded',
-        help_text='Processing status for intra-oral scans (upper and lower)'
-    )
-    cbct_processing_status = models.CharField(
-        max_length=20, 
-        choices=PROCESSING_STATUS_CHOICES, 
-        default='not_uploaded',
-        help_text='Processing status for CBCT scan'
-    )
     
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
     deleted = models.BooleanField(default=False, db_index=True)
@@ -341,10 +269,6 @@ class Patient(models.Model):
     
     def has_ios_scans(self):
         """Check if both upper and lower scans are uploaded"""
-        # Check old file fields first (for backward compatibility)
-        if self.upper_scan_raw and self.lower_scan_raw:
-            return True
-        
         # Check FileRegistry for new processing flow
         try:
             # Check for both raw and processed files
@@ -361,10 +285,6 @@ class Patient(models.Model):
         
     def has_cbct_scan(self):
         """Check if CBCT scan is uploaded"""
-        # Check old file field first (for backward compatibility)
-        if self.cbct:
-            return True
-            
         # Check FileRegistry for new processing flow
         try:
             # Check for both raw and processed CBCT files

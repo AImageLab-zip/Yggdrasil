@@ -15,8 +15,8 @@ except ImportError:
     USERNAME = "llumetti"
     PASSWORD = "password"
     FILES_CONFIG = {
-        "upper_scan_raw": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\upper.stl",
-        "lower_scan_raw": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\lower.stl",
+        "upper_scan": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\upper.stl",
+        "lower_scan": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\lower.stl",
         "cbct": r"E:\ToothFairy4M\Dataset_Progetto_AI\CBCT\niigz\1.nii.gz",
         "teleradiography": r"C:\Users\Luca\Pictures\licensed-image.jpg",
         "panoramic": r"C:\Users\Luca\Pictures\licensed-image.jpg",

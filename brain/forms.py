@@ -10,18 +10,6 @@ class PatientForm(forms.ModelForm):
 
 
 class PatientUploadForm(forms.ModelForm):
-    cbct = forms.FileField(
-        required=False,
-        label='CBCT File',
-        widget=forms.FileInput(
-            attrs={
-                'class': 'form-control',
-                'accept': '.dcm,.dicom,.nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz',
-            }
-        ),
-    )
-    cbct_upload_type = forms.CharField(widget=forms.HiddenInput(), required=False)
-
     ios_upper = forms.FileField(
         required=False,
         label='IOS - Upper',

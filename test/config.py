@@ -12,8 +12,8 @@ PASSWORD = "your-password"  # Replace with your password
 # Update these paths to match your local file system
 FILES_CONFIG = {
     # IOS Files
-    "upper_scan_raw": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\upper.stl",
-    "lower_scan_raw": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\lower.stl",
+    "upper_scan": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\upper.stl",
+    "lower_scan": r"E:\ToothFairy4M\Dataset_Progetto_AI\IOS\Progetto AI\Bits2Bites\1\lower.stl",
     
     # CBCT File
     "cbct": r"E:\ToothFairy4M\Dataset_Progetto_AI\CBCT\niigz\1.nii.gz",
@@ -45,8 +45,8 @@ UPLOAD_CONFIG = {
 # Alternative file paths for Linux/Docker environment (if running from within container)
 # Uncomment and modify these if running the script from inside the Docker container
 LINUX_FILES_CONFIG = {
-    "upper_scan_raw": "/dataset/raw/ios/upper.stl",
-    "lower_scan_raw": "/dataset/raw/ios/lower.stl", 
+    "upper_scan": "/dataset/raw/ios/upper.stl",
+    "lower_scan": "/dataset/raw/ios/lower.stl", 
     "cbct": "/dataset/raw/cbct/1.nii.gz",
     "teleradiography": "/dataset/raw/images/teleradiography.jpg",
     "panoramic": "/dataset/raw/images/panoramic.jpg",

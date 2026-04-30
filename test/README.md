@@ -49,8 +49,8 @@ Update the file paths in `config.py` to point to your test files:
 
 ```python
 FILES_CONFIG = {
-    "upper_scan_raw": r"path\to\upper.stl",
-    "lower_scan_raw": r"path\to\lower.stl", 
+    "upper_scan": r"path\to\upper.stl",
+    "lower_scan": r"path\to\lower.stl", 
     "cbct": r"path\to\cbct.nii.gz",
     "teleradiography": r"path\to\xray.jpg",
     "panoramic": r"path\to\panoramic.jpg",
