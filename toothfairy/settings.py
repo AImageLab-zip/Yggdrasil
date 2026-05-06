@@ -243,15 +243,19 @@ OBJECT_STORAGE_ADDRESSING_STYLE = config(
 OBJECT_STORAGE_KEY_PREFIX = config("OBJECT_STORAGE_KEY_PREFIX", default="")
 
 # Async jobs (distributed runners)
-_REDIS_PASSWORD = config("REDIS_PASSWORD", default="")
-_DEFAULT_REDIS_AUTH = f":{_REDIS_PASSWORD}@" if _REDIS_PASSWORD else ""
+_REDIS_PASSWORD = config("REDIS_PASSWORD")
+_REDIS_HOST = config("REDIS_HOST", default="redis")
+_REDIS_PORT = config("REDIS_PORT", default=6379, cast=int)
+_REDIS_BROKER_DB = config("REDIS_BROKER_DB", default=0, cast=int)
+_REDIS_RESULT_DB = config("REDIS_RESULT_DB", default=1, cast=int)
+_DEFAULT_REDIS_URL = f"redis://:{_REDIS_PASSWORD}@{_REDIS_HOST}:{_REDIS_PORT}"
 CELERY_BROKER_URL = config(
     "CELERY_BROKER_URL",
-    default=f"redis://{_DEFAULT_REDIS_AUTH}redis:6379/0",
+    default=f"{_DEFAULT_REDIS_URL}/{_REDIS_BROKER_DB}",
 )
 CELERY_RESULT_BACKEND = config(
     "CELERY_RESULT_BACKEND",
-    default=f"redis://{_DEFAULT_REDIS_AUTH}redis:6379/1",
+    default=f"{_DEFAULT_REDIS_URL}/{_REDIS_RESULT_DB}",
 )
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
