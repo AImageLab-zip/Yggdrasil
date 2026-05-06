@@ -12,20 +12,6 @@ from common.models import Modality
 logger = logging.getLogger(__name__)
 
 
-# Kept for migration compatibility (referenced by brain/migrations/0004_initial.py).
-# These are not used by the current Patient model — files go through FileRegistry.
-def brain_scan_upload_path(instance, filename):
-    return f"brain/patient_{instance.patient_id}/raw/{filename}"
-
-
-def brain_normalized_scan_path(instance, filename):
-    return f"brain/patient_{instance.patient_id}/normalized/{filename}"
-
-
-def brain_cbct_upload_path(instance, filename):
-    return f"brain/patient_{instance.patient_id}/cbct/{filename}"
-
-
 class ActivePatientManager(models.Manager):
     """Default manager that hides soft-deleted patients."""
 

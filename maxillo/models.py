@@ -2,7 +2,6 @@ import secrets
 
 from django.db import models
 from django.contrib.auth.models import User
-from django.core.validators import FileExtensionValidator
 from django.core.exceptions import ValidationError
 import os
 from django.utils import timezone
@@ -10,68 +9,6 @@ from django.utils.text import slugify
 from common.models import Modality, ProjectAccess, Job, FileRegistry, Invitation
 import logging
 logger = logging.getLogger(__name__)
-import zipfile
-import tarfile
-
-
-# Kept for migration compatibility (referenced by maxillo/migrations/0001_initial.py).
-# These are not used by the current Patient model — files go through FileRegistry.
-def scan_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/raw/{filename}"
-
-
-def normalized_scan_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/normalized/{filename}"
-
-
-def cbct_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/cbct/{filename}"
-
-
-def voice_caption_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient.patient_id}/voice_captions/{filename}"
-
-
-def validate_cbct_file(value):
-    """
-    Validator for CBCT files.
-    Kept for migration compatibility (0001_initial).
-    """
-    filename = value.name.lower()
-    valid_extensions = [
-        '.dcm', '.dicom',
-        '.nii', '.nii.gz', '.gz',
-        '.mha', '.mhd',
-        '.nrrd', '.nhdr',
-        '.zip', '.tar', '.tar.gz', '.tgz',
-    ]
-    has_valid_extension = any(filename.endswith(ext) for ext in valid_extensions)
-    if filename == 'dicomdir' or filename.endswith('/dicomdir'):
-        return
-    if not has_valid_extension:
-        raise ValidationError(
-            'Unsupported file format. Supported formats: DICOM (.dcm, .zip, .tar), '
-            'NIfTI (.nii, .nii.gz), MetaImage (.mha, .mhd), NRRD (.nrrd, .nhdr)'
-        )
-    if filename.endswith(('.zip', '.tar', '.tar.gz', '.tgz')):
-        try:
-            if filename.endswith('.zip'):
-                with zipfile.ZipFile(value, 'r') as zf:
-                    file_list = zf.namelist()
-                    has_dicom = any(f.lower().endswith('.dcm') or f.lower() == 'dicomdir'
-                                    for f in file_list)
-                    if not has_dicom:
-                        raise ValidationError('Archive must contain DICOM files')
-            elif filename.endswith(('.tar', '.tar.gz', '.tgz')):
-                mode = 'r:gz' if filename.endswith(('.tar.gz', '.tgz')) else 'r'
-                with tarfile.open(fileobj=value, mode=mode) as tf:
-                    file_list = tf.getnames()
-                    has_dicom = any(f.lower().endswith('.dcm') or f.lower().endswith('/dicomdir')
-                                    for f in file_list)
-                    if not has_dicom:
-                        raise ValidationError('Archive must contain DICOM files')
-        except Exception as e:
-            raise ValidationError(f'Error reading archive file: {str(e)}')
 
 
 def validate_cbct_folder(files):
