@@ -1,4 +1,4 @@
-"""Helpers to route maxillo/brain namespaces to the correct domain models/forms."""
+"""Helpers to route maxillo/brain/laparoscopy namespaces to the correct domain models/forms."""
 
 from django.apps import apps
 
@@ -11,13 +11,20 @@ def is_brain_namespace(request):
     return get_namespace(request) == 'brain'
 
 
+def is_laparoscopy_namespace(request):
+    return get_namespace(request) == 'laparoscopy'
+
+
 def get_domain_models(request):
-    if is_brain_namespace(request):
+    ns = get_namespace(request)
+    if ns == 'brain':
         app_label = 'brain'
+    elif ns == 'laparoscopy':
+        app_label = 'laparoscopy'
     else:
         app_label = 'maxillo'
 
-    return {
+    models = {
         'Patient': apps.get_model(app_label, 'Patient'),
         'Folder': apps.get_model(app_label, 'Folder'),
         'Tag': apps.get_model(app_label, 'Tag'),
@@ -26,6 +33,7 @@ def get_domain_models(request):
         'VoiceCaption': apps.get_model(app_label, 'VoiceCaption'),
         'Export': apps.get_model(app_label, 'Export'),
     }
+    return models
 
 
 def get_canonical_models():
@@ -42,8 +50,17 @@ def get_canonical_models():
 
 
 def get_domain_forms(request):
-    if is_brain_namespace(request):
+    ns = get_namespace(request)
+    if ns == 'brain':
         from brain.forms import (
+            ClassificationForm,
+            DatasetForm,
+            PatientForm,
+            PatientManagementForm,
+            PatientUploadForm,
+        )
+    elif ns == 'laparoscopy':
+        from laparoscopy.forms import (
             ClassificationForm,
             DatasetForm,
             PatientForm,

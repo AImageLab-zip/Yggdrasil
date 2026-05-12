@@ -10,7 +10,7 @@ import logging
 
 from common.file_access import exists as artifact_exists
 
-from .domain import get_domain_forms, get_domain_models
+from .domain import get_domain_forms, get_domain_models, get_namespace
 from .helpers import redirect_with_namespace, render_with_fallback
 
 logger = logging.getLogger(__name__)
@@ -390,6 +390,38 @@ def patient_detail(request, patient_id):
         context['allowed_modality_slugs'] = [m.slug for m in allowed_modalities]
     except Exception:
         pass
+    try:
+        from django.db.models import Case, When, IntegerField as _IntegerField
+        from django.urls import reverse as _reverse
+        ns = get_namespace(request)
+        video_file = patient.files.filter(
+            file_type__in=['video_processed', 'video_raw']
+        ).annotate(
+            _prio=Case(
+                When(file_type='video_processed', subtype='compressed', then=0),
+                When(file_type='video_processed', then=1),
+                default=2,
+                output_field=_IntegerField(),
+            )
+        ).order_by('_prio', '-created_at').first()
+        if video_file:
+            context['video_file'] = video_file
+            context['video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': video_file.id})
+        context['has_video'] = bool(video_file)
+        subsampled_file = patient.files.filter(
+            file_type='video_processed', subtype='subsampled'
+        ).order_by('-created_at').first()
+        worker_source_file = subsampled_file or video_file
+        if subsampled_file:
+            context['subsampled_video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': subsampled_file.id})
+        if worker_source_file and getattr(worker_source_file, 'file_path', None):
+            context['worker_video_source_ref'] = worker_source_file.file_path
+            context['worker_video_source_file_id'] = worker_source_file.id
+    except Exception:
+        context['has_video'] = False
+        context['video_url'] = None
+        context['worker_video_source_ref'] = None
+        context['worker_video_source_file_id'] = None
     return render_with_fallback(request, 'patient_detail', context)
 
 @login_required

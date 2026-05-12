@@ -1193,4 +1193,156 @@
 
 .modality-option.active:hover {
     background-color: #0b5ed7;
-} 
+}
+
+/* Laparoscopy temporal classification timeline */
+.laparoscopy-patient-detail #timeline-class-list .timeline-class-item {
+    cursor: pointer;
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+    border-left: 4px solid transparent;
+}
+
+.laparoscopy-patient-detail #timeline-class-list .timeline-class-name {
+    line-height: 1.2;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-track-wrap {
+    position: relative;
+    height: 30px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #f8f9fa 0%, #eef1f4 100%);
+    border: 1px solid #ced4da;
+    cursor: pointer;
+    user-select: none;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-track {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 50%;
+    height: 4px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: #adb5bd;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-pins-layer {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-segments-layer {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-segment {
+    position: absolute;
+    top: 50%;
+    height: 8px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: var(--segment-color, #6c757d);
+    opacity: 0.7;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    width: 14px;
+    height: 30px;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    transform: translateX(-50%);
+    background: var(--pin-color, #0d6efd);
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22);
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin::after {
+    content: '';
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    width: 2px;
+    height: 16px;
+    transform: translateX(-50%);
+    background: var(--pin-color, #0d6efd);
+    border-radius: 2px;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin.is-selected::before {
+    width: 12px;
+    height: 12px;
+    top: 1px;
+    box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65);
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-playhead {
+    position: absolute;
+    top: 0;
+    left: 8px;
+    transform: translateX(-50%);
+    width: 12px;
+    height: 30px;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: ew-resize;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-playhead::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 2px;
+    height: 30px;
+    transform: translateX(-50%);
+    background: #dc3545;
+    border-radius: 1px;
+}
+
+.laparoscopy-patient-detail #temporal-classification-bar .timeline-playhead::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 12px;
+    height: 12px;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: #dc3545;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 768px) {
+    .laparoscopy-patient-detail #temporal-classification-bar #timeline-active-class {
+        margin-left: 0 !important;
+    }
+}

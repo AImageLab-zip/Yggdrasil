@@ -2,6 +2,7 @@
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.http import JsonResponse
 
 from common.models import Project
 from .domain import get_domain_forms, get_domain_models
@@ -196,6 +197,32 @@ def upload_patient(request):
                     except Exception as e:
                         messages.error(request, f"Error saving {display_name}: {e}")
 
+            # Generic video modality
+            video_file = request.FILES.get('video')
+            video_error = None
+            if video_file:
+                try:
+                    modality = Modality.objects.get(slug='video')
+                    patient.modalities.add(modality)
+
+                    from laparoscopy.file_utils import save_video_to_dataset
+                    fr, job = save_video_to_dataset(patient, video_file)
+                    if fr:
+                        uploaded_modalities.append('Video')
+                        if job:
+                            processing_job_ids.append(job.id)
+                    else:
+                        video_error = 'Video file could not be saved (storage may be unavailable).'
+                except Exception as e:
+                    video_error = f"Error saving Video: {e}"
+
+            is_xhr = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+            if video_error:
+                messages.error(request, video_error)
+                if is_xhr:
+                    return JsonResponse({'ok': False, 'error': video_error}, status=400)
+
             if uploaded_modalities:
                 unique_modalities = list(dict.fromkeys(uploaded_modalities))
                 summary_message = (
@@ -209,6 +236,16 @@ def upload_patient(request):
                 messages.success(request, summary_message)
             else:
                 messages.success(request, 'Patient uploaded successfully!')
+
+            if is_xhr:
+                from django.urls import reverse, NoReverseMatch
+                ns = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
+                try:
+                    redirect_url = reverse(f"{ns}:patient_list")
+                except NoReverseMatch:
+                    redirect_url = reverse('maxillo:patient_list')
+                return JsonResponse({'ok': True, 'redirect': redirect_url})
+
             return redirect_with_namespace(request, 'patient_list')
     else:
         patient_form = PatientForm()

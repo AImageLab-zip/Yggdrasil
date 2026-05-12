@@ -1,11 +1,13 @@
 """File serving and registry API endpoints."""
 
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse, Http404, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.db import models
+import contextlib
 import os
+import re
 import logging
 import traceback
 import mimetypes
@@ -55,16 +57,21 @@ def serve_file(request, file_id):
             and request.resolver_match.namespace
         ) or "maxillo"
         file_domain = file_obj.domain or request_namespace
-        if file_domain not in ["maxillo", "brain"]:
+        if file_domain not in ["maxillo", "brain", "laparoscopy"]:
             file_domain = request_namespace
 
         if not artifact_exists(resolved_file_path):
             raise Http404("File not found")
 
         # Authentication: Check if user has access to the patient associated with this file
-        patient = file_obj.brain_patient if file_domain == "brain" else file_obj.patient
+        if file_domain == "brain":
+            patient = file_obj.brain_patient
+        elif file_domain == "laparoscopy":
+            patient = file_obj.laparoscopy_patient
+        else:
+            patient = file_obj.patient
         if not patient:
-            patient = file_obj.patient or file_obj.brain_patient
+            patient = file_obj.patient or file_obj.brain_patient or file_obj.laparoscopy_patient
         if patient:
             if getattr(patient, "deleted", False):
                 return JsonResponse({"error": "Patient not found"}, status=404)
@@ -135,6 +142,54 @@ def serve_file(request, file_id):
                 else f"file_{file_obj.id}"
             )
         )
+        safe_filename = filename.replace("\n", " ").replace("\r", " ")
+
+        # Video and audio files need Range-request support so browsers can seek.
+        if content_type and (content_type.startswith("video/") or content_type.startswith("audio/")):
+            total_size = file_obj.file_size or 0
+            range_header = request.META.get("HTTP_RANGE", "").strip()
+
+            if range_header and total_size > 0:
+                m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+                if m:
+                    start = int(m.group(1))
+                    end = int(m.group(2)) if m.group(2) else total_size - 1
+                    end = min(end, total_size - 1)
+                    length = end - start + 1
+                    try:
+                        from common.object_storage import get_object_storage as _get_os
+                        body, _ = _get_os().get_range(resolved_file_path, f"bytes={start}-{end}")
+                        def _iter(b, chunk=512 * 1024):
+                            try:
+                                while True:
+                                    data = b.read(chunk)
+                                    if not data:
+                                        break
+                                    yield data
+                            finally:
+                                with contextlib.suppress(Exception):
+                                    b.close()
+                        resp = StreamingHttpResponse(_iter(body), status=206, content_type=content_type)
+                        resp["Content-Range"] = f"bytes {start}-{end}/{total_size}"
+                        resp["Content-Length"] = str(length)
+                        resp["Accept-Ranges"] = "bytes"
+                        resp["Content-Disposition"] = f'inline; filename="{safe_filename}"'
+                        return resp
+                    except Exception as e:
+                        logger.warning(f"Range fetch failed for file {file_id}, falling back: {e}")
+
+            # Full response — still advertise Range support and Content-Length
+            resp = streaming_response(
+                path_or_key=resolved_file_path,
+                content_type=content_type,
+                filename=safe_filename,
+                as_attachment=False,
+            )
+            resp["Accept-Ranges"] = "bytes"
+            if total_size > 0:
+                resp["Content-Length"] = str(total_size)
+            return resp
+
         return streaming_response(
             path_or_key=resolved_file_path,
             content_type=content_type,

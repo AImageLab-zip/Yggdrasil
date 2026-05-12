@@ -21,6 +21,12 @@ def _get_domain_models(request):
             apps.get_model('brain', 'Folder'),
             apps.get_model('brain', 'Tag'),
         )
+    if ns == 'laparoscopy':
+        return (
+            apps.get_model('laparoscopy', 'Patient'),
+            apps.get_model('laparoscopy', 'Folder'),
+            apps.get_model('laparoscopy', 'Tag'),
+        )
     return MaxilloPatient, MaxilloFolder, MaxilloTag
 
 def home(request):

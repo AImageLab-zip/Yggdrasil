@@ -14,6 +14,7 @@ env.bak/
 venv.bak/
 .env.dev
 .env.prod
+.env-zip-dgx
 
 # Django
 *.log
@@ -200,3 +201,6 @@ ANALYSIS.md
 MODULE_DESIGN.md
 Trace-*.json
 .tmp_trace_*.tsv
+Makefile
+CLAUDE.md
+.code-review-graph

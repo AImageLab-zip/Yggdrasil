@@ -743,10 +743,13 @@ def start_export_processing(export_id, domain="maxillo"):
     """
     from ..models import Export as MaxilloExport
     from brain.models import Export as BrainExport
+    from laparoscopy.models import Export as LaparoscopyExport
 
     try:
         if domain == "brain":
             export = BrainExport.objects.filter(id=export_id).first()
+        elif domain == "laparoscopy":
+            export = LaparoscopyExport.objects.filter(id=export_id).first()
         else:
             export = MaxilloExport.objects.filter(id=export_id).first()
 
@@ -782,7 +785,7 @@ def start_export_processing(export_id, domain="maxillo"):
         try:
             export = MaxilloExport.objects.filter(
                 id=export_id
-            ).first() or BrainExport.objects.get(id=export_id)
+            ).first() or LaparoscopyExport.objects.filter(id=export_id).first() or BrainExport.objects.get(id=export_id)
             export.mark_failed(str(e))
         except Exception:
             pass

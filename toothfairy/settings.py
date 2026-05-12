@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     "common",
     "maxillo",
     "brain",
+    "laparoscopy",
 ]
 
 MIDDLEWARE = [

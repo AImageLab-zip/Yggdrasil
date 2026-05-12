@@ -159,6 +159,7 @@ class Job(models.Model):
 	DOMAIN_CHOICES = [
 		('maxillo', 'Maxillo'),
 		('brain', 'Brain'),
+		('laparoscopy', 'Laparoscopy'),
 	]
 
 	STATUS_CHOICES = [
@@ -177,8 +178,10 @@ class Job(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 
 	# IO
 	input_file_path = models.CharField(max_length=500, help_text='Primary input object key', blank=True)
@@ -289,6 +292,7 @@ class ProcessingJob(models.Model):
 	DOMAIN_CHOICES = [
 		('maxillo', 'Maxillo'),
 		('brain', 'Brain'),
+		('laparoscopy', 'Laparoscopy'),
 	]
 
 	JOB_TYPE_CHOICES = [
@@ -314,8 +318,10 @@ class ProcessingJob(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
+	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
+	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 
 	# File paths
 	input_file_path = models.CharField(max_length=500, help_text='Input object key')
@@ -430,6 +436,7 @@ class FileRegistry(models.Model):
 	DOMAIN_CHOICES = [
 		('maxillo', 'Maxillo'),
 		('brain', 'Brain'),
+		('laparoscopy', 'Laparoscopy'),
 	]
 
 	FILE_TYPE_CHOICES = [
@@ -465,6 +472,9 @@ class FileRegistry(models.Model):
 		('teleradiography_processed', 'Teleradiography Processed'),
 		('panoramic_raw', 'panoramic Raw'),
 		('panoramic_processed', 'panoramic Processed'),
+		# Generic video modality (used by laparoscopy and any future video domain)
+		('video_raw', 'Video Raw'),
+		('video_processed', 'Video Processed'),
 	]
 
 	file_type = models.CharField(max_length=255, choices=FILE_TYPE_CHOICES)
@@ -477,8 +487,10 @@ class FileRegistry(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
+	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
+	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	processing_job = models.ForeignKey('common.Job', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	metadata = models.JSONField(default=dict, blank=True, help_text='Additional file metadata')
