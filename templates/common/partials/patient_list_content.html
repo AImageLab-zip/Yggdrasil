@@ -66,19 +66,23 @@
                                         <input type="hidden" id="iosFilterValue" name="has_ios" value="{{ has_ios_filter }}">
                                         <input type="hidden" id="cbctFilterValue" name="has_cbct" value="{{ has_cbct_filter }}">
                                         <input type="hidden" id="biteFilterValue" name="has_bite" value="{{ has_bite_filter }}">
-                                        <input type="hidden" id="voiceFilterValue" name="has_voice" value="{{ has_voice_filter }}">
-                                        {% for m in modality_filter_specs %}
-                                        <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
-                                        <button type="button" class="status-filter-btn" data-filter="status_{{ m.slug }}" title="All {{ m.name }} (no filter)" data-bs-toggle="tooltip">
+                                         <input type="hidden" id="voiceFilterValue" name="has_voice" value="{{ has_voice_filter }}">
+                                         <input type="hidden" id="reportsFilterValue" name="has_reports" value="{{ has_reports_filter }}">
+                                         {% for m in modality_filter_specs %}
+                                         <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
+                                         <button type="button" class="status-filter-btn" data-filter="status_{{ m.slug }}" title="All {{ m.name }} (no filter)" data-bs-toggle="tooltip">
                                             {% if m.icon %}
                                             <i class="{{ m.icon }}"></i>
                                             {% else %}
                                             <span class="status-filter-label">{{ m.label|default:m.name }}</span>
                                             {% endif %}
-                                        </button>
-                                        {% endfor %}
-                                    </div>
-                                </div>
+                                         </button>
+                                         {% endfor %}
+                                         <button type="button" class="status-filter-btn" data-filter="reports" title="All Reports (no filter)" data-bs-toggle="tooltip">
+                                             <i class="fas fa-comment"></i>
+                                         </button>
+                                     </div>
+                                 </div>
                                 <div class="filter-item">
                                     <label class="filter-label">Per page</label>
                                     <select name="per_page" class="filter-select">

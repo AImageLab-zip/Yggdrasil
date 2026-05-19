@@ -71,6 +71,7 @@ function updateFilterURL() {
     url.searchParams.delete('has_cbct');
     url.searchParams.delete('has_voice');
     url.searchParams.delete('has_bite');
+    url.searchParams.delete('has_reports');
     // Clear dynamic status_<slug> params
     Array.from(url.searchParams.keys()).forEach(key => {
         if (key.startsWith('status_')) {
@@ -134,6 +135,7 @@ function autoExpandFilters() {
                       url.searchParams.has('has_ios') || 
                       url.searchParams.has('has_cbct') || 
                       url.searchParams.has('has_bite') || 
+                      url.searchParams.has('has_reports') || 
                       url.searchParams.has('has_voice') || 
                       Array.from(url.searchParams.keys()).some(k => k.startsWith('status_')) ||
                       url.searchParams.has('tags');
@@ -960,13 +962,19 @@ function initStatusFilterButtons() {
     statusButtons.forEach(btn => {
         btn.addEventListener('click', function() {
             const filterKey = this.dataset.filter; // e.g., 'status_cbct' or legacy 'ios'
+            const isReports = filterKey === 'reports';
             const isDynamic = filterKey.startsWith('status_');
             const currentValue = this.dataset.value || '';
             
             let newValue, newClass;
             
+            // Reports filter: '' -> yes (green) -> '' (gray)
+            if (isReports) {
+                if (currentValue === '') { newValue = 'yes'; newClass = 'status-green'; }
+                else { newValue = ''; newClass = 'status-gray'; }
+            }
             // Dynamic filters cycle: '' -> processed (green) -> processing (yellow) -> failed (red) -> ''
-            if (isDynamic) {
+            else if (isDynamic) {
                 if (currentValue === '') { newValue = 'processed'; newClass = 'status-green'; }
                 else if (currentValue === 'processed') { newValue = 'processing'; newClass = 'status-yellow'; }
                 else if (currentValue === 'processing') { newValue = 'failed'; newClass = 'status-red'; }
@@ -1004,7 +1012,8 @@ function initializeStatusButtonStates() {
         { filter: 'ios', inputId: 'iosFilterValue', buttonSelector: '[data-filter="ios"]' },
         { filter: 'cbct', inputId: 'cbctFilterValue', buttonSelector: '[data-filter="cbct"]' },
         { filter: 'bite', inputId: 'biteFilterValue', buttonSelector: '[data-filter="bite"]' },
-        { filter: 'voice', inputId: 'voiceFilterValue', buttonSelector: '[data-filter="voice"]' }
+        { filter: 'voice', inputId: 'voiceFilterValue', buttonSelector: '[data-filter="voice"]' },
+        { filter: 'reports', inputId: 'reportsFilterValue', buttonSelector: '[data-filter="reports"]' }
     ];
     legacyMappings.forEach(mapping => {
         const input = document.getElementById(mapping.inputId);
@@ -1048,7 +1057,8 @@ function updateButtonTitle(button, filterKey, value) {
             'ios': { '': 'All IOS (no filter)', 'yes': 'Has IOS', 'no': 'No IOS', 'failed': 'IOS Failed' },
             'cbct': { '': 'All CBCT (no filter)', 'yes': 'Has CBCT', 'no': 'No CBCT', 'failed': 'CBCT Failed' },
             'bite': { '': 'All Bite (no filter)', 'yes': 'Has Bite Classification', 'no': 'No Bite Classification', 'failed': 'Bite Classification Failed' },
-            'voice': { '': 'All Voice (no filter)', 'yes': 'Has Voice', 'no': 'No Voice', 'failed': 'Voice Failed' }
+            'voice': { '': 'All Voice (no filter)', 'yes': 'Has Voice', 'no': 'No Voice', 'failed': 'Voice Failed' },
+            'reports': { '': 'All Reports (no filter)', 'yes': 'Has Reports' }
         };
         const title = value ? (filterLabels[filter] && filterLabels[filter][value]) : (filterLabels[filter] && filterLabels[filter]['']);
         button.title = title || '';

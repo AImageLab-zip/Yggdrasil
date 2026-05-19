@@ -139,6 +139,7 @@ def patient_list(request):
     has_cbct_filter = request.GET.get('has_cbct', '')
     has_bite_filter = request.GET.get('has_bite', '')
     has_voice_filter = request.GET.get('has_voice', '')
+    has_reports_filter = request.GET.get('has_reports', '')
 
     folder_id = request.GET.get('folder')
     tags_selected = request.GET.getlist('tags')
@@ -168,6 +169,9 @@ def patient_list(request):
     
     if tags_selected:
         patients = patients.filter(tags__name__in=tags_selected).distinct()
+
+    if has_reports_filter == 'yes':
+        patients = patients.filter(voice_captions__isnull=False).distinct()
     
     patients = patients.order_by('-uploaded_at')
     
@@ -441,6 +445,7 @@ def patient_list(request):
         'has_cbct_filter': has_cbct_filter,
         'has_bite_filter': has_bite_filter,
         'has_voice_filter': has_voice_filter,
+        'has_reports_filter': has_reports_filter,
         'folder_id': folder_id or 'all',
         'selected_tags': tags_selected,
         'folders': folders_with_counts,
