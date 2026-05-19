@@ -16,6 +16,7 @@ import logging
 from common.models import Modality, FileRegistry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
+from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
 from .domain import get_domain_models, get_namespace
 from .helpers import redirect_with_namespace
 
@@ -146,10 +147,22 @@ def is_admin(user):
     return user.is_staff or user.profile.is_admin()
 
 
+def _can_use_exports(request):
+    if user_is_project_admin(request.user, request):
+        return True
+    FolderModel = get_domain_models(request)["Folder"]
+    for folder in FolderModel.objects.filter(parent__isnull=True).only("id"):
+        if user_can_create_export(request.user, folder, request):
+            return True
+    return False
+
+
 @login_required
-@user_passes_test(is_admin)
 def export_list(request):
     """Display export history page with all previous exports."""
+    if not _can_use_exports(request):
+        messages.error(request, "You do not have permission to access exports.")
+        return redirect_with_namespace(request, "patient_list")
     ExportModel = get_domain_models(request)["Export"]
     exports = ExportModel.objects.filter(user=request.user).order_by("-created_at")
 
@@ -193,10 +206,12 @@ def export_list(request):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_http_methods(["GET", "POST"])
 def export_new(request):
     """Create new export page with folder/modality selection."""
+    if not _can_use_exports(request):
+        messages.error(request, "You do not have permission to create exports.")
+        return redirect_with_namespace(request, "patient_list")
     domain_models = get_domain_models(request)
     ExportModel = domain_models["Export"]
     FolderModel = domain_models["Folder"]
@@ -221,6 +236,13 @@ def export_new(request):
         if not folder_ids:
             messages.error(request, "Please select at least one folder.")
             return redirect_with_namespace(request, "export_new")
+
+        FolderModel = domain_models["Folder"]
+        selected_folders = FolderModel.objects.filter(id__in=[int(fid) for fid in folder_ids])
+        for folder in selected_folders:
+            if not user_can_create_export(request.user, folder, request):
+                messages.error(request, "You do not have permission to export from selected folders.")
+                return redirect_with_namespace(request, "export_new")
 
         # Require at least one selection (can be a modality and/or reports only)
         if not modality_slugs:
@@ -311,6 +333,7 @@ def export_new(request):
 
     # GET request - show form
     folders = FolderModel.objects.filter(parent__isnull=True).order_by("name")
+    folders = filter_folders_for_user(request.user, folders, get_namespace(request))
 
     # Get patient counts for folders
     folders_with_counts = []
@@ -338,10 +361,11 @@ def export_new(request):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_http_methods(["POST", "GET"])
 def export_preview(request):
     """AJAX endpoint to get export statistics based on selected criteria."""
+    if not _can_use_exports(request):
+        return JsonResponse({"error": "Permission denied"}, status=403)
     try:
         domain_models = get_domain_models(request)
         PatientModel = domain_models["Patient"]

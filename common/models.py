@@ -57,10 +57,7 @@ class Modality(models.Model):
 class ProjectAccess(models.Model):
 	ROLE_CHOICES = [
 		('standard', 'Standard User'),
-		('annotator', 'Annotator'),
-		('project_manager', 'Project Manager'),
 		('admin', 'Administrator'),
-		('student_dev', 'Student Developer'),
 	]
 
 	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='project_access')
@@ -75,37 +72,37 @@ class ProjectAccess(models.Model):
 		return f"{self.user.username} -> {self.project.name}"
 
 	def is_annotator(self):
-		return self.role in ['annotator', 'project_manager', 'admin']
+		return self.role == 'admin'
 
 	def is_project_manager(self):
-		return self.role == 'project_manager'
+		return False
 
 	def is_admin(self):
 		return self.role == 'admin'
 
 	def is_student_developer(self):
-		return self.role == 'student_dev'
+		return False
 
 	def can_upload_scans(self):
-		return self.role in ['annotator', 'project_manager', 'admin', 'student_dev']
+		return self.role in ['admin', 'standard']
 
 	def can_see_debug_scans(self):
-		return self.role in ['admin', 'student_dev']
+		return self.role == 'admin'
 
 	def can_see_public_private_scans(self):
-		return self.role in ['annotator', 'project_manager', 'admin', 'standard']
+		return self.role in ['admin', 'standard']
 
 	def can_modify_scan_settings(self):
-		return self.role in ['annotator', 'project_manager', 'admin']
+		return self.role == 'admin'
 
 	def can_delete_scans(self):
 		return self.role == 'admin'
 
 	def can_delete_debug_scans(self):
-		return self.role in ['admin', 'student_dev']
+		return self.role == 'admin'
 
 	def can_view_other_profiles(self):
-		return self.role in ['project_manager', 'admin']
+		return self.role == 'admin'
 
 	def get_role_display(self):
 		return dict(self.ROLE_CHOICES).get(self.role, self.role)
@@ -117,10 +114,7 @@ class ProjectAccess(models.Model):
 class Invitation(models.Model):
 	ROLE_CHOICES = [
 		('standard', 'Standard User'),
-		('annotator', 'Annotator'),
-		('project_manager', 'Project Manager'),
 		('admin', 'Administrator'),
-		('student_dev', 'Student Developer'),
 	]
 
 	code = models.CharField(max_length=64, unique=True)

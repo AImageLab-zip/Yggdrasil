@@ -20,7 +20,17 @@ from .patient_upload import upload_patient
 from .classification import update_classification
 
 # Folder and tag management
-from .folders_tags import create_folder, move_patients_to_folder, add_patient_tag, remove_patient_tag
+from .folders_tags import (
+    create_folder,
+    move_patients_to_folder,
+    add_patient_tag,
+    remove_patient_tag,
+    folder_stats,
+    folder_permissions,
+    upsert_folder_permission,
+    delete_folder_permission,
+    rename_folder,
+)
 
 # Deletion
 from .deletion import delete_patient, bulk_delete_patients
@@ -126,6 +136,11 @@ __all__ = [
     'move_patients_to_folder',
     'add_patient_tag',
     'remove_patient_tag',
+    'folder_stats',
+    'folder_permissions',
+    'upsert_folder_permission',
+    'delete_folder_permission',
+    'rename_folder',
     # Profile
     'user_profile',
     # Export

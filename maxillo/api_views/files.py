@@ -10,7 +10,7 @@ import logging
 import traceback
 import mimetypes
 from common.models import FileRegistry, ProjectAccess
-from common.permissions import PermissionChecker
+from common.permissions import user_can_read_folder, user_is_project_admin, filter_patients_for_user
 from common.file_access import exists as artifact_exists, streaming_response
 
 logger = logging.getLogger(__name__)
@@ -73,19 +73,9 @@ def serve_file(request, file_id):
 
             project = Project.objects.filter(slug=file_domain).first()
 
-            # Get user permissions using PermissionChecker
-            perm = PermissionChecker(request.user, project)
-
-            # Check patient visibility permissions
-            can_view = False
-            if perm.is_admin():
-                can_view = True
-            elif perm.is_annotator() and patient.visibility != "debug":
-                can_view = True
-            elif perm.is_student_developer() and patient.visibility == "debug":
-                can_view = True
-            elif patient.visibility == "public":
-                can_view = True
+            can_view = user_is_project_admin(request.user, file_domain) or (
+                patient.folder and user_can_read_folder(request.user, patient.folder, file_domain)
+            )
 
             if not can_view:
                 logger.warning(
@@ -94,7 +84,7 @@ def serve_file(request, file_id):
                 return JsonResponse({"error": "Permission denied"}, status=403)
 
             # Check project access if patient belongs to a project
-            if project and not perm.is_admin():
+            if project and not user_is_project_admin(request.user, project):
                 has_project_access = ProjectAccess.objects.filter(
                     user=request.user, project=project
                 ).exists()
@@ -174,63 +164,27 @@ def get_file_registry(request):
         ) or "maxillo"
         current_project = Project.objects.filter(slug=namespace).first()
 
-        # Get user permissions using PermissionChecker
-        perm = PermissionChecker(request.user, current_project)
-
         # Build query with authorization filtering
         files = FileRegistry.objects.select_related("patient", "brain_patient")
 
         files = files.filter(domain=namespace)
+        is_admin = user_is_project_admin(request.user, namespace)
         if namespace == "brain":
-            files = files.filter(
-                models.Q(brain_patient__isnull=True)
-                | models.Q(brain_patient__deleted=False)
-            )
+            files = files.filter(models.Q(brain_patient__isnull=True) | models.Q(brain_patient__deleted=False))
+            if not is_admin:
+                files = files.filter(brain_patient__isnull=False)
         else:
-            files = files.filter(
-                models.Q(patient__isnull=True) | models.Q(patient__deleted=False)
-            )
+            files = files.filter(models.Q(patient__isnull=True) | models.Q(patient__deleted=False))
+            if not is_admin:
+                files = files.filter(patient__isnull=False)
 
-        # Apply authorization filtering based on user role and patient visibility
-        if perm.is_admin():
-            # Admins can see all files
-            pass
-        elif perm.is_annotator():
-            # Annotators can see files from public/private patients
-            if namespace == "brain":
-                files = files.filter(
-                    models.Q(brain_patient__isnull=True)
-                    | models.Q(brain_patient__visibility__in=["public", "private"])
-                )
+        if not is_admin:
+            PatientModel = files.model._meta.apps.get_model('brain' if namespace == 'brain' else 'maxillo', 'Patient')
+            allowed_patients = filter_patients_for_user(request.user, PatientModel.objects.all(), namespace).values_list('patient_id', flat=True)
+            if namespace == 'brain':
+                files = files.filter(brain_patient_id__in=allowed_patients)
             else:
-                files = files.filter(
-                    models.Q(patient__isnull=True)
-                    | models.Q(patient__visibility__in=["public", "private"])
-                )
-        elif perm.is_student_developer():
-            # Student developers can see files from debug patients
-            if namespace == "brain":
-                files = files.filter(
-                    models.Q(brain_patient__isnull=True)
-                    | models.Q(brain_patient__visibility="debug")
-                )
-            else:
-                files = files.filter(
-                    models.Q(patient__isnull=True)
-                    | models.Q(patient__visibility="debug")
-                )
-        else:
-            # Regular users can only see files from public patients
-            if namespace == "brain":
-                files = files.filter(
-                    models.Q(brain_patient__isnull=True)
-                    | models.Q(brain_patient__visibility="public")
-                )
-            else:
-                files = files.filter(
-                    models.Q(patient__isnull=True)
-                    | models.Q(patient__visibility="public")
-                )
+                files = files.filter(patient_id__in=allowed_patients)
 
         # Apply additional filters
         if file_type:

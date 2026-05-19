@@ -10,6 +10,7 @@ import os
 import logging
 
 from .domain import get_domain_models
+from common.permissions import user_can_write_annotations, user_is_project_admin
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,6 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 def update_classification(request, patient_id):
     """AJAX endpoint for instant classification updates"""
-    user_profile = request.user.profile
     domain_models = get_domain_models(request)
     Patient = domain_models['Patient']
     Classification = domain_models['Classification']
@@ -27,12 +27,8 @@ def update_classification(request, patient_id):
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
         
-        can_classify = False
-        if user_profile.is_admin():
-            can_classify = True
-        elif user_profile.is_annotator() and patient.visibility != 'debug':
-            can_classify = True
-        elif user_profile.is_student_developer() and patient.visibility == 'debug':
+        can_classify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+        if user_is_project_admin(request.user, request):
             can_classify = True
         
         if not can_classify:

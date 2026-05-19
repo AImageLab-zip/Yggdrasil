@@ -14,6 +14,7 @@ from django.views.decorators.http import require_POST
 from PIL import Image
 
 from common.file_access import exists as artifact_exists, open_binary
+from common.permissions import user_can_read_folder, user_can_write_annotations, user_is_project_admin
 
 from ..models import IntraoralToothSegmentation
 from .domain import get_domain_models
@@ -40,25 +41,15 @@ def _serve_file_url(request, file_id):
 
 
 def _can_view(user_profile, patient):
-    if user_profile.is_admin():
+    if user_is_project_admin(user_profile.user, patient._meta.app_label):
         return True
-    if user_profile.is_annotator() and patient.visibility != 'debug':
-        return True
-    if user_profile.is_student_developer() and patient.visibility == 'debug':
-        return True
-    if patient.visibility == 'public':
-        return True
-    return False
+    return bool(patient.folder and user_can_read_folder(user_profile.user, patient.folder, patient._meta.app_label))
 
 
 def _can_modify(user_profile, patient):
-    if user_profile.is_admin():
+    if user_is_project_admin(user_profile.user, patient._meta.app_label):
         return True
-    if user_profile.is_annotator() and patient.visibility != 'debug':
-        return True
-    if user_profile.is_student_developer() and patient.visibility == 'debug':
-        return True
-    return False
+    return bool(patient.folder and user_can_write_annotations(user_profile.user, patient.folder, patient._meta.app_label))
 
 
 def _image_bounds_from_metadata(metadata):

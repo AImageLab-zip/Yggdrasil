@@ -8,6 +8,7 @@ import os
 import logging
 
 from common.file_access import exists as artifact_exists, streaming_response
+from common.permissions import user_can_read_folder, user_is_project_admin
 from .domain import get_domain_models
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,14 @@ def _serve_file_url(request, file_id):
         getattr(request, "resolver_match", None) and request.resolver_match.namespace
     ) or "maxillo"
     return reverse(f"{namespace}:api_serve_file", kwargs={"file_id": file_id})
+
+
+def _can_read_patient(request, patient):
+    if user_is_project_admin(request.user, request):
+        return True
+    if not patient.folder:
+        return False
+    return user_can_read_folder(request.user, patient.folder, request)
 
 
 @login_required
@@ -33,19 +42,7 @@ def patient_viewer_data(request, patient_id):
         )
         else "maxillo"
     )
-    user_profile = request.user.profile
-
-    can_view = False
-    if user_profile.is_admin():
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    elif patient.visibility == "public":
-        can_view = True
-
-    if not can_view:
+    if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     # Determine modality status using Jobs (use 'ios' modality slug from request context or default)
@@ -179,20 +176,7 @@ def patient_cbct_data(request, patient_id):
         )
         else "maxillo"
     )
-    user_profile = request.user.profile
-
-    # Check permissions based on scan visibility and user role
-    can_view = False
-    if user_profile.is_admin():
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    elif patient.visibility == "public":
-        can_view = True
-
-    if not can_view:
+    if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     # Determine modality status using Jobs (use 'cbct' modality slug for this endpoint)
@@ -317,16 +301,7 @@ def patient_volume_data(request, patient_id, modality_slug):
         )
         else "maxillo"
     )
-    user_profile = request.user.profile
-    # Basic permission checks (same as CBCT)
-    can_view = False
-    if user_profile.is_admin() or patient.visibility == "public":
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    if not can_view:
+    if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
         from common.models import FileRegistry as _FR
@@ -403,20 +378,7 @@ def patient_panoramic_data(request, patient_id):
 
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    user_profile = request.user.profile
-
-    # Check permissions based on scan visibility and user role
-    can_view = False
-    if user_profile.is_admin():
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    elif patient.visibility == "public":
-        can_view = True
-
-    if not can_view:
+    if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     # PRIORITY 1: Check for uploaded panoramic modality file
@@ -567,20 +529,7 @@ def patient_intraoral_data(request, patient_id):
 
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    user_profile = request.user.profile
-
-    # Check permissions based on scan visibility and user role
-    can_view = False
-    if user_profile.is_admin():
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    elif patient.visibility == "public":
-        can_view = True
-
-    if not can_view:
+    if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     # Get intraoral images from FileRegistry
@@ -626,20 +575,7 @@ def patient_teleradiography_data(request, patient_id):
 
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    user_profile = request.user.profile
-
-    # Check permissions based on scan visibility and user role
-    can_view = False
-    if user_profile.is_admin():
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    elif patient.visibility == "public":
-        can_view = True
-
-    if not can_view:
+    if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     # Look for teleradiography file in FileRegistry
