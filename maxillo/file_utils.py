@@ -1,22 +1,25 @@
-import os
-import hashlib
 import contextlib
-import logging
-import traceback
+import hashlib
 import io
-from pathlib import Path
-import tempfile
-from django.utils import timezone
-from django.db import transaction
-from common.models import FileRegistry, Job
-from .models import VoiceCaption, Classification, Patient
 import json
-import zipfile
+import logging
+import os
 import tarfile
+import tempfile
+import traceback
+import zipfile
+from pathlib import Path
+
+from common.models import FileRegistry, Job
+from django.db import transaction
+from django.utils import timezone
+
+from .models import Classification, Patient, VoiceCaption
 
 logger = logging.getLogger(__name__)
 
-from common.file_access import exists as artifact_exists, open_binary
+from common.file_access import exists as artifact_exists
+from common.file_access import open_binary
 from common.object_storage import get_object_storage
 
 
@@ -67,7 +70,9 @@ def get_file_type_for_modality(
         else "cbct_processed",  # Keep existing behavior
         "audio": "audio_raw" if not is_processed else "audio_processed",
         "bite_classification": "bite_classification",  # Special case - no raw/processed distinction
-        "intraoral": "intraoral_raw" if not is_processed else "intraoral_processed",
+        "intraoral-photo": "intraoral_raw"
+        if not is_processed
+        else "intraoral_processed",
         "teleradiography": "teleradiography_raw"
         if not is_processed
         else "teleradiography_processed",
@@ -338,7 +343,6 @@ def save_generic_modality_file(
         no_processing_modalities = [
             "panoramic",
             "teleradiography",
-            "intraoral-photo",
             "rawzip",
             "braintumor-mri-t1",
             "braintumor-mri-t2",
@@ -881,7 +885,7 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
     saved_entries = []
     errors = []
     saved_files = []
-    summary_key = f"{_raw_key_prefix_for(patient, 'intraoral')}/intraoral_patient_{patient.patient_id}_manifest.json"
+    summary_key = f"{_raw_key_prefix_for(patient, 'intraoral-photo')}/intraoral_patient_{patient.patient_id}_manifest.json"
 
     # Resolve modality FK for FileRegistry
     modality_fk = None
@@ -898,7 +902,7 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
             ext = os.path.splitext(original_name)[1].lower() or ".jpg"
 
             filename = f"intraoral_{idx + 1}_patient_{patient.patient_id}{ext}"
-            key = f"{_raw_key_prefix_for(patient, 'intraoral')}/{filename}"
+            key = f"{_raw_key_prefix_for(patient, 'intraoral-photo')}/{filename}"
             key, file_size, file_hash = _upload_uploaded_file_to_storage(
                 key=key, uploaded_file=img
             )
@@ -917,11 +921,13 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
                 },
             )
             saved_entries.append(entry)
-            saved_files.append({
-                "file_id": entry.id,
-                "path": key,
-                "index": idx + 1,
-            })
+            saved_files.append(
+                {
+                    "file_id": entry.id,
+                    "path": key,
+                    "index": idx + 1,
+                }
+            )
         except Exception as e:
             logger.error(f"Error saving intraoral image {idx}: {e}", exc_info=True)
             errors.append(f"Failed to save image {idx + 1}: {str(e)}")
@@ -950,6 +956,9 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
                 status="pending",
                 output_files={
                     "input_manifest": summary_key,
+                    "input_files": {
+                        str(item["file_id"]): item["path"] for item in saved_files
+                    },
                     "input_type": "multiple_images",
                     "file_count": len(saved_files),
                 },
@@ -1079,7 +1088,12 @@ def mark_job_completed(job_id, output_files, logs=None):
                 )
 
         elif job.modality_slug == "intraoral-photo":
-            segmentation_key = output_files.get("segmentation_json")
+            from .models import IntraoralToothSegmentation
+            from .views.intraoral_segmentation import _normalize_teeth_payload
+
+            segmentation_key = _resolve_output_path_or_key(
+                (output_files or {}).get("segmentation_json")
+            )
             if not segmentation_key:
                 logger.error(
                     "Intraoral completion missing output_files.segmentation_json for job %s",
@@ -1096,69 +1110,14 @@ def mark_job_completed(job_id, output_files, logs=None):
                 with contextlib.suppress(Exception):
                     fh.close()
 
-            schema_version = segmentation_payload.get("schema_version")
-            if schema_version != 1:
-                logger.error(
-                    "Unsupported intraoral segmentation schema_version=%s for job %s",
-                    schema_version,
-                    job.id,
-                )
-                return True
-
-            if not job_patient:
-                logger.error("Intraoral job %s has no patient", job.id)
-                return True
-
-            payload_patient_id = segmentation_payload.get("patient_id")
-            if payload_patient_id != getattr(job_patient, "patient_id", None):
-                logger.error(
-                    "Segmentation patient_id mismatch for job %s: payload=%s expected=%s",
-                    job.id,
-                    payload_patient_id,
-                    getattr(job_patient, "patient_id", None),
-                )
-                return True
-
-            segmentations = segmentation_payload.get("segmentations")
-            if not isinstance(segmentations, dict):
-                logger.error(
-                    "Invalid segmentations payload type for job %s: %s",
-                    job.id,
-                    type(segmentations).__name__,
-                )
-                return True
-
-            from .models import IntraoralToothSegmentation
-            from .views.intraoral_segmentation import _normalize_teeth_payload
-
-            file_ids = []
-            for file_id_raw in segmentations.keys():
-                try:
-                    file_ids.append(int(str(file_id_raw)))
-                except Exception as exc:
-                    logger.error(
-                        "Invalid intraoral file_id key for job %s: %s (%s)",
-                        job.id,
-                        file_id_raw,
-                        exc,
-                    )
-                    return True
-
+            segmentations = segmentation_payload.get("segmentations") or {}
             valid_file_ids = set(
                 FileRegistry.objects.filter(
-                    id__in=file_ids,
+                    id__in=[int(str(file_id)) for file_id in segmentations.keys()],
                     file_type__in=["intraoral_raw", "intraoral_processed"],
                     **_job_entity_fk_kwargs(job),
                 ).values_list("id", flat=True)
             )
-            invalid_file_ids = sorted([fid for fid in file_ids if fid not in valid_file_ids])
-            if invalid_file_ids:
-                logger.error(
-                    "Invalid intraoral file ids in segmentation payload for job %s: %s",
-                    job.id,
-                    invalid_file_ids,
-                )
-                return True
 
             updated_count = 0
             skipped_confirmed_count = 0
@@ -1235,15 +1194,7 @@ def mark_job_completed(job_id, output_files, logs=None):
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")
-        if job_patient and job.modality_slug == "cbct":
-            logger.info(f"Updating patient CBCT processing status")
-            job_patient.cbct_processing_status = "processed"
-            job_patient.save()
-        elif job_patient and job.modality_slug == "ios":
-            logger.info(f"Updating patient IOS processing status")
-            job_patient.ios_processing_status = "processed"
-            job_patient.save()
-        elif job_voice_caption and job.modality_slug == "audio":
+        if job_voice_caption and job.modality_slug == "audio":
             job_voice_caption.processing_status = "completed"
 
             # Use logs parameter directly if it contains transcription text
@@ -1440,13 +1391,7 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         job_voice_caption = _job_voice_caption(job)
         job.mark_failed(error_msg, can_retry)
 
-        if job_patient and job.modality_slug == "cbct":
-            job_patient.cbct_processing_status = "failed"
-            job_patient.save()
-        elif job_patient and job.modality_slug == "ios":
-            job_patient.ios_processing_status = "failed"
-            job_patient.save()
-        elif job_voice_caption and job.modality_slug == "audio":
+        if job_voice_caption and job.modality_slug == "audio":
             job_voice_caption.processing_status = "failed"
             job_voice_caption.save()
         elif job_patient and job.modality_slug == "bite_classification":

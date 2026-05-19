@@ -97,18 +97,19 @@
                                     <small class="text-primary me-2">{{ c.user.username }}</small>
                                     {% if ns != 'brain' %}
                                     <div class="dropdown d-inline-block me-2">
-                                        <span class="badge bg-secondary dropdown-toggle modality-badge-clickable" 
+                                        <span class="badge bg-secondary {% if c.can_view_content %}dropdown-toggle modality-badge-clickable{% endif %}" 
                                               id="modalityDropdown{{ c.id }}" 
-                                              data-bs-toggle="dropdown" 
+                                              {% if c.can_view_content %}data-bs-toggle="dropdown"{% endif %}
                                               data-bs-auto-close="true"
                                               data-bs-boundary="viewport"
                                               aria-expanded="false"
                                               data-caption-id="{{ c.id }}"
                                               data-current-modality="{{ c.modality }}"
-                                              style="cursor: pointer;"
-                                              title="Click to change modality">
+                                              style="cursor: {% if c.can_view_content %}pointer{% else %}default{% endif %};"
+                                              title="{% if c.can_view_content %}Click to change modality{% else %}Modality{% endif %}">
                                             {{ c.get_modality_display }}
                                         </span>
+                                        {% if c.can_view_content %}
                                         <ul class="dropdown-menu" aria-labelledby="modalityDropdown{{ c.id }}">
                                             {% for modality in allowed_modalities %}
                                             <li>
@@ -122,12 +123,14 @@
                                             </li>
                                             {% endfor %}
                                         </ul>
+                                        {% endif %}
                                     </div>
                                     {% endif %}
                                     <span class="badge bg-secondary me-2">{{ c.get_display_duration|default:'Audio' }}</span>
                                     <small class="text-muted">{{ c.created_at|date:"M d, H:i" }}</small>
                                 </div>
                                 <div class="caption-actions">
+                                    {% if c.can_view_content %}
                                     {% with audio=c.get_audio_file %}
                                         {% if audio %}
                                         <button class="btn btn-outline-primary btn-sm btn-play-audio" data-audio-url="{% url ns|add:':api_serve_file' file_id=audio.id %}" title="Play">
@@ -135,6 +138,7 @@
                                         </button>
                                         {% endif %}
                                     {% endwith %}
+                                    {% endif %}
                                     {% if c.text_caption %}
                                     {% if c.user_id == user.id or user.is_staff %}
                                     <button class="btn btn-outline-secondary btn-sm btn-edit-caption" data-caption-id="{{ c.id }}" title="Edit">
@@ -150,7 +154,7 @@
                                 </div>
                             </div>
                             <div class="caption-text-compact mt-1">
-                                {% if c.text_caption %}
+                                {% if c.can_view_content and c.text_caption %}
                                     <div class="caption-text-display">
                                         <div class="caption-text-preview">
                                             <small class="text-dark">
@@ -171,6 +175,11 @@
                                         </div>
                                         {% endif %}
                                     </div>
+                                {% elif c.is_ghost %}
+                                    <small class="text-muted fst-italic">
+                                        <i class="fas fa-user-secret me-1"></i>
+                                        Caption content hidden
+                                    </small>
                                 {% else %}
                                     <small class="text-muted">
                                         <i class="fas fa-clock me-1"></i>

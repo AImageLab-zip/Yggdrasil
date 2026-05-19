@@ -1,69 +1,82 @@
 name: toothfairy4m-$DOCKER_SUFFIX
 
 services:
-  web:
-    build: .
-    container_name: toothfairy4m-web-$DOCKER_SUFFIX
-    volumes:
-      - .:/app
-    command: /app/entrypoint.sh
-    ports:
-      - "$WEB_EXTERNAL_PORT:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    environment:
-      VIRTUAL_HOST: ${DOMAIN:-}
-      VIRTUAL_PORT: ${WEB_EXTERNAL_PORT:-}
-      LETSENCRYPT_HOST: ${DOMAIN:-}
-      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
-      DB_HOST: toothfairy4m-db-$DOCKER_SUFFIX
+    web:
+        build: .
+        container_name: toothfairy4m-web-$DOCKER_SUFFIX
+        volumes:
+            - .:/app
+        command: /app/entrypoint.sh
+        ports:
+            - "$WEB_EXTERNAL_PORT:8000"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        environment:
+            VIRTUAL_HOST: ${VIRTUAL_HOST:-${DOMAIN:-}}
+            VIRTUAL_PORT: ${VIRTUAL_PORT:-8000}
+            LETSENCRYPT_HOST: ${LETSENCRYPT_HOST:-${VIRTUAL_HOST:-${DOMAIN:-}}}
+            LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
+            DB_HOST: toothfairy4m-db-$DOCKER_SUFFIX
 
-    env_file:
-      - ${ENV_FILE:-.env-$DOCKER_SUFFIX}
-    user: "$UID:$GID"
-    restart: unless-stopped
-    networks:
-      - app-net
-      - proxy-net
+        env_file:
+            - .env
+        user: "$UID:$GID"
+        restart: unless-stopped
+        networks:
+            - app-net-prod
+            - proxy-net
 
-  db:
-    image: mysql:8.0
-    container_name: toothfairy4m-db-$DOCKER_SUFFIX
-    environment:
-      MYSQL_DATABASE: $MYSQL_DATABASE
-      MYSQL_USER: $MYSQL_USER
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
-      MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "$DB_EXTERNAL_PORT:3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$MYSQL_ROOT_PASSWORD"]
-      timeout: 20s
-      retries: 10
-      interval: 10s
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-      - app-net
+    db:
+        image: mysql:8.0
+        container_name: toothfairy4m-db-$DOCKER_SUFFIX
+        environment:
+            MYSQL_DATABASE: $MYSQL_DATABASE
+            MYSQL_USER: $MYSQL_USER
+            MYSQL_PASSWORD: $MYSQL_PASSWORD
+            MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
+        volumes:
+            - mysql_data:/var/lib/mysql
+        ports:
+            - "$DB_EXTERNAL_PORT:3306"
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "mysqladmin",
+                    "ping",
+                    "-h",
+                    "localhost",
+                    "-u",
+                    "root",
+                    "-p$MYSQL_ROOT_PASSWORD",
+                ]
+            timeout: 20s
+            retries: 10
+            interval: 10s
+            start_period: 30s
+        restart: unless-stopped
+        networks:
+            - app-net-prod
 
-  redis:
-    image: redis:7-alpine
-    container_name: toothfairy4m-redis-$DOCKER_SUFFIX
-    restart: unless-stopped
-    networks:
-      - app-net
+    redis:
+        image: redis:7-alpine
+        container_name: toothfairy4m-redis-$DOCKER_SUFFIX
+        command: redis-server --requirepass ${REDIS_PASSWORD}
+        restart: unless-stopped
+        ports:
+            - "$REDIS_EXTERNAL_PORT:6379"
+        networks:
+            - app-net-prod
 
 volumes:
-  mysql_data:
+    mysql_data:
 
 networks:
-  proxy-net:
-    external: true
-  app-net:
-    name: app-net-$DOCKER_SUFFIX
-    external: true
+    proxy-net:
+        external: true
+    app-net-prod:
+        name: app-net-prod
+        external: true

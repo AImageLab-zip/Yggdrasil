@@ -24,12 +24,12 @@ Minimum required for the web stack:
 
 - `SECRET_KEY` (Django)
 - `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` (MySQL)
+- `REDIS_PASSWORD` (Redis auth used by Celery defaults)
 - `RUNNER_API_TOKENS` (token(s) accepted by runner callback API)
 
 Notes:
 
 - Django accepts either `DB_NAME/DB_USER/DB_PASSWORD` or the `MYSQL_*` variables above.
-- `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` must point to Redis reachable by both web app and runners.
 - Object storage is S3-compatible (Garage/MinIO) via `OBJECT_STORAGE_*`.
 
 ## Running web stack

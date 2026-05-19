@@ -2,7 +2,6 @@ import secrets
 
 from django.db import models
 from django.contrib.auth.models import User
-from django.core.validators import FileExtensionValidator
 from django.core.exceptions import ValidationError
 import os
 from django.utils import timezone
@@ -10,72 +9,6 @@ from django.utils.text import slugify
 from common.models import Modality, ProjectAccess, Job, FileRegistry, Invitation
 import logging
 logger = logging.getLogger(__name__)
-import zipfile
-import tarfile
-
-
-def validate_cbct_file(value):
-    """
-    Validator for CBCT files that supports multiple formats:
-    - DICOM: .dcm files, zip/tar archives containing .dcm files, or DICOMDIR
-    - NIfTI: .nii, .nii.gz
-    - MetaImage: .mha, .mhd
-    - NRRD: .nrrd, .nhdr
-    
-    Note: This validator is for single file uploads. Folder uploads are validated separately.
-    """
-    if hasattr(value, 'temporary_file_path'):
-        file_path = value.temporary_file_path()
-    else:
-        file_path = value.name
-    
-    filename = value.name.lower()
-    valid_extensions = [
-        '.dcm', '.dicom',  # DICOM
-        '.nii', '.nii.gz', '.gz',  # NIfTI
-        '.mha', '.mhd',  # MetaImage
-        '.nrrd', '.nhdr',  # NRRD
-        '.zip', '.tar', '.tar.gz', '.tgz'  # Archives that might contain DICOM
-    ]
-    
-    # Check if file has a valid extension
-    has_valid_extension = any(filename.endswith(ext) for ext in valid_extensions)
-    
-    # Special case for DICOMDIR files (no extension)
-    if filename == 'dicomdir' or filename.endswith('/dicomdir'):
-        return
-    
-    if not has_valid_extension:
-        raise ValidationError(
-            f'Unsupported file format. Supported formats: DICOM (.dcm, .zip, .tar), '
-            f'NIfTI (.nii, .nii.gz), MetaImage (.mha, .mhd), NRRD (.nrrd, .nhdr)'
-        )
-    
-    # For archives, check if they contain DICOM files
-    if filename.endswith(('.zip', '.tar', '.tar.gz', '.tgz')):
-        try:
-            # Check if archive contains DICOM files
-            if filename.endswith('.zip'):
-                with zipfile.ZipFile(value, 'r') as zf:
-                    file_list = zf.namelist()
-                    has_dicom = any(f.lower().endswith('.dcm') or f.lower() == 'dicomdir' 
-                                   for f in file_list)
-                    if not has_dicom:
-                        raise ValidationError(
-                            'Archive must contain DICOM files (.dcm) or DICOMDIR file'
-                        )
-            elif filename.endswith(('.tar', '.tar.gz', '.tgz')):
-                mode = 'r:gz' if filename.endswith(('.tar.gz', '.tgz')) else 'r'
-                with tarfile.open(fileobj=value, mode=mode) as tf:
-                    file_list = tf.getnames()
-                    has_dicom = any(f.lower().endswith('.dcm') or f.lower().endswith('/dicomdir') 
-                                   for f in file_list)
-                    if not has_dicom:
-                        raise ValidationError(
-                            'Archive must contain DICOM files (.dcm) or DICOMDIR file'
-                        )
-        except Exception as e:
-            raise ValidationError(f'Error reading archive file: {str(e)}')
 
 
 def validate_cbct_folder(files):
@@ -228,21 +161,6 @@ class Tag(models.Model):
         return self.name
 
 
-def scan_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/raw/{filename}"
-
-
-def normalized_scan_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/normalized/{filename}"
-
-
-def cbct_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient_id}/cbct/{filename}"
-
-
-def voice_caption_upload_path(instance, filename):
-    return f"scans/patient_{instance.patient.patient_id}/voice_captions/{filename}"
-
 
 class ActivePatientManager(models.Manager):
     """Default manager that hides soft-deleted patients."""
@@ -259,65 +177,12 @@ class Patient(models.Model):
         ('debug', 'Debug'),
     ]
     
-    PROCESSING_STATUS_CHOICES = [
-        ('not_uploaded', 'Not Uploaded'),
-        ('processing', 'Processing'),
-        ('processed', 'Processed'),
-        ('failed', 'Processing Failed'),
-    ]
-    
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
     dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     modalities = models.ManyToManyField(Modality, blank=True, related_name='patients', help_text='Modalities available for this patient')
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
-    
-    upper_scan_raw = models.FileField(
-        upload_to=scan_upload_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    lower_scan_raw = models.FileField(
-        upload_to=scan_upload_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    
-    upper_scan_norm = models.FileField(
-        upload_to=normalized_scan_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    lower_scan_norm = models.FileField(
-        upload_to=normalized_scan_path,
-        validators=[FileExtensionValidator(allowed_extensions=['stl'])],
-        blank=True,
-        null=True
-    )
-    
-    cbct = models.FileField(
-        upload_to=cbct_upload_path,
-        validators=[validate_cbct_file],
-        blank=True,
-        null=True
-    )
-    
-    ios_processing_status = models.CharField(
-        max_length=20, 
-        choices=PROCESSING_STATUS_CHOICES, 
-        default='not_uploaded',
-        help_text='Processing status for intra-oral scans (upper and lower)'
-    )
-    cbct_processing_status = models.CharField(
-        max_length=20, 
-        choices=PROCESSING_STATUS_CHOICES, 
-        default='not_uploaded',
-        help_text='Processing status for CBCT scan'
-    )
     
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
     deleted = models.BooleanField(default=False, db_index=True)
@@ -332,12 +197,6 @@ class Patient(models.Model):
 
     def save(self, *args, **kwargs):
         creating = self._state.adding
-        if self.upper_scan_raw and self.lower_scan_raw:
-            if self.ios_processing_status == 'not_uploaded':
-                self.ios_processing_status = 'processing'
-        if self.cbct:
-            if self.cbct_processing_status == 'not_uploaded':
-                self.cbct_processing_status = 'processing'
 
         # First save to ensure patient_id is assigned
         super().save(*args, **kwargs)
@@ -374,10 +233,6 @@ class Patient(models.Model):
     
     def has_ios_scans(self):
         """Check if both upper and lower scans are uploaded"""
-        # Check old file fields first (for backward compatibility)
-        if self.upper_scan_raw and self.lower_scan_raw:
-            return True
-        
         # Check FileRegistry for new processing flow
         try:
             # Check for both raw and processed files
@@ -394,10 +249,6 @@ class Patient(models.Model):
         
     def has_cbct_scan(self):
         """Check if CBCT scan is uploaded"""
-        # Check old file field first (for backward compatibility)
-        if self.cbct:
-            return True
-            
         # Check FileRegistry for new processing flow
         try:
             # Check for both raw and processed CBCT files
@@ -408,13 +259,33 @@ class Patient(models.Model):
             logger.error(f"Error checking CBCT files for patient {self.patient_id}: {e}", exc_info=True)
             return False
         
+    def _processing_status(self, modality_slug):
+        job = self.jobs.filter(modality_slug=modality_slug).order_by('-created_at').first()
+        if not job:
+            return 'not_uploaded'
+        if job.status in ('pending', 'processing', 'retrying'):
+            return 'processing'
+        if job.status == 'failed':
+            return 'failed'
+        if job.status == 'completed':
+            return 'processed'
+        return 'not_uploaded'
+
+    @property
+    def ios_job_status(self):
+        return self._processing_status('ios')
+
+    @property
+    def cbct_job_status(self):
+        return self._processing_status('cbct')
+
     def is_ios_processed(self):
         """Check if IOS processing is complete"""
-        return self.ios_processing_status == 'processed'
-        
+        return self.ios_job_status == 'processed'
+
     def is_cbct_processed(self):
         """Check if CBCT processing is complete"""
-        return self.cbct_processing_status == 'processed'
+        return self.cbct_job_status == 'processed'
     
     # New methods for working with FileRegistry system
     def has_rgb_images(self):

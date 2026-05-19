@@ -221,6 +221,8 @@
                     {% if user_profile.is_admin %}
                     <button class="btn btn-outline-secondary btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" title="Rerun processing" data-bs-toggle="tooltip" aria-label="Rerun"><i class="fas fa-sync"></i>
                     </button>
+                    {% endif %}
+                    {% if item.can_delete %}
                     <button class="btn btn-outline-danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" data-bs-toggle="tooltip" aria-label="Delete"><i class="fas fa-trash"></i>
                     </button>
                     {% endif %}

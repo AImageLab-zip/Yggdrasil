@@ -48,8 +48,6 @@ def patient_detail(request, patient_id):
         raw_cbct = patient.get_cbct_raw_file()
         if raw_cbct and artifact_exists(raw_cbct.file_path):
             has_cbct = True
-        elif patient.cbct:  # Fallback to old field
-            has_cbct = True
     except:
         pass
 
@@ -129,9 +127,6 @@ def patient_detail(request, patient_id):
                 
                 if reprocess_ios and (has_upper_scan or has_lower_scan):
                     patient.classifications.filter(classifier='pipeline').delete()
-                    patient.upper_scan_norm = None
-                    patient.lower_scan_norm = None
-                    patient.ios_processing_status = 'processing'
                     patient.save()
                     
                     try:
@@ -148,9 +143,6 @@ def patient_detail(request, patient_id):
                         messages.error(request, f'Error uploading IOS scan(s): {e}')
                 
                 if reprocess_cbct and (has_cbct_file or has_cbct_folder):
-                    patient.cbct_processing_status = 'processing'
-                    patient.save()
-                    
                     if has_cbct_folder:
                         try:
                             from ..file_utils import save_cbct_folder_to_dataset
@@ -292,10 +284,14 @@ def patient_detail(request, patient_id):
         logger.error(f"Error organizing patient files: {e}")
 
 
-    # Voice captions -- filter only captions made by the current user for all captions
+    # Voice captions
+    # Non-admin users can see caption metadata for all captions, but only access
+    # content (text/audio) for their own captions.
     voice_captions = patient.voice_captions.all()
-    if not user_is_project_admin(request.user, request):
-        voice_captions = voice_captions.filter(user=request.user)
+    is_admin_user = user_is_project_admin(request.user, request)
+    for caption in voice_captions:
+        caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.is_ghost = not caption.can_view_content
 
     # Build modality files lookup for drag-drop grid
     modality_files = {}
@@ -365,6 +361,7 @@ def patient_detail(request, patient_id):
         'default_modality_json': default_modality_json,
         'patient_files': patient_files,
         'voice_captions': voice_captions,
+        'is_admin_user': is_admin_user,
         'modality_files': modality_files,
         'modality_files_json': modality_files_json,
     }

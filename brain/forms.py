@@ -1,5 +1,6 @@
 from django import forms
 
+from common.permissions import filter_folders_for_user
 from .models import Classification, Dataset, Folder, Patient, Tag
 
 
@@ -10,18 +11,6 @@ class PatientForm(forms.ModelForm):
 
 
 class PatientUploadForm(forms.ModelForm):
-    cbct = forms.FileField(
-        required=False,
-        label='CBCT File',
-        widget=forms.FileInput(
-            attrs={
-                'class': 'form-control',
-                'accept': '.dcm,.dicom,.nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz',
-            }
-        ),
-    )
-    cbct_upload_type = forms.CharField(widget=forms.HiddenInput(), required=False)
-
     ios_upper = forms.FileField(
         required=False,
         label='IOS - Upper',
@@ -69,8 +58,11 @@ class PatientUploadForm(forms.ModelForm):
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if user and hasattr(user, 'profile'):
-            pass
+        if user:
+            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
+            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'brain')
+        else:
+            self.fields['folder'].queryset = Folder.objects.none()
 
     def clean(self):
         cleaned_data = super().clean()
@@ -135,11 +127,13 @@ class PatientManagementForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['dataset'].empty_label = 'No Dataset'
         self.fields['dataset'].required = False
+        if user:
+            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
+            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'brain')
+        else:
+            self.fields['folder'].queryset = Folder.objects.none()
         if self.instance and self.instance.pk:
             self.fields['tags_text'].initial = ', '.join(self.instance.tag_names())
-
-        if user and hasattr(user, 'profile'):
-            pass
 
     def clean(self):
         cleaned_data = super().clean()

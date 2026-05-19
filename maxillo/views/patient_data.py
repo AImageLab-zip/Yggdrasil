@@ -436,7 +436,7 @@ def patient_panoramic_data(request, patient_id):
     )
 
     # Check if CBCT exists but is still processing
-    if patient.has_cbct_scan() and patient.cbct_processing_status == "processing":
+    if patient.has_cbct_scan() and patient.cbct_job_status == "processing":
         return JsonResponse(
             {
                 "error": "CBCT is still being processed",
@@ -447,7 +447,7 @@ def patient_panoramic_data(request, patient_id):
         )
 
     # Check if processing failed
-    if patient.has_cbct_scan() and patient.cbct_processing_status == "failed":
+    if patient.has_cbct_scan() and patient.cbct_job_status == "failed":
         return JsonResponse(
             {
                 "error": "CBCT processing failed",
@@ -458,7 +458,7 @@ def patient_panoramic_data(request, patient_id):
         )
 
     # Check if CBCT processing is complete (panoramic is only available after processing)
-    logger.debug(f"CBCT processing status: {patient.cbct_processing_status}")
+    logger.debug(f"CBCT processing status: {patient.cbct_job_status}")
     logger.debug(f"is_cbct_processed(): {patient.is_cbct_processed()}")
     if not patient.is_cbct_processed():
         return JsonResponse(

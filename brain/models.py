@@ -12,18 +12,6 @@ from common.models import Modality
 logger = logging.getLogger(__name__)
 
 
-def brain_scan_upload_path(instance, filename):
-    return f"brain/patient_{instance.patient_id}/raw/{filename}"
-
-
-def brain_normalized_scan_path(instance, filename):
-    return f"brain/patient_{instance.patient_id}/normalized/{filename}"
-
-
-def brain_cbct_upload_path(instance, filename):
-    return f"brain/patient_{instance.patient_id}/cbct/{filename}"
-
-
 class ActivePatientManager(models.Manager):
     """Default manager that hides soft-deleted patients."""
 
@@ -133,13 +121,6 @@ class Patient(models.Model):
         ('debug', 'Debug'),
     ]
 
-    PROCESSING_STATUS_CHOICES = [
-        ('not_uploaded', 'Not Uploaded'),
-        ('processing', 'Processing'),
-        ('processed', 'Processed'),
-        ('failed', 'Processing Failed'),
-    ]
-
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
     dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
@@ -151,25 +132,6 @@ class Patient(models.Model):
     )
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
-
-    upper_scan_raw = models.FileField(upload_to=brain_scan_upload_path, blank=True, null=True)
-    lower_scan_raw = models.FileField(upload_to=brain_scan_upload_path, blank=True, null=True)
-    upper_scan_norm = models.FileField(upload_to=brain_normalized_scan_path, blank=True, null=True)
-    lower_scan_norm = models.FileField(upload_to=brain_normalized_scan_path, blank=True, null=True)
-    cbct = models.FileField(upload_to=brain_cbct_upload_path, blank=True, null=True)
-
-    ios_processing_status = models.CharField(
-        max_length=20,
-        choices=PROCESSING_STATUS_CHOICES,
-        default='not_uploaded',
-        help_text='Processing status for intra-oral scans (upper and lower)',
-    )
-    cbct_processing_status = models.CharField(
-        max_length=20,
-        choices=PROCESSING_STATUS_CHOICES,
-        default='not_uploaded',
-        help_text='Processing status for CBCT scan',
-    )
 
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
     deleted = models.BooleanField(default=False, db_index=True)
@@ -222,10 +184,6 @@ class Patient(models.Model):
 
     def save(self, *args, **kwargs):
         creating = self._state.adding
-        if self.upper_scan_raw and self.lower_scan_raw and self.ios_processing_status == 'not_uploaded':
-            self.ios_processing_status = 'processing'
-        if self.cbct and self.cbct_processing_status == 'not_uploaded':
-            self.cbct_processing_status = 'processing'
 
         super().save(*args, **kwargs)
 
@@ -234,9 +192,6 @@ class Patient(models.Model):
             super().save(update_fields=['name'])
 
     def has_ios_scans(self):
-        if self.upper_scan_raw and self.lower_scan_raw:
-            return True
-
         try:
             upper_raw = self.files.filter(file_type='ios_raw_upper').exists()
             lower_raw = self.files.filter(file_type='ios_raw_lower').exists()
@@ -248,9 +203,6 @@ class Patient(models.Model):
             return False
 
     def has_cbct_scan(self):
-        if self.cbct:
-            return True
-
         try:
             has_raw = self.files.filter(file_type='cbct_raw').exists()
             has_processed = self.files.filter(file_type='cbct_processed').exists()
@@ -259,11 +211,31 @@ class Patient(models.Model):
             logger.error('Error checking CBCT files for brain patient %s: %s', self.patient_id, exc, exc_info=True)
             return False
 
+    def _processing_status(self, modality_slug):
+        job = self.jobs.filter(modality_slug=modality_slug).order_by('-created_at').first()
+        if not job:
+            return 'not_uploaded'
+        if job.status in ('pending', 'processing', 'retrying'):
+            return 'processing'
+        if job.status == 'failed':
+            return 'failed'
+        if job.status == 'completed':
+            return 'processed'
+        return 'not_uploaded'
+
+    @property
+    def ios_job_status(self):
+        return self._processing_status('ios')
+
+    @property
+    def cbct_job_status(self):
+        return self._processing_status('cbct')
+
     def is_ios_processed(self):
-        return self.ios_processing_status == 'processed'
+        return self.ios_job_status == 'processed'
 
     def is_cbct_processed(self):
-        return self.cbct_processing_status == 'processed'
+        return self.cbct_job_status == 'processed'
 
     def has_rgb_images(self):
         try:

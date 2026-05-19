@@ -12,6 +12,7 @@ from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
+    user_can_delete_single_patient,
     user_is_project_admin,
 )
 import logging
@@ -342,6 +343,10 @@ def patient_list(request):
             'available_modalities': [m.slug for m in available_modality_objs],
             'modality_statuses': {ms['slug']: ms['status'] for ms in modality_status_list},
             'modality_status_list': modality_status_list,
+            'can_delete': bool(
+                is_admin
+                or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+            ),
         }
         patients_with_status.append(patient_data)
     

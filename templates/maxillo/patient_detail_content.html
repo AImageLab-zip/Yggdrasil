@@ -99,7 +99,7 @@
             <div class="position-relative">
                 <!-- IOS Viewer -->
                 <div id="ios-viewer" class="viewer-container" {% if default_modality_slug and default_modality_slug != 'ios' %}style="display: none;"{% endif %}>
-                    {% if patient.ios_processing_status == 'processing' %}
+                    {% if patient.ios_job_status == 'processing' %}
                         <!-- Processing State -->
                         <div class="ios-status-display">
                             <div class="text-center py-5">
@@ -117,7 +117,7 @@
                                 </div>
                             </div>
                         </div>
-                    {% elif patient.ios_processing_status == 'failed' %}
+                    {% elif patient.ios_job_status == 'failed' %}
                         <!-- Error State -->
                         <div class="ios-status-display">
                             <div class="text-center py-5">
@@ -128,21 +128,6 @@
                                 <p class="text-muted">
                                     Unable to process the uploaded scans.<br>
                                     <small>Please re-upload the files using the File Management section.</small>
-                                </p>
-                            </div>
-                        </div>
-                    {% elif patient.ios_processing_status == 'processing' %}
-                        <!-- Processing State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <div class="spinner-border text-primary" role="status">
-                                        <span class="visually-hidden">Processing...</span>
-                                    </div>
-                                </div>
-                                <h5 class="text-primary mb-2">Processing IOS Scans</h5>
-                                <p class="text-muted">
-                                    Your scans are being processed. This may take a few minutes.
                                 </p>
                             </div>
                         </div>
@@ -194,7 +179,7 @@
                 
                 <!-- CBCT Viewer -->
                 <div id="cbct-viewer" class="viewer-container" {% if default_modality_slug != 'cbct' %}style="display: none;"{% endif %}>
-                    {% if patient.cbct_processing_status == 'failed' %}
+                    {% if patient.cbct_job_status == 'failed' %}
                         <!-- Failed State -->
                         <div class="ios-status-display">
                             <div class="text-center py-5">
@@ -208,7 +193,7 @@
                                 </p>
                             </div>
                         </div>
-                    {% elif patient.cbct_processing_status == 'processing' %}
+                    {% elif patient.cbct_job_status == 'processing' %}
                         <!-- Processing State -->
                         <div class="ios-status-display">
                             <div class="text-center py-5">

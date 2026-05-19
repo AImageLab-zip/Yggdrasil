@@ -1,18 +1,18 @@
 """Export processor for background export generation."""
 
-import os
-import sys
-import zipfile
 import logging
+import os
 import subprocess
+import sys
 import tempfile
+import zipfile
 from pathlib import Path
-from django.conf import settings
-from django.utils import timezone
 
 from common.file_access import exists as artifact_exists
 from common.file_access import iter_bytes as iter_artifact_bytes
 from common.object_storage import get_object_storage
+from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class ExportProcessor:
             "raw": [],
             "processed": ["bite_classification"],
         },
-        "intraoral": {
+        "intraoral-photo": {
             "raw": ["intraoral_raw"],
             "processed": ["intraoral_processed"],
         },
@@ -741,8 +741,9 @@ def start_export_processing(export_id, domain="maxillo"):
     Uses a subprocess instead of a daemon thread so the export completes even
     after the HTTP request ends (web workers can recycle and kill threads).
     """
-    from ..models import Export as MaxilloExport
     from brain.models import Export as BrainExport
+
+    from ..models import Export as MaxilloExport
 
     try:
         if domain == "brain":

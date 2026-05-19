@@ -278,8 +278,8 @@ def project_upload_api(request, project_slug):
             ],
             'tags': [tag.name for tag in patient.tags.all()],
             'processing_status': {
-                'ios': patient.ios_processing_status,
-                'cbct': patient.cbct_processing_status,
+                'ios': patient.ios_job_status,
+                'cbct': patient.cbct_job_status,
             },
             'upload_results': upload_results,
         }
@@ -489,58 +489,6 @@ def get_patient_files(request, project_slug, patient_id):
             }
             files_data.append(file_data)
         
-        # Also check legacy file fields for backward compatibility
-        legacy_files = []
-        if patient.upper_scan_raw:
-            legacy_files.append({
-                'filename': os.path.basename(patient.upper_scan_raw.name),
-                'file_type': 'ios_raw_upper_legacy',
-                'file_type_display': 'IOS Raw Upper (Legacy)',
-                'file_size': patient.upper_scan_raw.size if hasattr(patient.upper_scan_raw, 'size') else None,
-                'file_path': patient.upper_scan_raw.name,
-                'legacy_field': True
-            })
-        
-        if patient.lower_scan_raw:
-            legacy_files.append({
-                'filename': os.path.basename(patient.lower_scan_raw.name),
-                'file_type': 'ios_raw_lower_legacy',
-                'file_type_display': 'IOS Raw Lower (Legacy)',
-                'file_size': patient.lower_scan_raw.size if hasattr(patient.lower_scan_raw, 'size') else None,
-                'file_path': patient.lower_scan_raw.name,
-                'legacy_field': True
-            })
-        
-        if patient.upper_scan_norm:
-            legacy_files.append({
-                'filename': os.path.basename(patient.upper_scan_norm.name),
-                'file_type': 'ios_processed_upper_legacy',
-                'file_type_display': 'IOS Processed Upper (Legacy)',
-                'file_size': patient.upper_scan_norm.size if hasattr(patient.upper_scan_norm, 'size') else None,
-                'file_path': patient.upper_scan_norm.name,
-                'legacy_field': True
-            })
-        
-        if patient.lower_scan_norm:
-            legacy_files.append({
-                'filename': os.path.basename(patient.lower_scan_norm.name),
-                'file_type': 'ios_processed_lower_legacy',
-                'file_type_display': 'IOS Processed Lower (Legacy)',
-                'file_size': patient.lower_scan_norm.size if hasattr(patient.lower_scan_norm, 'size') else None,
-                'file_path': patient.lower_scan_norm.name,
-                'legacy_field': True
-            })
-        
-        if patient.cbct:
-            legacy_files.append({
-                'filename': os.path.basename(patient.cbct.name),
-                'file_type': 'cbct_raw_legacy',
-                'file_type_display': 'CBCT Raw (Legacy)',
-                'file_size': patient.cbct.size if hasattr(patient.cbct, 'size') else None,
-                'file_path': patient.cbct.name,
-                'legacy_field': True
-            })
-        
         return JsonResponse({
             'success': True,
             'project': {
@@ -554,8 +502,7 @@ def get_patient_files(request, project_slug, patient_id):
                 'uploaded_at': patient.uploaded_at.isoformat(),
             },
             'files': files_data,
-            'legacy_files': legacy_files,
-            'total_files': len(files_data) + len(legacy_files)
+            'total_files': len(files_data)
         })
         
     except Exception as e:
@@ -643,58 +590,6 @@ def get_multiple_patients_files(request, project_slug):
                 }
                 files_data.append(file_data)
             
-            # Check legacy file fields for backward compatibility
-            legacy_files = []
-            if patient.upper_scan_raw:
-                legacy_files.append({
-                    'filename': os.path.basename(patient.upper_scan_raw.name),
-                    'file_type': 'ios_raw_upper_legacy',
-                    'file_type_display': 'IOS Raw Upper (Legacy)',
-                    'file_size': patient.upper_scan_raw.size if hasattr(patient.upper_scan_raw, 'size') else None,
-                    'file_path': patient.upper_scan_raw.name,
-                    'legacy_field': True
-                })
-            
-            if patient.lower_scan_raw:
-                legacy_files.append({
-                    'filename': os.path.basename(patient.lower_scan_raw.name),
-                    'file_type': 'ios_raw_lower_legacy',
-                    'file_type_display': 'IOS Raw Lower (Legacy)',
-                    'file_size': patient.lower_scan_raw.size if hasattr(patient.lower_scan_raw, 'size') else None,
-                    'file_path': patient.lower_scan_raw.name,
-                    'legacy_field': True
-                })
-            
-            if patient.upper_scan_norm:
-                legacy_files.append({
-                    'filename': os.path.basename(patient.upper_scan_norm.name),
-                    'file_type': 'ios_processed_upper_legacy',
-                    'file_type_display': 'IOS Processed Upper (Legacy)',
-                    'file_size': patient.upper_scan_norm.size if hasattr(patient.upper_scan_norm, 'size') else None,
-                    'file_path': patient.upper_scan_norm.name,
-                    'legacy_field': True
-                })
-            
-            if patient.lower_scan_norm:
-                legacy_files.append({
-                    'filename': os.path.basename(patient.lower_scan_norm.name),
-                    'file_type': 'ios_processed_lower_legacy',
-                    'file_type_display': 'IOS Processed Lower (Legacy)',
-                    'file_size': patient.lower_scan_norm.size if hasattr(patient.lower_scan_norm, 'size') else None,
-                    'file_path': patient.lower_scan_norm.name,
-                    'legacy_field': True
-                })
-            
-            if patient.cbct:
-                legacy_files.append({
-                    'filename': os.path.basename(patient.cbct.name),
-                    'file_type': 'cbct_raw_legacy',
-                    'file_type_display': 'CBCT Raw (Legacy)',
-                    'file_size': patient.cbct.size if hasattr(patient.cbct, 'size') else None,
-                    'file_path': patient.cbct.name,
-                    'legacy_field': True
-                })
-            
             patients_data[patient.patient_id] = {
                 'patient_info': {
                     'patient_id': patient.patient_id,
@@ -702,8 +597,7 @@ def get_multiple_patients_files(request, project_slug):
                     'uploaded_at': patient.uploaded_at.isoformat(),
                 },
                 'files': files_data,
-                'legacy_files': legacy_files,
-                'total_files': len(files_data) + len(legacy_files)
+                'total_files': len(files_data)
             }
         
         return JsonResponse({

@@ -72,12 +72,6 @@ def rerun_processing(request, patient_id):
                     job.save()
                     jobs_found = True
 
-                    # Update patient status fields if they exist (for backward compatibility)
-                    status_field = f"{modality_slug}_processing_status"
-                    if hasattr(patient, status_field):
-                        setattr(patient, status_field, "processing")
-                        patient.save()
-
                     # Special handling for dependencies
                     if hasattr(job, "update_status_based_on_dependencies"):
                         job.update_status_based_on_dependencies()

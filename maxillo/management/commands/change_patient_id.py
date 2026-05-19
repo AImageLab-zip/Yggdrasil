@@ -54,26 +54,6 @@ class Command(BaseCommand):
         # Get file paths that need to be updated
         file_paths_to_update = []
 
-        # Check old FileField paths
-        if old_patient.upper_scan_raw:
-            file_paths_to_update.append(
-                ("upper_scan_raw", old_patient.upper_scan_raw.name)
-            )
-        if old_patient.lower_scan_raw:
-            file_paths_to_update.append(
-                ("lower_scan_raw", old_patient.lower_scan_raw.name)
-            )
-        if old_patient.upper_scan_norm:
-            file_paths_to_update.append(
-                ("upper_scan_norm", old_patient.upper_scan_norm.name)
-            )
-        if old_patient.lower_scan_norm:
-            file_paths_to_update.append(
-                ("lower_scan_norm", old_patient.lower_scan_norm.name)
-            )
-        if old_patient.cbct:
-            file_paths_to_update.append(("cbct", old_patient.cbct.name))
-
         # Check FileRegistry paths
         for file_obj in files:
             if file_obj.file_path and f"patient_{old_id}" in file_obj.file_path:
