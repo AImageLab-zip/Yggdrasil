@@ -9,7 +9,14 @@ import os
 import logging
 import traceback
 from common.models import Project, Modality, ProjectAccess, FileRegistry
-from common.permissions import PermissionChecker
+from common.permissions import (
+    PermissionChecker,
+    filter_folders_for_user,
+    filter_patients_for_user,
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,17 +72,8 @@ def project_upload_api(request, project_slug):
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Authentication required'}, status=401)
 
-        # Get user permissions using PermissionChecker
-        perm = PermissionChecker(request.user, project)
-
-        # Check if user has access to the project and can upload
-        # Admins can always upload, others need project access with appropriate role
-        if not perm.is_admin():
-            if not ProjectAccess.objects.filter(user=request.user, project=project).exists():
-                return JsonResponse({'error': 'You do not have permission to upload scans'}, status=403)
-            # Only annotators and admins can upload (not student developers)
-            if not perm.is_annotator():
-                return JsonResponse({'error': 'You do not have permission to upload scans'}, status=403)
+        if not ProjectAccess.objects.filter(user=request.user, project=project).exists():
+            return JsonResponse({'error': 'You do not have permission to upload scans'}, status=403)
         
         # Use the existing form logic from upload_scan view
         PatientUploadForm = _upload_form_class(project_slug)
@@ -96,14 +94,14 @@ def project_upload_api(request, project_slug):
         patient = patient_upload_form.save(commit=False)
         patient.uploaded_by = request.user
         
-        # Student developers can only create debug patients
-        if perm.is_student_developer():
-            patient.visibility = 'debug'
-        
         # Handle folder assignment
         folder = patient_upload_form.cleaned_data.get('folder')
         if folder:
             patient.folder = folder
+
+        if not user_is_project_admin(request.user, project):
+            if not folder or not user_can_write_annotations(request.user, folder, _project_domain(project_slug)):
+                return JsonResponse({'error': 'You do not have permission to upload into this folder'}, status=403)
         
         patient.save()
         
@@ -264,7 +262,6 @@ def project_upload_api(request, project_slug):
                 'name': patient.folder.name,
                 'full_path': patient.folder.get_full_path(),
             } if patient.folder else None,
-            'visibility': patient.visibility,
             'uploaded_at': patient.uploaded_at.isoformat(),
             'uploaded_by': {
                 'id': patient.uploaded_by.id,
@@ -314,9 +311,13 @@ def get_project_folders(request, project_slug):
             project = Project.objects.get(slug=project_slug)
         except Project.DoesNotExist:
             return JsonResponse({'error': 'Project not found'}, status=404)
+
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Authentication required'}, status=401)
         
         # Get all folders - we'll get all folders as they can be used across projects
-        folders = Folder.objects.all().order_by('name')
+        folders = Folder.objects.filter(parent__isnull=True).order_by('name')
+        folders = filter_folders_for_user(request.user, folders, _project_domain(project_slug))
         
         folders_data = []
         for folder in folders:
@@ -380,16 +381,19 @@ def get_project_patients_and_modalities(request, project_slug):
             project = Project.objects.get(slug=project_slug)
         except Project.DoesNotExist:
             return JsonResponse({'error': 'Project not found'}, status=404)
+
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Authentication required'}, status=401)
         
         # Get all patients for this project with their modalities
         patients = Patient.objects.all().prefetch_related('modalities').order_by('patient_id')
+        patients = filter_patients_for_user(request.user, patients, _project_domain(project_slug))
         
         patients_data = []
         for patient in patients:
             patient_data = {
                 'patient_id': patient.patient_id,
                 'name': patient.name,
-                'visibility': patient.visibility,
                 'uploaded_at': patient.uploaded_at.isoformat(),
                 'folder': {
                     'id': patient.folder.id,
@@ -446,12 +450,19 @@ def get_patient_files(request, project_slug, patient_id):
             project = Project.objects.get(slug=project_slug)
         except Project.DoesNotExist:
             return JsonResponse({'error': 'Project not found'}, status=404)
+
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Authentication required'}, status=401)
         
         # Check if patient exists and belongs to the project
         try:
             patient = Patient.objects.get(patient_id=patient_id)
         except Patient.DoesNotExist:
             return JsonResponse({'error': 'Patient not found in this project'}, status=404)
+
+        if not user_is_project_admin(request.user, domain):
+            if not patient.folder or not user_can_read_folder(request.user, patient.folder, domain):
+                return JsonResponse({'error': 'Permission denied'}, status=403)
         
         # Get all files for this patient from FileRegistry
         file_filter = {'domain': domain, 'brain_patient': patient} if domain == 'brain' else {'domain': domain, 'patient': patient}
@@ -488,7 +499,6 @@ def get_patient_files(request, project_slug, patient_id):
             'patient': {
                 'patient_id': patient.patient_id,
                 'name': patient.name,
-                'visibility': patient.visibility,
                 'uploaded_at': patient.uploaded_at.isoformat(),
             },
             'files': files_data,
@@ -522,6 +532,9 @@ def get_multiple_patients_files(request, project_slug):
             project = Project.objects.get(slug=project_slug)
         except Project.DoesNotExist:
             return JsonResponse({'error': 'Project not found'}, status=404)
+
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Authentication required'}, status=401)
         
         # Parse request data
         data = json.loads(request.body.decode('utf-8'))
@@ -548,6 +561,7 @@ def get_multiple_patients_files(request, project_slug):
                 queryset=FileRegistry.objects.filter(domain='maxillo').select_related('modality')
             )
         patients = Patient.objects.filter(patient_id__in=patient_ids).prefetch_related(files_prefetch).order_by('patient_id')
+        patients = filter_patients_for_user(request.user, patients, domain)
         
         found_patient_ids = set(patients.values_list('patient_id', flat=True))
         missing_patient_ids = [pid for pid in patient_ids if pid not in found_patient_ids]
@@ -580,7 +594,6 @@ def get_multiple_patients_files(request, project_slug):
                 'patient_info': {
                     'patient_id': patient.patient_id,
                     'name': patient.name,
-                    'visibility': patient.visibility,
                     'uploaded_at': patient.uploaded_at.isoformat(),
                 },
                 'files': files_data,

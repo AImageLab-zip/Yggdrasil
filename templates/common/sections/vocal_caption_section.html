@@ -136,13 +136,17 @@
                                         {% endif %}
                                     {% endwith %}
                                     {% if c.text_caption %}
+                                    {% if c.user_id == user.id or user.is_staff %}
                                     <button class="btn btn-outline-secondary btn-sm btn-edit-caption" data-caption-id="{{ c.id }}" title="Edit">
                                         <i class="fas fa-edit" style="font-size: 0.75rem;"></i>
                                     </button>
                                     {% endif %}
+                                    {% endif %}
+                                    {% if c.user_id == user.id or user.is_staff %}
                                     <button class="btn btn-outline-danger btn-sm btn-delete-caption" data-caption-id="{{ c.id }}" title="Delete">
                                         <i class="fas fa-trash" style="font-size: 0.75rem;"></i>
                                     </button>
+                                    {% endif %}
                                 </div>
                             </div>
                             <div class="caption-text-compact mt-1">

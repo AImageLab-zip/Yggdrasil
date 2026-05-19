@@ -90,33 +90,20 @@ class PatientUploadForm(forms.ModelForm):
     
     class Meta:
         model = Patient
-        fields = ['name', 'visibility', 'folder']
+        fields = ['name', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Patient X'}),
-            'visibility': forms.Select(attrs={'class': 'form-control'}),
         }
         labels = {
             'name': 'Scan Name',
-            'visibility': 'Visibility',
             'folder': 'Folder',
         }
     
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         
-        # Customize visibility choices based on user role
         if user and hasattr(user, 'profile'):
-            if user.profile.is_student_developer():
-                self.fields['visibility'].choices = [('debug', 'Debug')]
-                self.fields['visibility'].initial = 'debug'
-                self.fields['visibility'].widget.attrs['readonly'] = True
-            elif user.profile.is_admin():
-                self.fields['visibility'].choices = Patient.VISIBILITY_CHOICES
-            else:
-                self.fields['visibility'].choices = [
-                    ('public', 'Public'),
-                    ('private', 'Private'),
-                ]
+            pass
     
     def clean(self):
         cleaned_data = super().clean()
@@ -167,15 +154,13 @@ class PatientManagementForm(forms.ModelForm):
     tags_text = forms.CharField(required=False, help_text='Comma-separated tags', widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'e.g. caseA, urgent'}))
     class Meta:
         model = Patient
-        fields = ['name', 'visibility', 'dataset', 'folder']
+        fields = ['name', 'dataset', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Scan name'}),
-            'visibility': forms.Select(attrs={'class': 'form-select form-select-sm'}),
             'dataset': forms.Select(attrs={'class': 'form-select form-select-sm'}),
         }
         labels = {
             'name': 'Name',
-            'visibility': 'Visibility',
             'dataset': 'Dataset',
             'folder': 'Folder',
         }
@@ -188,20 +173,8 @@ class PatientManagementForm(forms.ModelForm):
         if self.instance and self.instance.pk:
             self.fields['tags_text'].initial = ', '.join(self.instance.tag_names())
         
-        # Customize visibility choices based on user role
         if user and hasattr(user, 'profile'):
-            if user.profile.is_student_developer():
-                # Student developers can only manage debug scans
-                self.fields['visibility'].choices = [('debug', 'Debug')]
-            elif user.profile.is_admin():
-                # Admins can manage all types of scans
-                self.fields['visibility'].choices = Patient.VISIBILITY_CHOICES
-            else:
-                # Annotators can manage public and private scans (not debug)
-                self.fields['visibility'].choices = [
-                    ('public', 'Public'),
-                    ('private', 'Private'),
-                ]
+            pass
     
     def clean(self):
         # Override the clean method to skip file validation for management updates
@@ -210,7 +183,6 @@ class PatientManagementForm(forms.ModelForm):
         
         # Only validate the fields we care about for management
         name = cleaned_data.get('name')
-        visibility = cleaned_data.get('visibility')
         dataset = cleaned_data.get('dataset')
         
         # Basic validation for management fields

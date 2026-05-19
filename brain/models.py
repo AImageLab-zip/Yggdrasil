@@ -71,6 +71,34 @@ class Folder(models.Model):
         return '/'.join(reversed(parts))
 
 
+class FolderAccess(models.Model):
+    ROLE_CHOICES = [
+        ('standard', 'Standard User'),
+        ('annotator', 'Annotator'),
+        ('project_manager', 'Project Manager'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='brain_folder_access')
+    folder = models.ForeignKey(Folder, on_delete=models.CASCADE, related_name='access_list')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='standard')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'brain_folder_access'
+        unique_together = ('user', 'folder')
+        indexes = [
+            models.Index(fields=['folder']),
+            models.Index(fields=['user']),
+            models.Index(fields=['role']),
+            models.Index(fields=['folder', 'role']),
+            models.Index(fields=['user', 'role']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.folder.name} ({self.role})"
+
+
 class Tag(models.Model):
     name = models.CharField(max_length=50, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)

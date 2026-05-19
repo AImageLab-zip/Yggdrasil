@@ -639,6 +639,131 @@ function initCreateFolder() {
     });
 }
 
+function initFolderContextMenu() {
+    const menu = document.getElementById('folderContextMenu');
+    if (!menu) return;
+
+    let selectedFolder = null;
+    const modalEl = document.getElementById('folderPermissionsModal');
+    const modal = modalEl && window.bootstrap ? new window.bootstrap.Modal(modalEl) : null;
+
+    function hideMenu() {
+        menu.style.display = 'none';
+    }
+
+    document.querySelectorAll('.folder-node').forEach(node => {
+        node.addEventListener('contextmenu', function (evt) {
+            evt.preventDefault();
+            selectedFolder = {
+                id: this.dataset.id,
+                name: this.dataset.name || 'Folder',
+            };
+            menu.style.display = 'block';
+            menu.style.left = `${evt.clientX}px`;
+            menu.style.top = `${evt.clientY}px`;
+        });
+    });
+
+    document.addEventListener('click', hideMenu);
+
+    const statsBtn = document.getElementById('folderMenuStats');
+    if (statsBtn) {
+        statsBtn.addEventListener('click', function () {
+            if (!selectedFolder) return;
+            secureFetch(`/${window.projectNamespace}/folders/${selectedFolder.id}/stats/`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) throw new Error(data.error || 'Failed to load stats');
+                    alert(`Folder: ${data.folder.name}\nPatients: ${data.stats.patient_count}`);
+                })
+                .catch(err => showNotification('error', err.message || 'Failed to load stats'));
+        });
+    }
+
+    const renameBtn = document.getElementById('folderMenuRename');
+    if (renameBtn) {
+        renameBtn.addEventListener('click', function () {
+            if (!selectedFolder) return;
+            const name = prompt('New folder name', selectedFolder.name || '');
+            if (!name) return;
+            secureFetch(`/${window.projectNamespace}/folders/${selectedFolder.id}/rename/`, {
+                method: 'POST',
+                body: JSON.stringify({ name }),
+            }).then(r => r.json()).then(data => {
+                if (!data.success) throw new Error(data.error || 'Failed to rename folder');
+                window.location.reload();
+            }).catch(err => showNotification('error', err.message || 'Failed to rename folder'));
+        });
+    }
+
+    const permBtn = document.getElementById('folderMenuPermissions');
+    if (permBtn) {
+        permBtn.addEventListener('click', function () {
+            if (!selectedFolder || !modal) return;
+            loadFolderPermissions(selectedFolder.id, selectedFolder.name);
+            modal.show();
+        });
+    }
+
+    function loadFolderPermissions(folderId, folderName) {
+        const title = document.getElementById('folderPermissionsModalLabel');
+        if (title) title.textContent = `Folder Permissions - ${folderName}`;
+        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) throw new Error(data.error || 'Failed to load permissions');
+                const userSel = document.getElementById('folderPermUser');
+                const body = document.querySelector('#folderPermTable tbody');
+                if (userSel) {
+                    userSel.innerHTML = '<option value="">Select user</option>';
+                    data.users.forEach(u => {
+                        const opt = document.createElement('option');
+                        opt.value = String(u.id);
+                        opt.textContent = u.username;
+                        userSel.appendChild(opt);
+                    });
+                }
+                if (body) {
+                    body.innerHTML = '';
+                    data.permissions.forEach(row => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `<td>${row.username}</td><td>${row.role}</td><td class="text-end"><button class="btn btn-sm btn-outline-danger" data-user-id="${row.user_id}">Remove</button></td>`;
+                        body.appendChild(tr);
+                    });
+                    body.querySelectorAll('button[data-user-id]').forEach(btn => {
+                        btn.addEventListener('click', function () {
+                            const uid = this.dataset.userId;
+                            secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/${uid}/delete/`, { method: 'DELETE' })
+                                .then(r => r.json())
+                                .then(resp => {
+                                    if (!resp.success) throw new Error(resp.error || 'Failed to remove permission');
+                                    loadFolderPermissions(folderId, folderName);
+                                })
+                                .catch(err => showNotification('error', err.message || 'Failed to remove permission'));
+                        });
+                    });
+                }
+
+                const saveBtn = document.getElementById('folderPermAddBtn');
+                if (saveBtn) {
+                    saveBtn.onclick = function () {
+                        const userId = document.getElementById('folderPermUser')?.value;
+                        const role = document.getElementById('folderPermRole')?.value;
+                        if (!userId || !role) return;
+                        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/upsert/`, {
+                            method: 'POST',
+                            body: JSON.stringify({ user_id: Number(userId), role }),
+                        }).then(r => r.json()).then(resp => {
+                            if (!resp.success) throw new Error(resp.error || 'Failed to save permission');
+                            loadFolderPermissions(folderId, folderName);
+                        }).catch(err => showNotification('error', err.message || 'Failed to save permission'));
+                    };
+                }
+            })
+            .catch(err => showNotification('error', err.message || 'Failed to load permissions'));
+    }
+}
+
 function initTagAddInline() {
     document.querySelectorAll('.btn-add-tag').forEach(btn => {
         btn.addEventListener('click', function(e) {
@@ -994,6 +1119,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initFilterRemoveButtons();
     initBulkSelection();
     initCreateFolder();
+    initFolderContextMenu();
     initTagAddInline();
     initTagFilter();
     initStatusFilterButtons();

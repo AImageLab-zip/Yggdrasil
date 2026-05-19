@@ -37,7 +37,7 @@
                                     -
                                 </button>
                             {% endif %}
-                            {% if user_profile.is_annotator %}
+                            {% if can_modify_segmentation %}
                                 <div class="value-dropdown">
                                     <div class="dropdown-option" data-value="Unknown">Unknown</div>
                                     <div class="dropdown-option" data-value="I">Class I</div>
@@ -67,7 +67,7 @@
                                     -
                                 </button>
                             {% endif %}
-                            {% if user_profile.is_annotator %}
+                            {% if can_modify_segmentation %}
                                 <div class="value-dropdown">
                                     <div class="dropdown-option" data-value="Unknown">Unknown</div>
                                     <div class="dropdown-option" data-value="I">Class I</div>
@@ -97,7 +97,7 @@
                                     -
                                 </button>
                             {% endif %}
-                            {% if user_profile.is_annotator %}
+                            {% if can_modify_segmentation %}
                                 <div class="value-dropdown">
                                     <div class="dropdown-option" data-value="Unknown">Unknown</div>
                                     <div class="dropdown-option" data-value="normal">Normal</div>
@@ -127,7 +127,7 @@
                                     -
                                 </button>
                             {% endif %}
-                            {% if user_profile.is_annotator %}
+                            {% if can_modify_segmentation %}
                                 <div class="value-dropdown">
                                     <div class="dropdown-option" data-value="Unknown">Unknown</div>
                                     <div class="dropdown-option" data-value="normal">Normal</div>
@@ -156,7 +156,7 @@
                                     -
                                 </button>
                             {% endif %}
-                            {% if user_profile.is_annotator %}
+                            {% if can_modify_segmentation %}
                                 <div class="value-dropdown">
                                     <div class="dropdown-option" data-value="Unknown">Unknown</div>
                                     <div class="dropdown-option" data-value="centered">Centered</div>
@@ -168,7 +168,7 @@
                 </div>
             </div>
             
-            {% if ai_classification and user_profile.is_annotator %}
+            {% if ai_classification and can_modify_segmentation %}
                 <div class="text-center mt-2">
                     <button type="button" class="btn btn-success btn-sm" id="confirmReview">
                         <i class="fas fa-check me-1"></i>Confirm Review
@@ -195,5 +195,4 @@
         {% endif %}
     </div>
 </div>
-
 

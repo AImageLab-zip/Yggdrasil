@@ -9,6 +9,11 @@ import os
 import logging
 
 from common.file_access import exists as artifact_exists
+from common.permissions import (
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 
 from .domain import get_domain_forms, get_domain_models
 from .helpers import redirect_with_namespace, render_with_fallback
@@ -25,17 +30,10 @@ def patient_detail(request, patient_id):
 
     patient = get_object_or_404(Patient, patient_id=patient_id)
     user_profile = request.user.profile
-    
-    can_view = False
-    if user_profile.is_admin():
+    can_view = bool(patient.folder and user_can_read_folder(request.user, patient.folder, request))
+    if user_is_project_admin(request.user, request):
         can_view = True
-    elif user_profile.is_annotator() and patient.visibility != 'debug':
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == 'debug':
-        can_view = True
-    elif patient.visibility == 'public':
-        can_view = True
-    
+
     if not can_view:
         messages.error(request, 'You do not have permission to view this scan.')
         return redirect_with_namespace(request, 'patient_list')
@@ -70,12 +68,8 @@ def patient_detail(request, patient_id):
     except Exception as e:
         logger.warning(f"Error checking uploaded panoramic availability: {e}")
     
-    can_modify = False
-    if user_profile.is_admin():
-        can_modify = True
-    elif user_profile.is_annotator() and patient.visibility != 'debug':
-        can_modify = True
-    elif user_profile.is_student_developer() and patient.visibility == 'debug':
+    can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    if user_is_project_admin(request.user, request):
         can_modify = True
     
     if request.method == 'POST' and can_modify:
@@ -292,7 +286,7 @@ def patient_detail(request, patient_id):
 
     # Voice captions -- filter only captions made by the current user for all captions
     voice_captions = patient.voice_captions.all()
-    if not user_profile.is_admin() and not user_profile.is_project_manager(): # and patient.patient_id in [4646, 4891]:
+    if not user_is_project_admin(request.user, request):
         voice_captions = voice_captions.filter(user=request.user)
 
     # Build modality files lookup for drag-drop grid
@@ -394,12 +388,8 @@ def update_patient_name(request, patient_id):
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
         
-        can_modify = False
-        if user_profile.is_admin():
-            can_modify = True
-        elif user_profile.is_annotator() and patient.visibility != 'debug':
-            can_modify = True
-        elif user_profile.is_student_developer() and patient.visibility == 'debug':
+        can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+        if user_is_project_admin(request.user, request):
             can_modify = True
         
         if not can_modify:

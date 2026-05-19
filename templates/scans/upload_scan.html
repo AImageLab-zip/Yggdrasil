@@ -34,19 +34,6 @@
                         {% include 'common/upload/modalities/cbct.html' %}
                         {% include 'common/upload/modalities/rgb.html' %}
 
-                        <div class="mb-3">
-                            <label for="{{ patient_upload_form.visibility.id_for_label }}" class="form-label">{{ patient_upload_form.visibility.label }}</label>
-                            {{ patient_upload_form.visibility }}
-                            {% if patient_upload_form.visibility.errors %}
-                                <div class="text-danger">{{ patient_upload_form.visibility.errors }}</div>
-                            {% endif %}
-                            <div class="form-text">
-                                <strong>Public:</strong> Visible to all users<br>
-                                <strong>Private:</strong> Visible only to annotators and administrators<br>
-                                {% if user.profile.is_student_developer %}<strong>Debug:</strong> Visible only to student developers and administrators{% endif %}
-                            </div>
-                        </div>
-
                         <!-- Organization Section -->
                         <h5 class="mb-3 upload-organization"><i class="fas fa-folder-tree me-2"></i>Organization</h5>
                         

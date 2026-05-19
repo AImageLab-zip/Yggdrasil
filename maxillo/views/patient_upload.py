@@ -4,6 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 
 from common.models import Project
+from common.permissions import user_is_project_admin
 from .domain import get_domain_forms, get_domain_models
 from .helpers import redirect_with_namespace
 
@@ -18,6 +19,10 @@ def upload_patient(request):
     PatientUploadForm = domain_forms['PatientUploadForm']
     Folder = domain_models['Folder']
     
+    if not request.user.profile:
+        messages.error(request, 'You do not have permission to upload scans.')
+        return redirect_with_namespace(request, 'patient_list')
+
     if not user_profile.can_upload_scans():
         messages.error(request, 'You do not have permission to upload scans.')
         return redirect_with_namespace(request, 'patient_list')
@@ -47,9 +52,6 @@ def upload_patient(request):
             patient = patient_upload_form.save(commit=False)
             patient.uploaded_by = request.user
             
-            if user_profile.is_student_developer():
-                patient.visibility = 'debug'
-                
             # Assign folder if provided
             folder = patient_upload_form.cleaned_data.get('folder')
             if folder:

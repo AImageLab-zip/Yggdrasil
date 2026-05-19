@@ -7,6 +7,11 @@ import json
 import logging
 
 from .domain import get_domain_models
+from common.permissions import (
+    user_can_delete_single_patient,
+    user_can_perform_bulk_operations,
+    user_is_project_admin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +23,9 @@ def delete_patient(request, patient_id):
 
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
-        user_profile = request.user.profile
-
-        # Check permissions based on scan type and user role
-        can_delete = False
-        if user_profile.is_admin():
-            can_delete = True  # Admins can delete all scans
-        elif user_profile.is_student_developer() and patient.visibility == 'debug':
-            can_delete = True  # Student developers can only delete debug scans
+        can_delete = bool(patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+        if user_is_project_admin(request.user, request):
+            can_delete = True
 
         if not can_delete:
             return JsonResponse({
@@ -56,10 +56,7 @@ def bulk_delete_patients(request):
         if not isinstance(scan_ids, list) or not scan_ids:
             return JsonResponse({'error': 'scan_ids list is required'}, status=400)
 
-        user_profile = request.user.profile
-
-        # Check permissions - only admins can bulk delete
-        if not user_profile.is_admin():
+        if not user_can_perform_bulk_operations(request.user, request):
             return JsonResponse({
                 'success': False,
                 'error': 'You do not have permission to bulk delete scans.'

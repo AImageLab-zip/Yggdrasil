@@ -23,7 +23,7 @@
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
 <script id="django-data" type="application/json">
 {
-    "canEdit": {{ user_profile.is_annotator|yesno:"true,false" }},
+    "canEdit": {{ can_modify_segmentation|yesno:"true,false" }},
     "scanId": {{ patient.patient_id }},
     "hasIOS": {{ patient.has_ios_scans|yesno:"true,false" }},
     "hasCBCT": {{ has_cbct|yesno:"true,false" }},
