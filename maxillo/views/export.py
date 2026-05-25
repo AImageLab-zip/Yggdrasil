@@ -6,12 +6,16 @@ from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from django.http import JsonResponse, Http404
 from django.views.decorators.http import require_POST, require_http_methods
+from django.db import OperationalError
 from django.db.models import Q, Count, Sum
 from django.urls import reverse
 from django.utils import timezone
 import os
 import json
 import logging
+import time
+import signal
+import subprocess
 
 from common.models import Modality, FileRegistry
 from common.file_access import exists as artifact_exists, streaming_response
@@ -846,22 +850,171 @@ def export_delete(request, export_id):
             {"success": False, "error": "Permission denied"}, status=403
         )
 
+    file_path = export.file_path
+
+    # Delete DB row first (fast), retry on transient lock waits.
+    deleted = False
+    max_attempts = 4
+    for attempt in range(max_attempts):
+        try:
+            deleted_count, _ = get_domain_models(request)["Export"].objects.filter(
+                id=export_id
+            ).delete()
+            deleted = deleted_count > 0
+            break
+        except OperationalError as e:
+            msg = str(e)
+            is_lock_timeout = "1205" in msg or "Lock wait timeout exceeded" in msg
+            if not is_lock_timeout or attempt == max_attempts - 1:
+                logger.error(f"Error deleting export {export_id}: {e}", exc_info=True)
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "Database is busy. Please retry in a few seconds.",
+                    },
+                    status=409,
+                )
+            time.sleep(0.4 * (attempt + 1))
+        except Exception as e:
+            logger.error(f"Error deleting export {export_id}: {e}", exc_info=True)
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+    if not deleted:
+        return JsonResponse(
+            {"success": False, "error": "Export not found or already deleted."},
+            status=404,
+        )
+
+    # Best effort object cleanup after DB deletion.
+    if file_path:
+        try:
+            get_object_storage().delete(file_path)
+        except Exception as e:
+            logger.warning(f"Could not delete export file {file_path}: {e}")
+
+    return JsonResponse({"success": True})
+
+
+def _kill_export_processes(export_id):
+    """Best-effort kill of run_export worker process(es) for one export id."""
+    killed_pids = []
     try:
-        # Optionally delete file
-        if export.file_path:
+        result = subprocess.run(
+            ["pgrep", "-f", f"manage.py run_export {int(export_id)}"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return killed_pids
+
+        for line in (result.stdout or "").splitlines():
+            line = (line or "").strip()
+            if not line:
+                continue
             try:
-                get_object_storage().delete(export.file_path)
+                pid = int(line)
+            except ValueError:
+                continue
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed_pids.append(pid)
+            except ProcessLookupError:
+                continue
+            except Exception:
+                continue
+    except Exception:
+        return killed_pids
+
+    # Escalate to SIGKILL if still alive after short grace period
+    if killed_pids:
+        time.sleep(0.8)
+        for pid in list(killed_pids):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            except Exception:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+    return killed_pids
+
+
+@login_required
+@user_passes_test(is_admin)
+@require_POST
+def export_stop(request, export_id):
+    """Manually stop a processing export, kill worker, and delete partial ZIPs."""
+    ExportModel = get_domain_models(request)["Export"]
+    export = get_object_or_404(ExportModel, id=export_id)
+
+    if export.user != request.user and not request.user.is_staff:
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    if export.status not in {"processing", "pending"}:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": f"Export is not running (status: {export.status}).",
+            },
+            status=409,
+        )
+
+    killed_pids = _kill_export_processes(export.id)
+
+    deleted_keys = []
+    storage_warnings = []
+    storage = get_object_storage()
+
+    # Delete known key if already set
+    if export.file_path:
+        try:
+            storage.delete(export.file_path)
+            deleted_keys.append(export.file_path)
+        except Exception as e:
+            storage_warnings.append(f"Could not delete {export.file_path}: {e}")
+
+    # Delete partial/final keys for this export id
+    prefix = f"exports/export_{export.id}_"
+    try:
+        for key in storage.list_keys(prefix):
+            if not key.startswith(prefix) or not key.endswith(".zip"):
+                continue
+            try:
+                storage.delete(key)
+                deleted_keys.append(key)
             except Exception as e:
-                logger.warning(f"Could not delete export file {export.file_path}: {e}")
-
-        # Delete export record
-        export.delete()
-
-        return JsonResponse({"success": True})
-
+                storage_warnings.append(f"Could not delete {key}: {e}")
     except Exception as e:
-        logger.error(f"Error deleting export: {e}", exc_info=True)
-        return JsonResponse({"success": False, "error": str(e)}, status=500)
+        storage_warnings.append(f"Could not list keys for prefix {prefix}: {e}")
+
+    stopped_at = timezone.now().strftime("%Y-%m-%d %H:%M:%S %Z")
+    who = getattr(request.user, "username", "unknown")
+    message = f"Stopped manually by {who} at {stopped_at}."
+    if killed_pids:
+        message += f" Killed worker PID(s): {', '.join(str(p) for p in killed_pids)}."
+    if deleted_keys:
+        message += f" Deleted {len(set(deleted_keys))} ZIP object(s)."
+    if storage_warnings:
+        message += " Storage cleanup had warnings."
+
+    export.mark_failed(message)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "killed_pids": killed_pids,
+            "deleted_keys": sorted(set(deleted_keys)),
+            "warnings": storage_warnings,
+            "status": "failed",
+            "error_message": message,
+        }
+    )
 
 
 def format_file_size(size_bytes):

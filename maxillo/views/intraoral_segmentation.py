@@ -15,6 +15,7 @@ from PIL import Image
 
 from common.file_access import exists as artifact_exists, open_binary
 from common.permissions import user_can_read_folder, user_can_write_annotations, user_is_project_admin
+from common.models import Job
 
 from ..models import IntraoralToothSegmentation
 from .domain import get_domain_models
@@ -229,11 +230,21 @@ def patient_intraoral_segmentation_data(request, patient_id):
                 row.updated_by.username if row and row.updated_by else None
             )
 
+        running_job_statuses = ['pending', 'dependency', 'processing', 'retrying']
+        segmentation_job_running = bool(
+            Job.objects.filter(
+                modality_slug='intraoral-photo',
+                patient=patient,
+                status__in=running_job_statuses,
+            ).exists()
+        )
+
         return JsonResponse({
             'images': images,
             'count': len(images),
             'tooth_codes': TOOTH_CODES,
             'can_modify': _can_modify(user_profile, patient),
+            'segmentation_job_running': segmentation_job_running,
         })
     except Exception as exc:
         logger.error(

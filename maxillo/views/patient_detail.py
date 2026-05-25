@@ -17,6 +17,7 @@ from common.permissions import (
 
 from .domain import get_domain_forms, get_domain_models
 from .helpers import redirect_with_namespace, render_with_fallback
+from ..file_utils import get_file_type_for_modality
 
 logger = logging.getLogger(__name__)
 
@@ -377,8 +378,55 @@ def patient_detail(request, patient_id):
             # Fallback: get all active modalities
             from common.models import Modality as _Modality
             allowed_modalities = list(_Modality.objects.filter(is_active=True))
+
+        raw_file_type_options = []
+        seen_raw_types = set()
+        valid_file_types = set()
+        try:
+            from common.models import FileRegistry as _FileRegistry
+
+            valid_file_types = set(_FileRegistry.get_file_type_choices_dict().keys())
+        except Exception:
+            valid_file_types = set()
+
+        for modality in allowed_modalities:
+            slug = (getattr(modality, 'slug', '') or '').strip()
+            if not slug:
+                continue
+
+            display_name = (
+                (getattr(modality, 'label', '') or '').strip()
+                or (getattr(modality, 'name', '') or '').strip()
+                or slug.upper()
+            )
+
+            subtype_values = [s for s in (getattr(modality, 'subtypes', None) or []) if str(s).strip()]
+            if slug == 'ios' and not subtype_values:
+                subtype_values = ['upper', 'lower']
+
+            candidates = []
+            if subtype_values:
+                for subtype in subtype_values:
+                    raw_type = get_file_type_for_modality(slug, is_processed=False, subtype=str(subtype).strip())
+                    subtype_label = str(subtype).replace('_', ' ').title()
+                    candidates.append((raw_type, f"{display_name} {subtype_label}"))
+            else:
+                raw_type = get_file_type_for_modality(slug, is_processed=False)
+                candidates.append((raw_type, display_name))
+
+            for raw_type, label in candidates:
+                if not raw_type or '_raw' not in raw_type:
+                    continue
+                if valid_file_types and raw_type not in valid_file_types:
+                    continue
+                if raw_type in seen_raw_types:
+                    continue
+                seen_raw_types.add(raw_type)
+                raw_file_type_options.append({'value': raw_type, 'label': label})
+
         context['allowed_modalities'] = allowed_modalities
         context['allowed_modality_slugs'] = [m.slug for m in allowed_modalities]
+        context['raw_file_type_options'] = raw_file_type_options
     except Exception:
         pass
     return render_with_fallback(request, 'patient_detail', context)

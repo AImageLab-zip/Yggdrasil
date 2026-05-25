@@ -347,13 +347,6 @@ def update_nifti_metadata(request, patient_id):
                     brain_patient=patient,
                     modality_slug="metadata_update",
                     status="completed",
-                    output_files={
-                        "updated_by": request.user.username,
-                        "changes": {
-                            "origin": new_origin,
-                            "affine": new_affine is not None,
-                        },
-                    },
                 )
             else:
                 Job.objects.create(
@@ -361,13 +354,6 @@ def update_nifti_metadata(request, patient_id):
                     patient=patient,
                     modality_slug="metadata_update",
                     status="completed",
-                    output_files={
-                        "updated_by": request.user.username,
-                        "changes": {
-                            "origin": new_origin,
-                            "affine": new_affine is not None,
-                        },
-                    },
                 )
 
             # Return updated metadata
