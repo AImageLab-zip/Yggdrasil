@@ -473,6 +473,7 @@ class FileRegistry(models.Model):
 		# Maxillo image modalities
 		('intraoral_raw', 'Intraoral Photographs Raw'),
 		('intraoral_processed', 'Intraoral Photographs Processed'),
+		('intraoral-photo_processed', 'Intraoral Photo Processed'),
 		('teleradiography_raw', 'Teleradiography Raw'),
 		('teleradiography_processed', 'Teleradiography Processed'),
 		('panoramic_raw', 'panoramic Raw'),

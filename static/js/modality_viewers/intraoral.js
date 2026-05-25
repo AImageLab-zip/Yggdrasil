@@ -72,6 +72,7 @@ window.IntraoralViewer = {
             const card = document.createElement('div');
             card.className = 'card h-100';
             card.style.cursor = 'pointer';
+            card.style.position = 'relative';
 
             const img = document.createElement('img');
             img.src = image.url;
@@ -92,24 +93,42 @@ window.IntraoralViewer = {
             card.appendChild(img);
             card.appendChild(cardBody);
             col.appendChild(card);
-            card.addEventListener('click', () => this.showFullscreenImage(image.url, `Intraoral Photo ${image.index}`));
+            card.addEventListener('click', () => this.showFullscreenImage(image.url, `Intraoral Photo ${image.index}`, image));
             grid.appendChild(col);
         });
     },
 
-    showFullscreenImage: function(src, title) {
+    showFullscreenImage: function(src, title, imageMeta) {
         const modal = document.getElementById('fullscreenImageModal');
         const modalTitle = document.getElementById('fullscreenImageModalLabel');
         const fullscreenImg = document.getElementById('fullscreenImage');
         
         if (modalTitle) modalTitle.textContent = title || 'Image Viewer';
-        if (fullscreenImg) fullscreenImg.src = src;
         
         if (modal) {
             const bsModal = new bootstrap.Modal(modal);
             bsModal.show();
+            const applyEditor = () => {
+                if (!fullscreenImg || !window.RGBImageEditor || !imageMeta) return;
+                const host = fullscreenImg.parentElement;
+                if (host) {
+                    host.querySelectorAll('.rgb-edit-toolbar').forEach((el) => el.remove());
+                }
+                delete fullscreenImg.dataset.rgbEditorMounted;
+                window.RGBImageEditor.attachToImage(fullscreenImg, {
+                    patientId: this.patientId,
+                    modalitySlug: 'intraoral-photo',
+                    sourceFileId: imageMeta.source_file_id || imageMeta.id,
+                    container: host,
+                });
+            };
+            if (fullscreenImg) {
+                fullscreenImg.onload = applyEditor;
+                fullscreenImg.src = src;
+                if (fullscreenImg.complete && fullscreenImg.naturalWidth > 0) {
+                    applyEditor();
+                }
+            }
         }
     }
 };
-
-

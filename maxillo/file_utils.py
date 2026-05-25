@@ -69,7 +69,7 @@ def get_file_type_for_modality(
         "bite_classification": "bite_classification",  # Special case - no raw/processed distinction
         "intraoral-photo": "intraoral_raw"
         if not is_processed
-        else "intraoral_processed",
+        else "intraoral-photo_processed",
         "teleradiography": "teleradiography_raw"
         if not is_processed
         else "teleradiography_processed",

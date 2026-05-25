@@ -176,6 +176,11 @@ urlpatterns = [
         name="patient_teleradiography_data",
     ),
     path(
+        "api/patient/<int:patient_id>/rgb-edit/save/",
+        views.save_rgb_image_edit,
+        name="save_rgb_image_edit",
+    ),
+    path(
         "api/patient/<int:patient_id>/volume/<slug:modality_slug>/",
         views.patient_volume_data,
         name="patient_volume_data",

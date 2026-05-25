@@ -48,6 +48,7 @@ from .patient_data import (
     patient_intraoral_data,
     patient_teleradiography_data,
     patient_panoramic_data,
+    save_rgb_image_edit,
 )
 
 # Intraoral segmentation APIs
@@ -118,6 +119,7 @@ __all__ = [
     'patient_intraoral_data',
     'patient_teleradiography_data',
     'patient_panoramic_data',
+    'save_rgb_image_edit',
     'patient_intraoral_segmentation_data',
     'update_patient_intraoral_segmentation',
     # Voice captions

@@ -267,6 +267,14 @@
     min-height: 420px;
 }
 
+.seg-rgb-editor-proxy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .intraoral-seg-actions {
     display: flex;
     justify-content: flex-end;

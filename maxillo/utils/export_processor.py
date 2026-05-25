@@ -40,11 +40,7 @@ class ExportProcessor:
         },
         "intraoral-photo": {
             "raw": ["intraoral_raw"],
-            "processed": ["intraoral_processed"],
-        },
-        "intraoral-photo": {
-            "raw": ["intraoral_raw"],
-            "processed": ["intraoral_processed"],
+            "processed": ["intraoral-photo_processed"],
         },
         "teleradiography": {
             "raw": ["teleradiography_raw"],

@@ -19,6 +19,7 @@ from common.models import Job
 
 from ..models import IntraoralToothSegmentation
 from .domain import get_domain_models
+from .patient_data import _latest_official_image_file
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,123 @@ def _normalize_polygon(points, image_bounds=None):
     return normalized
 
 
+def _clone_teeth(teeth):
+    if not isinstance(teeth, dict):
+        return {}
+    cloned = {}
+    for tooth_code, polygons in teeth.items():
+        if not isinstance(polygons, list):
+            continue
+        cloned[str(tooth_code)] = [
+            [[round(float(point[0]), 3), round(float(point[1]), 3)] for point in polygon]
+            for polygon in polygons
+            if isinstance(polygon, list)
+        ]
+    return cloned
+
+
+def _clip_polygon_to_rect(polygon, left, top, right, bottom):
+    def inside(point, edge):
+        x, y = point
+        if edge == 'left':
+            return x >= left
+        if edge == 'right':
+            return x <= right
+        if edge == 'top':
+            return y >= top
+        return y <= bottom
+
+    def intersect(start, end, edge):
+        x1, y1 = start
+        x2, y2 = end
+        if edge in ('left', 'right'):
+            x = left if edge == 'left' else right
+            dx = x2 - x1
+            if abs(dx) < 1e-9:
+                return [x, y1]
+            t = (x - x1) / dx
+            return [x, y1 + (y2 - y1) * t]
+        y = top if edge == 'top' else bottom
+        dy = y2 - y1
+        if abs(dy) < 1e-9:
+            return [x1, y]
+        t = (y - y1) / dy
+        return [x1 + (x2 - x1) * t, y]
+
+    def clip_against(points, edge):
+        output = []
+        if not points:
+            return output
+        for idx, current in enumerate(points):
+            previous = points[idx - 1]
+            current_inside = inside(current, edge)
+            previous_inside = inside(previous, edge)
+            if current_inside:
+                if not previous_inside:
+                    output.append(intersect(previous, current, edge))
+                output.append(current)
+            elif previous_inside:
+                output.append(intersect(previous, current, edge))
+        return output
+
+    result = [list(point) for point in polygon]
+    for edge in ('left', 'right', 'top', 'bottom'):
+        result = clip_against(result, edge)
+        if len(result) < 3:
+            return []
+    return [[round(point[0], 3), round(point[1], 3)] for point in result]
+
+
+def _apply_edit_operation(point, operation):
+    x = float(point[0])
+    y = float(point[1])
+    op_type = operation.get('type')
+    if op_type == 'flip-h':
+        width = float(operation.get('input_width') or 0)
+        return [round(width - x, 3), round(y, 3)]
+    if op_type == 'flip-v':
+        height = float(operation.get('input_height') or 0)
+        return [round(x, 3), round(height - y, 3)]
+    if op_type == 'crop':
+        return [round(x - float(operation.get('x') or 0), 3), round(y - float(operation.get('y') or 0), 3)]
+    return [round(x, 3), round(y, 3)]
+
+
+def _transform_polygon(polygon, operations):
+    transformed = [list(point) for point in polygon]
+    for operation in operations or []:
+        if len(transformed) < 3:
+            return []
+        op_type = operation.get('type')
+        if op_type == 'crop':
+            left = float(operation.get('x') or 0)
+            top = float(operation.get('y') or 0)
+            right = left + float(operation.get('width') or 0)
+            bottom = top + float(operation.get('height') or 0)
+            transformed = _clip_polygon_to_rect(transformed, left, top, right, bottom)
+            if len(transformed) < 3:
+                return []
+        transformed = [_apply_edit_operation(point, operation) for point in transformed]
+    return transformed if len(transformed) >= 3 else []
+
+
+def _transform_teeth(teeth, edit_meta):
+    operations = edit_meta.get('operations') if isinstance(edit_meta, dict) else []
+    if not operations:
+        return _clone_teeth(teeth)
+
+    transformed_teeth = {}
+    for tooth_code, polygons in (teeth or {}).items():
+        next_polygons = []
+        for polygon in polygons or []:
+            transformed_polygon = _transform_polygon(polygon, operations)
+            if len(transformed_polygon) >= 3:
+                next_polygons.append(transformed_polygon)
+        if next_polygons:
+            transformed_teeth[str(tooth_code)] = next_polygons
+    return transformed_teeth
+
+
 def _is_point(value):
     return (
         isinstance(value, list)
@@ -179,55 +297,123 @@ def patient_intraoral_segmentation_data(request, patient_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
 
     try:
-        files_qs = patient.files.filter(
-            file_type__in=['intraoral_raw', 'intraoral_processed']
-        ).order_by('metadata__image_index', 'created_at', 'id')
-
+        raw_files = patient.files.filter(file_type='intraoral_raw').order_by(
+            'metadata__image_index', 'created_at', 'id'
+        )
         images = []
-        file_ids = []
+        file_ids = set()
         fallback_index = 1
-        for file_obj in files_qs:
-            if not file_obj.file_path or not artifact_exists(file_obj.file_path):
-                continue
+        if raw_files.exists():
+            for file_obj in raw_files:
+                if not file_obj.file_path or not artifact_exists(file_obj.file_path):
+                    continue
 
-            image_index = fallback_index
-            if isinstance(file_obj.metadata, dict):
-                image_index = file_obj.metadata.get('image_index') or fallback_index
+                image_index = fallback_index
+                if isinstance(file_obj.metadata, dict):
+                    image_index = file_obj.metadata.get('image_index') or fallback_index
 
-            images.append({
-                'id': file_obj.id,
-                'index': image_index,
-                'original_filename': (
-                    file_obj.metadata.get('original_filename', '')
+                official_file = _latest_official_image_file(
+                    patient,
+                    ['intraoral-photo_processed', 'intraoral_processed'],
+                    source_file_id=file_obj.id,
+                )
+                if not official_file:
+                    official_file = _latest_official_image_file(
+                        patient,
+                        ['intraoral-photo_processed', 'intraoral_processed'],
+                        image_index=image_index,
+                    )
+                official_file = official_file or file_obj
+                images.append({
+                    'id': official_file.id,
+                    'source_file_id': file_obj.id,
+                    'index': image_index,
+                    'original_filename': (
+                        file_obj.metadata.get('original_filename', '')
+                        if isinstance(file_obj.metadata, dict)
+                        else ''
+                    ),
+                    'url': _serve_file_url(request, official_file.id),
+                    'raw_url': _serve_file_url(request, file_obj.id),
+                    'edit_meta': (
+                        official_file.metadata.get('edit_meta')
+                        if isinstance(official_file.metadata, dict)
+                        else None
+                    ),
+                })
+                file_ids.add(official_file.id)
+                file_ids.add(file_obj.id)
+                fallback_index += 1
+        else:
+            legacy_files = patient.files.filter(
+                file_type__in=['intraoral-photo_processed', 'intraoral_processed']
+            ).order_by('metadata__image_index', 'created_at', 'id')
+            for file_obj in legacy_files:
+                if not file_obj.file_path or not artifact_exists(file_obj.file_path):
+                    continue
+                image_index = fallback_index
+                if isinstance(file_obj.metadata, dict):
+                    image_index = file_obj.metadata.get('image_index') or fallback_index
+                source_file_id = (
+                    file_obj.metadata.get('source_file_id', file_obj.id)
                     if isinstance(file_obj.metadata, dict)
-                    else ''
-                ),
-                'url': _serve_file_url(request, file_obj.id),
-            })
-            file_ids.append(file_obj.id)
-            fallback_index += 1
+                    else file_obj.id
+                )
+                raw_url = _serve_file_url(request, source_file_id) if source_file_id else _serve_file_url(request, file_obj.id)
+                images.append({
+                    'id': file_obj.id,
+                    'source_file_id': source_file_id,
+                    'index': image_index,
+                    'original_filename': (
+                        file_obj.metadata.get('original_filename', '')
+                        if isinstance(file_obj.metadata, dict)
+                        else ''
+                    ),
+                    'url': _serve_file_url(request, file_obj.id),
+                    'raw_url': raw_url,
+                    'edit_meta': (
+                        file_obj.metadata.get('edit_meta')
+                        if isinstance(file_obj.metadata, dict)
+                        else None
+                    ),
+                })
+                file_ids.add(file_obj.id)
+                if source_file_id:
+                    file_ids.add(source_file_id)
+                fallback_index += 1
 
         segmentation_qs = IntraoralToothSegmentation.objects.filter(
             patient=patient,
-            image_file_id__in=file_ids,
+            image_file_id__in=list(file_ids),
         )
         by_file_id = {row.image_file_id: row for row in segmentation_qs}
 
         for image in images:
             row = by_file_id.get(image['id'])
-            image['teeth'] = row.teeth if row else {}
-            image['is_confirmed'] = bool(row and row.is_confirmed)
+            source_row = by_file_id.get(image.get('source_file_id')) if image.get('source_file_id') != image['id'] else None
+            display_row = row or source_row
+            if row:
+                teeth = row.teeth or {}
+            elif source_row:
+                teeth = _transform_teeth(source_row.teeth or {}, image.get('edit_meta') or {})
+            else:
+                teeth = {}
+            raw_teeth = source_row.teeth if source_row else (row.teeth if row else {})
+
+            image['teeth'] = teeth
+            image['raw_teeth'] = raw_teeth or {}
+            image['is_confirmed'] = bool(display_row and display_row.is_confirmed)
             image['confirmed_at'] = (
-                row.confirmed_at.isoformat() if row and row.confirmed_at else None
+                display_row.confirmed_at.isoformat() if display_row and display_row.confirmed_at else None
             )
             image['confirmed_by'] = (
-                row.confirmed_by.username if row and row.confirmed_by else None
+                display_row.confirmed_by.username if display_row and display_row.confirmed_by else None
             )
             image['updated_at'] = (
-                row.updated_at.isoformat() if row and row.updated_at else None
+                display_row.updated_at.isoformat() if display_row and display_row.updated_at else None
             )
             image['updated_by'] = (
-                row.updated_by.username if row and row.updated_by else None
+                display_row.updated_by.username if display_row and display_row.updated_by else None
             )
 
         running_job_statuses = ['pending', 'dependency', 'processing', 'retrying']
@@ -290,7 +476,7 @@ def update_patient_intraoral_segmentation(request, patient_id):
 
     valid_files_qs = patient.files.filter(
         id__in=file_ids,
-        file_type__in=['intraoral_raw', 'intraoral_processed'],
+        file_type__in=['intraoral_raw', 'intraoral-photo_processed', 'intraoral_processed'],
     )
     valid_files_by_id = {file_obj.id: file_obj for file_obj in valid_files_qs}
     valid_file_ids = set(valid_files_by_id)
