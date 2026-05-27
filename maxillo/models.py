@@ -402,7 +402,15 @@ class Patient(models.Model):
     
     def create_bite_classification_job(self, ios_job):
         """Create a bite classification job that depends on the IOS processing job"""
+        from common.job_routing import is_runner_enabled_for_modality
         from .models import Job
+
+        if not is_runner_enabled_for_modality('bite_classification'):
+            logger.info(
+                "Not creating bite classification job for patient %s because the runner is disabled",
+                self.patient_id,
+            )
+            return None
         
         existing_job = self.jobs.filter(modality_slug='bite_classification').first()
         if existing_job:

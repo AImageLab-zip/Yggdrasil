@@ -126,6 +126,7 @@ def patient_detail(request, patient_id):
             
             if updated_files:
                 from ..file_utils import save_cbct_to_dataset, save_ios_to_dataset
+                queued_processing = False
                 
                 if reprocess_ios and (has_upper_scan or has_lower_scan):
                     patient.classifications.filter(classifier='pipeline').delete()
@@ -138,8 +139,10 @@ def patient_detail(request, patient_id):
                             request.FILES.get('lower_scan')
                         )
                         if result['processing_job']:
+                            queued_processing = True
                             messages.success(request, f'IOS scan(s) uploaded and queued for processing (Job #{result["processing_job"].id})')
                         if result['bite_classification_job']:
+                            queued_processing = True
                             messages.success(request, f'Bite classification job #{result["bite_classification_job"].id} created (waiting for IOS completion)')
                     except Exception as e:
                         messages.error(request, f'Error uploading IOS scan(s): {e}')
@@ -154,18 +157,29 @@ def patient_detail(request, patient_id):
                             validate_cbct_folder(cbct_folder_files)
                             
                             folder_path, processing_job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
-                            messages.success(request, f'CBCT folder uploaded and queued for processing (Job #{processing_job.id})')
+                            if processing_job:
+                                queued_processing = True
+                                messages.success(request, f'CBCT folder uploaded and queued for processing (Job #{processing_job.id})')
+                            else:
+                                messages.success(request, 'CBCT folder uploaded successfully')
                         except Exception as e:
                             messages.error(request, f'Error uploading CBCT folder: {e}')
                     elif has_cbct_file:
                         try:
                             file_path, processing_job = save_cbct_to_dataset(patient, request.FILES['cbct'])
-                            messages.success(request, f'CBCT uploaded and queued for processing (Job #{processing_job.id})')
+                            if processing_job:
+                                queued_processing = True
+                                messages.success(request, f'CBCT uploaded and queued for processing (Job #{processing_job.id})')
+                            else:
+                                messages.success(request, 'CBCT uploaded successfully')
                         except Exception as e:
                             messages.error(request, f'Error uploading CBCT: {e}')
                 
                 files_str = ', '.join(updated_files)
-                messages.success(request, f'Successfully uploaded {files_str}! Files are queued for processing.')
+                if queued_processing:
+                    messages.success(request, f'Successfully uploaded {files_str}! Files are queued for processing.')
+                else:
+                    messages.success(request, f'Successfully uploaded {files_str}!')
 
                 # Update patient modalities based on actual uploaded files using helper
                 try:
