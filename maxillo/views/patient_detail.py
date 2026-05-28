@@ -355,31 +355,14 @@ def patient_detail(request, patient_id):
                     files_qs = patient.files.filter(modality=modality_obj)
 
                     if slug == 'cbct':
-                        # Prefer processed CBCT entries that expose a valid segmentation.
                         file_obj = None
-                        processed_candidates = patient.files.filter(file_type='cbct_processed').order_by('-created_at')
-                        for processed_entry in processed_candidates:
-                            if processed_entry.file_hash == 'multi-file' and processed_entry.metadata:
-                                files_data = processed_entry.metadata.get('files', {})
-                                segmentation_data = files_data.get('segmentation_nifti', {}) if isinstance(files_data, dict) else {}
-                                segmentation_path = segmentation_data.get('path') if isinstance(segmentation_data, dict) else None
-                                if segmentation_path and artifact_exists(segmentation_path):
-                                    file_obj = processed_entry
-                                    break
-                            elif processed_entry.file_path and (
-                                processed_entry.file_path.endswith('.nii') or processed_entry.file_path.endswith('.nii.gz')
-                            ):
-                                file_obj = processed_entry
+                        raw_candidates = patient.files.filter(file_type='cbct_raw').order_by('-created_at')
+                        for raw_entry in raw_candidates:
+                            if raw_entry.file_path and (
+                                raw_entry.file_path.endswith('.nii') or raw_entry.file_path.endswith('.nii.gz')
+                            ) and artifact_exists(raw_entry.file_path):
+                                file_obj = raw_entry
                                 break
-
-                        if not file_obj:
-                            raw_candidates = patient.files.filter(file_type='cbct_raw').order_by('-created_at')
-                            for raw_entry in raw_candidates:
-                                if raw_entry.file_path and (
-                                    raw_entry.file_path.endswith('.nii') or raw_entry.file_path.endswith('.nii.gz')
-                                ):
-                                    file_obj = raw_entry
-                                    break
                     else:
                         file_obj = files_qs.order_by('-created_at').first()
 

@@ -127,10 +127,10 @@
                                 <div class="btn-group btn-group-sm" role="group">
                                     {% for bundle_file in file.bundle_files %}
                                     <a href="{% url 'api:api_serve_file' file_id=file.id %}?file_key={{ bundle_file.key|urlencode }}"
-                                       class="btn btn-outline-success"
+                                       class="btn btn-outline-success btn-sm"
                                        title="Download {{ bundle_file.label }}"
                                        download>
-                                        {{ bundle_file.label }}
+                                        <i class="fas fa-download"></i>
                                     </a>
                                     {% endfor %}
                                 </div>
