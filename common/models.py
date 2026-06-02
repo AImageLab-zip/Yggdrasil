@@ -1,3 +1,7 @@
+"""
+DOMAIN_CHOICES i srepeated multiple times across many models, might be the case to generalize it into some king of global variable?
+"""
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils.text import slugify
