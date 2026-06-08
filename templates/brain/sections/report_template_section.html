@@ -1,0 +1,119 @@
+<!-- Report Template Section (Brain only) -->
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <!-- Left: collapse toggle -->
+        <h6 class="mb-0 flex-grow-1"
+            data-bs-toggle="collapse"
+            data-bs-target="#reportTemplateCollapse"
+            aria-expanded="true"
+            aria-controls="reportTemplateCollapse"
+            style="cursor: pointer;">
+            <i class="fas fa-file-medical-alt me-2"></i>Report Template
+        </h6>
+        <!-- Right: language pills + chevron (never triggers collapse) -->
+        <div class="d-flex align-items-center gap-2">
+            <div class="btn-group btn-group-sm" role="group" aria-label="Report language">
+                <button type="button"
+                        id="reportLangItBtn"
+                        class="btn {% if report_language != 'en' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn"
+                        data-lang="it">IT</button>
+                <button type="button"
+                        id="reportLangEnBtn"
+                        class="btn {% if report_language == 'en' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn"
+                        data-lang="en">EN</button>
+            </div>
+            <i class="fas fa-chevron-right collapse-indicator"
+               data-bs-toggle="collapse"
+               data-bs-target="#reportTemplateCollapse"
+               style="cursor: pointer;"></i>
+        </div>
+    </div>
+
+    <div class="collapse show" id="reportTemplateCollapse">
+        <div class="card">
+            <div class="card-body p-3">
+                <ul class="mb-0 ps-3 report-fields-it {% if report_language == 'en' %}d-none{% endif %}"
+                    style="font-size: 0.9rem; line-height: 1.9;">
+                    <li>Lato del Centro del Tumore</li>
+                    <li>Qualità dell'Enhancement</li>
+                    <li>Definizione del Margine Enhancing</li>
+                    <li>Definizione del Margine Non-Enhancing</li>
+                    <li>Emorragia Intratumorale</li>
+                    <li>Eterogeneità del Tumore</li>
+                    <li>Numero di Lesioni</li>
+                    <li>Tipo di Lesione</li>
+                    <li>Invasione Ependimale</li>
+                    <li>Profondità del TC</li>
+                    <li>Macroarea del Centro del Tumore</li>
+                    <li>Spostamento della Linea Mediana(mm)</li>
+                    <li>Forma del Tumore</li>
+                    <li>Origine del Tumore</li>
+                    <li>Il Tumore Attraversa la Linea Mediana</li>
+                    <li>Reperti Specifici del Soggetto</li>
+                </ul>
+                <ul class="mb-0 ps-3 report-fields-en {% if report_language != 'en' %}d-none{% endif %}"
+                    style="font-size: 0.9rem; line-height: 1.9;">
+                    <li>Side of Tumor Center</li>
+                    <li>Enhancement Quality</li>
+                    <li>Enhancing Margin Definition</li>
+                    <li>Non-Enhancing Margin Definition</li>
+                    <li>Intratumoral Hemorrhage</li>
+                    <li>Tumor Heterogeneity</li>
+                    <li>Number of Lesions</li>
+                    <li>Lesion Type</li>
+                    <li>Ependymal Invasion</li>
+                    <li>Depth of TC</li>
+                    <li>Macroarea of Tumor Center</li>
+                    <li>Midline Shift(mm)</li>
+                    <li>Tumor Shape</li>
+                    <li>Tumor Origin</li>
+                    <li>Tumor Crosses the Midline</li>
+                    <li>Subject-Specific Findings</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var LS_KEY = 'report_template_lang';
+
+    function applyLang(lang) {
+        var isEn = lang === 'en';
+        document.querySelector('.report-fields-it').classList.toggle('d-none', isEn);
+        document.querySelector('.report-fields-en').classList.toggle('d-none', !isEn);
+        document.getElementById('reportLangItBtn').className =
+            'btn ' + (!isEn ? 'btn-primary' : 'btn-outline-secondary') + ' report-lang-btn btn-sm';
+        document.getElementById('reportLangEnBtn').className =
+            'btn ' + (isEn  ? 'btn-primary' : 'btn-outline-secondary') + ' report-lang-btn btn-sm';
+    }
+
+    // On load: localStorage takes priority over server-rendered default
+    var saved = localStorage.getItem(LS_KEY);
+    if (saved && saved !== '{{ report_language }}') {
+        applyLang(saved);
+    }
+
+    document.querySelectorAll('.report-lang-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var lang = this.dataset.lang;
+            applyLang(lang);
+
+            // Persist in localStorage immediately (works without migration)
+            localStorage.setItem(LS_KEY, lang);
+
+            // Also persist server-side (best-effort)
+            fetch('{% url "set_report_language" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] ?? '',
+                },
+                body: JSON.stringify({ language: lang }),
+            }).catch(function () {/* non-critical */});
+        });
+    });
+})();
+</script>

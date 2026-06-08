@@ -590,3 +590,23 @@ class Export(models.Model):
             self.share_token = secrets.token_urlsafe(32)
             self.save(update_fields=['share_token'])
         return self.share_token
+
+
+class UserPreference(models.Model):
+    """Stores per-user UI preferences for the Brain app."""
+
+    LANGUAGE_CHOICES = [
+        ('it', 'Italian'),
+        ('en', 'English'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='brain_preference')
+    report_language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='it')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'brain_user_preference'
+
+    def __str__(self):
+        return f"Preferences for {self.user.username}"
+

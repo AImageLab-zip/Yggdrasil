@@ -5,8 +5,9 @@
 <script id="viewerGridData" type="application/json">
 {
     "scanId": {{ patient.patient_id }},
-    "projectNamespace": "{% firstof request.resolver_match.namespace 'maxillo' %}",
-    "modalityFiles": {{ modality_files_json|safe }}
+    "projectNamespace": "{% firstof request.resolver_match.namespace 'brain' %}",
+    "modalityFiles": {{ modality_files_json|safe }},
+    "segmentationFile": {{ segmentation_file_json|safe }}
 }
 </script>
 
@@ -29,7 +30,7 @@
                     <div id="modalityChipsContainer">
                         {% if patient_modalities %}
                             {% for m in patient_modalities %}
-                                {% if m.slug != 'rawzip' %}
+                                {% if m.slug != 'rawzip' and m.slug != 'braintumor-mri-seg' %}
                                     <div class="modality-chip"
                                          data-modality="{{ m.slug }}"
                                          draggable="true">
@@ -89,7 +90,8 @@
 
         <!-- Classification Column -->
         <div class="col-lg-4">
-            {% include 'common/sections/vocal_caption_section.html' %}
+            {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
+            {% include 'brain/sections/report_template_section.html' %}
             {% include 'common/sections/scan_settings_section.html' %}
             {% include 'common/sections/nifti_metadata_section.html' %}
             {% include 'common/sections/file_management_section.html' %}
@@ -99,7 +101,7 @@
     <!-- Back Button -->
     <div class="row mt-3">
         <div class="col-12">
-            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+            {% firstof request.resolver_match.namespace 'brain' as ns %}
             <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
                 <i class="fas fa-arrow-left me-2"></i>Back to Scan List
             </a>

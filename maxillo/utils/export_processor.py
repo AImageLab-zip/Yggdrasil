@@ -54,22 +54,6 @@ class ExportProcessor:
             "raw": ["panoramic_raw"],
             "processed": ["panoramic_processed"],
         },
-        "braintumor-mri-t1": {
-            "raw": ["braintumor_mri_t1_raw"],
-            "processed": ["braintumor_mri_t1_processed"],
-        },
-        "braintumor-mri-t1c": {
-            "raw": ["braintumor_mri_t1c_raw"],
-            "processed": ["braintumor_mri_t1c_processed"],
-        },
-        "braintumor-mri-t2": {
-            "raw": ["braintumor_mri_t2_raw"],
-            "processed": ["braintumor_mri_t2_processed"],
-        },
-        "braintumor-mri-flair": {
-            "raw": ["braintumor_mri_flair_raw"],
-            "processed": ["braintumor_mri_flair_processed"],
-        },
         "rawzip": {
             "raw": ["generic_raw"],
             "processed": ["generic_processed"],
@@ -142,10 +126,6 @@ class ExportProcessor:
     def _patient_file_queryset(self, patients):
         from common.models import FileRegistry
 
-        if self.domain == "brain":
-            return FileRegistry.objects.filter(
-                domain="brain", brain_patient__in=patients
-            )
         return FileRegistry.objects.filter(domain="maxillo", patient__in=patients)
 
     def _build_no_files_found_error(self, patients):
@@ -195,10 +175,8 @@ class ExportProcessor:
 
     def _update_progress(self, message, percent=None):
         """Update progress on the Export record for live feedback."""
-        if self.domain == "brain":
-            from brain.models import Export
-        else:
-            from ..models import Export
+        from ..models import Export
+
         update_kw = {"progress_message": message}
         if percent is not None:
             update_kw["progress_percent"] = min(100, max(0, int(percent)))
@@ -206,10 +184,8 @@ class ExportProcessor:
 
     def query_patients(self):
         """Query patients based on folder_ids and filters. Apply AND logic for all filters."""
-        if self.domain == "brain":
-            from brain.models import Patient, VoiceCaption
-        else:
-            from ..models import Patient, VoiceCaption
+        from ..models import Patient, VoiceCaption
+
         from common.models import FileRegistry, Modality
 
         # Start with folder filter
@@ -228,16 +204,9 @@ class ExportProcessor:
             if not cbct_file_types:
                 return patients.none()
             file_filter = {"file_type__in": cbct_file_types, "domain": self.domain}
-            if self.domain == "brain":
-                cbct_patients = Patient.objects.filter(
-                    patient_id__in=FileRegistry.objects.filter(
-                        **file_filter
-                    ).values_list("brain_patient_id", flat=True)
-                ).distinct()
-            else:
-                cbct_patients = Patient.objects.filter(
-                    files__file_type__in=cbct_file_types
-                ).distinct()
+            cbct_patients = Patient.objects.filter(
+                files__file_type__in=cbct_file_types
+            ).distinct()
             patients = patients.filter(
                 patient_id__in=cbct_patients.values_list("patient_id", flat=True)
             )
@@ -246,17 +215,9 @@ class ExportProcessor:
             ios_file_types = self._modality_requested_file_types("ios")
             if not ios_file_types:
                 return patients.none()
-            if self.domain == "brain":
-                ios_patients = Patient.objects.filter(
-                    patient_id__in=FileRegistry.objects.filter(
-                        domain="brain",
-                        file_type__in=ios_file_types,
-                    ).values_list("brain_patient_id", flat=True)
-                ).distinct()
-            else:
-                ios_patients = Patient.objects.filter(
-                    files__file_type__in=ios_file_types
-                ).distinct()
+            ios_patients = Patient.objects.filter(
+                files__file_type__in=ios_file_types
+            ).distinct()
             patients = patients.filter(
                 patient_id__in=ios_patients.values_list("patient_id", flat=True)
             )
@@ -267,16 +228,9 @@ class ExportProcessor:
                 modality_slug = key.replace("has_", "")
                 file_types = self._modality_requested_file_types(modality_slug)
                 if file_types:
-                    if self.domain == "brain":
-                        modality_patients = Patient.objects.filter(
-                            patient_id__in=FileRegistry.objects.filter(
-                                domain="brain", file_type__in=file_types
-                            ).values_list("brain_patient_id", flat=True)
-                        ).distinct()
-                    else:
-                        modality_patients = Patient.objects.filter(
-                            files__file_type__in=file_types
-                        ).distinct()
+                    modality_patients = Patient.objects.filter(
+                        files__file_type__in=file_types
+                    ).distinct()
                     patients = patients.filter(
                         patient_id__in=modality_patients.values_list(
                             "patient_id", flat=True
@@ -310,10 +264,8 @@ class ExportProcessor:
 
     def collect_files(self, patients):
         """Collect files from FileRegistry for each patient and selected modalities."""
-        if self.domain == "brain":
-            from brain.models import VoiceCaption
-        else:
-            from ..models import VoiceCaption
+        from ..models import VoiceCaption
+
         from common.models import FileRegistry, Modality
 
         files_to_export = []
@@ -363,18 +315,11 @@ class ExportProcessor:
                 if content_query:
                     query |= Q(modality__in=modality_objects) & content_query
 
-            if self.domain == "brain":
-                patient_files = (
-                    FileRegistry.objects.filter(domain="brain", brain_patient=patient)
-                    .filter(query)
-                    .distinct()
-                )
-            else:
-                patient_files = (
-                    FileRegistry.objects.filter(domain="maxillo", patient=patient)
-                    .filter(query)
-                    .distinct()
-                )
+            patient_files = (
+                FileRegistry.objects.filter(domain="maxillo", patient=patient)
+                .filter(query)
+                .distinct()
+            )
             logger.info(
                 f"Patient {patient.patient_id}: found {patient_files.count()} files matching query"
             )
@@ -741,15 +686,10 @@ def start_export_processing(export_id, domain="maxillo"):
     Uses a subprocess instead of a daemon thread so the export completes even
     after the HTTP request ends (web workers can recycle and kill threads).
     """
-    from brain.models import Export as BrainExport
-
     from ..models import Export as MaxilloExport
 
     try:
-        if domain == "brain":
-            export = BrainExport.objects.filter(id=export_id).first()
-        else:
-            export = MaxilloExport.objects.filter(id=export_id).first()
+        export = MaxilloExport.objects.filter(id=export_id).first()
 
         if not export:
             logger.error(f"Export {export_id} not found for domain {domain}")
@@ -776,7 +716,7 @@ def start_export_processing(export_id, domain="maxillo"):
             start_new_session=True,
         )
         logger.info(f"Started background subprocess for export {export_id}")
-    except (MaxilloExport.DoesNotExist, BrainExport.DoesNotExist):
+    except MaxilloExport.DoesNotExist:
         logger.error(f"Export {export_id} not found")
     except Exception as e:
         logger.error(f"Error starting export processing: {e}", exc_info=True)

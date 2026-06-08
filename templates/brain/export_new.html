@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <h1 class="h4 mb-3">New Brain Export</h1>
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label class="form-label">Folders</label>
+            {% for folder in folders %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="folder_ids" value="{{ folder.id }}" id="folder{{ folder.id }}">
+                    <label class="form-check-label" for="folder{{ folder.id }}">{{ folder.name }}</label>
+                </div>
+            {% endfor %}
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Modalities</label>
+            {% for modality in modalities %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="modality_slugs" value="{{ modality.slug }}" id="mod{{ modality.id }}">
+                    <label class="form-check-label" for="mod{{ modality.id }}">{{ modality.name }}</label>
+                </div>
+            {% endfor %}
+        </div>
+        <button class="btn btn-primary" type="submit">Create Export</button>
+    </form>
+</div>
+{% endblock %}
