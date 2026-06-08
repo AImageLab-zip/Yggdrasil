@@ -228,6 +228,7 @@ def export_new(request):
         include_raw, include_processed = _resolve_content_selection(
             request.POST, default_when_missing=False
         )
+        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
 
         # Get filters
         filters = {}
@@ -253,10 +254,10 @@ def export_new(request):
             messages.error(request, "Please select at least one modality.")
             return redirect_with_namespace(request, "export_new")
 
-        if not include_raw and not include_processed:
+        if not include_raw and not include_processed and not include_reports:
             messages.error(
                 request,
-                "Please select at least one content type: Raw files and/or Processed files.",
+                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
             )
             return redirect_with_namespace(request, "export_new")
 
@@ -267,25 +268,18 @@ def export_new(request):
             "filters": filters,
             "include_raw": include_raw,
             "include_processed": include_processed,
+            "include_reports": include_reports,
         }
 
         # Generate query summary
         folder_count = len(folder_ids)
         modality_names = []
-        include_reports = False
         for slug in modality_slugs:
-            if slug == "reports":
-                include_reports = True
-            else:
-                try:
-                    modality = Modality.objects.get(slug=slug)
-                    modality_names.append(modality.name)
-                except Modality.DoesNotExist:
-                    modality_names.append(slug)
-
-        # Add Reports to summary if selected
-        if include_reports:
-            modality_names.append("Reports")
+            try:
+                modality = Modality.objects.get(slug=slug)
+                modality_names.append(modality.name)
+            except Modality.DoesNotExist:
+                modality_names.append(slug)
 
         filter_parts = []
         if filters.get("has_cbct"):
@@ -314,6 +308,8 @@ def export_new(request):
             selected_content.append("Raw")
         if include_processed:
             selected_content.append("Processed")
+        if include_reports:
+            selected_content.append("Reports")
         query_summary_parts.append(f"Content: {' + '.join(selected_content)}")
 
         query_summary = ", ".join(query_summary_parts)
@@ -386,6 +382,7 @@ def export_preview(request):
         modality_slugs = data.get("modality_slugs", [])
         filters = data.get("filters", {})
         include_raw, include_processed = _resolve_content_selection(data)
+        include_reports = _coerce_bool(data.get("include_reports"), default=False)
         file_type_map = _file_type_map_for_selection(include_raw, include_processed)
 
         # Convert to proper types
@@ -472,52 +469,30 @@ def export_preview(request):
         for key, value in filters.items():
             if key.startswith("has_reports_") and value:
                 modality_slug = key.replace("has_reports_", "")
-                # Patients with files for this modality AND voice captions
-                try:
-                    modality = Modality.objects.get(slug=modality_slug)
-                    # Get patients with voice captions for this modality
-                    report_patients = (
-                        PatientModel.objects.filter(
-                            voice_captions__modality=modality,
-                            voice_captions__text_caption__isnull=False,
-                        )
-                        .exclude(voice_captions__text_caption="")
-                        .distinct()
+                report_patients = (
+                    PatientModel.objects.filter(
+                        voice_captions__modality=modality_slug,
+                        voice_captions__text_caption__isnull=False,
                     )
-                    patients = patients.filter(
-                        patient_id__in=report_patients.values_list(
-                            "patient_id", flat=True
-                        )
+                    .exclude(voice_captions__text_caption="")
+                    .distinct()
+                )
+                patients = patients.filter(
+                    patient_id__in=report_patients.values_list(
+                        "patient_id", flat=True
                     )
-                except Modality.DoesNotExist:
-                    pass
+                )
 
         patient_count = patients.count()
         folder_count = len(folder_ids) if folder_ids else 0
-        actual_modality_slugs = (
-            [slug for slug in modality_slugs if slug != "reports"]
-            if modality_slugs
-            else []
-        )
-        # When reports-only, count as 1 modality for display
-        modality_count = (
-            len(actual_modality_slugs)
-            if actual_modality_slugs
-            else (1 if modality_slugs else 0)
-        )
-
-        # Calculate file count and size estimate
-        # Separate reports from actual modalities
-        include_reports = "reports" in modality_slugs
-        actual_modality_slugs = [slug for slug in modality_slugs if slug != "reports"]
+        modality_count = len(modality_slugs) if modality_slugs else 0
 
         if patient_count > 0:
             file_count = 0
             total_size = 0
-            if actual_modality_slugs:
-                # Get files for selected modalities
+            if modality_slugs and (include_raw or include_processed):
                 file_types = []
-                for slug in actual_modality_slugs:
+                for slug in modality_slugs:
                     file_types.extend(file_type_map.get(slug, []))
                 file_filter = {
                     "domain": domain,
@@ -528,27 +503,13 @@ def export_preview(request):
                 file_count = files.count()
                 total_size = files.aggregate(total=Sum("file_size"))["total"] or 0
 
-            # Add voice caption reports if reports are selected (selected modalities or all when reports-only)
-            if include_reports:
-                report_modality_slugs = (
-                    actual_modality_slugs
-                    if actual_modality_slugs
-                    else list(
-                        Modality.objects.filter(is_active=True).values_list(
-                            "slug", flat=True
-                        )
-                    )
-                )
-                modality_objects = Modality.objects.filter(
-                    slug__in=report_modality_slugs
-                )
+            if include_reports and modality_slugs:
                 voice_captions = VoiceCaptionModel.objects.filter(
                     patient__in=patients,
-                    modality__in=modality_objects,
+                    modality__in=modality_slugs,
                     text_caption__isnull=False,
                 ).exclude(text_caption="")
-                voice_caption_count = voice_captions.count()
-                file_count += voice_caption_count
+                file_count += voice_captions.count()
                 for vc in voice_captions:
                     total_size += len(vc.text_caption.encode("utf-8"))
         else:

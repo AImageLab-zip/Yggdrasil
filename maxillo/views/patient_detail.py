@@ -63,7 +63,7 @@ def patient_detail(request, patient_id):
             )
 
         for panoramic_entry in panoramic_candidates:
-            if panoramic_entry.file_path and os.path.exists(panoramic_entry.file_path):
+            if panoramic_entry.file_path and artifact_exists(panoramic_entry.file_path):
                 has_uploaded_panoramic = True
                 break
     except Exception as e:
@@ -210,7 +210,8 @@ def patient_detail(request, patient_id):
     except Exception:
         patient_modalities = []
 
-    if not has_uploaded_panoramic:
+    has_panoramic = has_uploaded_panoramic or has_cbct
+    if not has_panoramic:
         patient_modalities = [m for m in patient_modalities if m.get('slug') != 'panoramic']
 
     has_intraoral_modality = any(
@@ -353,7 +354,7 @@ def patient_detail(request, patient_id):
         'user_profile': user_profile,
         'management_form': management_form,
         'has_cbct': has_cbct,
-        'has_uploaded_panoramic': has_uploaded_panoramic,
+        'has_panoramic': has_panoramic,
         'has_intraoral_modality': has_intraoral_modality,
         'can_modify_segmentation': can_modify,
         'patient_modalities': patient_modalities,

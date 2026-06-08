@@ -44,8 +44,7 @@ def get_file_type_for_modality(
 
     # Special handling for IOS with subtypes
     if modality_slug == "ios" and subtype:
-        base_type = f"ios_{subtype}"
-        file_type = f"{base_type}_processed" if is_processed else f"{base_type}_raw"
+        file_type = f"ios_processed_{subtype}" if is_processed else f"ios_raw_{subtype}"
         valid_file_types = FileRegistry.get_file_type_choices_dict().keys()
         if file_type in valid_file_types:
             return file_type
