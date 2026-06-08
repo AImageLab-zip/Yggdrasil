@@ -27,11 +27,7 @@ def rerun_processing(request, patient_id):
         from common.models import Job
         from ..modality_helpers import get_modality_slugs
 
-        job_filter = (
-            {"brain_patient": patient, "domain": "brain"}
-            if domain == "brain"
-            else {"patient": patient, "domain": "maxillo"}
-        )
+        job_filter = {"patient": patient, "domain": "maxillo"}
 
         try:
             data = json.loads(request.body) if request.body else {}
@@ -172,9 +168,7 @@ def admin_control_panel(request):
     # Get recent failed jobs
     recent_failed_jobs = (
         jobs.filter(status="failed")
-        .select_related(
-            "patient", "brain_patient", "voice_caption", "brain_voice_caption"
-        )
+        .select_related("patient", "voice_caption")
         .order_by("-created_at")[:10]
     )
 

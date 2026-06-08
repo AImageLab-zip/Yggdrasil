@@ -3,7 +3,6 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.apps import apps
 from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
@@ -16,17 +15,11 @@ from common.permissions import (
     user_is_project_admin,
 )
 import logging
+
 logger = logging.getLogger(__name__)
 
 
 def _get_domain_models(request):
-    ns = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or ''
-    if ns == 'brain':
-        return (
-            apps.get_model('brain', 'Patient'),
-            apps.get_model('brain', 'Folder'),
-            apps.get_model('brain', 'Tag'),
-        )
     return MaxilloPatient, MaxilloFolder, MaxilloTag
 
 def home(request):
