@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}ToothFairy4M{% endblock %}</title>
+    <title>{% block title %}Yggdrasil{% endblock %}</title>
     
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -92,7 +92,7 @@
                 {% else %}
                     <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
                 {% endif %}
-                <a class="navbar-brand ms-1" href="{% url ns|add:':patient_list' %}">{{ current_project_name|default:'ToothFairy4M' }}</a>
+                <a class="navbar-brand ms-1" href="{% url ns|add:':patient_list' %}">{{ current_project_name|default:'Yggdrasil' }}</a>
             </div>
             
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -206,7 +206,7 @@
     <!-- Footer -->
     <footer class="bg-light mt-5 py-4">
         <div class="container text-center">
-            <p class="mb-0">&copy; 2026 ToothFairy4M — developed by <a href="https://lucalumetti.it" target="_blank" rel="noopener">Luca Lumetti</a> <a href="https://github.com/AImagelab-Zip/ToothFairy4M" target="_blank" rel="noopener" class="text-dark ms-2" aria-label="GitHub repository"><i class="fa-brands fa-github"></i></a></p>
+            <p class="mb-0">&copy; 2026 Yggdrasil — developed by <a href="https://lucalumetti.it" target="_blank" rel="noopener">Luca Lumetti</a> <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-dark ms-2" aria-label="GitHub repository"><i class="fa-brands fa-github"></i></a></p>
         </div>
     </footer>
     {% endblock %}

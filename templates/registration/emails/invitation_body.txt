@@ -1,6 +1,6 @@
 Hello,
 
-You have been invited to register to ToothFairy4M platform.
+You have been invited to register to Yggdrasil platform.
 
 Projects:
 {% for project_name in project_names %}- {{ project_name }}
