@@ -71,6 +71,7 @@ function updateFilterURL() {
     url.searchParams.delete('has_cbct');
     url.searchParams.delete('has_voice');
     url.searchParams.delete('has_bite');
+    url.searchParams.delete('has_reports');
     // Clear dynamic status_<slug> params
     Array.from(url.searchParams.keys()).forEach(key => {
         if (key.startsWith('status_')) {
@@ -134,6 +135,7 @@ function autoExpandFilters() {
                       url.searchParams.has('has_ios') || 
                       url.searchParams.has('has_cbct') || 
                       url.searchParams.has('has_bite') || 
+                      url.searchParams.has('has_reports') || 
                       url.searchParams.has('has_voice') || 
                       Array.from(url.searchParams.keys()).some(k => k.startsWith('status_')) ||
                       url.searchParams.has('tags');
@@ -306,6 +308,42 @@ function initAdminActions() {
     const rerunModalEl = document.getElementById('rerunProcessingModal');
     let rerunModal = null;
     let rerunTargetScanId = null;
+    let rerunSelectedSlugs = [];
+    const rerunModalityOptionsEl = document.getElementById('rerunModalityOptions');
+    const rerunLabelsEl = document.getElementById('rerun-modality-labels');
+    let rerunModalityLabels = {};
+    if (rerunLabelsEl) {
+        try {
+            rerunModalityLabels = JSON.parse(rerunLabelsEl.textContent || '{}');
+        } catch (_err) {
+            rerunModalityLabels = {};
+        }
+    }
+    window.rerunModalityLabels = rerunModalityLabels;
+
+    function renderRerunOptions(modalitySlugs) {
+        if (!rerunModalityOptionsEl) return;
+        rerunModalityOptionsEl.innerHTML = '';
+        if (!modalitySlugs.length) {
+            rerunModalityOptionsEl.innerHTML = '<small class="text-muted">No rerunnable modalities available for this patient.</small>';
+            return;
+        }
+
+        modalitySlugs.forEach((slug, index) => {
+            const safeSlug = String(slug || '').trim();
+            if (!safeSlug) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            const checkboxId = `rerunModality_${safeSlug}_${index}`;
+            const label = rerunModalityLabels[safeSlug] || safeSlug.replace(/_/g, ' ');
+            wrapper.innerHTML = `
+                <input class="form-check-input rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
+                <label class="form-check-label" for="${checkboxId}">${label}</label>
+            `;
+            rerunModalityOptionsEl.appendChild(wrapper);
+        });
+    }
+
     if (rerunModalEl && window.bootstrap) {
         rerunModal = new window.bootstrap.Modal(rerunModalEl);
     }
@@ -316,22 +354,20 @@ function initAdminActions() {
             const scanName = this.dataset.scanName || `Scan #${rerunTargetScanId}`;
             const subtitle = document.getElementById('rerunScanSubtitle');
             if (subtitle) subtitle.textContent = scanName;
-            // reset checkboxes
-            ['rerunIos','rerunBite','rerunCbct','rerunVoice'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.checked = false;
-            });
+            rerunSelectedSlugs = (this.dataset.availableModalities || '')
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .filter((slug, idx, arr) => arr.indexOf(slug) === idx)
+                .filter(slug => slug !== 'rawzip');
+            renderRerunOptions(rerunSelectedSlugs);
             if (rerunModal) rerunModal.show();
         });
     });
     const confirmRerunBtn = document.getElementById('confirmRerunBtn');
     if (confirmRerunBtn) {
         confirmRerunBtn.addEventListener('click', function() {
-            const jobs = [];
-            if (document.getElementById('rerunIos')?.checked) jobs.push('ios');
-            if (document.getElementById('rerunBite')?.checked) jobs.push('bite_classification');
-            if (document.getElementById('rerunCbct')?.checked) jobs.push('cbct');
-            if (document.getElementById('rerunVoice')?.checked) jobs.push('voice');
+            const jobs = Array.from(document.querySelectorAll('.rerun-modality-checkbox:checked')).map(el => el.value);
             if (!jobs.length) {
                 showNotification('error', 'Select at least one job to rerun');
                 return;
@@ -351,35 +387,12 @@ function initAdminActions() {
                     // Update status indicators for this row based on selected jobs
                     const row = document.querySelector(`.patient-row[data-scan-id="${rerunTargetScanId}"]`) || document.querySelector(`.scan-row[data-scan-id="${rerunTargetScanId}"]`);
                     if (row) {
-                        if (jobs.includes('ios')) {
-                            // first .status-icon with tooth
-                            const icon = row.querySelector('.status-icon i.fas.fa-tooth')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-pending');
-                                icon.classList.add('status-processing');
-                            }
-                        }
-                        if (jobs.includes('cbct')) {
-                            const icon = row.querySelector('.status-icon i.fas.fa-cube')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-pending');
-                                icon.classList.add('status-processing');
-                            }
-                        }
-                        if (jobs.includes('voice')) {
-                            const icon = row.querySelector('.status-icon i.fas.fa-microphone')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-pending');
-                                icon.classList.add('status-processing');
-                            }
-                        }
-                        if (jobs.includes('bite_classification')) {
-                            const icon = row.querySelector('.status-icon i.fas.fa-teeth')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-absent');
-                                icon.classList.add('status-processing');
-                            }
-                        }
+                        jobs.forEach(slug => {
+                            const pill = row.querySelector(`.status-pill[data-modality-slug="${slug}"]`);
+                            if (!pill) return;
+                            pill.classList.remove('status-processed', 'status-failed', 'status-pending', 'status-absent');
+                            pill.classList.add('status-processing');
+                        });
                     }
                 } else {
                     showNotification('error', data.error || 'Failed to rerun jobs');
@@ -494,6 +507,7 @@ function initBulkSelection() {
     const clearBtn = document.getElementById('btnClearSelection');
     const moveBtn = document.getElementById('btnMoveSelected');
     const moveSelect = document.getElementById('moveFolderSelect');
+    const bulkRerunBtn = document.getElementById('btnBulkRerunSelected');
     
     // Only proceed if essential elements exist
     if (!toolbar || !countEl) {
@@ -610,6 +624,112 @@ function initBulkSelection() {
             });
         });
     }
+
+    const bulkRerunModalEl = document.getElementById('bulkRerunProcessingModal');
+    const bulkRerunModalityOptionsEl = document.getElementById('bulkRerunModalityOptions');
+    const bulkRerunSubtitleEl = document.getElementById('bulkRerunScanSubtitle');
+    const confirmBulkRerunBtn = document.getElementById('confirmBulkRerunBtn');
+    let bulkRerunModal = null;
+    if (bulkRerunModalEl && window.bootstrap) {
+        bulkRerunModal = new window.bootstrap.Modal(bulkRerunModalEl);
+    }
+
+    function getSelectedPatientIds() {
+        return Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value, 10)).filter(Number.isFinite);
+    }
+
+    function collectAvailableModalitiesForSelectedRows() {
+        const selectedRows = Array.from(document.querySelectorAll('.row-select:checked'))
+            .map(cb => cb.closest('.patient-row') || cb.closest('.scan-row'))
+            .filter(Boolean);
+        const slugSet = new Set();
+        selectedRows.forEach(row => {
+            row.querySelectorAll('.status-pill[data-modality-slug]').forEach(pill => {
+                const slug = (pill.dataset.modalitySlug || '').trim();
+                if (!slug || slug === 'rawzip') return;
+                if (pill.classList.contains('status-absent')) return;
+                if (slug === 'voice') {
+                    slugSet.add('voice');
+                    return;
+                }
+                slugSet.add(slug);
+            });
+        });
+        return Array.from(slugSet).sort((a, b) => a.localeCompare(b));
+    }
+
+    function renderBulkRerunOptions(modalitySlugs) {
+        if (!bulkRerunModalityOptionsEl) return;
+        bulkRerunModalityOptionsEl.innerHTML = '';
+        if (!modalitySlugs.length) {
+            bulkRerunModalityOptionsEl.innerHTML = '<small class="text-muted">No rerunnable modalities available for the selected scans.</small>';
+            return;
+        }
+        modalitySlugs.forEach((slug, index) => {
+            const safeSlug = String(slug || '').trim();
+            if (!safeSlug) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            const checkboxId = `bulkRerunModality_${safeSlug}_${index}`;
+            const label = (window.rerunModalityLabels && window.rerunModalityLabels[safeSlug]) || safeSlug.replace(/_/g, ' ');
+            wrapper.innerHTML = `
+                <input class="form-check-input bulk-rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
+                <label class="form-check-label" for="${checkboxId}">${label}</label>
+            `;
+            bulkRerunModalityOptionsEl.appendChild(wrapper);
+        });
+    }
+
+    if (bulkRerunBtn) {
+        bulkRerunBtn.addEventListener('click', function() {
+            const ids = getSelectedPatientIds();
+            if (!ids.length) return;
+            const modalities = collectAvailableModalitiesForSelectedRows();
+            renderBulkRerunOptions(modalities);
+            if (bulkRerunSubtitleEl) {
+                bulkRerunSubtitleEl.textContent = `${ids.length} selected patient${ids.length === 1 ? '' : 's'}`;
+            }
+            if (bulkRerunModal) bulkRerunModal.show();
+        });
+    }
+
+    if (confirmBulkRerunBtn) {
+        confirmBulkRerunBtn.addEventListener('click', function() {
+            const scan_ids = getSelectedPatientIds();
+            const jobs = Array.from(document.querySelectorAll('.bulk-rerun-modality-checkbox:checked')).map(el => el.value);
+            if (!scan_ids.length) {
+                showNotification('error', 'Select at least one scan');
+                return;
+            }
+            if (!jobs.length) {
+                showNotification('error', 'Select at least one modality to rerun');
+                return;
+            }
+
+            const label = this.querySelector('.label');
+            const spinner = this.querySelector('.spinner');
+            this.disabled = true;
+            if (label) label.classList.add('d-none');
+            if (spinner) spinner.classList.remove('d-none');
+
+            secureFetch(`/${window.projectNamespace}/patients/bulk-rerun-processing/`, {
+                method: 'POST',
+                body: JSON.stringify({ scan_ids, jobs })
+            }).then(r => r.json()).then(data => {
+                if (data.success) {
+                    showNotification('success', data.message || 'Bulk rerun queued');
+                    if (bulkRerunModal) bulkRerunModal.hide();
+                    window.location.reload();
+                } else {
+                    showNotification('error', data.error || 'Failed to rerun jobs');
+                }
+            }).catch(() => showNotification('error', 'Network error')).finally(() => {
+                confirmBulkRerunBtn.disabled = false;
+                if (label) label.classList.remove('d-none');
+                if (spinner) spinner.classList.add('d-none');
+            });
+        });
+    }
 }
 
 function initCreateFolder() {
@@ -637,6 +757,131 @@ function initCreateFolder() {
             }
         }).catch(() => showNotification('error', 'Network error'));
     });
+}
+
+function initFolderContextMenu() {
+    const menu = document.getElementById('folderContextMenu');
+    if (!menu) return;
+
+    let selectedFolder = null;
+    const modalEl = document.getElementById('folderPermissionsModal');
+    const modal = modalEl && window.bootstrap ? new window.bootstrap.Modal(modalEl) : null;
+
+    function hideMenu() {
+        menu.style.display = 'none';
+    }
+
+    document.querySelectorAll('.folder-node').forEach(node => {
+        node.addEventListener('contextmenu', function (evt) {
+            evt.preventDefault();
+            selectedFolder = {
+                id: this.dataset.id,
+                name: this.dataset.name || 'Folder',
+            };
+            menu.style.display = 'block';
+            menu.style.left = `${evt.clientX}px`;
+            menu.style.top = `${evt.clientY}px`;
+        });
+    });
+
+    document.addEventListener('click', hideMenu);
+
+    const statsBtn = document.getElementById('folderMenuStats');
+    if (statsBtn) {
+        statsBtn.addEventListener('click', function () {
+            if (!selectedFolder) return;
+            secureFetch(`/${window.projectNamespace}/folders/${selectedFolder.id}/stats/`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) throw new Error(data.error || 'Failed to load stats');
+                    alert(`Folder: ${data.folder.name}\nPatients: ${data.stats.patient_count}`);
+                })
+                .catch(err => showNotification('error', err.message || 'Failed to load stats'));
+        });
+    }
+
+    const renameBtn = document.getElementById('folderMenuRename');
+    if (renameBtn) {
+        renameBtn.addEventListener('click', function () {
+            if (!selectedFolder) return;
+            const name = prompt('New folder name', selectedFolder.name || '');
+            if (!name) return;
+            secureFetch(`/${window.projectNamespace}/folders/${selectedFolder.id}/rename/`, {
+                method: 'POST',
+                body: JSON.stringify({ name }),
+            }).then(r => r.json()).then(data => {
+                if (!data.success) throw new Error(data.error || 'Failed to rename folder');
+                window.location.reload();
+            }).catch(err => showNotification('error', err.message || 'Failed to rename folder'));
+        });
+    }
+
+    const permBtn = document.getElementById('folderMenuPermissions');
+    if (permBtn) {
+        permBtn.addEventListener('click', function () {
+            if (!selectedFolder || !modal) return;
+            loadFolderPermissions(selectedFolder.id, selectedFolder.name);
+            modal.show();
+        });
+    }
+
+    function loadFolderPermissions(folderId, folderName) {
+        const title = document.getElementById('folderPermissionsModalLabel');
+        if (title) title.textContent = `Folder Permissions - ${folderName}`;
+        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) throw new Error(data.error || 'Failed to load permissions');
+                const userSel = document.getElementById('folderPermUser');
+                const body = document.querySelector('#folderPermTable tbody');
+                if (userSel) {
+                    userSel.innerHTML = '<option value="">Select user</option>';
+                    data.users.forEach(u => {
+                        const opt = document.createElement('option');
+                        opt.value = String(u.id);
+                        opt.textContent = u.username;
+                        userSel.appendChild(opt);
+                    });
+                }
+                if (body) {
+                    body.innerHTML = '';
+                    data.permissions.forEach(row => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `<td>${row.username}</td><td>${row.role}</td><td class="text-end"><button class="btn btn-sm btn-outline-danger" data-user-id="${row.user_id}">Remove</button></td>`;
+                        body.appendChild(tr);
+                    });
+                    body.querySelectorAll('button[data-user-id]').forEach(btn => {
+                        btn.addEventListener('click', function () {
+                            const uid = this.dataset.userId;
+                            secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/${uid}/delete/`, { method: 'DELETE' })
+                                .then(r => r.json())
+                                .then(resp => {
+                                    if (!resp.success) throw new Error(resp.error || 'Failed to remove permission');
+                                    loadFolderPermissions(folderId, folderName);
+                                })
+                                .catch(err => showNotification('error', err.message || 'Failed to remove permission'));
+                        });
+                    });
+                }
+
+                const saveBtn = document.getElementById('folderPermAddBtn');
+                if (saveBtn) {
+                    saveBtn.onclick = function () {
+                        const userId = document.getElementById('folderPermUser')?.value;
+                        const role = document.getElementById('folderPermRole')?.value;
+                        if (!userId || !role) return;
+                        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/upsert/`, {
+                            method: 'POST',
+                            body: JSON.stringify({ user_id: Number(userId), role }),
+                        }).then(r => r.json()).then(resp => {
+                            if (!resp.success) throw new Error(resp.error || 'Failed to save permission');
+                            loadFolderPermissions(folderId, folderName);
+                        }).catch(err => showNotification('error', err.message || 'Failed to save permission'));
+                    };
+                }
+            })
+            .catch(err => showNotification('error', err.message || 'Failed to load permissions'));
+    }
 }
 
 function initTagAddInline() {
@@ -835,13 +1080,19 @@ function initStatusFilterButtons() {
     statusButtons.forEach(btn => {
         btn.addEventListener('click', function() {
             const filterKey = this.dataset.filter; // e.g., 'status_cbct' or legacy 'ios'
+            const isReports = filterKey === 'reports';
             const isDynamic = filterKey.startsWith('status_');
             const currentValue = this.dataset.value || '';
             
             let newValue, newClass;
             
+            // Reports filter: '' -> yes (green) -> '' (gray)
+            if (isReports) {
+                if (currentValue === '') { newValue = 'yes'; newClass = 'status-green'; }
+                else { newValue = ''; newClass = 'status-gray'; }
+            }
             // Dynamic filters cycle: '' -> processed (green) -> processing (yellow) -> failed (red) -> ''
-            if (isDynamic) {
+            else if (isDynamic) {
                 if (currentValue === '') { newValue = 'processed'; newClass = 'status-green'; }
                 else if (currentValue === 'processed') { newValue = 'processing'; newClass = 'status-yellow'; }
                 else if (currentValue === 'processing') { newValue = 'failed'; newClass = 'status-red'; }
@@ -879,7 +1130,8 @@ function initializeStatusButtonStates() {
         { filter: 'ios', inputId: 'iosFilterValue', buttonSelector: '[data-filter="ios"]' },
         { filter: 'cbct', inputId: 'cbctFilterValue', buttonSelector: '[data-filter="cbct"]' },
         { filter: 'bite', inputId: 'biteFilterValue', buttonSelector: '[data-filter="bite"]' },
-        { filter: 'voice', inputId: 'voiceFilterValue', buttonSelector: '[data-filter="voice"]' }
+        { filter: 'voice', inputId: 'voiceFilterValue', buttonSelector: '[data-filter="voice"]' },
+        { filter: 'reports', inputId: 'reportsFilterValue', buttonSelector: '[data-filter="reports"]' }
     ];
     legacyMappings.forEach(mapping => {
         const input = document.getElementById(mapping.inputId);
@@ -923,7 +1175,8 @@ function updateButtonTitle(button, filterKey, value) {
             'ios': { '': 'All IOS (no filter)', 'yes': 'Has IOS', 'no': 'No IOS', 'failed': 'IOS Failed' },
             'cbct': { '': 'All CBCT (no filter)', 'yes': 'Has CBCT', 'no': 'No CBCT', 'failed': 'CBCT Failed' },
             'bite': { '': 'All Bite (no filter)', 'yes': 'Has Bite Classification', 'no': 'No Bite Classification', 'failed': 'Bite Classification Failed' },
-            'voice': { '': 'All Voice (no filter)', 'yes': 'Has Voice', 'no': 'No Voice', 'failed': 'Voice Failed' }
+            'voice': { '': 'All Voice (no filter)', 'yes': 'Has Voice', 'no': 'No Voice', 'failed': 'Voice Failed' },
+            'reports': { '': 'All Reports (no filter)', 'yes': 'Has Reports' }
         };
         const title = value ? (filterLabels[filter] && filterLabels[filter][value]) : (filterLabels[filter] && filterLabels[filter]['']);
         button.title = title || '';
@@ -994,6 +1247,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initFilterRemoveButtons();
     initBulkSelection();
     initCreateFolder();
+    initFolderContextMenu();
     initTagAddInline();
     initTagFilter();
     initStatusFilterButtons();

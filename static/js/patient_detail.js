@@ -635,6 +635,73 @@ function escapeHtml(text) {
     return div.innerHTML;
 } 
 
+function initFileManagement() {
+    const addBtn = document.getElementById('addRawFileBtn');
+    const fileTypeSelect = document.getElementById('rawFileTypeSelect');
+    const fileInput = document.getElementById('rawFileInput');
+
+    if (addBtn && fileTypeSelect && fileInput) {
+        addBtn.addEventListener('click', () => {
+            const fileType = (fileTypeSelect.value || '').trim();
+            const file = fileInput.files && fileInput.files[0];
+            if (!fileType) {
+                notify('error', 'Select a raw file type');
+                return;
+            }
+            if (!file) {
+                notify('error', 'Select a file to upload');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file_type', fileType);
+            formData.append('file', file);
+
+            const headers = {};
+            const token = getCSRFToken();
+            if (token) {
+                headers['X-CSRFToken'] = token;
+            }
+
+            fetch(`/${window.projectNamespace}/patient/${window.scanId}/files/raw/add/`, {
+                method: 'POST',
+                headers,
+                body: formData,
+            })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.error || 'Failed to add raw file');
+                    }
+                    showSavedIndicator();
+                    window.location.reload();
+                })
+                .catch(error => notify('error', error.message || 'Network error'));
+        });
+    }
+
+    document.querySelectorAll('.btn-delete-raw-file').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const fileId = btn.dataset.fileId;
+            const fileName = btn.dataset.fileName || 'this file';
+            if (!fileId) return;
+            if (!window.confirm(`Delete raw file "${fileName}"? Related processed files will be removed and the job will be marked failed.`)) {
+                return;
+            }
+
+            postJson(`/${window.projectNamespace}/patient/${window.scanId}/files/raw/${fileId}/delete/`, {})
+                .then((data) => {
+                    if (!data.success) {
+                        throw new Error(data.error || 'Failed to remove raw file');
+                    }
+                    showSavedIndicator();
+                    window.location.reload();
+                })
+                .catch((error) => notify('error', error.message || 'Network error'));
+        });
+    });
+}
+
 // Initialize everything when page loads
 document.addEventListener('DOMContentLoaded', function() {
     console.debug('DOM Content Loaded - initializing...');
@@ -695,4 +762,5 @@ document.addEventListener('DOMContentLoaded', function() {
     initConfirmReview();
     initViewerToggle();
     initTagManagement();
+    initFileManagement();
 });

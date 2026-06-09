@@ -14,24 +14,20 @@
                 <i class="fas fa-tag text-primary"></i>
                 <small class="text-muted">Scan name:</small>
                 <small class="scan-name-display"><strong>{{ patient.name|default:"Unnamed scan" }}</strong></small>
-                {% if user_profile.is_annotator %}
+                {% if can_modify_segmentation %}
                     <button class="btn btn-sm btn-outline-secondary btn-edit-name" title="Edit scan name">
                         <i class="fas fa-edit"></i>
                     </button>
                 {% endif %}
             </div>
 
-            {% if user_profile.is_annotator %}
+            {% if can_modify_segmentation %}
                 <form method="post" class="scan-management-form">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update_management">
                     {{ management_form.name.as_hidden }}
 
                     <div class="row g-2">
-                        <div class="col-12 col-sm-6">
-                            <label class="form-label-sm"><i class="fas fa-eye me-1"></i>{{ management_form.visibility.label }}</label>
-                            {{ management_form.visibility }}
-                        </div>
                         <div class="col-12 col-sm-6">
                             <label class="form-label-sm"><i class="fas fa-database me-1"></i>{{ management_form.dataset.label }}</label>
                             {{ management_form.dataset }}

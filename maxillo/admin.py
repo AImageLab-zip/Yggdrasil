@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db.models import Count
 from django.contrib.auth.models import User
 from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
 from common.models import Project, Modality, ProjectAccess, Job, FileRegistry, Invitation
@@ -6,21 +7,15 @@ from .models import Tag, Folder
 
 
 class ReadOnlyAdminMixin:
-    """Mixin to make admin interface read-only for Student Developers"""
+    """Standard admin permissions."""
     
     def has_add_permission(self, request):
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            return False
         return super().has_add_permission(request)
     
     def has_change_permission(self, request, obj=None):
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            return False
         return super().has_change_permission(request, obj)
     
     def has_delete_permission(self, request, obj=None):
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            return False
         return super().has_delete_permission(request, obj)
 
 
@@ -41,8 +36,6 @@ class PatientAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            return qs.filter(visibility='debug')
         return qs
 
 
@@ -79,11 +72,7 @@ class ClassificationAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     readonly_fields = ['timestamp']
     
     def get_queryset(self, request):
-        """Filter classifications based on user role"""
         qs = super().get_queryset(request)
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            # Student developers can only see classifications for debug patients
-            return qs.filter(patient__visibility='debug')
         return qs
 
 
@@ -100,8 +89,6 @@ class IntraoralToothSegmentationAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related('patient', 'image_file', 'updated_by')
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            return qs.filter(patient__visibility='debug')
         return qs
 
 
@@ -118,11 +105,7 @@ class VoiceCaptionAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         return self.readonly_fields
     
     def get_queryset(self, request):
-        """Filter voice captions based on user role"""
         qs = super().get_queryset(request)
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            # Student developers can only see voice captions for debug patients
-            return qs.filter(patient__visibility='debug')
         return qs
 
 
@@ -131,6 +114,7 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ['id', 'modality_slug', 'status', 'patient', 'voice_caption', 'priority', 'dependencies_count', 'created_at', 'started_at', 'completed_at', 'retry_count']
     list_filter = ['modality_slug', 'status', 'created_at', 'started_at', 'completed_at', 'priority', ('dependencies', admin.EmptyFieldListFilter)]
     search_fields = ['patient__patient_id', 'voice_caption__id', 'worker_id']
+    autocomplete_fields = ['dependencies']
     readonly_fields = ['created_at', 'started_at', 'completed_at', 'dependencies_list']
     
     fieldsets = (
@@ -142,7 +126,7 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
             'description': 'Jobs that must complete before this job can start'
         }),
         ('Files & Processing', {
-            'fields': ('input_file_path', 'output_files')
+            'fields': ('input_files', 'output_files')
         }),
         ('Timing', {
             'fields': ('created_at', 'started_at', 'completed_at')
@@ -158,12 +142,14 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj and obj.status in ['processing', 'completed']:
             # Prevent editing jobs that are being processed or completed
-            return self.readonly_fields + ['modality_slug', 'patient', 'voice_caption', 'input_file_path']
+            return self.readonly_fields + ['modality_slug', 'patient', 'voice_caption', 'input_files']
         return self.readonly_fields
     
     def dependencies_count(self, obj):
         """Display the number of dependencies for this job"""
-        count = obj.dependencies.count()
+        count = getattr(obj, 'dependencies_count_annotated', None)
+        if count is None:
+            count = obj.dependencies.count()
         if count == 0:
             return "-"
         return f"{count} dep(s)"
@@ -181,11 +167,10 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     dependencies_list.short_description = "Dependency Jobs"
     
     def get_queryset(self, request):
-        """Optimize queryset to include dependencies count and filter based on user role"""
-        qs = super().get_queryset(request).prefetch_related('dependencies')
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            # Student developers can only see processing jobs for debug patients
-            return qs.filter(patient__visibility='debug')
+        """Optimize queryset for changelist dependency rendering."""
+        qs = super().get_queryset(request).annotate(
+            dependencies_count_annotated=Count('dependencies', distinct=True)
+        )
         return qs
     
     def get_fieldsets(self, request, obj=None):
@@ -193,10 +178,13 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         fieldsets = list(super().get_fieldsets(request, obj))
         
         # Add dependent jobs info if this job has dependents
-        if obj and obj.dependent_jobs.exists():
+        dependent_count = 0
+        if obj:
+            dependent_count = obj.dependent_jobs.count()
+        if dependent_count:
             dependent_info = {
                 'fields': (),
-                'description': f'This job has {obj.dependent_jobs.count()} dependent job(s) waiting for it to complete'
+                'description': f'This job has {dependent_count} dependent job(s) waiting for it to complete'
             }
             fieldsets.append(('Dependent Jobs', dependent_info))
         
@@ -272,11 +260,7 @@ class FileRegistryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         return self.readonly_fields
     
     def get_queryset(self, request):
-        """Filter file registry based on user role"""
         qs = super().get_queryset(request)
-        if hasattr(request.user, 'profile') and request.user.profile.is_student_developer():
-            # Student developers can only see files for debug patients
-            return qs.filter(patient__visibility='debug')
         return qs
 
 

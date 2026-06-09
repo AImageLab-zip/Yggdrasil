@@ -21,9 +21,9 @@ def current_project(request):
     user = getattr(request, 'user', None)
     try:
         if user and user.is_authenticated:
-            # Admins and student developers can see all projects
+            # Admins can see all projects
             # Use getattr checks to avoid attribute errors if profile is missing
-            if user.is_staff or getattr(getattr(user, 'profile', None), 'is_admin', False) or getattr(getattr(user, 'profile', None), 'is_student_developer', False):
+            if user.is_staff or getattr(getattr(user, 'profile', None), 'is_admin', False):
                 all_projects = Project.objects.filter(is_active=True).order_by('name')
             else:
                 # Regular users only see projects they have access to

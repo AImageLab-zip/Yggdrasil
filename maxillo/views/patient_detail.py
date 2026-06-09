@@ -9,9 +9,15 @@ import os
 import logging
 
 from common.file_access import exists as artifact_exists
+from common.permissions import (
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 
 from .domain import get_domain_forms, get_domain_models, get_namespace
 from .helpers import redirect_with_namespace, render_with_fallback
+from ..file_utils import get_file_type_for_modality
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +31,10 @@ def patient_detail(request, patient_id):
 
     patient = get_object_or_404(Patient, patient_id=patient_id)
     user_profile = request.user.profile
-    
-    can_view = False
-    if user_profile.is_admin():
+    can_view = bool(patient.folder and user_can_read_folder(request.user, patient.folder, request))
+    if user_is_project_admin(request.user, request):
         can_view = True
-    elif user_profile.is_annotator() and patient.visibility != 'debug':
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == 'debug':
-        can_view = True
-    elif patient.visibility == 'public':
-        can_view = True
-    
+
     if not can_view:
         messages.error(request, 'You do not have permission to view this scan.')
         return redirect_with_namespace(request, 'patient_list')
@@ -49,8 +48,6 @@ def patient_detail(request, patient_id):
     try:
         raw_cbct = patient.get_cbct_raw_file()
         if raw_cbct and artifact_exists(raw_cbct.file_path):
-            has_cbct = True
-        elif patient.cbct:  # Fallback to old field
             has_cbct = True
     except:
         pass
@@ -66,18 +63,14 @@ def patient_detail(request, patient_id):
             )
 
         for panoramic_entry in panoramic_candidates:
-            if panoramic_entry.file_path and os.path.exists(panoramic_entry.file_path):
+            if panoramic_entry.file_path and artifact_exists(panoramic_entry.file_path):
                 has_uploaded_panoramic = True
                 break
     except Exception as e:
         logger.warning(f"Error checking uploaded panoramic availability: {e}")
     
-    can_modify = False
-    if user_profile.is_admin():
-        can_modify = True
-    elif user_profile.is_annotator() and patient.visibility != 'debug':
-        can_modify = True
-    elif user_profile.is_student_developer() and patient.visibility == 'debug':
+    can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    if user_is_project_admin(request.user, request):
         can_modify = True
     
     if request.method == 'POST' and can_modify:
@@ -135,9 +128,6 @@ def patient_detail(request, patient_id):
                 
                 if reprocess_ios and (has_upper_scan or has_lower_scan):
                     patient.classifications.filter(classifier='pipeline').delete()
-                    patient.upper_scan_norm = None
-                    patient.lower_scan_norm = None
-                    patient.ios_processing_status = 'processing'
                     patient.save()
                     
                     try:
@@ -154,9 +144,6 @@ def patient_detail(request, patient_id):
                         messages.error(request, f'Error uploading IOS scan(s): {e}')
                 
                 if reprocess_cbct and (has_cbct_file or has_cbct_folder):
-                    patient.cbct_processing_status = 'processing'
-                    patient.save()
-                    
                     if has_cbct_folder:
                         try:
                             from ..file_utils import save_cbct_folder_to_dataset
@@ -223,7 +210,8 @@ def patient_detail(request, patient_id):
     except Exception:
         patient_modalities = []
 
-    if not has_uploaded_panoramic:
+    has_panoramic = has_uploaded_panoramic or has_cbct
+    if not has_panoramic:
         patient_modalities = [m for m in patient_modalities if m.get('slug') != 'panoramic']
 
     has_intraoral_modality = any(
@@ -298,10 +286,14 @@ def patient_detail(request, patient_id):
         logger.error(f"Error organizing patient files: {e}")
 
 
-    # Voice captions -- filter only captions made by the current user for all captions
+    # Voice captions
+    # Non-admin users can see caption metadata for all captions, but only access
+    # content (text/audio) for their own captions.
     voice_captions = patient.voice_captions.all()
-    if not user_profile.is_admin() and not user_profile.is_project_manager(): # and patient.patient_id in [4646, 4891]:
-        voice_captions = voice_captions.filter(user=request.user)
+    is_admin_user = user_is_project_admin(request.user, request)
+    for caption in voice_captions:
+        caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.is_ghost = not caption.can_view_content
 
     # Build modality files lookup for drag-drop grid
     modality_files = {}
@@ -362,7 +354,7 @@ def patient_detail(request, patient_id):
         'user_profile': user_profile,
         'management_form': management_form,
         'has_cbct': has_cbct,
-        'has_uploaded_panoramic': has_uploaded_panoramic,
+        'has_panoramic': has_panoramic,
         'has_intraoral_modality': has_intraoral_modality,
         'can_modify_segmentation': can_modify,
         'patient_modalities': patient_modalities,
@@ -371,6 +363,7 @@ def patient_detail(request, patient_id):
         'default_modality_json': default_modality_json,
         'patient_files': patient_files,
         'voice_captions': voice_captions,
+        'is_admin_user': is_admin_user,
         'modality_files': modality_files,
         'modality_files_json': modality_files_json,
     }
@@ -386,8 +379,55 @@ def patient_detail(request, patient_id):
             # Fallback: get all active modalities
             from common.models import Modality as _Modality
             allowed_modalities = list(_Modality.objects.filter(is_active=True))
+
+        raw_file_type_options = []
+        seen_raw_types = set()
+        valid_file_types = set()
+        try:
+            from common.models import FileRegistry as _FileRegistry
+
+            valid_file_types = set(_FileRegistry.get_file_type_choices_dict().keys())
+        except Exception:
+            valid_file_types = set()
+
+        for modality in allowed_modalities:
+            slug = (getattr(modality, 'slug', '') or '').strip()
+            if not slug:
+                continue
+
+            display_name = (
+                (getattr(modality, 'label', '') or '').strip()
+                or (getattr(modality, 'name', '') or '').strip()
+                or slug.upper()
+            )
+
+            subtype_values = [s for s in (getattr(modality, 'subtypes', None) or []) if str(s).strip()]
+            if slug == 'ios' and not subtype_values:
+                subtype_values = ['upper', 'lower']
+
+            candidates = []
+            if subtype_values:
+                for subtype in subtype_values:
+                    raw_type = get_file_type_for_modality(slug, is_processed=False, subtype=str(subtype).strip())
+                    subtype_label = str(subtype).replace('_', ' ').title()
+                    candidates.append((raw_type, f"{display_name} {subtype_label}"))
+            else:
+                raw_type = get_file_type_for_modality(slug, is_processed=False)
+                candidates.append((raw_type, display_name))
+
+            for raw_type, label in candidates:
+                if not raw_type or '_raw' not in raw_type:
+                    continue
+                if valid_file_types and raw_type not in valid_file_types:
+                    continue
+                if raw_type in seen_raw_types:
+                    continue
+                seen_raw_types.add(raw_type)
+                raw_file_type_options.append({'value': raw_type, 'label': label})
+
         context['allowed_modalities'] = allowed_modalities
         context['allowed_modality_slugs'] = [m.slug for m in allowed_modalities]
+        context['raw_file_type_options'] = raw_file_type_options
     except Exception:
         pass
     try:
@@ -434,12 +474,8 @@ def update_patient_name(request, patient_id):
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
         
-        can_modify = False
-        if user_profile.is_admin():
-            can_modify = True
-        elif user_profile.is_annotator() and patient.visibility != 'debug':
-            can_modify = True
-        elif user_profile.is_student_developer() and patient.visibility == 'debug':
+        can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+        if user_is_project_admin(request.user, request):
             can_modify = True
         
         if not can_modify:

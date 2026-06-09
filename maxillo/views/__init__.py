@@ -20,13 +20,24 @@ from .patient_upload import upload_patient
 from .classification import update_classification
 
 # Folder and tag management
-from .folders_tags import create_folder, move_patients_to_folder, add_patient_tag, remove_patient_tag
+from .folders_tags import (
+    create_folder,
+    move_patients_to_folder,
+    add_patient_tag,
+    remove_patient_tag,
+    folder_stats,
+    folder_permissions,
+    upsert_folder_permission,
+    delete_folder_permission,
+    rename_folder,
+)
 
 # Deletion
 from .deletion import delete_patient, bulk_delete_patients
 
 # Patient detail and management
 from .patient_detail import patient_detail, update_patient_name
+from .file_management import add_raw_file, delete_raw_file
 
 # Patient data API endpoints
 from .patient_data import (
@@ -37,6 +48,7 @@ from .patient_data import (
     patient_intraoral_data,
     patient_teleradiography_data,
     patient_panoramic_data,
+    save_rgb_image_edit,
 )
 
 # Intraoral segmentation APIs
@@ -55,7 +67,7 @@ from .voice_captions import (
 )
 
 # Admin
-from .admin import rerun_processing, admin_control_panel
+from .admin import rerun_processing, bulk_rerun_processing, admin_control_panel
 
 # Metadata
 from .metadata import get_nifti_metadata, update_nifti_metadata
@@ -74,6 +86,7 @@ from .export import (
     export_shared_landing,
     export_shared_download,
     export_delete,
+    export_stop,
 )
 
 # Export all functions
@@ -94,6 +107,8 @@ __all__ = [
     # Detail
     'patient_detail',
     'update_patient_name',
+    'add_raw_file',
+    'delete_raw_file',
     # Classification
     'update_classification',
     # Data APIs
@@ -104,6 +119,7 @@ __all__ = [
     'patient_intraoral_data',
     'patient_teleradiography_data',
     'patient_panoramic_data',
+    'save_rgb_image_edit',
     'patient_intraoral_segmentation_data',
     'update_patient_intraoral_segmentation',
     # Voice captions
@@ -117,6 +133,7 @@ __all__ = [
     'bulk_delete_patients',
     # Admin
     'rerun_processing',
+    'bulk_rerun_processing',
     'admin_control_panel',
     # Metadata
     'get_nifti_metadata',
@@ -126,6 +143,11 @@ __all__ = [
     'move_patients_to_folder',
     'add_patient_tag',
     'remove_patient_tag',
+    'folder_stats',
+    'folder_permissions',
+    'upsert_folder_permission',
+    'delete_folder_permission',
+    'rename_folder',
     # Profile
     'user_profile',
     # Export
@@ -138,4 +160,5 @@ __all__ = [
     'export_shared_landing',
     'export_shared_download',
     'export_delete',
+    'export_stop',
 ]

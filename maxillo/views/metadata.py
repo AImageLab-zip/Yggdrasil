@@ -8,6 +8,7 @@ import logging
 
 from common.file_access import exists as artifact_exists
 from common.object_storage import download_to_tempfile, get_object_storage
+from common.permissions import user_can_edit_metadata, user_can_read_folder, user_is_project_admin
 
 from .domain import get_domain_models, get_namespace
 
@@ -20,20 +21,7 @@ def get_nifti_metadata(request, patient_id):
     try:
         Patient = get_domain_models(request)["Patient"]
         patient = get_object_or_404(Patient, patient_id=patient_id)
-        user_profile = request.user.profile
-
-        # Check permissions based on scan visibility and user role
-        can_view = False
-        if user_profile.is_admin():
-            can_view = True
-        elif user_profile.is_annotator() and patient.visibility != "debug":
-            can_view = True
-        elif user_profile.is_student_developer() and patient.visibility == "debug":
-            can_view = True
-        elif patient.visibility == "public":
-            can_view = True
-
-        if not can_view:
+        if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_read_folder(request.user, patient.folder, request))):
             return JsonResponse({"error": "Permission denied"}, status=403)
 
         # Check if CBCT exists
@@ -186,7 +174,7 @@ def get_nifti_metadata(request, patient_id):
             try:
                 # Ensure all values are JSON-serializable
                 data_type_str = str(header.get_data_dtype())
-                can_edit_bool = bool(user_profile.is_admin)
+                can_edit_bool = bool(user_is_project_admin(request.user, request))
 
                 metadata = {
                     "affine": affine,  # Already converted to list by .tolist()
@@ -217,7 +205,7 @@ def get_nifti_metadata(request, patient_id):
                         "data_type": "unknown",
                         "units": {"spatial": "unknown", "temporal": "unknown"},
                         "description": "",
-                        "can_edit": bool(user_profile.is_admin),
+                        "can_edit": bool(user_is_project_admin(request.user, request)),
                     }
                     return JsonResponse(fallback_metadata)
                 except Exception as fallback_error:
@@ -244,6 +232,9 @@ def update_nifti_metadata(request, patient_id):
         Patient = get_domain_models(request)["Patient"]
         patient = get_object_or_404(Patient, patient_id=patient_id)
         domain = get_namespace(request)
+
+        if not user_can_edit_metadata(request.user, patient):
+            return JsonResponse({"error": "Permission denied"}, status=403)
 
         # Check if CBCT exists
         if not patient.has_cbct_scan():
@@ -356,13 +347,6 @@ def update_nifti_metadata(request, patient_id):
                     brain_patient=patient,
                     modality_slug="metadata_update",
                     status="completed",
-                    output_files={
-                        "updated_by": request.user.username,
-                        "changes": {
-                            "origin": new_origin,
-                            "affine": new_affine is not None,
-                        },
-                    },
                 )
             else:
                 Job.objects.create(
@@ -370,13 +354,6 @@ def update_nifti_metadata(request, patient_id):
                     patient=patient,
                     modality_slug="metadata_update",
                     status="completed",
-                    output_files={
-                        "updated_by": request.user.username,
-                        "changes": {
-                            "origin": new_origin,
-                            "affine": new_affine is not None,
-                        },
-                    },
                 )
 
             # Return updated metadata

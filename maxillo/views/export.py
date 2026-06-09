@@ -6,16 +6,21 @@ from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from django.http import JsonResponse, Http404
 from django.views.decorators.http import require_POST, require_http_methods
+from django.db import OperationalError
 from django.db.models import Q, Count, Sum
 from django.urls import reverse
 from django.utils import timezone
 import os
 import json
 import logging
+import time
+import signal
+import subprocess
 
 from common.models import Modality, FileRegistry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
+from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
 from .domain import get_domain_models, get_namespace
 from .helpers import redirect_with_namespace
 
@@ -45,7 +50,7 @@ EXPORT_MODALITY_FILE_TYPES = {
     },
     "intraoral-photo": {
         "raw": ["intraoral_raw"],
-        "processed": ["intraoral_processed"],
+        "processed": ["intraoral-photo_processed"],
     },
     "teleradiography": {
         "raw": ["teleradiography_raw"],
@@ -218,12 +223,22 @@ def _laparoscopy_export_preview(folder_ids):
             "estimated_size_bytes": size_bytes,
         }
     )
+def _can_use_exports(request):
+    if user_is_project_admin(request.user, request):
+        return True
+    FolderModel = get_domain_models(request)["Folder"]
+    for folder in FolderModel.objects.filter(parent__isnull=True).only("id"):
+        if user_can_create_export(request.user, folder, request):
+            return True
+    return False
 
 
 @login_required
-@user_passes_test(is_admin)
 def export_list(request):
     """Display export history page with all previous exports."""
+    if not _can_use_exports(request):
+        messages.error(request, "You do not have permission to access exports.")
+        return redirect_with_namespace(request, "patient_list")
     ExportModel = get_domain_models(request)["Export"]
     exports = ExportModel.objects.filter(user=request.user).order_by("-created_at")
 
@@ -267,10 +282,12 @@ def export_list(request):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_http_methods(["GET", "POST"])
 def export_new(request):
     """Create new export page with folder/modality selection."""
+    if not _can_use_exports(request):
+        messages.error(request, "You do not have permission to create exports.")
+        return redirect_with_namespace(request, "patient_list")
     domain_models = get_domain_models(request)
     ExportModel = domain_models["Export"]
     if get_namespace(request) == "laparoscopy":
@@ -286,6 +303,7 @@ def export_new(request):
         include_raw, include_processed = _resolve_content_selection(
             request.POST, default_when_missing=False
         )
+        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
 
         # Get filters
         filters = {}
@@ -299,15 +317,22 @@ def export_new(request):
             messages.error(request, "Please select at least one folder.")
             return redirect_with_namespace(request, "export_new")
 
+        FolderModel = domain_models["Folder"]
+        selected_folders = FolderModel.objects.filter(id__in=[int(fid) for fid in folder_ids])
+        for folder in selected_folders:
+            if not user_can_create_export(request.user, folder, request):
+                messages.error(request, "You do not have permission to export from selected folders.")
+                return redirect_with_namespace(request, "export_new")
+
         # Require at least one selection (can be a modality and/or reports only)
         if not modality_slugs:
             messages.error(request, "Please select at least one modality.")
             return redirect_with_namespace(request, "export_new")
 
-        if not include_raw and not include_processed:
+        if not include_raw and not include_processed and not include_reports:
             messages.error(
                 request,
-                "Please select at least one content type: Raw files and/or Processed files.",
+                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
             )
             return redirect_with_namespace(request, "export_new")
 
@@ -319,25 +344,18 @@ def export_new(request):
             "filters": filters,
             "include_raw": include_raw,
             "include_processed": include_processed,
+            "include_reports": include_reports,
         }
 
         # Generate query summary
         folder_count = len(folder_ids)
         modality_names = []
-        include_reports = False
         for slug in modality_slugs:
-            if slug == "reports":
-                include_reports = True
-            else:
-                try:
-                    modality = Modality.objects.get(slug=slug)
-                    modality_names.append(modality.name)
-                except Modality.DoesNotExist:
-                    modality_names.append(slug)
-
-        # Add Reports to summary if selected
-        if include_reports:
-            modality_names.append("Reports")
+            try:
+                modality = Modality.objects.get(slug=slug)
+                modality_names.append(modality.name)
+            except Modality.DoesNotExist:
+                modality_names.append(slug)
 
         filter_parts = []
         if filters.get("has_cbct"):
@@ -366,6 +384,8 @@ def export_new(request):
             selected_content.append("Raw")
         if include_processed:
             selected_content.append("Processed")
+        if include_reports:
+            selected_content.append("Reports")
         query_summary_parts.append(f"Content: {' + '.join(selected_content)}")
 
         query_summary = ", ".join(query_summary_parts)
@@ -389,6 +409,7 @@ def export_new(request):
 
     # GET request - show form
     folders = FolderModel.objects.filter(parent__isnull=True).order_by("name")
+    folders = filter_folders_for_user(request.user, folders, get_namespace(request))
 
     # Get patient counts for folders
     folders_with_counts = []
@@ -416,10 +437,11 @@ def export_new(request):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_http_methods(["POST", "GET"])
 def export_preview(request):
     """AJAX endpoint to get export statistics based on selected criteria."""
+    if not _can_use_exports(request):
+        return JsonResponse({"error": "Permission denied"}, status=403)
     try:
         domain_models = get_domain_models(request)
         PatientModel = domain_models["Patient"]
@@ -436,6 +458,7 @@ def export_preview(request):
         modality_slugs = data.get("modality_slugs", [])
         filters = data.get("filters", {})
         include_raw, include_processed = _resolve_content_selection(data)
+        include_reports = _coerce_bool(data.get("include_reports"), default=False)
         file_type_map = _file_type_map_for_selection(include_raw, include_processed)
 
         # Convert to proper types
@@ -525,52 +548,30 @@ def export_preview(request):
         for key, value in filters.items():
             if key.startswith("has_reports_") and value:
                 modality_slug = key.replace("has_reports_", "")
-                # Patients with files for this modality AND voice captions
-                try:
-                    modality = Modality.objects.get(slug=modality_slug)
-                    # Get patients with voice captions for this modality
-                    report_patients = (
-                        PatientModel.objects.filter(
-                            voice_captions__modality=modality,
-                            voice_captions__text_caption__isnull=False,
-                        )
-                        .exclude(voice_captions__text_caption="")
-                        .distinct()
+                report_patients = (
+                    PatientModel.objects.filter(
+                        voice_captions__modality=modality_slug,
+                        voice_captions__text_caption__isnull=False,
                     )
-                    patients = patients.filter(
-                        patient_id__in=report_patients.values_list(
-                            "patient_id", flat=True
-                        )
+                    .exclude(voice_captions__text_caption="")
+                    .distinct()
+                )
+                patients = patients.filter(
+                    patient_id__in=report_patients.values_list(
+                        "patient_id", flat=True
                     )
-                except Modality.DoesNotExist:
-                    pass
+                )
 
         patient_count = patients.count()
         folder_count = len(folder_ids) if folder_ids else 0
-        actual_modality_slugs = (
-            [slug for slug in modality_slugs if slug != "reports"]
-            if modality_slugs
-            else []
-        )
-        # When reports-only, count as 1 modality for display
-        modality_count = (
-            len(actual_modality_slugs)
-            if actual_modality_slugs
-            else (1 if modality_slugs else 0)
-        )
-
-        # Calculate file count and size estimate
-        # Separate reports from actual modalities
-        include_reports = "reports" in modality_slugs
-        actual_modality_slugs = [slug for slug in modality_slugs if slug != "reports"]
+        modality_count = len(modality_slugs) if modality_slugs else 0
 
         if patient_count > 0:
             file_count = 0
             total_size = 0
-            if actual_modality_slugs:
-                # Get files for selected modalities
+            if modality_slugs and (include_raw or include_processed):
                 file_types = []
-                for slug in actual_modality_slugs:
+                for slug in modality_slugs:
                     file_types.extend(file_type_map.get(slug, []))
                 file_filter = {
                     "domain": domain,
@@ -581,27 +582,13 @@ def export_preview(request):
                 file_count = files.count()
                 total_size = files.aggregate(total=Sum("file_size"))["total"] or 0
 
-            # Add voice caption reports if reports are selected (selected modalities or all when reports-only)
-            if include_reports:
-                report_modality_slugs = (
-                    actual_modality_slugs
-                    if actual_modality_slugs
-                    else list(
-                        Modality.objects.filter(is_active=True).values_list(
-                            "slug", flat=True
-                        )
-                    )
-                )
-                modality_objects = Modality.objects.filter(
-                    slug__in=report_modality_slugs
-                )
+            if include_reports and modality_slugs:
                 voice_captions = VoiceCaptionModel.objects.filter(
                     patient__in=patients,
-                    modality__in=modality_objects,
+                    modality__in=modality_slugs,
                     text_caption__isnull=False,
                 ).exclude(text_caption="")
-                voice_caption_count = voice_captions.count()
-                file_count += voice_caption_count
+                file_count += voice_captions.count()
                 for vc in voice_captions:
                     total_size += len(vc.text_caption.encode("utf-8"))
         else:
@@ -903,22 +890,171 @@ def export_delete(request, export_id):
             {"success": False, "error": "Permission denied"}, status=403
         )
 
+    file_path = export.file_path
+
+    # Delete DB row first (fast), retry on transient lock waits.
+    deleted = False
+    max_attempts = 4
+    for attempt in range(max_attempts):
+        try:
+            deleted_count, _ = get_domain_models(request)["Export"].objects.filter(
+                id=export_id
+            ).delete()
+            deleted = deleted_count > 0
+            break
+        except OperationalError as e:
+            msg = str(e)
+            is_lock_timeout = "1205" in msg or "Lock wait timeout exceeded" in msg
+            if not is_lock_timeout or attempt == max_attempts - 1:
+                logger.error(f"Error deleting export {export_id}: {e}", exc_info=True)
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "Database is busy. Please retry in a few seconds.",
+                    },
+                    status=409,
+                )
+            time.sleep(0.4 * (attempt + 1))
+        except Exception as e:
+            logger.error(f"Error deleting export {export_id}: {e}", exc_info=True)
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+    if not deleted:
+        return JsonResponse(
+            {"success": False, "error": "Export not found or already deleted."},
+            status=404,
+        )
+
+    # Best effort object cleanup after DB deletion.
+    if file_path:
+        try:
+            get_object_storage().delete(file_path)
+        except Exception as e:
+            logger.warning(f"Could not delete export file {file_path}: {e}")
+
+    return JsonResponse({"success": True})
+
+
+def _kill_export_processes(export_id):
+    """Best-effort kill of run_export worker process(es) for one export id."""
+    killed_pids = []
     try:
-        # Optionally delete file
-        if export.file_path:
+        result = subprocess.run(
+            ["pgrep", "-f", f"manage.py run_export {int(export_id)}"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return killed_pids
+
+        for line in (result.stdout or "").splitlines():
+            line = (line or "").strip()
+            if not line:
+                continue
             try:
-                get_object_storage().delete(export.file_path)
+                pid = int(line)
+            except ValueError:
+                continue
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed_pids.append(pid)
+            except ProcessLookupError:
+                continue
+            except Exception:
+                continue
+    except Exception:
+        return killed_pids
+
+    # Escalate to SIGKILL if still alive after short grace period
+    if killed_pids:
+        time.sleep(0.8)
+        for pid in list(killed_pids):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            except Exception:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+    return killed_pids
+
+
+@login_required
+@user_passes_test(is_admin)
+@require_POST
+def export_stop(request, export_id):
+    """Manually stop a processing export, kill worker, and delete partial ZIPs."""
+    ExportModel = get_domain_models(request)["Export"]
+    export = get_object_or_404(ExportModel, id=export_id)
+
+    if export.user != request.user and not request.user.is_staff:
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    if export.status not in {"processing", "pending"}:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": f"Export is not running (status: {export.status}).",
+            },
+            status=409,
+        )
+
+    killed_pids = _kill_export_processes(export.id)
+
+    deleted_keys = []
+    storage_warnings = []
+    storage = get_object_storage()
+
+    # Delete known key if already set
+    if export.file_path:
+        try:
+            storage.delete(export.file_path)
+            deleted_keys.append(export.file_path)
+        except Exception as e:
+            storage_warnings.append(f"Could not delete {export.file_path}: {e}")
+
+    # Delete partial/final keys for this export id
+    prefix = f"exports/export_{export.id}_"
+    try:
+        for key in storage.list_keys(prefix):
+            if not key.startswith(prefix) or not key.endswith(".zip"):
+                continue
+            try:
+                storage.delete(key)
+                deleted_keys.append(key)
             except Exception as e:
-                logger.warning(f"Could not delete export file {export.file_path}: {e}")
-
-        # Delete export record
-        export.delete()
-
-        return JsonResponse({"success": True})
-
+                storage_warnings.append(f"Could not delete {key}: {e}")
     except Exception as e:
-        logger.error(f"Error deleting export: {e}", exc_info=True)
-        return JsonResponse({"success": False, "error": str(e)}, status=500)
+        storage_warnings.append(f"Could not list keys for prefix {prefix}: {e}")
+
+    stopped_at = timezone.now().strftime("%Y-%m-%d %H:%M:%S %Z")
+    who = getattr(request.user, "username", "unknown")
+    message = f"Stopped manually by {who} at {stopped_at}."
+    if killed_pids:
+        message += f" Killed worker PID(s): {', '.join(str(p) for p in killed_pids)}."
+    if deleted_keys:
+        message += f" Deleted {len(set(deleted_keys))} ZIP object(s)."
+    if storage_warnings:
+        message += " Storage cleanup had warnings."
+
+    export.mark_failed(message)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "killed_pids": killed_pids,
+            "deleted_keys": sorted(set(deleted_keys)),
+            "warnings": storage_warnings,
+            "status": "failed",
+            "error_message": message,
+        }
+    )
 
 
 def format_file_size(size_bytes):

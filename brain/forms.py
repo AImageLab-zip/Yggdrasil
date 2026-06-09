@@ -1,5 +1,6 @@
 from django import forms
 
+from common.permissions import filter_folders_for_user
 from .models import Classification, Dataset, Folder, Patient, Tag
 
 
@@ -10,18 +11,6 @@ class PatientForm(forms.ModelForm):
 
 
 class PatientUploadForm(forms.ModelForm):
-    cbct = forms.FileField(
-        required=False,
-        label='CBCT File',
-        widget=forms.FileInput(
-            attrs={
-                'class': 'form-control',
-                'accept': '.dcm,.dicom,.nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz',
-            }
-        ),
-    )
-    cbct_upload_type = forms.CharField(widget=forms.HiddenInput(), required=False)
-
     ios_upper = forms.FileField(
         required=False,
         label='IOS - Upper',
@@ -58,31 +47,22 @@ class PatientUploadForm(forms.ModelForm):
 
     class Meta:
         model = Patient
-        fields = ['name', 'visibility', 'folder']
+        fields = ['name', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Patient X'}),
-            'visibility': forms.Select(attrs={'class': 'form-control'}),
         }
         labels = {
             'name': 'Scan Name',
-            'visibility': 'Visibility',
             'folder': 'Folder',
         }
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if user and hasattr(user, 'profile'):
-            if user.profile.is_student_developer():
-                self.fields['visibility'].choices = [('debug', 'Debug')]
-                self.fields['visibility'].initial = 'debug'
-                self.fields['visibility'].widget.attrs['readonly'] = True
-            elif user.profile.is_admin():
-                self.fields['visibility'].choices = Patient.VISIBILITY_CHOICES
-            else:
-                self.fields['visibility'].choices = [
-                    ('public', 'Public'),
-                    ('private', 'Private'),
-                ]
+        if user:
+            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
+            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'brain')
+        else:
+            self.fields['folder'].queryset = Folder.objects.none()
 
     def clean(self):
         cleaned_data = super().clean()
@@ -132,15 +112,13 @@ class PatientManagementForm(forms.ModelForm):
 
     class Meta:
         model = Patient
-        fields = ['name', 'visibility', 'dataset', 'folder']
+        fields = ['name', 'dataset', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Scan name'}),
-            'visibility': forms.Select(attrs={'class': 'form-select form-select-sm'}),
             'dataset': forms.Select(attrs={'class': 'form-select form-select-sm'}),
         }
         labels = {
             'name': 'Name',
-            'visibility': 'Visibility',
             'dataset': 'Dataset',
             'folder': 'Folder',
         }
@@ -149,19 +127,13 @@ class PatientManagementForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['dataset'].empty_label = 'No Dataset'
         self.fields['dataset'].required = False
+        if user:
+            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
+            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'brain')
+        else:
+            self.fields['folder'].queryset = Folder.objects.none()
         if self.instance and self.instance.pk:
             self.fields['tags_text'].initial = ', '.join(self.instance.tag_names())
-
-        if user and hasattr(user, 'profile'):
-            if user.profile.is_student_developer():
-                self.fields['visibility'].choices = [('debug', 'Debug')]
-            elif user.profile.is_admin():
-                self.fields['visibility'].choices = Patient.VISIBILITY_CHOICES
-            else:
-                self.fields['visibility'].choices = [
-                    ('public', 'Public'),
-                    ('private', 'Private'),
-                ]
 
     def clean(self):
         cleaned_data = super().clean()

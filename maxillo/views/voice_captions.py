@@ -9,6 +9,13 @@ import os
 import logging
 
 from common.file_access import exists as artifact_exists
+from common.permissions import (
+    user_can_delete_caption,
+    user_can_edit_caption,
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 
 from .domain import get_domain_models, is_brain_namespace
 
@@ -24,6 +31,9 @@ def upload_voice_caption(request, patient_id):
     VoiceCaption = domain_models['VoiceCaption']
 
     patient = get_object_or_404(Patient, patient_id=patient_id)
+
+    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
     
     try:
         audio_file = request.FILES.get('audio_file')
@@ -106,12 +116,14 @@ def delete_voice_caption(request, patient_id, caption_id):
     VoiceCaption = domain_models['VoiceCaption']
     
     patient = get_object_or_404(Patient, patient_id=patient_id)
+
+    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
     voice_caption = get_object_or_404(VoiceCaption, id=caption_id, patient=patient)
     
     # Check permissions
-    user_profile = request.user.profile
     is_owner = voice_caption.user == request.user
-    is_admin = user_profile.is_admin
+    is_admin = user_is_project_admin(request.user, request)
     
     # If not owner and not admin, deny access
     if not is_owner and not is_admin:
@@ -157,6 +169,9 @@ def upload_text_caption(request, patient_id):
     VoiceCaption = domain_models['VoiceCaption']
     
     patient = get_object_or_404(Patient, patient_id=patient_id)
+
+    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_read_folder(request.user, patient.folder, request))):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
     
     # Check permissions
     if not request.user.is_authenticated:
@@ -233,13 +248,7 @@ def edit_voice_caption_transcription(request, patient_id, caption_id):
     voice_caption = get_object_or_404(VoiceCaption, id=caption_id, patient=patient)
     
     # Check permissions
-    user_profile = request.user.profile
-    is_owner = voice_caption.user == request.user
-    is_admin = user_profile.is_admin
-    is_annotator = user_profile.is_annotator
-    
-    # Only owners, admins, or annotators can edit transcriptions
-    if not (is_owner or is_admin or is_annotator):
+    if not user_can_edit_caption(request.user, voice_caption):
         return JsonResponse({
             'error': 'You do not have permission to edit this transcription.',
             'code': 'permission_denied'
@@ -307,13 +316,7 @@ def update_voice_caption_modality(request, patient_id, caption_id):
         return JsonResponse({'error': 'Modality is not used for brain voice captions.'}, status=400)
     
     # Check permissions
-    user_profile = request.user.profile
-    is_owner = voice_caption.user == request.user
-    is_admin = user_profile.is_admin
-    is_annotator = user_profile.is_annotator
-    
-    # Only owners, admins, or annotators can edit modality
-    if not (is_owner or is_admin or is_annotator):
+    if not user_can_edit_caption(request.user, voice_caption):
         return JsonResponse({
             'error': 'You do not have permission to edit this caption.',
             'code': 'permission_denied'

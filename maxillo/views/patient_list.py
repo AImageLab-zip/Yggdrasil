@@ -9,6 +9,12 @@ from django.db.models import Q
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import render_with_fallback
 from common.models import Project, ProjectAccess
+from common.permissions import (
+    filter_folders_for_user,
+    filter_patients_for_user,
+    user_can_delete_single_patient,
+    user_is_project_admin,
+)
 import logging
 logger = logging.getLogger(__name__)
 
@@ -71,9 +77,7 @@ def select_project(request, project_id: int):
     project = get_object_or_404(Project, id=project_id, is_active=True)
     
     # Check if user has access to this project
-    # Admins and student developers have access to all projects
-    if not (request.user.profile.is_admin or request.user.profile.is_student_developer):
-        # Regular users need explicit access
+    if not user_is_project_admin(request.user, project):
         has_access = ProjectAccess.objects.filter(
             user=request.user,
             project=project
@@ -89,7 +93,8 @@ def select_project(request, project_id: int):
 
 @login_required
 def patient_list(request):
-    user_profile = request.user.profile
+    namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
+    is_admin = user_is_project_admin(request.user, namespace)
     Patient, Folder, Tag = _get_domain_models(request)
     
     # Import Job model early for use in prefetch
@@ -122,20 +127,13 @@ def patient_list(request):
     # Enforce project access: admins see all; others require ProjectAccess entry
     current_project_id = request.session.get('current_project_id')
     has_access = True
-    if not user_profile.is_admin() and current_project_id:
+    if not is_admin and current_project_id:
         has_access = ProjectAccess.objects.filter(user=request.user, project_id=current_project_id).exists()
         if not has_access:
             messages.error(request, 'You are not allowed to access this project.')
             return redirect('home')
 
-    if user_profile.is_admin():
-        patients = base_queryset.all()
-    elif user_profile.is_annotator():
-        patients = base_queryset.filter(visibility__in=['public', 'private'])
-    elif user_profile.is_student_developer():
-        patients = base_queryset.filter(visibility='debug')
-    else:
-        patients = base_queryset.filter(visibility='public')
+    patients = filter_patients_for_user(request.user, base_queryset, namespace)
     
     # Filter by app namespace if mounted under /maxillo or /brain
     if current_project_id and any(field.name == 'project' for field in Patient._meta.fields):
@@ -147,6 +145,7 @@ def patient_list(request):
     has_cbct_filter = request.GET.get('has_cbct', '')
     has_bite_filter = request.GET.get('has_bite', '')
     has_voice_filter = request.GET.get('has_voice', '')
+    has_reports_filter = request.GET.get('has_reports', '')
 
     folder_id = request.GET.get('folder')
     tags_selected = request.GET.getlist('tags')
@@ -176,6 +175,9 @@ def patient_list(request):
     
     if tags_selected:
         patients = patients.filter(tags__name__in=tags_selected).distinct()
+
+    if has_reports_filter == 'yes':
+        patients = patients.filter(voice_captions__isnull=False).distinct()
     
     patients = patients.order_by('-uploaded_at')
     
@@ -351,10 +353,15 @@ def patient_list(request):
             'available_modalities': [m.slug for m in available_modality_objs],
             'modality_statuses': {ms['slug']: ms['status'] for ms in modality_status_list},
             'modality_status_list': modality_status_list,
+            'can_delete': bool(
+                is_admin
+                or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+            ),
         }
         patients_with_status.append(patient_data)
     
     folders = Folder.objects.filter(parent__isnull=True).order_by('name')
+    folders = filter_folders_for_user(request.user, folders, namespace)
     
     # Add patient counts for each folder
     folders_with_counts = []
@@ -444,12 +451,14 @@ def patient_list(request):
         'has_cbct_filter': has_cbct_filter,
         'has_bite_filter': has_bite_filter,
         'has_voice_filter': has_voice_filter,
+        'has_reports_filter': has_reports_filter,
         'folder_id': folder_id or 'all',
         'selected_tags': tags_selected,
         'folders': folders_with_counts,
         'all_tags': all_tags,
         'per_page': per_page,
-        'user_profile': user_profile,
+        'user_profile': request.user.profile,
+        'is_admin_user': is_admin,
         'allowed_modalities': allowed_modalities,
         'status_filters': status_filters,
         'modality_filter_specs': modality_filter_specs,

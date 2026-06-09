@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Patient {{ patient.name }} - ToothFairy4M{% endblock %}
+{% block title %}Patient {{ patient.name }} - Yggdrasil{% endblock %}
 
 {% block extra_css %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
@@ -23,7 +23,7 @@
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
 <script id="django-data" type="application/json">
 {
-    "canEdit": {{ user_profile.is_annotator|yesno:"true,false" }},
+    "canEdit": {{ can_modify_segmentation|yesno:"true,false" }},
     "scanId": {{ patient.patient_id }},
     "hasIOS": {{ patient.has_ios_scans|yesno:"true,false" }},
     "hasCBCT": {{ has_cbct|yesno:"true,false" }},
@@ -49,6 +49,7 @@
 <script src="{% static 'js/modality_viewers/cbct.js' %}"></script>
 {% endif %}
 <script src="{% static 'js/modality_viewers/intraoral.js' %}"></script>
+<script src="{% static 'js/modality_viewers/rgb_editor.js' %}"></script>
 <script src="{% static 'js/modality_viewers/teleradiography.js' %}"></script>
 <script src="{% static 'js/modality_viewers/panoramic.js' %}"></script>
 

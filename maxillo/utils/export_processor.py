@@ -1,18 +1,18 @@
 """Export processor for background export generation."""
 
-import os
-import sys
-import zipfile
 import logging
+import os
 import subprocess
+import sys
 import tempfile
+import zipfile
 from pathlib import Path
-from django.conf import settings
-from django.utils import timezone
 
 from common.file_access import exists as artifact_exists
 from common.file_access import iter_bytes as iter_artifact_bytes
 from common.object_storage import get_object_storage
+from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,9 @@ class ExportProcessor:
             "raw": [],
             "processed": ["bite_classification"],
         },
-        "intraoral": {
-            "raw": ["intraoral_raw"],
-            "processed": ["intraoral_processed"],
-        },
         "intraoral-photo": {
             "raw": ["intraoral_raw"],
-            "processed": ["intraoral_processed"],
+            "processed": ["intraoral-photo_processed"],
         },
         "teleradiography": {
             "raw": ["teleradiography_raw"],
@@ -82,7 +78,9 @@ class ExportProcessor:
         self.domain = domain
         self.query_params = export.query_params
         self.folder_ids = self.query_params.get("folder_ids", [])
-        self.modality_slugs = self.query_params.get("modality_slugs", [])
+        # Strip legacy "reports" pseudo-slug from modality list
+        raw_slugs = self.query_params.get("modality_slugs", [])
+        self.modality_slugs = [s for s in raw_slugs if s != "reports"]
         self.filters = self.query_params.get("filters", {})
         self.has_content_selection = (
             "include_raw" in self.query_params
@@ -99,6 +97,11 @@ class ExportProcessor:
             # Legacy exports created before content selection existed.
             self.include_raw = True
             self.include_processed = True
+        # include_reports: explicit flag, or legacy "reports" pseudo-slug
+        self.include_reports = self._coerce_bool(
+            self.query_params.get("include_reports"),
+            default="reports" in raw_slugs,
+        )
 
     @staticmethod
     def _coerce_bool(value, default=False):
@@ -139,6 +142,23 @@ class ExportProcessor:
             return True
         return False
 
+    @staticmethod
+    def _infer_modality_slug_from_path(file_path):
+        path = (file_path or "").lower()
+        if "/raw/ios/" in path or "/processed/ios/" in path:
+            return "ios"
+        if "/raw/cbct/" in path or "/processed/cbct/" in path:
+            return "cbct"
+        if "/raw/audio/" in path or "/processed/audio/" in path:
+            return "audio"
+        if "/raw/intraoral/" in path or "/processed/intraoral/" in path:
+            return "intraoral-photo"
+        if "/raw/teleradiography/" in path or "/processed/teleradiography/" in path:
+            return "teleradiography"
+        if "/raw/panoramic/" in path or "/processed/panoramic/" in path:
+            return "panoramic"
+        return None
+
     def _patient_file_queryset(self, patients):
         from common.models import FileRegistry
 
@@ -149,19 +169,20 @@ class ExportProcessor:
         return FileRegistry.objects.filter(domain="maxillo", patient__in=patients)
 
     def _build_no_files_found_error(self, patients):
-        actual_modality_slugs = [s for s in self.modality_slugs if s != "reports"]
         selected_content = []
         if self.include_raw:
             selected_content.append("raw")
         if self.include_processed:
             selected_content.append("processed")
+        if self.include_reports:
+            selected_content.append("reports")
 
         if not selected_content:
-            return "No export content selected. Enable at least one of Raw files or Processed files."
+            return "No export content selected. Enable at least one of Raw files, Processed files, or Reports."
 
         patient_qs = self._patient_file_queryset(patients)
         modality_summaries = []
-        for modality_slug in actual_modality_slugs:
+        for modality_slug in self.modality_slugs:
             groups = self._modality_file_type_groups(modality_slug)
             parts = []
             if self.include_raw:
@@ -287,24 +308,19 @@ class ExportProcessor:
         for key, value in self.filters.items():
             if key.startswith("has_reports_") and value:
                 modality_slug = key.replace("has_reports_", "")
-                try:
-                    modality = Modality.objects.get(slug=modality_slug)
-                    # Patients with voice captions for this modality
-                    report_patients = (
-                        Patient.objects.filter(
-                            voice_captions__modality=modality,
-                            voice_captions__text_caption__isnull=False,
-                        )
-                        .exclude(voice_captions__text_caption="")
-                        .distinct()
+                report_patients = (
+                    Patient.objects.filter(
+                        voice_captions__modality=modality_slug,
+                        voice_captions__text_caption__isnull=False,
                     )
-                    patients = patients.filter(
-                        patient_id__in=report_patients.values_list(
-                            "patient_id", flat=True
-                        )
+                    .exclude(voice_captions__text_caption="")
+                    .distinct()
+                )
+                patients = patients.filter(
+                    patient_id__in=report_patients.values_list(
+                        "patient_id", flat=True
                     )
-                except Modality.DoesNotExist:
-                    pass
+                )
 
         return patients.distinct()
 
@@ -319,23 +335,18 @@ class ExportProcessor:
         files_to_export = []
         total_size = 0
 
-        # Separate reports from actual modalities
-        actual_modality_slugs = [
-            slug for slug in self.modality_slugs if slug != "reports"
-        ]
-
-        # Get file types for selected modalities (excluding reports)
+        # Get file types for selected modalities
         file_types = []
-        for modality_slug in actual_modality_slugs:
+        for modality_slug in self.modality_slugs:
             file_types.extend(self._modality_requested_file_types(modality_slug))
         file_types = list(set(file_types))
 
         logger.info(
-            f"Collecting files for modalities: {actual_modality_slugs}, file_types: {file_types}"
+            f"Collecting files for modalities: {self.modality_slugs}, file_types: {file_types}"
         )
 
         # Also check by modality relationship
-        modality_objects = Modality.objects.filter(slug__in=actual_modality_slugs)
+        modality_objects = Modality.objects.filter(slug__in=self.modality_slugs)
         logger.info(f"Found {modality_objects.count()} modality objects")
 
         for patient in patients:
@@ -345,6 +356,11 @@ class ExportProcessor:
 
             # Base query: match by file_type (this catches files even if modality is None)
             query = Q(file_type__in=file_types)
+
+            # Resilience for legacy/mis-typed rows: include IOS paths when IOS raw is requested,
+            # even if file_type was stored incorrectly.
+            if self.include_raw and "ios" in self.modality_slugs:
+                query |= Q(file_path__icontains="/raw/ios/")
 
             # For modality-based matching, also include files that match by modality relationship
             # and selected content types (raw and/or processed)
@@ -388,15 +404,28 @@ class ExportProcessor:
                 # '_processed'), or any other processed/bite_classification file from a modality
                 # relationship match.
                 is_mapped_file_type = file_reg.file_type in file_types
+                inferred_modality_from_path = self._infer_modality_slug_from_path(
+                    file_reg.file_path
+                )
                 is_modality_fallback = (
-                    file_reg.modality is not None
-                    and file_reg.modality.slug in actual_modality_slugs
+                    (
+                        (
+                            file_reg.modality is not None
+                            and file_reg.modality.slug in self.modality_slugs
+                        )
+                        or (
+                            inferred_modality_from_path is not None
+                            and inferred_modality_from_path in self.modality_slugs
+                        )
+                    )
                     and self._file_type_matches_requested_content(file_reg.file_type)
                 )
                 if is_mapped_file_type or is_modality_fallback:
                     # Determine modality slug for file organization
                     if file_reg.modality:
                         modality_slug = file_reg.modality.slug
+                    elif inferred_modality_from_path:
+                        modality_slug = inferred_modality_from_path
                     else:
                         # Infer from file_type if modality is not set
                         if file_reg.file_type.startswith("ios_"):
@@ -475,43 +504,27 @@ class ExportProcessor:
                         f"  Skipping file {file_reg.file_type}: not in expected mapped types and not eligible modality fallback"
                     )
 
-            # Collect VoiceCaption text files for reports (only if 'reports' is selected)
-            if "reports" in self.modality_slugs:
-                # When reports-only: use all active modalities; otherwise use selected modalities
-                report_modality_slugs = [
-                    s for s in self.modality_slugs if s != "reports"
-                ]
-                if not report_modality_slugs:
-                    report_modality_slugs = list(
-                        Modality.objects.filter(is_active=True).values_list(
-                            "slug", flat=True
-                        )
-                    )
-                for modality_slug in report_modality_slugs:
-                    try:
-                        modality = Modality.objects.get(slug=modality_slug)
-                        voice_captions = VoiceCaption.objects.filter(
-                            patient=patient,
-                            modality=modality,
-                            text_caption__isnull=False,
-                        ).exclude(text_caption="")
+            # Collect VoiceCaption text files for reports
+            if self.include_reports and self.modality_slugs:
+                for modality_slug in self.modality_slugs:
+                    voice_captions = VoiceCaption.objects.filter(
+                        patient=patient,
+                        modality=modality_slug,
+                        text_caption__isnull=False,
+                    ).exclude(text_caption="")
 
-                        for vc in voice_captions:
-                            # Create a virtual file entry for the text caption (user_id = annotator for unique filename)
-                            files_to_export.append(
-                                {
-                                    "type": "report",
-                                    "patient": patient,
-                                    "voice_caption": vc,
-                                    "modality_slug": modality_slug,
-                                    "content": vc.text_caption,
-                                    "user_id": vc.user_id,
-                                }
-                            )
-                            # Estimate text file size
-                            total_size += len(vc.text_caption.encode("utf-8"))
-                    except Modality.DoesNotExist:
-                        pass
+                    for vc in voice_captions:
+                        files_to_export.append(
+                            {
+                                "type": "report",
+                                "patient": patient,
+                                "voice_caption": vc,
+                                "modality_slug": modality_slug,
+                                "content": vc.text_caption,
+                                "user_id": vc.user_id,
+                            }
+                        )
+                        total_size += len(vc.text_caption.encode("utf-8"))
 
         logger.info(
             f"Total files collected: {len(files_to_export)}, total size: {total_size} bytes"
@@ -645,15 +658,15 @@ class ExportProcessor:
                                 pct,
                             )
 
-                # Add report files (filename includes annotator user_id to avoid overwriting)
+                # Add report files: one folder per modality (reports_{slug}/)
                 for modality_slug, reports in patient_data["reports"].items():
+                    report_folder = f"reports_{modality_slug}"
                     for report_info in reports:
                         content = report_info["content"]
                         user_id = report_info.get("user_id", "unknown")
-                        filename = f"{modality_slug}_{user_id}.txt"
-                        dest_path = f"{patient_folder}/reports/{filename}"
-
-                        # Write text content to ZIP
+                        vc_id = report_info["voice_caption"].id
+                        filename = f"{user_id}_{vc_id}.txt"
+                        dest_path = f"{patient_folder}/{report_folder}/{filename}"
                         zipf.writestr(dest_path, content)
                         current_entry[0] += 1
                         if total_entries and current_entry[0] % progress_interval == 0:
@@ -669,10 +682,10 @@ class ExportProcessor:
         """Main processing method. Queries patients, collects files, creates ZIP, and updates export."""
         try:
             if self.has_content_selection and not (
-                self.include_raw or self.include_processed
+                self.include_raw or self.include_processed or self.include_reports
             ):
                 self.export.mark_failed(
-                    "No export content selected. Please enable Raw files and/or Processed files."
+                    "No export content selected. Please enable Raw files, Processed files, and/or Reports."
                 )
                 return
 
@@ -741,9 +754,10 @@ def start_export_processing(export_id, domain="maxillo"):
     Uses a subprocess instead of a daemon thread so the export completes even
     after the HTTP request ends (web workers can recycle and kill threads).
     """
-    from ..models import Export as MaxilloExport
     from brain.models import Export as BrainExport
     from laparoscopy.models import Export as LaparoscopyExport
+
+    from ..models import Export as MaxilloExport
 
     try:
         if domain == "brain":

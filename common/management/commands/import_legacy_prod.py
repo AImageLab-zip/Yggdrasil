@@ -250,9 +250,9 @@ class Command(BaseCommand):
         cursor.execute(
             f"""
             INSERT INTO `maxillo_job`
-            (`id`, `modality_slug`, `status`, `priority`, `input_file_path`, `output_files`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
+            (`id`, `modality_slug`, `status`, `priority`, `input_files`, `output_files`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
             SELECT
-                j.`id`, j.`modality_slug`, j.`status`, j.`priority`, j.`input_file_path`, j.`output_files`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
+                j.`id`, j.`modality_slug`, j.`status`, j.`priority`, JSON_OBJECT('input', j.`input_file_path`), j.`output_files`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
                 j.`patient_id`, j.`voice_caption_id`, NULL, NULL, 'maxillo'
             FROM `{legacy_db}`.`scans_job` j
             LEFT JOIN `{legacy_db}`.`scans_patient` p ON p.`patient_id` = j.`patient_id`
@@ -266,9 +266,9 @@ class Command(BaseCommand):
         cursor.execute(
             f"""
             INSERT INTO `maxillo_job`
-            (`id`, `modality_slug`, `status`, `priority`, `input_file_path`, `output_files`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
+            (`id`, `modality_slug`, `status`, `priority`, `input_files`, `output_files`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
             SELECT
-                j.`id`, j.`modality_slug`, j.`status`, j.`priority`, j.`input_file_path`, j.`output_files`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
+                j.`id`, j.`modality_slug`, j.`status`, j.`priority`, JSON_OBJECT('input', j.`input_file_path`), j.`output_files`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
                 NULL, NULL, j.`patient_id`, j.`voice_caption_id`, 'brain'
             FROM `{legacy_db}`.`scans_job` j
             LEFT JOIN `{legacy_db}`.`scans_patient` p ON p.`patient_id` = j.`patient_id`
@@ -283,9 +283,9 @@ class Command(BaseCommand):
         cursor.execute(
             f"""
             INSERT INTO `maxillo_processingjob`
-            (`id`, `job_type`, `status`, `priority`, `input_file_path`, `output_files`, `docker_image`, `docker_command`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
+            (`id`, `job_type`, `status`, `priority`, `input_files`, `output_files`, `docker_image`, `docker_command`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
             SELECT
-                j.`id`, j.`job_type`, j.`status`, j.`priority`, j.`input_file_path`, j.`output_files`, j.`docker_image`, j.`docker_command`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
+                j.`id`, j.`job_type`, j.`status`, j.`priority`, JSON_OBJECT('input', j.`input_file_path`), j.`output_files`, j.`docker_image`, j.`docker_command`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
                 j.`patient_id`, j.`voice_caption_id`, NULL, NULL, 'maxillo'
             FROM `{legacy_db}`.`scans_processingjob` j
             LEFT JOIN `{legacy_db}`.`scans_patient` p ON p.`patient_id` = j.`patient_id`
@@ -299,9 +299,9 @@ class Command(BaseCommand):
         cursor.execute(
             f"""
             INSERT INTO `maxillo_processingjob`
-            (`id`, `job_type`, `status`, `priority`, `input_file_path`, `output_files`, `docker_image`, `docker_command`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
+            (`id`, `job_type`, `status`, `priority`, `input_files`, `output_files`, `docker_image`, `docker_command`, `created_at`, `started_at`, `completed_at`, `retry_count`, `max_retries`, `error_logs`, `worker_id`, `patient_id`, `voice_caption_id`, `brain_patient_id`, `brain_voice_caption_id`, `domain`)
             SELECT
-                j.`id`, j.`job_type`, j.`status`, j.`priority`, j.`input_file_path`, j.`output_files`, j.`docker_image`, j.`docker_command`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
+                j.`id`, j.`job_type`, j.`status`, j.`priority`, JSON_OBJECT('input', j.`input_file_path`), j.`output_files`, j.`docker_image`, j.`docker_command`, j.`created_at`, j.`started_at`, j.`completed_at`, j.`retry_count`, j.`max_retries`, j.`error_logs`, j.`worker_id`,
                 NULL, NULL, j.`patient_id`, j.`voice_caption_id`, 'brain'
             FROM `{legacy_db}`.`scans_processingjob` j
             LEFT JOIN `{legacy_db}`.`scans_patient` p ON p.`patient_id` = j.`patient_id`

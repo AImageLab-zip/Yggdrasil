@@ -1,4 +1,4 @@
-# ToothFairy4M
+# Yggdrasil
 
 A Django web application for managing and processing dental and medical imaging data, including Intraoral Scans (IOS) and Cone Beam Computed Tomography (CBCT).
 
@@ -14,7 +14,7 @@ A Django web application for managing and processing dental and medical imaging 
 
 ## Description
 
-ToothFairy4M is a comprehensive platform designed for dental and maxillofacial imaging research. It provides tools for uploading, processing, annotating, and exporting medical imaging data with support for multiple modalities. The application features a modern web interface with 3D visualization capabilities and automated processing workflows.
+Yggdrasil is a comprehensive platform designed for dental and maxillofacial imaging research. It provides tools for uploading, processing, annotating, and exporting medical imaging data with support for multiple modalities. The application features a modern web interface with 3D visualization capabilities and automated processing workflows.
 
 Live instance: [https://toothfairy4m.ing.unimore.it](https://toothfairy4m.ing.unimore.it)
 
@@ -24,12 +24,12 @@ Minimum required for the web stack:
 
 - `SECRET_KEY` (Django)
 - `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` (MySQL)
+- `REDIS_PASSWORD` (Redis auth used by Celery defaults)
 - `RUNNER_API_TOKENS` (token(s) accepted by runner callback API)
 
 Notes:
 
 - Django accepts either `DB_NAME/DB_USER/DB_PASSWORD` or the `MYSQL_*` variables above.
-- `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` must point to Redis reachable by both web app and runners.
 - Object storage is S3-compatible (Garage/MinIO) via `OBJECT_STORAGE_*`.
 
 ## Running web stack

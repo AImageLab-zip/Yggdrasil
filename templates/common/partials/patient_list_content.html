@@ -26,7 +26,7 @@
                     <div id="folderTreeCollapse" class="collapse show">
                         <div id="folderTree">
                         {% for f in folders %}
-                        <div class="folder-node" data-id="{{ f.folder.id }}">
+                        <div class="folder-node" data-id="{{ f.folder.id }}" data-name="{{ f.folder.name|escape }}">
                             <div class="folder-item {% if folder_id|stringformat:'s' == f.folder.id|stringformat:'s' %}active{% endif %}" data-folder="{{ f.folder.id }}">
                                 <a href="?folder={{ f.folder.id }}{% for key, value in request.GET.items %}{% if key != 'folder' and key != 'page' %}&{{ key|urlencode }}={{ value|urlencode }}{% endif %}{% endfor %}" class="text-decoration-none text-reset">
                                     <i class="fas fa-folder text-warning me-2"></i>{{ f.folder.name }}
@@ -37,9 +37,11 @@
                         {% endfor %}
                         </div>
                     </div>
+                    {% if is_admin_user %}
                     <div class="mt-2">
                         <button class="btn btn-sm btn-outline-primary w-100" id="btnCreateFolder"><i class="fas fa-plus me-1"></i>New Folder</button>
                     </div>
+                    {% endif %}
                 </div>
             </div>
             <div class="card mt-3">
@@ -64,19 +66,23 @@
                                         <input type="hidden" id="iosFilterValue" name="has_ios" value="{{ has_ios_filter }}">
                                         <input type="hidden" id="cbctFilterValue" name="has_cbct" value="{{ has_cbct_filter }}">
                                         <input type="hidden" id="biteFilterValue" name="has_bite" value="{{ has_bite_filter }}">
-                                        <input type="hidden" id="voiceFilterValue" name="has_voice" value="{{ has_voice_filter }}">
-                                        {% for m in modality_filter_specs %}
-                                        <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
-                                        <button type="button" class="status-filter-btn" data-filter="status_{{ m.slug }}" title="All {{ m.name }} (no filter)" data-bs-toggle="tooltip">
+                                         <input type="hidden" id="voiceFilterValue" name="has_voice" value="{{ has_voice_filter }}">
+                                         <input type="hidden" id="reportsFilterValue" name="has_reports" value="{{ has_reports_filter }}">
+                                         {% for m in modality_filter_specs %}
+                                         <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
+                                         <button type="button" class="status-filter-btn" data-filter="status_{{ m.slug }}" title="All {{ m.name }} (no filter)" data-bs-toggle="tooltip">
                                             {% if m.icon %}
                                             <i class="{{ m.icon }}"></i>
                                             {% else %}
                                             <span class="status-filter-label">{{ m.label|default:m.name }}</span>
                                             {% endif %}
-                                        </button>
-                                        {% endfor %}
-                                    </div>
-                                </div>
+                                         </button>
+                                         {% endfor %}
+                                         <button type="button" class="status-filter-btn" data-filter="reports" title="All Reports (no filter)" data-bs-toggle="tooltip">
+                                             <i class="fas fa-comment"></i>
+                                         </button>
+                                     </div>
+                                 </div>
                                 <div class="filter-item">
                                     <label class="filter-label">Per page</label>
                                     <select name="per_page" class="filter-select">
@@ -95,6 +101,7 @@
                     </div>
                 </div>
             </div>
+            {% if is_admin_user %}
             <div class="card mt-3" id="bulkToolbarCard">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <strong><i class="fas fa-layer-group me-2"></i>Bulk actions</strong>
@@ -122,6 +129,9 @@
                             <button id="btnDeleteSelected" class="btn btn-danger btn-sm uniform-btn" title="Delete selected" data-bs-toggle="tooltip" aria-label="Delete selected">
                                 <i class="fas fa-trash"></i><span class="btn-label ms-1">Delete</span>
                             </button>
+                            <button id="btnBulkRerunSelected" class="btn btn-outline-secondary btn-sm uniform-btn" title="Rerun selected" data-bs-toggle="tooltip" aria-label="Rerun selected">
+                                <i class="fas fa-sync"></i><span class="btn-label ms-1">Rerun</span>
+                            </button>
                             <button class="btn btn-sm btn-outline-secondary uniform-btn" id="btnClearSelection" title="Clear selection" data-bs-toggle="tooltip" aria-label="Clear selection">
                                 <i class="fas fa-times"></i><span class="btn-label ms-1">Clear</span>
                             </button>
@@ -129,6 +139,7 @@
                     </div>
                 </div>
             </div>
+            {% endif %}
         </aside>
         <main class="main-col col-12 col-lg-8">
     <div class="patient-list-wrapper">
@@ -143,7 +154,7 @@
             <div>Modalities</div>
             <div>Tags</div>
             <div>Uploader</div>
-            <div>Privacy</div>
+            <div>Folder</div>
             <div>Actions</div>
         </div>
         {% for item in page_obj.object_list %}
@@ -166,10 +177,10 @@
                 <div class="status-indicators">
                     {% for ms in item.modality_status_list %}
                     {% if ms.slug != 'voice' %}
-                    <span class="badge rounded-pill me-1 status-pill status-{{ ms.status }}" title="{{ ms.name }}" data-bs-toggle="tooltip" aria-label="{{ ms.name }}">{% if ms.icon %}<i class="{{ ms.icon }}"></i>{% else %}{{ ms.label|default:ms.name }}{% endif %}</span>
+                    <span class="badge rounded-pill me-1 status-pill status-{{ ms.status }}" data-modality-slug="{{ ms.slug }}" title="{{ ms.name }}" data-bs-toggle="tooltip" aria-label="{{ ms.name }}">{% if ms.icon %}<i class="{{ ms.icon }}"></i>{% else %}{{ ms.label|default:ms.name }}{% endif %}</span>
                     {% endif %}
                     {% endfor %}
-                    <span class="badge rounded-pill me-1 status-pill {% if item.voice_caption_processing %}status-processing{% elif item.voice_caption_processed %}status-processed{% else %}status-absent{% endif %} position-relative" title="Voice{% if item.voice_caption_count %} ({{ item.voice_caption_count }} caption{{ item.voice_caption_count|pluralize }}){% endif %}" data-bs-toggle="tooltip" aria-label="Voice">
+                    <span class="badge rounded-pill me-1 status-pill {% if item.voice_caption_processing %}status-processing{% elif item.voice_caption_processed %}status-processed{% else %}status-absent{% endif %} position-relative" data-modality-slug="voice" title="Voice{% if item.voice_caption_count %} ({{ item.voice_caption_count }} caption{{ item.voice_caption_count|pluralize }}){% endif %}" data-bs-toggle="tooltip" aria-label="Voice">
                         <i class="fas fa-comment"></i>
                         {% if item.voice_caption_count > 0 %}
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-success" style="font-size: 0.65rem; padding: 0.15rem 0.35rem;">
@@ -204,15 +215,21 @@
                 {% endif %}
             </div>
             <div class="privacy">
-                <span class="privacy-badge privacy-{{ p.visibility }}">{{ p.visibility|capfirst }}</span>
+                {% if p.folder %}
+                <span class="privacy-badge">{{ p.folder.name }}</span>
+                {% else %}
+                <small class="text-muted">-</small>
+                {% endif %}
             </div>
             <div class="actions">
                 <div class="btn-group btn-group-sm" role="group">
                     <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="btn btn-outline-primary btn-open" title="View" data-bs-toggle="tooltip" aria-label="View"><i class="fas fa-eye"></i>
                     </a>
                     {% if user_profile.is_admin %}
-                    <button class="btn btn-outline-secondary btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" title="Rerun processing" data-bs-toggle="tooltip" aria-label="Rerun"><i class="fas fa-sync"></i>
+                    <button class="btn btn-outline-secondary btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-modalities="{% for ms in item.modality_status_list %}{% if ms.slug != 'rawzip' and ms.status != 'absent' %}{% if not forloop.first %},{% endif %}{{ ms.slug }}{% endif %}{% endfor %}{% if item.voice_caption_count > 0 or item.voice_caption_processing or item.voice_caption_processed %},voice{% endif %}" title="Rerun processing" data-bs-toggle="tooltip" aria-label="Rerun"><i class="fas fa-sync"></i>
                     </button>
+                    {% endif %}
+                    {% if item.can_delete %}
                     <button class="btn btn-outline-danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" data-bs-toggle="tooltip" aria-label="Delete"><i class="fas fa-trash"></i>
                     </button>
                     {% endif %}
@@ -288,6 +305,50 @@
         </main>
     </div>
 
+{% if is_admin_user %}
+<div id="folderContextMenu" class="card shadow" style="position: fixed; z-index: 1080; display: none; min-width: 220px;">
+    <div class="list-group list-group-flush">
+        <button type="button" class="list-group-item list-group-item-action" id="folderMenuStats">Statistics</button>
+        <button type="button" class="list-group-item list-group-item-action" id="folderMenuPermissions">Edit permissions</button>
+        <button type="button" class="list-group-item list-group-item-action" id="folderMenuRename">Rename folder</button>
+    </div>
+</div>
+
+<div class="modal fade" id="folderPermissionsModal" tabindex="-1" aria-labelledby="folderPermissionsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="folderPermissionsModalLabel">Folder Permissions</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 align-items-end mb-3">
+            <div class="col-md-5">
+                <label for="folderPermUser" class="form-label">User</label>
+                <select id="folderPermUser" class="form-select"></select>
+            </div>
+            <div class="col-md-4">
+                <label for="folderPermRole" class="form-label">Role</label>
+                <select id="folderPermRole" class="form-select">
+                    <option value="standard">standard</option>
+                    <option value="annotator">annotator</option>
+                    <option value="project_manager">project_manager</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary w-100" id="folderPermAddBtn">Save</button>
+            </div>
+        </div>
+        <table class="table table-sm" id="folderPermTable">
+            <thead><tr><th>User</th><th>Role</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 
 <div class="modal fade" id="rerunProcessingModal" tabindex="-1" aria-labelledby="rerunProcessingModalLabel" aria-hidden="true">
   <div class="modal-dialog">
@@ -298,22 +359,7 @@
       </div>
       <div class="modal-body">
         <div class="mb-2"><small class="text-muted" id="rerunScanSubtitle"></small></div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="ios" id="rerunIos">
-          <label class="form-check-label" for="rerunIos">IOS processing</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="bite_classification" id="rerunBite">
-          <label class="form-check-label" for="rerunBite">Bite classification</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="cbct" id="rerunCbct">
-          <label class="form-check-label" for="rerunCbct">CBCT</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="voice" id="rerunVoice">
-          <label class="form-check-label" for="rerunVoice">All voice transcriptions</label>
-        </div>
+        <div id="rerunModalityOptions"></div>
         <div class="mt-2"><small class="text-muted">This will set existing jobs to pending. No new jobs will be created.</small></div>
       </div>
       <div class="modal-footer">
@@ -322,7 +368,36 @@
           <span class="label">Rerun selected</span>
           <span class="spinner d-none"><i class="fas fa-spinner fa-spin"></i></span>
         </button>
-      </div>
+</div>
+
+<script id="rerun-modality-labels" type="application/json">{
+{% for m in modality_filter_specs %}
+  "{{ m.slug }}": "{% if m.slug == 'voice' %}All voice transcriptions{% elif m.slug == 'ios' %}IOS processing{% else %}{{ m.label|default:m.name }}{% endif %}"{% if not forloop.last %},{% endif %}
+{% endfor %}
+}</script>
     </div>
   </div>
     </div>
+
+<div class="modal fade" id="bulkRerunProcessingModal" tabindex="-1" aria-labelledby="bulkRerunProcessingModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="bulkRerunProcessingModalLabel">Bulk rerun processing</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2"><small class="text-muted" id="bulkRerunScanSubtitle"></small></div>
+        <div id="bulkRerunModalityOptions"></div>
+        <div class="mt-2"><small class="text-muted">This reruns only the latest existing job per selected modality per patient. No new jobs are created.</small></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="confirmBulkRerunBtn">
+          <span class="label">Rerun selected</span>
+          <span class="spinner d-none"><i class="fas fa-spinner fa-spin"></i></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

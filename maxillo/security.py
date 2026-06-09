@@ -10,6 +10,7 @@ from django.shortcuts import redirect
 from django.contrib import messages
 from typing import Optional, Tuple
 import logging
+from common.permissions import user_can_read_folder, user_can_write_annotations, user_is_project_admin
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +55,14 @@ def check_patient_access(user, patient, require_modify: bool = False) -> Authori
         logger.warning(f"User {user.id} has no profile - denying access")
         return AuthorizationResult(False, "Invalid user profile")
     
-    user_profile = user.profile
-
     if getattr(patient, 'deleted', False):
         logger.warning(f"User {user.id} denied access to deleted patient {patient.patient_id}")
         return AuthorizationResult(False, "Patient not found")
     
-    # Check basic view permissions
-    can_view = False
-    if user_profile.is_admin():
-        can_view = True
-    elif user_profile.is_annotator() and patient.visibility != 'debug':
-        can_view = True
-    elif user_profile.is_student_developer() and patient.visibility == 'debug':
-        can_view = True
-    elif patient.visibility == 'public':
-        can_view = True
+    app_label = patient._meta.app_label
+    can_view = user_is_project_admin(user, app_label) or (
+        patient.folder and user_can_read_folder(user, patient.folder, app_label)
+    )
     
     if not can_view:
         logger.warning(f"User {user.id} denied view access to patient {patient.patient_id}")
@@ -77,13 +70,9 @@ def check_patient_access(user, patient, require_modify: bool = False) -> Authori
     
     # Check modify permissions if required
     if require_modify:
-        can_modify = False
-        if user_profile.is_admin():
-            can_modify = True
-        elif user_profile.is_annotator() and patient.visibility != 'debug':
-            can_modify = True
-        elif user_profile.is_student_developer() and patient.visibility == 'debug':
-            can_modify = True
+        can_modify = user_is_project_admin(user, app_label) or (
+            patient.folder and user_can_write_annotations(user, patient.folder, app_label)
+        )
         
         if not can_modify:
             logger.warning(f"User {user.id} denied modify access to patient {patient.patient_id}")

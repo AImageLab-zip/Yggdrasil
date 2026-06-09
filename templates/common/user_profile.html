@@ -7,7 +7,7 @@
     {% else %}
         {{ target_user.username }}'s Profile
     {% endif %}
-    - ToothFairy4M
+    - Yggdrasil
 {% endblock %}
 
 {% block content %}
@@ -297,7 +297,7 @@
                                     <tr>
                                         <th>Patient</th>
                                         <th>Project</th>
-                                        <th>Visibility</th>
+                                        <th>Folder</th>
                                         <th>Date & Time</th>
                                         <th>Action</th>
                                     </tr>
@@ -319,12 +319,10 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if patient.visibility == 'public' %}
-                                                <span class="badge bg-success">Public</span>
-                                            {% elif patient.visibility == 'private' %}
-                                                <span class="badge bg-warning">Private</span>
-                                            {% elif patient.visibility == 'debug' %}
-                                                <span class="badge bg-info">Debug</span>
+                                            {% if patient.folder %}
+                                                <span class="badge bg-secondary">{{ patient.folder.name }}</span>
+                                            {% else %}
+                                                <span class="text-muted">-</span>
                                             {% endif %}
                                         </td>
                                         <td>

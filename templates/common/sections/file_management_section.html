@@ -21,6 +21,32 @@
                         <h6 class="text-primary mb-2 small">
                             <i class="fas fa-file-import me-1"></i>Raw Files
                         </h6>
+                        {% if can_modify_segmentation %}
+                        <div class="card border-0 bg-light mb-2">
+                            <div class="card-body py-2 px-2">
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-12 col-md-5">
+                                        <label class="form-label-sm mb-1">Raw type</label>
+                                        <select id="rawFileTypeSelect" class="form-select form-select-sm">
+                                            <option value="">Select type</option>
+                                            {% for opt in raw_file_type_options %}
+                                            <option value="{{ opt.value }}">{{ opt.label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-12 col-md-5">
+                                        <label class="form-label-sm mb-1">File</label>
+                                        <input id="rawFileInput" type="file" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-12 col-md-2">
+                                        <button id="addRawFileBtn" type="button" class="btn btn-primary btn-sm w-100">
+                                            <i class="fas fa-plus me-1"></i>Add
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
                         <div class="list-group list-group-flush">
                             {% for file in patient_files.raw %}
                             <div class="list-group-item d-flex justify-content-between align-items-center py-2 px-0">
@@ -36,12 +62,25 @@
                                         </div>
                                     </div>
                                 </div>
-                                <a href="{% url 'api:api_serve_file' file_id=file.id %}?file_key=primary" 
-                                   class="btn btn-outline-primary btn-sm" 
-                                   title="Download file"
-                                   download>
-                                    <i class="fas fa-download"></i>
-                                </a>
+                                <div class="btn-group">
+                                    <a href="{% url 'api:api_serve_file' file_id=file.id %}?file_key=primary" 
+                                       class="btn btn-outline-primary btn-sm" 
+                                       title="Download file"
+                                       download>
+                                        <i class="fas fa-download"></i>
+                                    </a>
+                                    {% if can_modify_segmentation %}
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-danger btn-sm btn-delete-raw-file"
+                                        data-file-id="{{ file.id }}"
+                                        data-file-name="{{ file.original_filename|default:file.filename }}"
+                                        title="Remove raw file"
+                                    >
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
                             </div>
                             {% endfor %}
                         </div>
@@ -138,4 +177,3 @@
         </div>
     </div>
 </div>
-

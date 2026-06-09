@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}New Export - ToothFairy4M{% endblock %}
+{% block title %}New Export - Yggdrasil{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
@@ -72,15 +72,6 @@
                             {% empty %}
                                 <p class="text-muted">No modalities available.</p>
                             {% endfor %}
-                            <hr class="my-2">
-                            <div class="form-check mb-2">
-                                <input class="form-check-input modality-checkbox" type="checkbox" name="modality_slugs" value="reports" id="modality_reports">
-                                <label class="form-check-label" for="modality_reports">
-                                    <i class="fas fa-file-alt me-1"></i>
-                                    Reports
-                                </label>
-                                <small class="text-muted d-block ms-4 mt-1">Export voice captions/reports for selected modalities</small>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -108,7 +99,15 @@
                                     Processed files
                                 </label>
                             </div>
-                            <small class="text-muted d-block">You can export either one, or both.</small>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input content-checkbox" type="checkbox" name="include_reports" id="include_reports" value="1">
+                                <label class="form-check-label" for="include_reports">
+                                    <i class="fas fa-file-alt me-1"></i>
+                                    Reports
+                                </label>
+                                <small class="text-muted d-block ms-4 mt-1">Voice caption reports for each selected modality, saved in separate <code>reports_&lt;modality&gt;</code> folders.</small>
+                            </div>
+                            <small class="text-muted d-block">Select at least one content type.</small>
                         </div>
                     </div>
                 </div>

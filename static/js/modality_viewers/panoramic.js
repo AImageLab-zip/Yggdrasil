@@ -18,6 +18,10 @@ window.PanoramicViewer = {
         return `/${namespace}/api/patient/${this.patientId}/panoramic/`;
     },
 
+    getMetaUrl: function() {
+        return `${this.getApiUrl()}?meta=1`;
+    },
+
     loadInto: function(config) {
         if (!this.patientId) {
             console.error('No patient ID set for panoramic viewer');
@@ -39,33 +43,46 @@ window.PanoramicViewer = {
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'none';
         
-        // Setup handlers before setting src
-        img.onload = () => {
-            console.debug('Panoramic image loaded successfully');
-            if (loading) loading.style.display = 'none';
-            if (content) content.style.display = 'block';
-        };
-        
-        img.onerror = () => {
-            console.error('Failed to load panoramic image');
-            if (loading) loading.style.display = 'none';
-            if (error) error.style.display = 'block';
-        };
-        
-        // Add click handler for fullscreen view
-        img.onclick = () => {
-            this.showFullscreenImage(img.src, config.title || 'Panoramic');
-        };
-        
-        // Set the image source (this triggers loading)
-        img.src = this.getApiUrl();
-        
-        // Handle case where image is already cached
-        if (img.complete && img.naturalHeight !== 0) {
-            console.debug('Panoramic image already loaded from cache');
-            if (loading) loading.style.display = 'none';
-            if (content) content.style.display = 'block';
-        }
+        fetch(this.getMetaUrl())
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                img.addEventListener('load', () => {
+                    console.debug('Panoramic image loaded successfully');
+                    if (loading) loading.style.display = 'none';
+                    if (content) content.style.display = 'block';
+                    if (window.RGBImageEditor && data.source_file_id) {
+                        const container = img.parentElement;
+                        if (container) {
+                            container.querySelectorAll('.rgb-edit-toolbar').forEach((el) => el.remove());
+                        }
+                        delete img.dataset.rgbEditorMounted;
+                        window.RGBImageEditor.attachToImage(img, {
+                            patientId: this.patientId,
+                            modalitySlug: 'panoramic',
+                            sourceFileId: data.source_file_id,
+                            rawUrl: data.raw_url,
+                            container,
+                        });
+                    }
+                }, { once: true });
+
+                img.onerror = () => {
+                    console.error('Failed to load panoramic image');
+                    if (loading) loading.style.display = 'none';
+                    if (error) error.style.display = 'block';
+                };
+
+                img.onclick = null;
+
+                img.src = data.url;
+            })
+            .catch(() => {
+                if (loading) loading.style.display = 'none';
+                if (error) error.style.display = 'block';
+            });
     },
 
     load: function() {
@@ -88,19 +105,5 @@ window.PanoramicViewer = {
         });
     },
     
-    showFullscreenImage: function(src, title) {
-        const modal = document.getElementById('fullscreenImageModal');
-        const modalTitle = document.getElementById('fullscreenImageModalLabel');
-        const fullscreenImg = document.getElementById('fullscreenImage');
-        
-        if (modalTitle) modalTitle.textContent = title || 'Image Viewer';
-        if (fullscreenImg) fullscreenImg.src = src;
-        
-        if (modal) {
-            const bsModal = new bootstrap.Modal(modal);
-            bsModal.show();
-        }
-    }
+    showFullscreenImage: function() {}
 };
-
-

@@ -61,10 +61,7 @@ class Modality(models.Model):
 class ProjectAccess(models.Model):
 	ROLE_CHOICES = [
 		('standard', 'Standard User'),
-		('annotator', 'Annotator'),
-		('project_manager', 'Project Manager'),
 		('admin', 'Administrator'),
-		('student_dev', 'Student Developer'),
 	]
 
 	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='project_access')
@@ -79,37 +76,37 @@ class ProjectAccess(models.Model):
 		return f"{self.user.username} -> {self.project.name}"
 
 	def is_annotator(self):
-		return self.role in ['annotator', 'project_manager', 'admin']
+		return self.role == 'admin'
 
 	def is_project_manager(self):
-		return self.role == 'project_manager'
+		return False
 
 	def is_admin(self):
 		return self.role == 'admin'
 
 	def is_student_developer(self):
-		return self.role == 'student_dev'
+		return False
 
 	def can_upload_scans(self):
-		return self.role in ['annotator', 'project_manager', 'admin', 'student_dev']
+		return self.role in ['admin', 'standard']
 
 	def can_see_debug_scans(self):
-		return self.role in ['admin', 'student_dev']
+		return self.role == 'admin'
 
 	def can_see_public_private_scans(self):
-		return self.role in ['annotator', 'project_manager', 'admin', 'standard']
+		return self.role in ['admin', 'standard']
 
 	def can_modify_scan_settings(self):
-		return self.role in ['annotator', 'project_manager', 'admin']
+		return self.role == 'admin'
 
 	def can_delete_scans(self):
 		return self.role == 'admin'
 
 	def can_delete_debug_scans(self):
-		return self.role in ['admin', 'student_dev']
+		return self.role == 'admin'
 
 	def can_view_other_profiles(self):
-		return self.role in ['project_manager', 'admin']
+		return self.role == 'admin'
 
 	def get_role_display(self):
 		return dict(self.ROLE_CHOICES).get(self.role, self.role)
@@ -121,10 +118,7 @@ class ProjectAccess(models.Model):
 class Invitation(models.Model):
 	ROLE_CHOICES = [
 		('standard', 'Standard User'),
-		('annotator', 'Annotator'),
-		('project_manager', 'Project Manager'),
 		('admin', 'Administrator'),
-		('student_dev', 'Student Developer'),
 	]
 
 	code = models.CharField(max_length=64, unique=True)
@@ -188,8 +182,8 @@ class Job(models.Model):
 	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 
 	# IO
-	input_file_path = models.CharField(max_length=500, help_text='Primary input object key', blank=True)
-	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output file paths and metadata')
+	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
+	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output object keys and metadata written on completion')
 
 	# Timing and metadata
 	created_at = models.DateTimeField(auto_now_add=True)
@@ -216,8 +210,17 @@ class Job(models.Model):
 		db_table = 'maxillo_job'
 
 	def __str__(self):
-		related_obj = self.patient or self.brain_patient or self.voice_caption or self.brain_voice_caption
-		return f"Job {self.id} - {self.modality_slug} - {self.get_status_display()} - {related_obj}"
+		related_bits = []
+		if self.patient_id:
+			related_bits.append(f"patient:{self.patient_id}")
+		if self.brain_patient_id:
+			related_bits.append(f"brain_patient:{self.brain_patient_id}")
+		if self.voice_caption_id:
+			related_bits.append(f"voice:{self.voice_caption_id}")
+		if self.brain_voice_caption_id:
+			related_bits.append(f"brain_voice:{self.brain_voice_caption_id}")
+		related_str = f" [{' | '.join(related_bits)}]" if related_bits else ""
+		return f"Job {self.id} - {self.modality_slug} - {self.status}{related_str}"
 
 	def can_retry(self):
 		return self.status == 'failed' and self.retry_count < self.max_retries
@@ -328,8 +331,8 @@ class ProcessingJob(models.Model):
 	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 
 	# File paths
-	input_file_path = models.CharField(max_length=500, help_text='Input object key')
-	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output file paths and metadata')
+	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
+	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output object keys and metadata written on completion')
 
 	# Processing info
 	docker_image = models.CharField(max_length=200, help_text='Docker image used for processing')
@@ -359,8 +362,17 @@ class ProcessingJob(models.Model):
 		db_table = 'maxillo_processingjob'
 
 	def __str__(self):
-		related_obj = self.patient or self.brain_patient or self.voice_caption or self.brain_voice_caption
-		return f"ProcessingJob {self.id} - {self.get_job_type_display()} - {self.get_status_display()} - {related_obj}"
+		related_bits = []
+		if self.patient_id:
+			related_bits.append(f"patient:{self.patient_id}")
+		if self.brain_patient_id:
+			related_bits.append(f"brain_patient:{self.brain_patient_id}")
+		if self.voice_caption_id:
+			related_bits.append(f"voice:{self.voice_caption_id}")
+		if self.brain_voice_caption_id:
+			related_bits.append(f"brain_voice:{self.brain_voice_caption_id}")
+		related_str = f" [{' | '.join(related_bits)}]" if related_bits else ""
+		return f"ProcessingJob {self.id} - {self.job_type} - {self.status}{related_str}"
 
 	def can_retry(self):
 		return self.status == 'failed' and self.retry_count < self.max_retries
@@ -472,6 +484,7 @@ class FileRegistry(models.Model):
 		# Maxillo image modalities
 		('intraoral_raw', 'Intraoral Photographs Raw'),
 		('intraoral_processed', 'Intraoral Photographs Processed'),
+		('intraoral-photo_processed', 'Intraoral Photo Processed'),
 		('teleradiography_raw', 'Teleradiography Raw'),
 		('teleradiography_processed', 'Teleradiography Processed'),
 		('panoramic_raw', 'panoramic Raw'),

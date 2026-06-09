@@ -12,6 +12,11 @@
     display: none;
 }
 
+.intraoral-segmentation-box.job-running .seg-empty-hint {
+    display: flex;
+    align-items: center;
+}
+
 .seg-empty-hint {
     color: #617085;
     font-size: 0.82rem;
@@ -97,6 +102,21 @@
     color: #fff;
     font-size: 0.52rem;
     line-height: 13px;
+}
+
+.seg-selected-badge {
+    position: absolute;
+    z-index: 3;
+    top: -6px;
+    left: -5px;
+    width: 13px;
+    height: 13px;
+    border-radius: 999px;
+    background: #0b5ed7;
+    color: #fff;
+    font-size: 0.46rem;
+    line-height: 13px;
+    text-align: center;
 }
 
 .intraoral-segmentation-controls {
@@ -245,6 +265,14 @@
     background: #f4f7fb;
     overflow: auto;
     min-height: 420px;
+}
+
+.seg-rgb-editor-proxy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .intraoral-seg-actions {

@@ -284,8 +284,8 @@ function initModalitySelection() {
         // Selected modality field deprecated - modalities are now inferred from uploaded files on the backend
 
         // IOS inputs (keeping file validation)
-        const upper = form.querySelector('input[type="file"][name="upper_scan_raw"], input[type="file"][name="upper_scan"]');
-        const lower = form.querySelector('input[type="file"][name="lower_scan_raw"], input[type="file"][name="lower_scan"]');
+        const upper = form.querySelector('input[type="file"][name="upper_scan"]');
+        const lower = form.querySelector('input[type="file"][name="lower_scan"]');
 
         // Per-modality blocks (with data-group); listen to inputs named by slug or slug_folder_files
         const containers = form.querySelectorAll('.volume-upload-container, .cbct-upload-container');

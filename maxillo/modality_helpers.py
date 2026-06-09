@@ -128,8 +128,7 @@ def get_modalities_for_uploaded_files(files_dict, allowed_slugs: Optional[Set[st
     detected_slugs = set()
     
     # Check for IOS (upper + lower scans)
-    if ('upper_scan_raw' in files_dict or 'upper_scan' in files_dict) and \
-       ('lower_scan_raw' in files_dict or 'lower_scan' in files_dict):
+    if 'upper_scan' in files_dict and 'lower_scan' in files_dict:
         ios_modality = get_modality_by_slug('ios')
         if ios_modality and (not allowed_slugs or 'ios' in allowed_slugs):
             detected_slugs.add('ios')

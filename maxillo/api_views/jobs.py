@@ -3,6 +3,8 @@
 import logging
 import traceback
 
+from django.contrib.auth.decorators import login_required
+from django.db.models import Q
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -10,6 +12,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from common.models import Job
+from common.permissions import user_can_read_folder, user_is_project_admin
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,7 @@ def _serialize_job(job):
         "modality": job.modality_slug,
         "status": job.status,
         "priority": job.priority,
-        "input_file_path": job.input_file_path,
+        "input_files": job.input_files,
         "output_files": job.output_files,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "started_at": job.started_at.isoformat() if job.started_at else None,
@@ -57,7 +60,41 @@ def _serialize_job(job):
     return job_data
 
 
+def _user_can_access_job(user, job):
+    if user_is_project_admin(user, job.domain):
+        return True
+
+    patient = _job_patient(job)
+    if not patient:
+        voice_caption = _job_voice_caption(job)
+        patient = getattr(voice_caption, "patient", None)
+
+    if not patient or getattr(patient, "deleted", False) or not patient.folder:
+        return False
+
+    return user_can_read_folder(user, patient.folder, job.domain)
+
+
+def _apply_job_acl_filter(jobs_qs, user, domain):
+    if user_is_project_admin(user, domain):
+        return jobs_qs
+
+    if domain == "brain":
+        folder_ids = user.brain_folder_access.values_list("folder_id", flat=True)
+        return jobs_qs.filter(
+            Q(brain_patient__folder_id__in=folder_ids)
+            | Q(brain_voice_caption__patient__folder_id__in=folder_ids)
+        )
+
+    folder_ids = user.maxillo_folder_access.values_list("folder_id", flat=True)
+    return jobs_qs.filter(
+        Q(patient__folder_id__in=folder_ids)
+        | Q(voice_caption__patient__folder_id__in=folder_ids)
+    )
+
+
 @csrf_exempt
+@login_required
 @require_http_methods(["GET"])
 def get_job_status(request, job_id):
     try:
@@ -65,6 +102,8 @@ def get_job_status(request, job_id):
         job = Job.objects.select_related(
             "patient", "brain_patient", "voice_caption", "brain_voice_caption"
         ).get(id=job_id, domain=domain)
+        if not _user_can_access_job(request.user, job):
+            return JsonResponse({"error": "Permission denied"}, status=403)
         return JsonResponse({"success": True, "job": _serialize_job(job)})
     except Job.DoesNotExist:
         logger.error("Job with ID %s not found for status check.", job_id)
@@ -76,6 +115,7 @@ def get_job_status(request, job_id):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+@method_decorator(login_required, name="dispatch")
 class ProcessingJobListView(View):
     """List jobs with optional filtering."""
 
@@ -90,6 +130,7 @@ class ProcessingJobListView(View):
             jobs = Job.objects.filter(domain=domain).select_related(
                 "patient", "brain_patient", "voice_caption", "brain_voice_caption"
             )
+            jobs = _apply_job_acl_filter(jobs, request.user, domain)
 
             if modality:
                 jobs = jobs.filter(modality_slug=modality)
