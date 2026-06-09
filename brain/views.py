@@ -6,11 +6,12 @@ import os
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 from django.http import JsonResponse
 
 from common.file_access import exists as artifact_exists
@@ -28,7 +29,7 @@ from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from .helpers import redirect_with_namespace, render_with_fallback
-from .models import Classification, Export, Folder, Patient, Tag, UserPreference
+from .models import Classification, Export, Folder, FolderAccess, Patient, Tag, UserPreference
 
 
 logger = logging.getLogger(__name__)
@@ -462,25 +463,70 @@ def update_patient_name(request, patient_id):
 
 
 @login_required
+@require_POST
 def delete_patient(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not user_is_project_admin(request.user, "brain"):
-        messages.error(request, "Permission denied.")
-        return redirect("brain:patient_list")
-    patient.delete()
-    messages.success(request, "Patient deleted.")
-    return redirect("brain:patient_list")
+    can_delete = bool(
+        user_is_project_admin(request.user, "brain")
+        or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+    )
+    if not can_delete:
+        return JsonResponse(
+            {"success": False, "error": "You do not have permission to delete this patient."},
+            status=403,
+        )
+    patient.deleted = True
+    patient.save(update_fields=["deleted"])
+    return JsonResponse({"success": True, "message": "Scan deleted successfully"})
 
 
 @login_required
+@require_POST
 def bulk_delete_patients(request):
-    return redirect("brain:patient_list")
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+
+    scan_ids = data.get("scan_ids", [])
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse(
+            {"success": False, "error": "You do not have permission to bulk delete scans."},
+            status=403,
+        )
+
+    deleted_count = Patient.objects.filter(patient_id__in=scan_ids).update(deleted=True)
+    if not deleted_count:
+        return JsonResponse({"success": False, "error": "No valid scans found to delete"}, status=404)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": f"Successfully deleted {deleted_count} scans.",
+            "deleted_count": deleted_count,
+        }
+    )
 
 
 @login_required
+@require_POST
 def rerun_processing(request, patient_id):
-    messages.info(request, "Brain processing rerun is not configured.")
-    return redirect("brain:patient_detail", patient_id=patient_id)
+    return JsonResponse(
+        {"success": False, "error": "Brain processing rerun is not configured."},
+        status=400,
+    )
+
+
+@login_required
+@require_POST
+def bulk_rerun_processing(request):
+    return JsonResponse(
+        {"success": False, "error": "Brain bulk processing rerun is not configured."},
+        status=400,
+    )
 
 
 @login_required
@@ -524,42 +570,151 @@ def create_folder(request):
 @login_required
 def folder_stats(request, folder_id):
     folder = get_object_or_404(Folder, id=folder_id)
-    return JsonResponse({"id": folder.id, "name": folder.name, "patient_count": folder.patients.count()})
+    return JsonResponse(
+        {
+            "success": True,
+            "folder": {"id": folder.id, "name": folder.name},
+            "stats": {"patient_count": folder.patients.count()},
+        }
+    )
 
 
 @login_required
+@require_POST
 def rename_folder(request, folder_id):
-    return redirect("brain:patient_list")
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    name = (data.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"success": False, "error": "Folder name is required"}, status=400)
+    folder = get_object_or_404(Folder, id=folder_id)
+    folder.name = name
+    folder.parent = None
+    folder.save(update_fields=["name", "parent"])
+    return JsonResponse({"success": True, "folder": {"id": folder.id, "name": folder.name}})
 
 
 @login_required
 def folder_permissions(request, folder_id):
-    return JsonResponse({"folder_id": folder_id, "permissions": []})
+    folder = get_object_or_404(Folder, id=folder_id)
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    rows = folder.access_list.select_related("user").order_by("user__username")
+    users = User.objects.filter(is_active=True).order_by("username")
+    return JsonResponse(
+        {
+            "success": True,
+            "folder": {"id": folder.id, "name": folder.name},
+            "permissions": [
+                {"user_id": row.user_id, "username": row.user.username, "role": row.role}
+                for row in rows
+            ],
+            "users": [{"id": user.id, "username": user.username} for user in users],
+        }
+    )
 
 
 @login_required
+@require_POST
 def upsert_folder_permission(request, folder_id):
-    return JsonResponse({"ok": True})
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = get_object_or_404(Folder, id=folder_id)
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    user_id = data.get("user_id")
+    role = data.get("role")
+    valid_roles = {choice[0] for choice in FolderAccess.ROLE_CHOICES}
+    if role not in valid_roles:
+        return JsonResponse({"success": False, "error": "Invalid role"}, status=400)
+    if not user_id:
+        return JsonResponse({"success": False, "error": "user_id required"}, status=400)
+    row, _ = FolderAccess.objects.update_or_create(
+        folder=folder,
+        user_id=user_id,
+        defaults={"role": role},
+    )
+    return JsonResponse({"success": True, "user_id": row.user_id, "role": row.role})
 
 
 @login_required
+@require_http_methods(["DELETE"])
 def delete_folder_permission(request, folder_id, user_id):
-    return JsonResponse({"ok": True})
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = get_object_or_404(Folder, id=folder_id)
+    FolderAccess.objects.filter(folder=folder, user_id=user_id).delete()
+    return JsonResponse({"success": True})
 
 
 @login_required
+@require_POST
 def move_patients_to_folder(request):
-    return redirect("brain:patient_list")
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    scan_ids = data.get("scan_ids", [])
+    folder_id = data.get("folder_id")
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = None
+    if folder_id and folder_id not in ("root", "all"):
+        folder = get_object_or_404(Folder, id=folder_id)
+    updated = Patient.objects.filter(patient_id__in=scan_ids).update(folder=folder)
+    return JsonResponse({"success": True, "updated": updated})
 
 
 @login_required
+@require_POST
 def add_patient_tag(request, patient_id):
-    return redirect("brain:patient_detail", patient_id=patient_id)
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        user_is_project_admin(request.user, "brain")
+        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    ):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    tag_name = (data.get("tag") or data.get("name") or "").strip()
+    if not tag_name:
+        return JsonResponse({"success": False, "error": "Tag name required"}, status=400)
+    tag, _ = Tag.objects.get_or_create(name=tag_name)
+    patient.tags.add(tag)
+    return JsonResponse({"success": True, "tags": patient.tag_names()})
 
 
 @login_required
+@require_POST
 def remove_patient_tag(request, patient_id):
-    return redirect("brain:patient_detail", patient_id=patient_id)
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        user_is_project_admin(request.user, "brain")
+        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    ):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    tag_name = (data.get("tag") or data.get("name") or "").strip()
+    if not tag_name:
+        return JsonResponse({"success": False, "error": "Tag name required"}, status=400)
+    tag = Tag.objects.filter(name=tag_name).first()
+    if not tag:
+        return JsonResponse({"success": False, "error": "Tag not found"}, status=404)
+    patient.tags.remove(tag)
+    return JsonResponse({"success": True, "tags": patient.tag_names()})
 
 
 @login_required
@@ -568,18 +723,39 @@ def upload_voice_caption(request, patient_id):
 
 
 @login_required
+@require_POST
 def upload_text_caption(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    text = request.POST.get("text") or request.POST.get("caption") or ""
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+    text = data.get("text") or data.get("caption") or ""
     if not text.strip():
         return JsonResponse({"error": "Caption text is required"}, status=400)
     caption = patient.voice_captions.create(
         user=request.user,
         duration=0,
         text_caption=text.strip(),
+        original_text_caption=text.strip(),
         processing_status="completed",
     )
-    return JsonResponse({"success": True, "caption_id": caption.id, "text_caption": caption.text_caption})
+    return JsonResponse(
+        {
+            "success": True,
+            "caption": {
+                "id": caption.id,
+                "user_username": caption.user.username,
+                "display_duration": "Text",
+                "quality_color": "success",
+                "created_at": caption.created_at.strftime("%b %d, %H:%M"),
+                "audio_url": None,
+                "is_processed": True,
+                "text_caption": caption.text_caption,
+                "is_text_caption": True,
+            },
+        }
+    )
 
 
 @login_required

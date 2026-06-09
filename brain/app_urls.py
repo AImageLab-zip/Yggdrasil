@@ -71,6 +71,11 @@ urlpatterns = [
         name="rerun_processing",
     ),
     path(
+        "patients/bulk-rerun-processing/",
+        views.bulk_rerun_processing,
+        name="bulk_rerun_processing",
+    ),
+    path(
         "admin/control-panel/",
         lambda request: redirect("admin_control_panel"),
         name="admin_control_panel",
