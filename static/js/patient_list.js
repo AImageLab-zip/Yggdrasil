@@ -755,7 +755,7 @@ function initCreateFolder() {
             } else {
                 showNotification('error', data.error || 'Failed to create folder');
             }
-        }).catch(() => showNotification('error', 'Network error'));
+        }).catch(error => showNotification('error', error.message || 'Network error'));
     });
 }
 

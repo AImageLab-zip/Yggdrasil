@@ -489,8 +489,36 @@ def user_profile(request, username=None):
 
 
 @login_required
+@require_POST
 def create_folder(request):
-    return redirect("brain:patient_list")
+    try:
+        if not user_is_project_admin(request.user, "brain"):
+            return JsonResponse({"error": "Permission denied"}, status=403)
+
+        data = _json.loads(request.body) if request.body else request.POST
+        name = (data.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"error": "Folder name is required"}, status=400)
+
+        folder, created = Folder.objects.get_or_create(
+            name=name,
+            parent=None,
+            defaults={"created_by": request.user},
+        )
+        return JsonResponse(
+            {
+                "success": True,
+                "folder": {
+                    "id": folder.id,
+                    "name": folder.name,
+                    "path": folder.name,
+                    "created": created,
+                },
+            }
+        )
+    except Exception as exc:
+        logger.exception("Error creating brain folder")
+        return JsonResponse({"error": str(exc)}, status=500)
 
 
 @login_required
