@@ -22,19 +22,7 @@ class VocalCaptionRecorder {
 
         this.brainStt = {
             enabled: false,
-            modelPromise: null,
-            modelPromises: {},
-            audioContext: null,
-            sourceNode: null,
-            processorNode: null,
-            silentGainNode: null,
-            sampleRate: 0,
-            buffers: [],
-            bufferedSamples: 0,
-            segmentTimer: null,
-            queue: Promise.resolve(),
             sessionStartText: '',
-            isLoadingModel: false,
             recognition: null,
             useSpeechRecognition: false,
             speechFinalText: '',
@@ -44,9 +32,9 @@ class VocalCaptionRecorder {
         };
 
         this.brainSpeechLanguages = {
-            en: { label: 'English', speechRecognition: 'en-US', whisper: 'english', localModel: 'Xenova/whisper-tiny.en' },
-            it: { label: 'Italian', speechRecognition: 'it-IT', whisper: 'italian', localModel: 'onnx-community/whisper-small-ita-ONNX' },
-            de: { label: 'German', speechRecognition: 'de-DE', whisper: 'german', localModel: 'onnx-community/whisper-large-v3-turbo-german-ONNX' }
+            en: { label: 'English', speechRecognition: 'en-US' },
+            it: { label: 'Italian', speechRecognition: 'it-IT' },
+            de: { label: 'German', speechRecognition: 'de-DE' }
         };
         this.brainSpeechLanguageStorageKey = 'toothfairy.brainSpeechLanguage';
         
@@ -645,9 +633,14 @@ class VocalCaptionRecorder {
     async startBrainLocalStt() {
         if (this.brainStt.enabled) return;
 
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass || !navigator.mediaDevices?.getUserMedia) {
-            this.notify('error', 'Browser-local speech recognition needs microphone and Web Audio support.');
+        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionClass) {
+            this.notify('error', 'Live speech recognition is not supported in this browser.');
+            return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+            this.notify('error', 'Live speech recognition needs microphone support.');
             return;
         }
 
@@ -656,9 +649,6 @@ class VocalCaptionRecorder {
             this.brainStt.enabled = true;
             this.brainStt.language = this.getSelectedBrainSpeechLanguage();
             this.brainStt.sessionStartText = this.captionTextArea ? this.captionTextArea.value : '';
-            this.brainStt.buffers = [];
-            this.brainStt.bufferedSamples = 0;
-            this.brainStt.queue = Promise.resolve();
 
             this.isRecording = true;
             this.isPaused = false;
@@ -675,38 +665,10 @@ class VocalCaptionRecorder {
                 return;
             }
 
-            this.brainStt.audioContext = new AudioContextClass();
-            this.brainStt.sampleRate = this.brainStt.audioContext.sampleRate;
-            this.brainStt.sourceNode = this.brainStt.audioContext.createMediaStreamSource(this.stream);
-            this.brainStt.processorNode = this.brainStt.audioContext.createScriptProcessor(4096, 1, 1);
-            this.brainStt.silentGainNode = this.brainStt.audioContext.createGain();
-            this.brainStt.silentGainNode.gain.value = 0;
-
-            this.brainStt.processorNode.onaudioprocess = (event) => {
-                if (!this.brainStt.enabled || this.isPaused) return;
-                const input = event.inputBuffer.getChannelData(0);
-                const copy = new Float32Array(input.length);
-                copy.set(input);
-                this.brainStt.buffers.push(copy);
-                this.brainStt.bufferedSamples += copy.length;
-            };
-
-            this.brainStt.sourceNode.connect(this.brainStt.processorNode);
-            this.brainStt.processorNode.connect(this.brainStt.silentGainNode);
-            this.brainStt.silentGainNode.connect(this.brainStt.audioContext.destination);
-
-            this.getBrainLocalTranscriber().catch((error) => {
-                console.error('Error loading browser-local STT model:', error?.message || error, error?.stack || '');
-                this.notify('error', 'Could not load the browser-local speech model: ' + (error?.message || error));
-            });
-
-            this.brainStt.segmentTimer = setInterval(() => {
-                this.enqueueBrainLocalSegment(false);
-            }, 3000);
-
-            this.notify('info', 'Loading local speech model in your browser...');
+            this.notify('error', 'Live speech recognition could not be started in this browser.');
+            await this.stopBrainLocalStt({ flush: false, discard: true });
         } catch (error) {
-            console.error('Error starting browser-local STT:', error);
+            console.error('Error starting live speech recognition:', error);
             this.handleRecordingError(error);
             await this.stopBrainLocalStt({ flush: false, discard: true });
         }
@@ -893,7 +855,6 @@ class VocalCaptionRecorder {
             this.currentPauseStart = Date.now();
             this.audioLevelVisualizer?.classList.add('is-paused');
             this.stopVisualizer(false);
-            this.enqueueBrainLocalSegment(false);
             if (this.brainStt.useSpeechRecognition && this.brainStt.recognition) {
                 this.commitBrainSpeechInterim();
                 try {
@@ -912,17 +873,11 @@ class VocalCaptionRecorder {
     async stopBrainLocalStt({ flush = false, discard = false } = {}) {
         if (!this.brainStt.enabled && !this.stream) return;
 
-        const wasEnabled = this.brainStt.enabled;
         this.brainStt.enabled = false;
         this.isRecording = false;
         this.isPaused = false;
         this.stopTimer();
         this.stopVisualizer(true);
-
-        if (this.brainStt.segmentTimer) {
-            clearInterval(this.brainStt.segmentTimer);
-            this.brainStt.segmentTimer = null;
-        }
 
         if (this.brainStt.recognition) {
             this.commitBrainSpeechInterim();
@@ -933,23 +888,6 @@ class VocalCaptionRecorder {
             }
         }
 
-        try {
-            this.brainStt.processorNode?.disconnect();
-            this.brainStt.sourceNode?.disconnect();
-            this.brainStt.silentGainNode?.disconnect();
-        } catch (error) {
-            console.warn('Error disconnecting local STT nodes:', error);
-        }
-
-        this.brainStt.processorNode = null;
-        this.brainStt.sourceNode = null;
-        this.brainStt.silentGainNode = null;
-
-        if (this.brainStt.audioContext) {
-            await this.brainStt.audioContext.close().catch(() => {});
-            this.brainStt.audioContext = null;
-        }
-
         this.cleanup();
 
         if (discard) {
@@ -957,11 +895,6 @@ class VocalCaptionRecorder {
                 this.captionTextArea.value = this.brainStt.sessionStartText || '';
                 this.updateCharacterCount();
             }
-            this.brainStt.buffers = [];
-            this.brainStt.bufferedSamples = 0;
-        } else if (flush && wasEnabled && !this.brainStt.useSpeechRecognition) {
-            await this.enqueueBrainLocalSegment(true);
-            await this.brainStt.queue.catch(() => {});
         }
 
         this.brainStt.recognition = null;
@@ -971,111 +904,6 @@ class VocalCaptionRecorder {
         this.brainStt.displayedInterimText = '';
 
         this.resetUI();
-    }
-
-    async getBrainLocalTranscriber() {
-        const languageConfig = this.getBrainSpeechLanguageConfig();
-        const modelName = languageConfig.localModel;
-
-        if (this.brainStt.modelPromises[modelName]) {
-            return this.brainStt.modelPromises[modelName];
-        }
-
-        this.brainStt.isLoadingModel = true;
-        this.brainStt.modelPromises[modelName] = (async () => {
-            const moduleUrl = '/static/vendor/transformers/dist/transformers.min.js';
-            const { pipeline, env } = await import(moduleUrl);
-
-            // Use locally-served WASM runtime and model files
-            env.allowLocalModels = true;
-            env.allowRemoteModels = false;
-            env.localModelPath = '/static/vendor/transformers/models/';
-            env.backends.onnx.wasm.wasmPaths = '/static/vendor/transformers/onnxruntime-2.17.2/';
-
-            const transcriber = await pipeline(
-                'automatic-speech-recognition',
-                modelName,
-                { quantized: true }
-            );
-            this.brainStt.isLoadingModel = false;
-            this.notify('success', `${languageConfig.label} local speech model ready.`);
-            return transcriber;
-        })();
-
-        this.brainStt.modelPromise = this.brainStt.modelPromises[modelName];
-        return this.brainStt.modelPromises[modelName];
-    }
-
-    enqueueBrainLocalSegment(force) {
-        const minSamples = Math.max(1, Math.floor((this.brainStt.sampleRate || 16000) * 1.5));
-        if (!force && this.brainStt.bufferedSamples < minSamples) {
-            return this.brainStt.queue;
-        }
-
-        const audio = this.drainBrainAudioBuffer();
-        if (!audio || audio.length === 0) {
-            return this.brainStt.queue;
-        }
-
-        this.brainStt.queue = this.brainStt.queue
-            .then(async () => {
-                const transcriber = await this.getBrainLocalTranscriber();
-                const resampled = this.resampleAudio(audio, this.brainStt.sampleRate || 16000, 16000);
-                const result = await transcriber(resampled, {
-                    chunk_length_s: 20,
-                    stride_length_s: 2,
-                    language: this.getBrainSpeechLanguageConfig().whisper,
-                    task: 'transcribe'
-                });
-                const text = typeof result === 'string' ? result : (result && result.text) || '';
-                this.appendBrainTranscript(text);
-            })
-            .catch((error) => {
-                console.error('Browser-local STT transcription failed:', error);
-                this.notify('error', 'Browser-local transcription failed for the latest audio segment.');
-            });
-
-        return this.brainStt.queue;
-    }
-
-    drainBrainAudioBuffer() {
-        const length = this.brainStt.bufferedSamples;
-        if (!length) return null;
-
-        const merged = new Float32Array(length);
-        let offset = 0;
-        this.brainStt.buffers.forEach((buffer) => {
-            merged.set(buffer, offset);
-            offset += buffer.length;
-        });
-
-        this.brainStt.buffers = [];
-        this.brainStt.bufferedSamples = 0;
-        return merged;
-    }
-
-    resampleAudio(audio, fromSampleRate, toSampleRate) {
-        if (!audio || fromSampleRate === toSampleRate) return audio;
-        const ratio = fromSampleRate / toSampleRate;
-        const newLength = Math.max(1, Math.round(audio.length / ratio));
-        const result = new Float32Array(newLength);
-
-        for (let i = 0; i < newLength; i += 1) {
-            const sourceIndex = i * ratio;
-            const left = Math.floor(sourceIndex);
-            const right = Math.min(left + 1, audio.length - 1);
-            const weight = sourceIndex - left;
-            result[i] = (audio[left] * (1 - weight)) + (audio[right] * weight);
-        }
-
-        return result;
-    }
-
-    appendBrainTranscript(text) {
-        const cleaned = (text || '').replace(/\s+/g, ' ').trim();
-        if (!cleaned || !this.captionTextArea) return;
-
-        this.appendTextToCaption(cleaned);
     }
     
     getRecorderOptions() {

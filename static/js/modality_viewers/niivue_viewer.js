@@ -131,31 +131,36 @@ class NiiVueViewer {
         }
 
         const overlay = this.nv.volumes[overlayIndex];
-        const overlayColormap = 'segmentationMask';
 
-        if (typeof this.nv.addColormap === 'function') {
-            try {
-                this.nv.addColormap(overlayColormap, {
-                    R: [255, 255],
-                    G: [48, 220],
-                    B: [48, 0],
-                    A: [0, 255],
-                    I: [0, 255]
-                });
-                overlay.colormap = overlayColormap;
-            } catch (error) {
-                console.debug('NiiVueViewer: Falling back to built-in red overlay colormap', error);
-                overlay.colormap = 'red';
-            }
-        } else {
+        // addColormap is confirmed public in NiiVue 0.67.
+        // I=[0,85,170,255] evenly maps labels 0/1/2/3 across the 0-255 LUT range:
+        //   voxel N → LUT index (N/3)*255  →  0→0, 1→85, 2→170, 3→255
+        // cal_max is hardcoded to 3 — do NOT use global_max which NiiVue may
+        // report as 1.0 for integer label files.
+        try {
+            this.nv.addColormap('segmentationMask', {
+                R: [0,   0,   255, 0  ],
+                G: [0,   255, 0,   0  ],
+                B: [0,   0,   0,   255],
+                A: [0,   255, 255, 255],
+                I: [0,   85,  170, 255]
+            });
+            overlay.colormap = 'segmentationMask';
+        } catch (e) {
             overlay.colormap = 'red';
         }
 
-        // Keep zero/background labels invisible.
-        overlay.cal_min = Math.max(0.5, overlay.global_min || 0);
-        overlay.cal_max = overlay.global_max || 1;
-
         this._setOverlayOpacity(overlayIndex, opacity);
+
+        // Set cal range after the GPU update inside _setOverlayOpacity so it
+        // is not overwritten by any internal reset, then flush to GPU.
+        overlay.cal_min = 0;
+        overlay.cal_max = 3;
+        if (typeof this.nv.updateGLVolume === 'function') {
+            this.nv.updateGLVolume();
+        } else {
+            this.nv.drawScene();
+        }
 
         this.segmentationOverlayLoaded = true;
     }
@@ -201,9 +206,6 @@ class NiiVueViewer {
         overlay.opacity = clamped;
         if (typeof this.nv.setOpacity === 'function') {
             this.nv.setOpacity(overlayIndex, clamped);
-        }
-        if (typeof this.nv.updateGLVolume === 'function') {
-            this.nv.updateGLVolume();
         } else {
             this.nv.drawScene();
         }

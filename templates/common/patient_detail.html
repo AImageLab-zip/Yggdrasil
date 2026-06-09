@@ -59,6 +59,12 @@
 <script src="{% static 'js/intraoral_segmentation.js' %}"></script>
 {% endif %}
 
+{# Brain STT: load transformers.js as a classic script so document.currentScript #}
+{# is available during ONNX/wasm initialisation (null inside dynamic import()). #}
+{% if ns == 'brain' %}
+<script src="{% static 'vendor/transformers/dist/transformers.min.js' %}"></script>
+{% endif %}
+
 {# Additional features #}
 <script src="{% static 'js/vocal_caption.js' %}"></script>
 <script src="{% static 'js/nifti_metadata.js' %}"></script>
