@@ -10,7 +10,7 @@ from common.file_access import exists as artifact_exists
 from common.object_storage import download_to_tempfile, get_object_storage
 from common.permissions import user_can_edit_metadata, user_can_read_folder, user_is_project_admin
 
-from .domain import get_domain_models, get_namespace
+from .domain import get_domain_models
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,6 @@ def update_nifti_metadata(request, patient_id):
     try:
         Patient = get_domain_models(request)["Patient"]
         patient = get_object_or_404(Patient, patient_id=patient_id)
-        domain = get_namespace(request)
 
         if not user_can_edit_metadata(request.user, patient):
             return JsonResponse({"error": "Permission denied"}, status=403)
@@ -341,20 +340,20 @@ def update_nifti_metadata(request, patient_id):
 
             from common.models import Job
 
-            if domain == "brain":
-                Job.objects.create(
-                    domain="brain",
-                    brain_patient=patient,
-                    modality_slug="metadata_update",
-                    status="completed",
-                )
-            else:
-                Job.objects.create(
-                    domain="maxillo",
-                    patient=patient,
-                    modality_slug="metadata_update",
-                    status="completed",
-                )
+            Job.objects.create(
+                domain="maxillo",
+                patient=patient,
+                modality_slug="metadata_update",
+                status="completed",
+                output_files={
+                    "updated_by": request.user.username,
+                    "changes": {
+                        "origin": new_origin,
+                        "affine": new_affine is not None,
+                    },
+                },
+            )
+
 
             # Return updated metadata
             return get_nifti_metadata(request, patient_id)

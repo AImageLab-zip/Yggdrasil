@@ -3,7 +3,6 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib import messages
-from django.apps import apps
 from django.db.models import Count, Q, Max
 from django.utils import timezone
 from datetime import timedelta
@@ -17,13 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 def _get_domain_models(request):
-    ns = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or ''
-    if ns == 'brain':
-        return (
-            apps.get_model('brain', 'Patient'),
-            apps.get_model('brain', 'Classification'),
-            apps.get_model('brain', 'VoiceCaption'),
-        )
     return MaxilloPatient, MaxilloClassification, MaxilloVoiceCaption
 
 

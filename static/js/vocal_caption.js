@@ -19,6 +19,24 @@ class VocalCaptionRecorder {
         this.audioSourceNode = null;
         this.visualizerData = null;
         this.visualizerAnimationFrame = null;
+
+        this.brainStt = {
+            enabled: false,
+            sessionStartText: '',
+            recognition: null,
+            useSpeechRecognition: false,
+            speechFinalText: '',
+            speechInterimText: '',
+            displayedInterimText: '',
+            language: 'en'
+        };
+
+        this.brainSpeechLanguages = {
+            en: { label: 'English', speechRecognition: 'en-US' },
+            it: { label: 'Italian', speechRecognition: 'it-IT' },
+            de: { label: 'German', speechRecognition: 'de-DE' }
+        };
+        this.brainSpeechLanguageStorageKey = 'toothfairy.brainSpeechLanguage';
         
         this.initializeElements();
         this.checkBrowserSupport();
@@ -49,6 +67,7 @@ class VocalCaptionRecorder {
         this.textCharCount = document.getElementById('textCharCount');
         this.saveTextBtn = document.getElementById('saveTextCaption');
         this.clearTextBtn = document.getElementById('clearTextCaption');
+        this.brainSpeechLanguageInputs = Array.from(document.querySelectorAll('input[name="brainSpeechLanguage"]'));
         
         if (!this.startBtn || !this.recordingTimer || !this.progressBar) {
             console.warn('Some recording UI elements not found');
@@ -114,6 +133,61 @@ class VocalCaptionRecorder {
         
         // Initialize text input functionality
         this.initializeTextInput();
+        this.initializeBrainSpeechLanguage();
+    }
+
+    initializeBrainSpeechLanguage() {
+        if (!this.isBrainProject || !this.brainSpeechLanguageInputs.length) return;
+
+        this.selectBrainSpeechLanguage(this.getStoredBrainSpeechLanguage());
+
+        this.brainSpeechLanguageInputs.forEach((input) => {
+            input.addEventListener('change', () => {
+                if (!input.checked) return;
+
+                this.brainStt.language = this.getSelectedBrainSpeechLanguage();
+                this.storeBrainSpeechLanguage(this.brainStt.language);
+                this.restartBrainSpeechRecognitionForLanguage();
+            });
+        });
+    }
+
+    getStoredBrainSpeechLanguage() {
+        try {
+            const language = window.localStorage.getItem(this.brainSpeechLanguageStorageKey);
+            return this.brainSpeechLanguages[language] ? language : 'en';
+        } catch (error) {
+            return 'en';
+        }
+    }
+
+    storeBrainSpeechLanguage(language) {
+        if (!this.brainSpeechLanguages[language]) return;
+
+        try {
+            window.localStorage.setItem(this.brainSpeechLanguageStorageKey, language);
+        } catch (error) {
+            console.warn('Could not remember speech language:', error);
+        }
+    }
+
+    getSelectedBrainSpeechLanguage() {
+        const selected = this.brainSpeechLanguageInputs.find((input) => input.checked);
+        const language = selected ? selected.value : this.brainStt.language;
+        return this.brainSpeechLanguages[language] ? language : 'en';
+    }
+
+    getBrainSpeechLanguageConfig() {
+        return this.brainSpeechLanguages[this.getSelectedBrainSpeechLanguage()] || this.brainSpeechLanguages.en;
+    }
+
+    selectBrainSpeechLanguage(language) {
+        const nextLanguage = this.brainSpeechLanguages[language] ? language : 'en';
+        const input = this.brainSpeechLanguageInputs.find((item) => item.value === nextLanguage);
+        if (input) {
+            input.checked = true;
+        }
+        this.brainStt.language = nextLanguage;
     }
     
     getCurrentModality() {
@@ -173,6 +247,10 @@ class VocalCaptionRecorder {
     }
     
     async startRecording() {
+        if (this.isBrainProject) {
+            return this.startBrainLocalStt();
+        }
+
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             
@@ -213,6 +291,11 @@ class VocalCaptionRecorder {
     }
     
     togglePause() {
+        if (this.isBrainProject && this.brainStt.enabled) {
+            this.toggleBrainLocalPause();
+            return;
+        }
+
         if (!this.mediaRecorder || !this.isRecording) return;
         
         if (this.isPaused) {
@@ -246,6 +329,11 @@ class VocalCaptionRecorder {
     }
     
     stopRecording() {
+        if (this.isBrainProject && this.brainStt.enabled) {
+            this.stopBrainLocalStt({ flush: false });
+            return;
+        }
+
         if (this.mediaRecorder && this.isRecording) {
             if (this.isPaused) {
                 this.mediaRecorder.resume();
@@ -261,6 +349,14 @@ class VocalCaptionRecorder {
     }
     
     async saveRecording() {
+        if (this.isBrainProject) {
+            if (this.brainStt.enabled) {
+                await this.stopBrainLocalStt({ flush: true });
+            }
+            await this.saveTextCaption();
+            return;
+        }
+
         // Stop recording if active
         if (this.isRecording) {
             this.stopRecording();
@@ -307,6 +403,11 @@ class VocalCaptionRecorder {
     }
     
     discardRecording() {
+        if (this.isBrainProject && this.brainStt.enabled) {
+            this.stopBrainLocalStt({ flush: false, discard: true });
+            return;
+        }
+
         this.stopRecording();
         this.resetUI();
     }
@@ -527,6 +628,282 @@ class VocalCaptionRecorder {
             this.audioContext.close().catch(() => {});
             this.audioContext = null;
         }
+    }
+
+    async startBrainLocalStt() {
+        if (this.brainStt.enabled) return;
+
+        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionClass) {
+            this.notify('error', 'Live speech recognition is not supported in this browser.');
+            return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+            this.notify('error', 'Live speech recognition needs microphone support.');
+            return;
+        }
+
+        try {
+            this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this.brainStt.enabled = true;
+            this.brainStt.language = this.getSelectedBrainSpeechLanguage();
+            this.brainStt.sessionStartText = this.captionTextArea ? this.captionTextArea.value : '';
+
+            this.isRecording = true;
+            this.isPaused = false;
+            this.recordingStartTime = Date.now();
+            this.totalPausedDuration = 0;
+            this.currentPauseStart = null;
+
+            this.setupAudioVisualization(this.stream);
+            this.updateUI();
+            this.startTimer();
+
+            if (this.startBrainSpeechRecognition()) {
+                this.notify('info', 'Listening. The caption box will update as you speak.');
+                return;
+            }
+
+            this.notify('error', 'Live speech recognition could not be started in this browser.');
+            await this.stopBrainLocalStt({ flush: false, discard: true });
+        } catch (error) {
+            console.error('Error starting live speech recognition:', error);
+            this.handleRecordingError(error);
+            await this.stopBrainLocalStt({ flush: false, discard: true });
+        }
+    }
+
+    startBrainSpeechRecognition() {
+        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionClass || !this.captionTextArea) {
+            return false;
+        }
+
+        const languageConfig = this.getBrainSpeechLanguageConfig();
+        const recognition = new SpeechRecognitionClass();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = languageConfig.speechRecognition;
+
+        this.brainStt.useSpeechRecognition = true;
+        this.brainStt.speechFinalText = '';
+        this.brainStt.speechInterimText = '';
+        this.brainStt.displayedInterimText = '';
+        this.brainStt.recognition = recognition;
+
+        recognition.onresult = (event) => {
+            let finalText = '';
+            let interimText = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                const transcript = event.results[i][0]?.transcript || '';
+                if (event.results[i].isFinal) {
+                    finalText += transcript;
+                } else {
+                    interimText += transcript;
+                }
+            }
+
+            if (finalText.trim()) {
+                this.stripDisplayedBrainInterim();
+                this.brainStt.speechFinalText = this.joinCaptionText(
+                    this.brainStt.speechFinalText,
+                    finalText
+                );
+                this.appendTextToCaption(finalText);
+            }
+            this.brainStt.speechInterimText = interimText;
+            this.renderBrainSpeechText();
+        };
+
+        recognition.onerror = (event) => {
+            if (event.error === 'no-speech' || event.error === 'aborted') {
+                return;
+            }
+            console.warn('Live speech recognition error:', event.error);
+        };
+
+        recognition.onend = () => {
+            if (this.brainStt.recognition !== recognition) {
+                return;
+            }
+            if (!this.brainStt.enabled || this.isPaused || !this.brainStt.useSpeechRecognition) {
+                return;
+            }
+            try {
+                recognition.start();
+            } catch (error) {
+                console.warn('Could not restart live speech recognition:', error);
+            }
+        };
+
+        try {
+            recognition.start();
+            return true;
+        } catch (error) {
+            console.warn('Live speech recognition unavailable:', error);
+            this.brainStt.recognition = null;
+            this.brainStt.useSpeechRecognition = false;
+            return false;
+        }
+    }
+
+    restartBrainSpeechRecognitionForLanguage() {
+        if (!this.brainStt.enabled || !this.brainStt.useSpeechRecognition || !this.brainStt.recognition) {
+            return;
+        }
+
+        this.commitBrainSpeechInterim();
+        try {
+            this.brainStt.recognition.stop();
+        } catch (error) {
+            console.warn('Could not stop live speech recognition before language switch:', error);
+        }
+
+        this.brainStt.recognition = null;
+        this.brainStt.useSpeechRecognition = false;
+        if (!this.isPaused) {
+            this.startBrainSpeechRecognition();
+        }
+    }
+
+    renderBrainSpeechText() {
+        if (!this.captionTextArea) return;
+
+        this.stripDisplayedBrainInterim();
+        const interimText = (this.brainStt.speechInterimText || '').replace(/\s+/g, ' ').trim();
+        if (interimText) {
+            this.appendTextToCaption(interimText);
+            this.brainStt.displayedInterimText = interimText;
+        }
+        this.updateCharacterCount();
+    }
+
+    commitBrainSpeechInterim() {
+        if (!this.brainStt.speechInterimText.trim()) return;
+
+        this.stripDisplayedBrainInterim();
+        this.brainStt.speechFinalText = this.joinCaptionText(
+            this.brainStt.speechFinalText,
+            this.brainStt.speechInterimText
+        );
+        this.appendTextToCaption(this.brainStt.speechInterimText);
+        this.brainStt.speechInterimText = '';
+        this.brainStt.displayedInterimText = '';
+        this.updateCharacterCount();
+    }
+
+    stripDisplayedBrainInterim() {
+        if (!this.captionTextArea) return;
+
+        const interimText = (this.brainStt.displayedInterimText || '').replace(/\s+/g, ' ').trim();
+        if (!interimText) return;
+
+        const current = this.captionTextArea.value;
+        const trimmedEnd = current.replace(/\s+$/, '');
+        const withSeparator = ` ${interimText}`;
+
+        if (trimmedEnd.endsWith(withSeparator)) {
+            this.captionTextArea.value = trimmedEnd.slice(0, -withSeparator.length);
+        } else if (trimmedEnd === interimText) {
+            this.captionTextArea.value = '';
+        }
+
+        this.brainStt.displayedInterimText = '';
+    }
+
+    appendTextToCaption(text) {
+        const cleaned = (text || '').replace(/\s+/g, ' ').trim();
+        if (!cleaned || !this.captionTextArea) return;
+
+        this.captionTextArea.value = this.joinCaptionText(this.captionTextArea.value, cleaned);
+        this.updateCharacterCount();
+    }
+
+    joinCaptionText(...parts) {
+        return parts
+            .map((part) => (part || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .join(' ');
+    }
+
+    toggleBrainLocalPause() {
+        if (!this.brainStt.enabled || !this.isRecording) return;
+
+        if (this.isPaused) {
+            this.isPaused = false;
+            if (this.currentPauseStart) {
+                this.totalPausedDuration += Date.now() - this.currentPauseStart;
+                this.currentPauseStart = null;
+            }
+            this.audioLevelVisualizer?.classList.remove('is-paused');
+            this.startVisualizer();
+            if (this.pauseBtn) {
+                this.pauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+                this.pauseBtn.title = 'Pause';
+            }
+            if (this.brainStt.useSpeechRecognition && this.brainStt.recognition) {
+                try {
+                    this.brainStt.recognition.start();
+                } catch (error) {
+                    console.warn('Could not resume live speech recognition:', error);
+                }
+            }
+        } else {
+            this.isPaused = true;
+            this.currentPauseStart = Date.now();
+            this.audioLevelVisualizer?.classList.add('is-paused');
+            this.stopVisualizer(false);
+            if (this.brainStt.useSpeechRecognition && this.brainStt.recognition) {
+                this.commitBrainSpeechInterim();
+                try {
+                    this.brainStt.recognition.stop();
+                } catch (error) {
+                    console.warn('Could not pause live speech recognition:', error);
+                }
+            }
+            if (this.pauseBtn) {
+                this.pauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+                this.pauseBtn.title = 'Resume';
+            }
+        }
+    }
+
+    async stopBrainLocalStt({ flush = false, discard = false } = {}) {
+        if (!this.brainStt.enabled && !this.stream) return;
+
+        this.brainStt.enabled = false;
+        this.isRecording = false;
+        this.isPaused = false;
+        this.stopTimer();
+        this.stopVisualizer(true);
+
+        if (this.brainStt.recognition) {
+            this.commitBrainSpeechInterim();
+            try {
+                this.brainStt.recognition.stop();
+            } catch (error) {
+                console.warn('Error stopping live speech recognition:', error);
+            }
+        }
+
+        this.cleanup();
+
+        if (discard) {
+            if (this.captionTextArea) {
+                this.captionTextArea.value = this.brainStt.sessionStartText || '';
+                this.updateCharacterCount();
+            }
+        }
+
+        this.brainStt.recognition = null;
+        this.brainStt.useSpeechRecognition = false;
+        this.brainStt.speechFinalText = '';
+        this.brainStt.speechInterimText = '';
+        this.brainStt.displayedInterimText = '';
+
+        this.resetUI();
     }
     
     getRecorderOptions() {

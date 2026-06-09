@@ -29,22 +29,18 @@ RAWZIP_SLUG = 'rawzip'
 
 
 def _project_domain(project_slug):
-    return 'brain' if project_slug == 'brain' else 'maxillo'
+    return 'maxillo'
 
 
 def _project_models(project_slug):
-    app_label = 'brain' if _project_domain(project_slug) == 'brain' else 'maxillo'
     return {
-        'Patient': apps.get_model(app_label, 'Patient'),
-        'Folder': apps.get_model(app_label, 'Folder'),
-        'Tag': apps.get_model(app_label, 'Tag'),
+        'Patient': apps.get_model('maxillo', 'Patient'),
+        'Folder': apps.get_model('maxillo', 'Folder'),
+        'Tag': apps.get_model('maxillo', 'Tag'),
     }
 
 
 def _upload_form_class(project_slug):
-    if _project_domain(project_slug) == 'brain':
-        from brain.forms import PatientUploadForm
-        return PatientUploadForm
     from ..forms import PatientUploadForm
     return PatientUploadForm
 
@@ -465,7 +461,7 @@ def get_patient_files(request, project_slug, patient_id):
                 return JsonResponse({'error': 'Permission denied'}, status=403)
         
         # Get all files for this patient from FileRegistry
-        file_filter = {'domain': domain, 'brain_patient': patient} if domain == 'brain' else {'domain': domain, 'patient': patient}
+        file_filter = {'domain': domain, 'patient': patient}
         files = FileRegistry.objects.filter(**file_filter).prefetch_related('modality').order_by('file_type', 'created_at')
         
         files_data = []
@@ -550,16 +546,10 @@ def get_multiple_patients_files(request, project_slug):
             return JsonResponse({'error': 'Maximum 100 patient IDs allowed per request'}, status=400)
         
         # Get patients and their files (only from the specified project)
-        if domain == 'brain':
-            files_prefetch = Prefetch(
-                'files',
-                queryset=FileRegistry.objects.filter(domain='brain').select_related('modality')
-            )
-        else:
-            files_prefetch = Prefetch(
-                'files',
-                queryset=FileRegistry.objects.filter(domain='maxillo').select_related('modality')
-            )
+        files_prefetch = Prefetch(
+            'files',
+            queryset=FileRegistry.objects.filter(domain='maxillo').select_related('modality')
+        )
         patients = Patient.objects.filter(patient_id__in=patient_ids).prefetch_related(files_prefetch).order_by('patient_id')
         patients = filter_patients_for_user(request.user, patients, domain)
         

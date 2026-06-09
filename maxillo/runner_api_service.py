@@ -12,9 +12,6 @@ logger = logging.getLogger(__name__)
 
 def _project_slug_for_job(job: Job) -> str:
     try:
-        if getattr(job, "domain", "maxillo") == "brain":
-            return "brain"
-
         patient = getattr(job, "patient", None)
         project = getattr(patient, "project", None) if patient is not None else None
         slug = getattr(project, "slug", None) if project is not None else None
@@ -26,7 +23,7 @@ def _project_slug_for_job(job: Job) -> str:
 
 
 def _patient_public_id_for_job(job: Job) -> Optional[int]:
-    patient = getattr(job, "brain_patient", None) or getattr(job, "patient", None)
+    patient = getattr(job, "patient", None)
     if patient is None:
         return None
     return getattr(patient, "patient_id", None) or getattr(patient, "id", None)
@@ -50,9 +47,7 @@ def claim_job_for_runner(*, job_id: int, worker_id: str) -> Dict[str, Any]:
     with transaction.atomic():
         job = (
             Job.objects.select_for_update()
-            .select_related(
-                "patient", "brain_patient", "voice_caption", "brain_voice_caption"
-            )
+            .select_related("patient", "voice_caption")
             .get(id=job_id)
         )
 

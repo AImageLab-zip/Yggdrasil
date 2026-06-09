@@ -59,5 +59,4 @@ Use `toothfairy4m-runner` (cookiecutter template) to run worker nodes.
 
 For more information or to request an account, please contact:
 
-**Luca Lumetti**  
-Email: [luca.lumetti@unimore.it](mailto:luca.lumetti@unimore.it)
+Email: [yggdrasil@unimore.it](mailto:yggdrasil@unimore.it)

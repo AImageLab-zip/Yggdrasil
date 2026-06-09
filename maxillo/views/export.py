@@ -60,22 +60,6 @@ EXPORT_MODALITY_FILE_TYPES = {
         "raw": ["panoramic_raw"],
         "processed": ["panoramic_processed"],
     },
-    "braintumor-mri-t1": {
-        "raw": ["braintumor_mri_t1_raw"],
-        "processed": ["braintumor_mri_t1_processed"],
-    },
-    "braintumor-mri-t1c": {
-        "raw": ["braintumor_mri_t1c_raw"],
-        "processed": ["braintumor_mri_t1c_processed"],
-    },
-    "braintumor-mri-t2": {
-        "raw": ["braintumor_mri_t2_raw"],
-        "processed": ["braintumor_mri_t2_processed"],
-    },
-    "braintumor-mri-flair": {
-        "raw": ["braintumor_mri_flair_raw"],
-        "processed": ["braintumor_mri_flair_processed"],
-    },
     "rawzip": {
         "raw": ["generic_raw"],
         "processed": ["generic_processed"],
@@ -401,10 +385,6 @@ def export_preview(request):
             else PatientModel.objects.none()
         )
 
-        file_patient_filter = (
-            "brain_patient__in" if domain == "brain" else "patient__in"
-        )
-
         # Apply filters (checking for processed files)
         if filters.get("has_cbct"):
             cbct_file_types = file_type_map.get("cbct", [])
@@ -413,9 +393,7 @@ def export_preview(request):
             # Patients with CBCT files for selected content
             cbct_patient_ids = FileRegistry.objects.filter(
                 domain=domain, file_type__in=cbct_file_types
-            ).values_list(
-                "brain_patient_id" if domain == "brain" else "patient_id", flat=True
-            )
+            ).values_list("patient_id", flat=True)
             cbct_patients = PatientModel.objects.filter(
                 patient_id__in=cbct_patient_ids
             ).distinct()
@@ -431,9 +409,7 @@ def export_preview(request):
             ios_patient_ids = FileRegistry.objects.filter(
                 domain=domain,
                 file_type__in=ios_file_types,
-            ).values_list(
-                "brain_patient_id" if domain == "brain" else "patient_id", flat=True
-            )
+            ).values_list("patient_id", flat=True)
             ios_patients = PatientModel.objects.filter(
                 patient_id__in=ios_patient_ids
             ).distinct()
@@ -450,10 +426,7 @@ def export_preview(request):
                 if file_types:
                     modality_patient_ids = FileRegistry.objects.filter(
                         domain=domain, file_type__in=file_types
-                    ).values_list(
-                        "brain_patient_id" if domain == "brain" else "patient_id",
-                        flat=True,
-                    )
+                    ).values_list("patient_id", flat=True)
                     modality_patients = PatientModel.objects.filter(
                         patient_id__in=modality_patient_ids
                     ).distinct()

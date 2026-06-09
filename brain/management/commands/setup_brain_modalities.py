@@ -68,6 +68,16 @@ class Command(BaseCommand):
                 'requires_multiple_files': False,
                 'is_active': True,
             },
+            {
+                'name': 'Brain MRI Segmentation',
+                'slug': 'braintumor-mri-seg',
+                'description': 'Brain Tumor Segmentation Mask',
+                'icon': 'fas fa-brain',
+                'label': 'SEG',
+                'supported_extensions': ['.nii', '.nii.gz'],
+                'requires_multiple_files': False,
+                'is_active': True,
+            },
         ]
 
         # Create or update each modality and link to Brain project

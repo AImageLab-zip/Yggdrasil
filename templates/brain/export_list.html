@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4 mb-0">Brain Exports</h1>
+        <a class="btn btn-primary btn-sm" href="{% url 'brain:export_new' %}">New Export</a>
+    </div>
+    <div class="list-group">
+        {% for export in exports %}
+            <a class="list-group-item list-group-item-action" href="{% url 'brain:export_status' export.id %}">
+                #{{ export.id }} - {{ export.status }} - {{ export.created_at }}
+            </a>
+        {% empty %}
+            <div class="text-muted">No exports yet.</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

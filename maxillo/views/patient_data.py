@@ -74,14 +74,6 @@ def patient_viewer_data(request, patient_id):
     """API endpoint to provide scan data for 3D viewer"""
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    domain = (
-        "brain"
-        if (
-            getattr(request, "resolver_match", None)
-            and request.resolver_match.namespace == "brain"
-        )
-        else "maxillo"
-    )
     if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
@@ -91,14 +83,11 @@ def patient_viewer_data(request, patient_id):
         from common.models import Job as _Job
 
         job_filter = {
-            "domain": domain,
+            "domain": "maxillo",
             "modality_slug": modality_slug,
             "status": "processing",
+            "patient_id": patient.patient_id,
         }
-        if domain == "brain":
-            job_filter["brain_patient_id"] = patient.patient_id
-        else:
-            job_filter["patient_id"] = patient.patient_id
         if _Job.objects.filter(**job_filter).exists():
             return JsonResponse(
                 {
@@ -109,14 +98,11 @@ def patient_viewer_data(request, patient_id):
                 status=202,
             )
         failed_filter = {
-            "domain": domain,
+            "domain": "maxillo",
             "modality_slug": modality_slug,
             "status": "failed",
+            "patient_id": patient.patient_id,
         }
-        if domain == "brain":
-            failed_filter["brain_patient_id"] = patient.patient_id
-        else:
-            failed_filter["patient_id"] = patient.patient_id
         if _Job.objects.filter(**failed_filter).exists():
             return JsonResponse(
                 {
@@ -208,14 +194,6 @@ def patient_cbct_data(request, patient_id):
     """API endpoint to serve CBCT data"""
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    domain = (
-        "brain"
-        if (
-            getattr(request, "resolver_match", None)
-            and request.resolver_match.namespace == "brain"
-        )
-        else "maxillo"
-    )
     if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
@@ -225,14 +203,11 @@ def patient_cbct_data(request, patient_id):
         from common.models import Job as _Job
 
         job_filter = {
-            "domain": domain,
+            "domain": "maxillo",
             "modality_slug": modality_slug,
             "status": "processing",
+            "patient_id": patient.patient_id,
         }
-        if domain == "brain":
-            job_filter["brain_patient_id"] = patient.patient_id
-        else:
-            job_filter["patient_id"] = patient.patient_id
         if _Job.objects.filter(**job_filter).exists():
             return JsonResponse(
                 {
@@ -243,14 +218,11 @@ def patient_cbct_data(request, patient_id):
                 status=202,
             )
         failed_filter = {
-            "domain": domain,
+            "domain": "maxillo",
             "modality_slug": modality_slug,
             "status": "failed",
+            "patient_id": patient.patient_id,
         }
-        if domain == "brain":
-            failed_filter["brain_patient_id"] = patient.patient_id
-        else:
-            failed_filter["patient_id"] = patient.patient_id
         if _Job.objects.filter(**failed_filter).exists():
             return JsonResponse(
                 {
@@ -333,14 +305,6 @@ def patient_volume_data(request, patient_id, modality_slug):
     """
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    domain = (
-        "brain"
-        if (
-            getattr(request, "resolver_match", None)
-            and request.resolver_match.namespace == "brain"
-        )
-        else "maxillo"
-    )
     if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
@@ -351,14 +315,11 @@ def patient_volume_data(request, patient_id, modality_slug):
     file_path = None
     try:
         processed_filter = {
-            "domain": domain,
+            "domain": "maxillo",
             "modality__slug": modality_slug,
             "file_type": "cbct_processed",
+            "patient_id": patient.patient_id,
         }
-        if domain == "brain":
-            processed_filter["brain_patient_id"] = patient.patient_id
-        else:
-            processed_filter["patient_id"] = patient.patient_id
         processed = _FR.objects.filter(**processed_filter).first()
         if (
             processed
@@ -375,11 +336,11 @@ def patient_volume_data(request, patient_id, modality_slug):
     # Fallback: use the latest raw NIfTI
     if not file_path:
         try:
-            raw_filter = {"domain": domain, "modality__slug": modality_slug}
-            if domain == "brain":
-                raw_filter["brain_patient_id"] = patient.patient_id
-            else:
-                raw_filter["patient_id"] = patient.patient_id
+            raw_filter = {
+                "domain": "maxillo",
+                "modality__slug": modality_slug,
+                "patient_id": patient.patient_id,
+            }
             raw = _FR.objects.filter(**raw_filter).order_by("-created_at").first()
             if (
                 raw
