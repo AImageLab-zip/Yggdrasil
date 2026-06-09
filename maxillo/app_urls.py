@@ -24,6 +24,16 @@ urlpatterns = [
         name="update_patient_name",
     ),
     path(
+        "patient/<int:patient_id>/files/raw/add/",
+        views.add_raw_file,
+        name="add_raw_file",
+    ),
+    path(
+        "patient/<int:patient_id>/files/raw/<int:file_id>/delete/",
+        views.delete_raw_file,
+        name="delete_raw_file",
+    ),
+    path(
         "patient/<int:patient_id>/voice-caption/",
         views.upload_voice_caption,
         name="upload_voice_caption",
@@ -64,6 +74,11 @@ urlpatterns = [
     ),
     path(
         "patients/bulk-delete/", views.bulk_delete_patients, name="bulk_delete_patients"
+    ),
+    path(
+        "patients/bulk-rerun-processing/",
+        views.bulk_rerun_processing,
+        name="bulk_rerun_processing",
     ),
     path(
         "patient/<int:patient_id>/rerun-processing/",
@@ -107,6 +122,7 @@ urlpatterns = [
         views.export_share_update,
         name="export_share_update",
     ),
+    path("export/<int:export_id>/stop/", views.export_stop, name="export_stop"),
     path(
         "export/shared/<str:share_token>/",
         views.export_shared_landing,
@@ -158,6 +174,11 @@ urlpatterns = [
         "api/patient/<int:patient_id>/teleradiography/",
         views.patient_teleradiography_data,
         name="patient_teleradiography_data",
+    ),
+    path(
+        "api/patient/<int:patient_id>/rgb-edit/save/",
+        views.save_rgb_image_edit,
+        name="save_rgb_image_edit",
     ),
     path(
         "api/patient/<int:patient_id>/volume/<slug:modality_slug>/",

@@ -9,6 +9,7 @@
     const namespace = window.projectNamespace || 'maxillo';
     const segmentationBox = labelRoot.querySelector('[data-segmentation-root]');
     const teethGrid = document.getElementById('intraoralSegmentationTeethGrid');
+    const emptyHint = document.getElementById('segEmptyHint');
     const confirmBtn = document.getElementById('segConfirmBtn');
     const onlySelectedBtn = document.getElementById('segOnlySelectedBtn');
     const resetViewBtn = document.getElementById('segResetViewBtn');
@@ -33,13 +34,14 @@
         images: [],
         teethByFileId: {},
         selectedImage: null,
-        selectedTooth: toothCodes[0],
+        selectedTooth: null,
         selectedPolygon: null,
         selectedVertex: null,
         drawing: false,
         draftPoints: [],
         stage: null,
         imageLayer: null,
+        imageNode: null,
         polygonLayer: null,
         handleLayer: null,
         imageObj: null,
@@ -61,6 +63,8 @@
         currentDraftId: null,
         nextDraftId: 1,
         onlySelectedTooth: false,
+        segmentationJobRunning: false,
+        imageEditSessions: {},
     };
 
     function setStatus(text) {
@@ -68,9 +72,25 @@
     }
 
     function imageStatusText(image = state.selectedImage, tooth = state.selectedTooth) {
-        if (!image) return 'Select an image to start annotation.';
+        if (!image) {
+            return state.segmentationJobRunning
+                ? 'AI segmentation is running. Labels will appear automatically when ready.'
+                : 'Select an image to start annotation.';
+        }
         if (image.is_confirmed) return 'Confirmed. Reopen to edit.';
+        if (!tooth) return `Image ${image.index}. Select a tooth to start annotation.`;
         return `Tooth ${tooth}. Click image to add polygon points.`;
+    }
+
+    function setJobRunningHint() {
+        if (!segmentationBox) return;
+        segmentationBox.classList.toggle('job-running', !!state.segmentationJobRunning);
+        if (!emptyHint) return;
+        if (state.segmentationJobRunning) {
+            emptyHint.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Image is getting segmented by AI...';
+            return;
+        }
+        emptyHint.textContent = 'Select an image to start annotation.';
     }
 
     function escapeHtml(text) {
@@ -360,6 +380,192 @@
         return polygon.map(clonePoint);
     }
 
+    function cloneTeethMap(teeth) {
+        const out = {};
+        Object.entries(teeth || {}).forEach(([tooth, polygons]) => {
+            out[tooth] = Array.isArray(polygons) ? polygons.map(clonePolygon) : [];
+        });
+        return out;
+    }
+
+    function clipPolygonToRect(polygon, rect) {
+        if (!Array.isArray(polygon) || polygon.length < 3) return [];
+
+        function inside(point, edge) {
+            if (edge === 'left') return point[0] >= rect.left;
+            if (edge === 'right') return point[0] <= rect.right;
+            if (edge === 'top') return point[1] >= rect.top;
+            return point[1] <= rect.bottom;
+        }
+
+        function intersect(start, end, edge) {
+            const x1 = start[0];
+            const y1 = start[1];
+            const x2 = end[0];
+            const y2 = end[1];
+            if (edge === 'left' || edge === 'right') {
+                const x = edge === 'left' ? rect.left : rect.right;
+                const dx = x2 - x1;
+                if (Math.abs(dx) < 1e-6) return [x, y1];
+                const t = (x - x1) / dx;
+                return [x, y1 + (y2 - y1) * t];
+            }
+            const y = edge === 'top' ? rect.top : rect.bottom;
+            const dy = y2 - y1;
+            if (Math.abs(dy) < 1e-6) return [x1, y];
+            const t = (y - y1) / dy;
+            return [x1 + (x2 - x1) * t, y];
+        }
+
+        function clipAgainst(points, edge) {
+            const output = [];
+            if (!points.length) return output;
+            for (let idx = 0; idx < points.length; idx += 1) {
+                const current = points[idx];
+                const previous = points[(idx + points.length - 1) % points.length];
+                const currentInside = inside(current, edge);
+                const previousInside = inside(previous, edge);
+                if (currentInside) {
+                    if (!previousInside) output.push(intersect(previous, current, edge));
+                    output.push(current);
+                } else if (previousInside) {
+                    output.push(intersect(previous, current, edge));
+                }
+            }
+            return output;
+        }
+
+        let result = polygon.map(clonePoint);
+        ['left', 'right', 'top', 'bottom'].forEach((edge) => {
+            result = clipAgainst(result, edge);
+        });
+        return result.length >= 3 ? result.map(([x, y]) => [Number(x.toFixed(3)), Number(y.toFixed(3))]) : [];
+    }
+
+    function applyImageEditOperation(point, operation) {
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        if (operation.type === 'flip-h') return [Number((operation.input_width - x).toFixed(3)), Number(y.toFixed(3))];
+        if (operation.type === 'flip-v') return [Number(x.toFixed(3)), Number((operation.input_height - y).toFixed(3))];
+        if (operation.type === 'crop') return [Number((x - operation.x).toFixed(3)), Number((y - operation.y).toFixed(3))];
+        if (operation.type === 'rotate-cw') return [Number((operation.input_height - y).toFixed(3)), Number(x.toFixed(3))];
+        if (operation.type === 'rotate-arbitrary') {
+            const θ = ((operation.angle % 360) + 360) % 360 * Math.PI / 180;
+            const cx = operation.input_width / 2;
+            const cy = operation.input_height / 2;
+            const dx = x - cx;
+            const dy = y - cy;
+            const rotX = dx * Math.cos(θ) + dy * Math.sin(θ) + operation.bb_width / 2 - operation.crop_x;
+            const rotY = -dx * Math.sin(θ) + dy * Math.cos(θ) + operation.bb_height / 2 - operation.crop_y;
+            return [Number(rotX.toFixed(3)), Number(rotY.toFixed(3))];
+        }
+        return [Number(x.toFixed(3)), Number(y.toFixed(3))];
+    }
+
+    function transformPolygonByOperations(polygon, operations) {
+        let nextPolygon = clonePolygon(polygon);
+        (Array.isArray(operations) ? operations : []).forEach((operation) => {
+            if (!operation || !operation.type || nextPolygon.length < 3) return;
+            if (operation.type === 'crop') {
+                nextPolygon = clipPolygonToRect(nextPolygon, {
+                    left: Number(operation.x),
+                    top: Number(operation.y),
+                    right: Number(operation.x) + Number(operation.width),
+                    bottom: Number(operation.y) + Number(operation.height),
+                }).map(point => applyImageEditOperation(point, operation));
+                return;
+            }
+            nextPolygon = nextPolygon.map(point => applyImageEditOperation(point, operation));
+        });
+        return nextPolygon.length >= 3 ? nextPolygon : [];
+    }
+
+    function transformTeethMap(teeth, editMeta) {
+        const operations = Array.isArray(editMeta && editMeta.operations) ? editMeta.operations : [];
+        if (!operations.length) return cloneTeethMap(teeth);
+        const out = {};
+        Object.entries(teeth || {}).forEach(([tooth, polygons]) => {
+            const transformed = (Array.isArray(polygons) ? polygons : [])
+                .map(polygon => transformPolygonByOperations(polygon, operations))
+                .filter(polygon => polygon.length >= 3);
+            if (transformed.length) out[tooth] = transformed;
+        });
+        return out;
+    }
+
+    function normalizePreviewEditMeta(fileId, editMeta, editorSession) {
+        const key = String(fileId);
+        if (!state.imageEditSessions[key]) {
+            state.imageEditSessions[key] = {
+                baseTeeth: cloneTeethMap(state.teethByFileId[fileId] || {}),
+                previewEditMeta: { operations: [] },
+                editorSession: null,
+            };
+        }
+
+        const session = state.imageEditSessions[key];
+        const sessionOps = Array.isArray(editorSession && editorSession.operations)
+            ? editorSession.operations.map(operation => ({ ...operation }))
+            : null;
+        const incomingOps = sessionOps || (Array.isArray(editMeta && editMeta.operations)
+            ? editMeta.operations.map(operation => ({ ...operation }))
+            : []);
+        const previousOps = Array.isArray(session.previewEditMeta && session.previewEditMeta.operations)
+            ? session.previewEditMeta.operations.map(operation => ({ ...operation }))
+            : [];
+
+        let operations = incomingOps;
+        if (!sessionOps && incomingOps.length && previousOps.length && incomingOps.length <= previousOps.length) {
+            operations = previousOps.concat(incomingOps);
+        }
+
+        session.previewEditMeta = {
+            ...(editMeta || {}),
+            operations,
+        };
+        return session.previewEditMeta;
+    }
+
+    function applyPreviewEditToImage(fileId, editMeta, editorSession) {
+        const session = state.imageEditSessions[String(fileId)] || {
+            baseTeeth: cloneTeethMap(state.teethByFileId[fileId] || {}),
+        };
+        const normalizedEditMeta = normalizePreviewEditMeta(fileId, editMeta || {}, editorSession || null);
+        state.teethByFileId[fileId] = transformTeethMap(session.baseTeeth, normalizedEditMeta);
+        renderLabels();
+        redrawStage();
+        return normalizedEditMeta;
+    }
+
+    function clearPreviewEditSession(fileId) {
+        delete state.imageEditSessions[String(fileId)];
+    }
+
+    function migrateImageState(previousId, nextId) {
+        if (previousId === nextId) return;
+        if (state.teethByFileId[previousId]) {
+            state.teethByFileId[nextId] = cloneTeethMap(state.teethByFileId[previousId]);
+            delete state.teethByFileId[previousId];
+        }
+        if (state.imageEditSessions[String(previousId)]) {
+            state.imageEditSessions[String(nextId)] = state.imageEditSessions[String(previousId)];
+            delete state.imageEditSessions[String(previousId)];
+        }
+    }
+
+    function ensureImageEditSession(fileId) {
+        const key = String(fileId);
+        const image = currentImageById(fileId) || {};
+        if (!state.imageEditSessions[key]) {
+            state.imageEditSessions[key] = {
+                baseTeeth: cloneTeethMap(image.raw_teeth || state.teethByFileId[fileId] || {}),
+                previewEditMeta: { operations: [] },
+                editorSession: null,
+            };
+        }
+        return state.imageEditSessions[key];
+    }
+
     function teethForFile(fileId) {
         if (!state.teethByFileId[fileId]) state.teethByFileId[fileId] = {};
         return state.teethByFileId[fileId];
@@ -596,6 +802,7 @@
 
     function renderLabels() {
         if (segmentationBox) segmentationBox.classList.toggle('has-selected-image', !!state.selectedImage);
+        setJobRunningHint();
         if (!teethGrid) return;
         teethGrid.innerHTML = '';
         toothCodes.forEach((code) => {
@@ -622,6 +829,13 @@
             codeText.className = 'seg-tooth-code';
             codeText.textContent = code;
             btn.appendChild(codeText);
+            if (code === state.selectedTooth) {
+                const selectedBadge = document.createElement('span');
+                selectedBadge.className = 'seg-selected-badge';
+                selectedBadge.setAttribute('aria-hidden', 'true');
+                selectedBadge.innerHTML = '<i class="fas fa-paint-brush"></i>';
+                btn.appendChild(selectedBadge);
+            }
             if (count > 0) {
                 const badge = document.createElement('span');
                 badge.className = 'seg-count';
@@ -638,7 +852,7 @@
                         points: clonePolygon(state.draftPoints),
                     });
                 }
-                state.selectedTooth = code;
+                state.selectedTooth = state.selectedTooth === code ? null : code;
                 state.selectedPolygon = null;
                 state.selectedVertex = null;
                 state.drawing = false;
@@ -666,7 +880,7 @@
         if (!onlySelectedBtn) return;
         onlySelectedBtn.classList.toggle('active', state.onlySelectedTooth);
         onlySelectedBtn.textContent = state.onlySelectedTooth ? 'Show all' : 'Only selected';
-        onlySelectedBtn.disabled = !state.selectedImage;
+        onlySelectedBtn.disabled = !state.selectedImage || !state.selectedTooth;
         if (resetViewBtn) resetViewBtn.disabled = !state.selectedImage;
     }
 
@@ -999,6 +1213,14 @@
 
     function finishDrawing() {
         if (!state.drawing || !canEditCurrentImage()) return;
+        if (!state.selectedTooth) {
+            state.drawing = false;
+            state.draftPoints = [];
+            state.currentDraftId = null;
+            setStatus('Select a tooth before drawing.');
+            redrawStage();
+            return;
+        }
         if (state.draftPoints.length < 3) {
             setStatus('Need at least 3 points.');
             return;
@@ -1028,6 +1250,10 @@
 
     function startOrContinueDrawing(point) {
         if (!canEditCurrentImage()) return;
+        if (!state.selectedTooth) {
+            setStatus('Select a tooth before drawing.');
+            return;
+        }
         if (!state.drawing) {
             state.selectedPolygon = null;
             state.selectedVertex = null;
@@ -1156,7 +1382,7 @@
         destroyStage();
         if (state.container) state.container.classList.remove('is-focused');
         renderLabels();
-        setStatus('Select an image to start annotation.');
+        setStatus(imageStatusText(null, state.selectedTooth));
     }
 
     function selectImage(image) {
@@ -1172,6 +1398,8 @@
         state.selectedImage = image;
         state.selectedPolygon = null;
         state.selectedVertex = null;
+        state.selectedTooth = null;
+        state.onlySelectedTooth = false;
         state.drawing = false;
         state.draftPoints = [];
         state.currentDraftId = null;
@@ -1184,6 +1412,7 @@
         if (state.stage) state.stage.destroy();
         state.stage = null;
         state.imageLayer = null;
+        state.imageNode = null;
         state.polygonLayer = null;
         state.handleLayer = null;
         state.imageObj = null;
@@ -1247,7 +1476,7 @@
         window.setTimeout(() => { state.didPan = false; }, 0);
     }
 
-    function mountStage(host, image) {
+    function mountStage(host, image, onReady) {
         destroyStage();
         const token = ++state.mountToken;
         host.innerHTML = '';
@@ -1268,7 +1497,8 @@
             state.stage.add(state.imageLayer);
             state.stage.add(state.polygonLayer);
             state.stage.add(state.handleLayer);
-            state.imageLayer.add(new window.Konva.Image({ image: img, width, height, listening: false }));
+            state.imageNode = new window.Konva.Image({ image: img, width, height, listening: false });
+            state.imageLayer.add(state.imageNode);
             state.imageLayer.draw();
             resetViewport();
             host.addEventListener('auxclick', (evt) => {
@@ -1293,7 +1523,10 @@
             });
             state.stage.on('dblclick dbltap', finishDrawing);
             redrawStage();
-            setStatus(state.selectedImage.is_confirmed ? 'Confirmed. Reopen to edit.' : `Image ${image.index}. Tooth ${state.selectedTooth}. Click image to add polygon points.`);
+            setStatus(state.selectedImage.is_confirmed ? 'Confirmed. Reopen to edit.' : imageStatusText(state.selectedImage, state.selectedTooth));
+            if (typeof onReady === 'function') {
+                onReady({ width, height, image: img });
+            }
         };
         img.onerror = () => {
             if (token === state.mountToken) setStatus('Image failed to load.');
@@ -1354,9 +1587,147 @@
         stageHost.className = 'intraoral-seg-stage';
         shell.appendChild(stageHost);
 
+        let editorProxy = null;
+
+        function syncEditorProxyGeometry(dimensions) {
+            if (!editorProxy || !dimensions) return;
+            editorProxy.style.width = `${dimensions.width}px`;
+            editorProxy.style.height = `${dimensions.height}px`;
+            editorProxy.style.left = `calc(50% - ${Math.round(dimensions.width / 2)}px)`;
+            editorProxy.style.top = '0';
+        }
+
+        function attachFocusedEditor(dimensions) {
+            if (!window.RGBImageEditor || !dimensions || !state.selectedImage) return;
+            const existingProxy = shell.querySelector('.seg-rgb-editor-proxy');
+            if (existingProxy) existingProxy.remove();
+            shell.querySelectorAll('.rgb-edit-toolbar').forEach((el) => el.remove());
+
+            const proxy = document.createElement('img');
+            proxy.className = 'seg-rgb-editor-proxy';
+            proxy.alt = '';
+            proxy.src = state.selectedImage.url;
+            editorProxy = proxy;
+            syncEditorProxyGeometry(dimensions);
+            shell.appendChild(proxy);
+
+            proxy.addEventListener('load', function onFirstProxyLoad() {
+                proxy.removeEventListener('load', onFirstProxyLoad);
+                const imageSession = ensureImageEditSession(state.selectedImage.id);
+                if (!imageSession.editorSession) {
+                    const existingEditMeta = state.selectedImage.edit_meta || {};
+                    const existingOperations = Array.isArray(existingEditMeta.operations)
+                        ? existingEditMeta.operations.map(operation => ({ ...operation }))
+                        : [];
+                    imageSession.editorSession = {
+                        sourceUrl: state.selectedImage.raw_url || state.selectedImage.url,
+                        baseWidth: existingEditMeta.input_width || proxy.naturalWidth || 0,
+                        baseHeight: existingEditMeta.input_height || proxy.naturalHeight || 0,
+                        currentWidth: existingEditMeta.output_width || proxy.naturalWidth || 0,
+                        currentHeight: existingEditMeta.output_height || proxy.naturalHeight || 0,
+                        operations: existingOperations,
+                        history: [{
+                            url: state.selectedImage.url,
+                            operations: existingOperations,
+                        }],
+                    };
+                }
+                window.RGBImageEditor.attachToImage(proxy, {
+                    patientId,
+                    modalitySlug: 'intraoral-photo',
+                    sourceFileId: state.selectedImage.source_file_id || state.selectedImage.id,
+                    rawUrl: state.selectedImage.raw_url,
+                    container: shell,
+                    initialSession: imageSession.editorSession,
+                    onReset: (rawUrl) => {
+                        const sourceFileId = state.selectedImage.source_file_id || state.selectedImage.id;
+                        const prevId = state.selectedImage.id;
+                        state.images = state.images.map((item) => (
+                            item.id === prevId ? {
+                                ...item,
+                                id: sourceFileId,
+                                url: rawUrl,
+                                is_processed: false,
+                                edit_meta: null,
+                            } : item
+                        ));
+                        // Reset the raw session cleanly; do not migrate processed-space teeth
+                        const rawSession = ensureImageEditSession(sourceFileId);
+                        rawSession.editorSession = null;
+                        rawSession.previewEditMeta = { operations: [] };
+                        rawSession.baseTeeth = cloneTeethMap(state.teethByFileId[sourceFileId] || {});
+                        state.selectedImage = state.images.find((item) => item.id === sourceFileId) || {
+                            ...state.selectedImage,
+                            id: sourceFileId,
+                            url: rawUrl,
+                            is_processed: false,
+                            edit_meta: null,
+                        };
+                        renderLabels();
+                        redrawStage();
+                        mountStage(stageHost, state.selectedImage, syncEditorProxyGeometry);
+                    },
+                    onLivePreview: (_dataUrl, previewCanvas) => {
+                        if (!state.imageNode || !state.imageLayer || !previewCanvas) return;
+                        state.imageNode.image(previewCanvas);
+                        state.imageLayer.batchDraw();
+                    },
+                    onPreview: (nextUrl, editMeta, editorSession) => {
+                        state.images = state.images.map((item) => (
+                            item.id === state.selectedImage.id ? { ...item, url: nextUrl } : item
+                        ));
+                        state.selectedImage = { ...state.selectedImage, url: nextUrl };
+                        const normalizedEditMeta = applyPreviewEditToImage(state.selectedImage.id, editMeta, editorSession);
+                        ensureImageEditSession(state.selectedImage.id).editorSession = editorSession;
+                        state.selectedImage.edit_meta = normalizedEditMeta;
+                        mountStage(stageHost, state.selectedImage, syncEditorProxyGeometry);
+                    },
+                    onSaved: (data, editMeta, editorSession) => {
+                        const nextUrl = data.url + (data.url.includes('?') ? '&' : '?') + 'v=' + Date.now();
+                        const prevId = state.selectedImage.id;
+
+                        // After save the processed image has all editMeta.operations baked in.
+                        // Update baseTeeth to the processed coordinate space so any subsequent
+                        // edits (and the immediate Konva redraw) are positioned correctly.
+                        const prevSession = state.imageEditSessions[String(prevId)];
+                        if (prevSession) {
+                            prevSession.baseTeeth = transformTeethMap(prevSession.baseTeeth, editMeta);
+                            prevSession.previewEditMeta = { operations: [] };
+                        }
+                        state.teethByFileId[prevId] = prevSession
+                            ? cloneTeethMap(prevSession.baseTeeth)
+                            : transformTeethMap(cloneTeethMap(state.teethByFileId[prevId] || {}), editMeta);
+
+                        state.images = state.images.map((item) => (
+                            item.id === prevId ? {
+                                ...item,
+                                id: data.file_id,
+                                url: nextUrl,
+                                is_processed: true,
+                                edit_meta: editMeta,
+                            } : item
+                        ));
+                        migrateImageState(prevId, data.file_id);
+                        const nextSession = ensureImageEditSession(data.file_id);
+                        nextSession.editorSession = editorSession;
+                        state.selectedImage = state.images.find((item) => item.id === data.file_id) || {
+                            ...state.selectedImage,
+                            id: data.file_id,
+                            url: nextUrl,
+                            is_processed: true,
+                            edit_meta: editMeta,
+                        };
+                        renderLabels();
+                        redrawStage();
+                        mountStage(stageHost, state.selectedImage, syncEditorProxyGeometry);
+                    },
+                });
+            });
+        }
+
         selected.appendChild(strip);
         selected.appendChild(shell);
-        mountStage(stageHost, state.selectedImage);
+        mountStage(stageHost, state.selectedImage, attachFocusedEditor);
     }
 
     function renderGrid() {
@@ -1385,17 +1756,22 @@
         const response = await fetch(`/${namespace}/api/patient/${patientId}/intraoral-segmentation/`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Failed to load segmentation.');
+        state.segmentationJobRunning = !!data.segmentation_job_running;
         const byId = new Map((Array.isArray(data.images) ? data.images : []).map(image => [image.id, image]));
         state.images = state.images.map((image) => {
             const loaded = byId.get(image.id) || image;
             return {
                 ...loaded,
+                source_file_id: loaded.source_file_id || image.source_file_id || image.id,
+                raw_url: loaded.raw_url || image.raw_url || loaded.url || image.url,
+                raw_teeth: normalizeTeeth(loaded.raw_teeth || image.raw_teeth || {}),
                 is_confirmed: !!loaded.is_confirmed,
                 confirmed_at: loaded.confirmed_at || null,
                 confirmed_by: loaded.confirmed_by || null,
             };
         });
         state.teethByFileId = {};
+        state.imageEditSessions = {};
         state.images.forEach((image) => {
             state.teethByFileId[image.id] = normalizeTeeth(image.teeth || {});
         });
@@ -1406,12 +1782,16 @@
         state.container.className = 'intraoral-seg-workspace';
         state.images = Array.isArray(images) ? images.slice() : [];
         if (!state.images.length) return;
+        state.segmentationJobRunning = false;
         setStatus('Loading segmentation...');
         try {
             await loadSegmentation();
             renderGrid();
+            setStatus(imageStatusText(null, state.selectedTooth));
         } catch (error) {
             state.teethByFileId = {};
+            state.imageEditSessions = {};
+            state.segmentationJobRunning = false;
             state.images = state.images.map(image => ({ ...image, is_confirmed: false, confirmed_at: null, confirmed_by: null }));
             state.images.forEach(image => { state.teethByFileId[image.id] = {}; });
             renderGrid();
@@ -1454,13 +1834,27 @@
                 }
                 state.drawing = false;
                 state.draftPoints = [];
+                state.selectedTooth = null;
+                state.selectedPolygon = null;
+                state.selectedVertex = null;
                 redrawStage();
-                setStatus('Drawing canceled.');
+                renderLabels();
+                setStatus('Drawing canceled. Tooth selection cleared.');
             } else if (state.selectedPolygon || state.selectedVertex) {
                 state.selectedPolygon = null;
                 state.selectedVertex = null;
                 redrawStage();
-                setStatus(`Image ${state.selectedImage.index}. Tooth ${state.selectedTooth}. Click image to add polygon points.`);
+                setStatus(imageStatusText(state.selectedImage, state.selectedTooth));
+            } else if (state.selectedTooth) {
+                state.selectedTooth = null;
+                state.selectedPolygon = null;
+                state.selectedVertex = null;
+                state.drawing = false;
+                state.draftPoints = [];
+                state.currentDraftId = null;
+                renderLabels();
+                redrawStage();
+                setStatus(imageStatusText(state.selectedImage, state.selectedTooth));
             }
         }
         if (evt.key === 'Enter' && state.drawing) {

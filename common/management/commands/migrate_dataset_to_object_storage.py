@@ -184,26 +184,12 @@ class Command(BaseCommand):
                         fr.metadata, dataset_root=dataset_root
                     )
 
-            job_qs = (
-                Job.objects.exclude(input_file_path="")
-                .filter(input_file_path__startswith=dataset_root)
-                .order_by("id")
-            )
+            job_qs = Job.objects.order_by("id")
             for job in _iter_qs(job_qs.iterator(), limit_n=limit):
-                original = job.input_file_path or ""
-                s = original.strip()
-                if s.startswith("{") or s.startswith("["):
-                    try:
-                        parsed = json.loads(original)
-                        yield from _iter_dataset_paths(
-                            parsed, dataset_root=dataset_root
-                        )
-                    except Exception:
-                        if _should_rewrite_path(original, dataset_root=dataset_root):
-                            yield original
-                else:
-                    if _should_rewrite_path(original, dataset_root=dataset_root):
-                        yield original
+                if isinstance(job.input_files, (dict, list)):
+                    yield from _iter_dataset_paths(
+                        job.input_files, dataset_root=dataset_root
+                    )
 
                 if isinstance(job.output_files, (dict, list)):
                     yield from _iter_dataset_paths(
@@ -374,47 +360,21 @@ class Command(BaseCommand):
 
             self.stdout.write(f"FileRegistry updated: {fr_updated}")
 
-            job_qs = (
-                Job.objects.exclude(input_file_path="")
-                .filter(input_file_path__startswith=dataset_root)
-                .order_by("id")
-            )
+            job_qs = Job.objects.order_by("id")
             job_count = job_qs.count()
-            self.stdout.write(f"Job candidates (input_file_path): {job_count}")
+            self.stdout.write(f"Job candidates (input_files): {job_count}")
 
             job_updated = 0
             for job in _iter_qs(job_qs.iterator(), limit_n=limit):
-                original = job.input_file_path or ""
-                new_val = original
                 changed = False
-
-                s = original.strip()
-                if s.startswith("{") or s.startswith("["):
-                    try:
-                        parsed = json.loads(original)
-                        _set_context("Job", job.id, "input_file_path")
-                        rewritten, ch = _rewrite_any(
-                            parsed,
-                            dataset_root=dataset_root,
-                            ensure_uploaded=ensure_uploaded,
-                        )
-                        if ch:
-                            new_val = json.dumps(rewritten)
-                            changed = True
-                    except Exception:
-                        if _should_rewrite_path(original, dataset_root=dataset_root):
-                            _set_context("Job", job.id, "input_file_path")
-                            maybe_key = ensure_uploaded(original)
-                            if maybe_key is not MISSING:
-                                new_val = maybe_key
-                                changed = True
-                else:
-                    if _should_rewrite_path(original, dataset_root=dataset_root):
-                        _set_context("Job", job.id, "input_file_path")
-                        maybe_key = ensure_uploaded(original)
-                        if maybe_key is not MISSING:
-                            new_val = maybe_key
-                            changed = True
+                new_inputs = job.input_files
+                if isinstance(job.input_files, (dict, list)):
+                    _set_context("Job", job.id, "input_files")
+                    new_inputs, changed = _rewrite_any(
+                        job.input_files,
+                        dataset_root=dataset_root,
+                        ensure_uploaded=ensure_uploaded,
+                    )
 
                 out_changed = False
                 new_outputs = job.output_files
@@ -429,13 +389,13 @@ class Command(BaseCommand):
                 if changed or out_changed:
                     job_updated += 1
                     if do_apply:
-                        job.input_file_path = new_val
+                        job.input_files = new_inputs
                         if out_changed:
                             job.output_files = new_outputs
                         job.save(
-                            update_fields=["input_file_path", "output_files"]
+                            update_fields=["input_files", "output_files"]
                             if out_changed
-                            else ["input_file_path"]
+                            else ["input_files"]
                         )
 
             self.stdout.write(f"Jobs updated: {job_updated}")

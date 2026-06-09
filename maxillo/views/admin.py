@@ -10,10 +10,13 @@ import json
 import logging
 
 from .domain import get_domain_models, get_namespace
+from common.permissions import user_can_perform_bulk_operations
 
 logger = logging.getLogger(__name__)
 
 
+@login_required
+@require_POST
 def rerun_processing(request, patient_id):
     """Set selected existing jobs to pending so workers can pick them up (admin only).
 
@@ -133,6 +136,123 @@ def rerun_processing(request, patient_id):
 
     except Exception as e:
         logger.error(f"Error rerunning processing for scan {patient_id}: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_POST
+def bulk_rerun_processing(request):
+    """Bulk rerun latest existing job per modality per patient (admin only)."""
+    try:
+        if not user_can_perform_bulk_operations(request.user, request):
+            return JsonResponse(
+                {"success": False, "error": "You do not have permission to bulk rerun jobs."},
+                status=403,
+            )
+
+        Patient = get_domain_models(request)["Patient"]
+        domain = get_namespace(request)
+        from common.models import Job
+
+        try:
+            data = json.loads(request.body) if request.body else {}
+        except json.JSONDecodeError:
+            data = {}
+
+        scan_ids = data.get("scan_ids", [])
+        requested_jobs = data.get("jobs", [])
+
+        if not isinstance(scan_ids, list) or not scan_ids:
+            return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+        if not isinstance(requested_jobs, list) or not requested_jobs:
+            return JsonResponse({"success": False, "error": "jobs list is required"}, status=400)
+
+        valid_scan_ids = []
+        for raw_id in scan_ids:
+            try:
+                valid_scan_ids.append(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+        valid_scan_ids = list(set(valid_scan_ids))
+
+        if not valid_scan_ids:
+            return JsonResponse({"success": False, "error": "No valid scan_ids provided"}, status=400)
+
+        patients = Patient.objects.filter(patient_id__in=valid_scan_ids)
+        if not patients.exists():
+            return JsonResponse({"success": False, "error": "No valid scans found"}, status=404)
+
+        normalized_jobs = []
+        for slug in requested_jobs:
+            s = str(slug or "").strip()
+            if not s:
+                continue
+            normalized_jobs.append("audio" if s == "voice" else s)
+        normalized_jobs = list(set(normalized_jobs))
+
+        if not normalized_jobs:
+            return JsonResponse({"success": False, "error": "No valid modalities selected"}, status=400)
+
+        updated_pairs = 0
+        not_found_pairs = 0
+        updated_by_modality = {}
+        not_found_by_modality = {}
+
+        for patient in patients:
+            job_filter_base = (
+                {"brain_patient": patient, "domain": "brain"}
+                if domain == "brain"
+                else {"patient": patient, "domain": "maxillo"}
+            )
+
+            for modality_slug in normalized_jobs:
+                job = (
+                    Job.objects.filter(modality_slug=modality_slug, **job_filter_base)
+                    .order_by("-created_at")
+                    .first()
+                )
+                if not job:
+                    not_found_pairs += 1
+                    not_found_by_modality[modality_slug] = not_found_by_modality.get(modality_slug, 0) + 1
+                    continue
+
+                job.status = "pending"
+                job.started_at = None
+                job.completed_at = None
+                job.worker_id = ""
+                job.error_logs = ""
+                job.save()
+
+                if hasattr(job, "update_status_based_on_dependencies"):
+                    job.update_status_based_on_dependencies()
+
+                updated_pairs += 1
+                updated_by_modality[modality_slug] = updated_by_modality.get(modality_slug, 0) + 1
+
+                if modality_slug == "audio":
+                    for vc in patient.voice_captions.all():
+                        vc.processing_status = "pending"
+                        vc.save(update_fields=["processing_status"])
+
+        message = (
+            f"Bulk rerun queued for {updated_pairs} patient-modality pairs "
+            f"across {patients.count()} selected scans."
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": message,
+                "selected_scan_count": patients.count(),
+                "requested_modalities": normalized_jobs,
+                "updated_pairs": updated_pairs,
+                "not_found_pairs": not_found_pairs,
+                "updated_by_modality": updated_by_modality,
+                "not_found_by_modality": not_found_by_modality,
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error in bulk rerun processing: {e}", exc_info=True)
         return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 

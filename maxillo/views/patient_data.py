@@ -4,11 +4,23 @@ from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.urls import reverse
+from django.views.decorators.http import require_POST
+from django.utils import timezone
 import os
 import logging
+import tempfile
+import hashlib
+import json
+from PIL import Image
 
 from common.file_access import exists as artifact_exists, streaming_response
-from common.permissions import user_can_read_folder, user_is_project_admin
+from common.permissions import (
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
+from common.object_storage import get_object_storage
+from common.models import FileRegistry, Modality
 from .domain import get_domain_models
 
 logger = logging.getLogger(__name__)
@@ -27,6 +39,34 @@ def _can_read_patient(request, patient):
     if not patient.folder:
         return False
     return user_can_read_folder(request.user, patient.folder, request)
+
+
+def _can_write_patient(request, patient):
+    if user_is_project_admin(request.user, request):
+        return True
+    return bool(
+        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
+    )
+
+
+def _content_type_for_image_path(file_path):
+    ext = os.path.splitext((file_path or "").lower())[1]
+    if ext in [".jpg", ".jpeg"]:
+        return "image/jpeg"
+    if ext == ".gif":
+        return "image/gif"
+    if ext == ".webp":
+        return "image/webp"
+    return "image/png"
+
+
+def _latest_official_image_file(patient, file_types, *, source_file_id=None, image_index=None):
+    qs = patient.files.filter(file_type__in=file_types)
+    if source_file_id is not None:
+        qs = qs.filter(metadata__source_file_id=source_file_id)
+    elif image_index is not None:
+        qs = qs.filter(metadata__image_index=image_index)
+    return qs.order_by("-created_at", "-id").first()
 
 
 @login_required
@@ -346,31 +386,41 @@ def patient_panoramic_data(request, patient_id):
     try:
         from common.models import FileRegistry
 
-        # Look for panoramic files by modality slug OR file_type
-        # Try modality-based lookup first
+        # Prefer manually processed panoramic, then raw upload.
         panoramic_file = (
-            patient.files.filter(modality__slug="panoramic")
-            .order_by("-created_at")
+            patient.files.filter(file_type="panoramic_processed")
+            .order_by("-created_at", "-id")
             .first()
         )
-
-        # If not found, try file_type lookup (for files uploaded before modality system)
         if not panoramic_file:
             panoramic_file = (
                 patient.files.filter(file_type="panoramic_raw")
-                .order_by("-created_at")
+                .order_by("-created_at", "-id")
                 .first()
             )
-
-        # Also check processed panoramic
         if not panoramic_file:
             panoramic_file = (
-                patient.files.filter(file_type="panoramic_processed")
-                .order_by("-created_at")
+                patient.files.filter(modality__slug="panoramic")
+                .order_by("-created_at", "-id")
                 .first()
             )
 
         if panoramic_file and artifact_exists(panoramic_file.file_path):
+            source_file_id = (
+                (panoramic_file.metadata or {}).get("source_file_id")
+                if isinstance(panoramic_file.metadata, dict)
+                else None
+            )
+            source_file_id = source_file_id or panoramic_file.id
+            if request.GET.get("meta") == "1":
+                return JsonResponse(
+                    {
+                        "url": _serve_file_url(request, panoramic_file.id),
+                        "source_file_id": source_file_id,
+                        "raw_url": _serve_file_url(request, source_file_id),
+                        "is_processed": panoramic_file.file_type.endswith("_processed"),
+                    }
+                )
             logger.debug(f"Serving uploaded panoramic file: {panoramic_file.file_path}")
             # Determine content type based on file extension
             file_ext = os.path.splitext(panoramic_file.file_path)[1].lower()
@@ -495,25 +545,88 @@ def patient_intraoral_data(request, patient_id):
 
     # Get intraoral images from FileRegistry
     try:
-        intraoral_files = patient.files.filter(
-            file_type__in=["intraoral_raw", "intraoral_processed"]
-        ).order_by("metadata__image_index", "created_at")
+        raw_files = patient.files.filter(file_type="intraoral_raw").order_by(
+            "metadata__image_index", "created_at", "id"
+        )
 
-        if not intraoral_files.exists():
-            return JsonResponse({"error": "No intraoral photographs found"}, status=404)
-
-        images_data = []
-        for file_obj in intraoral_files:
-            if artifact_exists(file_obj.file_path):
+        if not raw_files.exists():
+            legacy_files = patient.files.filter(
+                file_type__in=["intraoral-photo_processed", "intraoral_processed"]
+            ).order_by(
+                "metadata__image_index", "created_at", "id"
+            )
+            if not legacy_files.exists():
+                return JsonResponse({"error": "No intraoral photographs found"}, status=404)
+            images_data = []
+            for fallback_index, file_obj in enumerate(legacy_files, start=1):
+                if not artifact_exists(file_obj.file_path):
+                    continue
+                image_index = (
+                    file_obj.metadata.get("image_index", fallback_index)
+                    if isinstance(file_obj.metadata, dict)
+                    else fallback_index
+                )
                 images_data.append(
                     {
                         "id": file_obj.id,
-                        "index": file_obj.metadata.get("image_index", 0),
-                        "original_filename": file_obj.metadata.get(
-                            "original_filename", ""
+                        "source_file_id": file_obj.id,
+                        "index": image_index,
+                        "original_filename": (
+                            file_obj.metadata.get("original_filename", "")
+                            if isinstance(file_obj.metadata, dict)
+                            else ""
                         ),
-                        "is_processed": file_obj.file_type.endswith("_processed"),
+                        "is_processed": True,
+                        "edit_meta": (
+                            file_obj.metadata.get("edit_meta")
+                            if isinstance(file_obj.metadata, dict)
+                            else None
+                        ),
                         "url": _serve_file_url(request, file_obj.id),
+                    }
+                )
+            if not images_data:
+                return JsonResponse(
+                    {"error": "No intraoral image files found in storage"},
+                    status=404,
+                )
+            return JsonResponse({"images": images_data, "count": len(images_data)})
+
+        images_data = []
+        for fallback_index, file_obj in enumerate(raw_files, start=1):
+            if artifact_exists(file_obj.file_path):
+                image_index = 0
+                if isinstance(file_obj.metadata, dict):
+                    image_index = file_obj.metadata.get("image_index", 0) or fallback_index
+                processed_file = _latest_official_image_file(
+                    patient,
+                    ["intraoral-photo_processed", "intraoral_processed"],
+                    source_file_id=file_obj.id,
+                )
+                if not processed_file:
+                    processed_file = _latest_official_image_file(
+                        patient,
+                        ["intraoral-photo_processed", "intraoral_processed"],
+                        image_index=image_index,
+                    )
+                official_file = processed_file or file_obj
+                images_data.append(
+                    {
+                        "id": official_file.id,
+                        "source_file_id": file_obj.id,
+                        "index": image_index,
+                        "original_filename": (
+                            file_obj.metadata.get("original_filename", "")
+                            if isinstance(file_obj.metadata, dict)
+                            else ""
+                        ),
+                        "is_processed": official_file.file_type.endswith("_processed"),
+                        "edit_meta": (
+                            official_file.metadata.get("edit_meta")
+                            if isinstance(official_file.metadata, dict)
+                            else None
+                        ),
+                        "url": _serve_file_url(request, official_file.id),
                     }
                 )
 
@@ -542,18 +655,38 @@ def patient_teleradiography_data(request, patient_id):
     # Look for teleradiography file in FileRegistry
     try:
         # Prefer processed file, fallback to raw
-        teleradiography_file = patient.files.filter(
-            file_type="teleradiography_processed"
-        ).first()
+        teleradiography_file = (
+            patient.files.filter(file_type="teleradiography_processed")
+            .order_by("-created_at", "-id")
+            .first()
+        )
 
         if not teleradiography_file:
-            teleradiography_file = patient.files.filter(
-                file_type="teleradiography_raw"
-            ).first()
+            teleradiography_file = (
+                patient.files.filter(file_type="teleradiography_raw")
+                .order_by("-created_at", "-id")
+                .first()
+            )
 
         if not teleradiography_file:
             return JsonResponse(
                 {"error": "Teleradiography image not found"}, status=404
+            )
+
+        source_file_id = (
+            (teleradiography_file.metadata or {}).get("source_file_id")
+            if isinstance(teleradiography_file.metadata, dict)
+            else None
+        )
+        source_file_id = source_file_id or teleradiography_file.id
+        if request.GET.get("meta") == "1":
+            return JsonResponse(
+                {
+                    "url": _serve_file_url(request, teleradiography_file.id),
+                    "source_file_id": source_file_id,
+                    "raw_url": _serve_file_url(request, source_file_id),
+                    "is_processed": teleradiography_file.file_type.endswith("_processed"),
+                }
             )
 
         if not artifact_exists(teleradiography_file.file_path):
@@ -576,3 +709,120 @@ def patient_teleradiography_data(request, patient_id):
     except Exception as e:
         logger.error(f"Error serving teleradiography data: {e}", exc_info=True)
         return JsonResponse({"error": "Internal server error"}, status=500)
+
+
+@login_required
+@require_POST
+def save_rgb_image_edit(request, patient_id):
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not _can_write_patient(request, patient):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    modality_slug = (request.POST.get("modality_slug") or "").strip()
+    source_file_id = request.POST.get("source_file_id")
+    edited_image = request.FILES.get("image")
+    edit_meta_raw = request.POST.get("edit_meta") or "{}"
+
+    modality_to_types = {
+        "intraoral-photo": ("intraoral_raw", "intraoral-photo_processed"),
+        "teleradiography": ("teleradiography_raw", "teleradiography_processed"),
+        "panoramic": ("panoramic_raw", "panoramic_processed"),
+    }
+    if modality_slug not in modality_to_types:
+        return JsonResponse({"success": False, "error": "Unsupported modality"}, status=400)
+    if not source_file_id:
+        return JsonResponse({"success": False, "error": "source_file_id is required"}, status=400)
+    try:
+        source_file_id = int(source_file_id)
+    except (TypeError, ValueError):
+        return JsonResponse({"success": False, "error": "Invalid source_file_id"}, status=400)
+    if not edited_image:
+        return JsonResponse({"success": False, "error": "Edited image is required"}, status=400)
+
+    try:
+        edit_meta = json.loads(edit_meta_raw)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid edit metadata"}, status=400)
+
+    raw_type, processed_type = modality_to_types[modality_slug]
+    source_file = get_object_or_404(FileRegistry, id=source_file_id, patient=patient)
+    if source_file.file_type != raw_type:
+        return JsonResponse({"success": False, "error": "Source file type mismatch"}, status=400)
+
+    ext = os.path.splitext(edited_image.name or "")[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        ext = ".png"
+    now = timezone.now()
+    object_key = (
+        f"maxillo/processed/{modality_slug}/{modality_slug}_patient_{patient.patient_id}"
+        f"_{source_file_id}_{now.strftime('%Y%m%d%H%M%S')}{ext}"
+    )
+
+    fd, tmp_path = tempfile.mkstemp(prefix="tf_rgb_edit_", suffix=ext)
+    os.close(fd)
+    hash_sha256 = hashlib.sha256()
+    file_size = 0
+    output_width = None
+    output_height = None
+    try:
+        with open(tmp_path, "wb+") as destination:
+            for chunk in edited_image.chunks():
+                destination.write(chunk)
+                hash_sha256.update(chunk)
+                file_size += len(chunk)
+        with Image.open(tmp_path) as saved_image:
+            output_width, output_height = saved_image.size
+        get_object_storage().upload_file(tmp_path, key=object_key)
+    except Exception as exc:
+        logger.error("Failed to store processed RGB image: %s", exc, exc_info=True)
+        return JsonResponse({"success": False, "error": "Failed to save processed image"}, status=500)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+    # Keep one processed file per source image (replace older rows + files)
+    old_entries = patient.files.filter(
+        file_type=processed_type,
+        metadata__source_file_id=source_file_id,
+    )
+    for row in old_entries:
+        try:
+            get_object_storage().delete(row.file_path)
+        except Exception:
+            logger.warning("Failed deleting old processed object %s", row.file_path)
+    old_entries.delete()
+
+    modality_fk = Modality.objects.filter(slug=modality_slug).first()
+    metadata = dict(source_file.metadata or {})
+    if output_width and output_height:
+        metadata["image_width"] = output_width
+        metadata["image_height"] = output_height
+    metadata.update({
+        "source_file_id": source_file_id,
+        "source_file_type": source_file.file_type,
+        "modality_slug": modality_slug,
+        "edited_at": now.isoformat(),
+        "edited_by": request.user.username,
+        "edit_meta": edit_meta,
+    })
+
+    processed_row = FileRegistry.objects.create(
+        file_type=processed_type,
+        file_path=object_key,
+        file_size=file_size,
+        file_hash=hash_sha256.hexdigest(),
+        metadata=metadata,
+        modality=modality_fk,
+        domain="maxillo",
+        patient=patient,
+    )
+
+    return JsonResponse({
+        "success": True,
+        "file_id": processed_row.id,
+        "url": _serve_file_url(request, processed_row.id),
+        "processed_file_type": processed_type,
+    })

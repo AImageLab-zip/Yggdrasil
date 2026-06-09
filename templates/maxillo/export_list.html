@@ -149,6 +149,11 @@
                                                 value="{% if export.share_token %}{% url ns|default:'maxillo'|add:':export_shared_download' export.share_token %}{% endif %}"
                                             >
                                         {% endif %}
+                                        {% if export.status == 'processing' %}
+                                            <button class="btn btn-sm btn-warning export-delete-btn" onclick="stopExport({{ export.id }})">
+                                                <i class="fas fa-stop me-1"></i>Stop
+                                            </button>
+                                        {% endif %}
                                         {% if export.status == 'failed' or export.status == 'completed' %}
                                             <button class="btn btn-sm btn-danger export-delete-btn" onclick="deleteExport({{ export.id }})">
                                                 <i class="fas fa-trash me-1"></i>Delete
@@ -253,6 +258,37 @@
             console.error('Error:', error);
             if (typeof window.appNotify === 'function') {
                 window.appNotify('error', 'Error deleting export');
+            }
+        });
+    }
+
+    function stopExport(exportId) {
+        if (!confirm('Stop this export now? This will terminate the worker and delete partial ZIP files.')) {
+            return;
+        }
+
+        const stopUrl = '{% url ns|default:"maxillo"|add:":export_stop" 0 %}'.replace('0', exportId);
+        fetch(stopUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                if (typeof window.appNotify === 'function') {
+                    window.appNotify('error', 'Error stopping export: ' + (data.error || 'Unknown error'));
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            if (typeof window.appNotify === 'function') {
+                window.appNotify('error', 'Error stopping export');
             }
         });
     }

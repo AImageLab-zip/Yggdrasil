@@ -129,6 +129,9 @@
                             <button id="btnDeleteSelected" class="btn btn-danger btn-sm uniform-btn" title="Delete selected" data-bs-toggle="tooltip" aria-label="Delete selected">
                                 <i class="fas fa-trash"></i><span class="btn-label ms-1">Delete</span>
                             </button>
+                            <button id="btnBulkRerunSelected" class="btn btn-outline-secondary btn-sm uniform-btn" title="Rerun selected" data-bs-toggle="tooltip" aria-label="Rerun selected">
+                                <i class="fas fa-sync"></i><span class="btn-label ms-1">Rerun</span>
+                            </button>
                             <button class="btn btn-sm btn-outline-secondary uniform-btn" id="btnClearSelection" title="Clear selection" data-bs-toggle="tooltip" aria-label="Clear selection">
                                 <i class="fas fa-times"></i><span class="btn-label ms-1">Clear</span>
                             </button>
@@ -174,10 +177,10 @@
                 <div class="status-indicators">
                     {% for ms in item.modality_status_list %}
                     {% if ms.slug != 'voice' %}
-                    <span class="badge rounded-pill me-1 status-pill status-{{ ms.status }}" title="{{ ms.name }}" data-bs-toggle="tooltip" aria-label="{{ ms.name }}">{% if ms.icon %}<i class="{{ ms.icon }}"></i>{% else %}{{ ms.label|default:ms.name }}{% endif %}</span>
+                    <span class="badge rounded-pill me-1 status-pill status-{{ ms.status }}" data-modality-slug="{{ ms.slug }}" title="{{ ms.name }}" data-bs-toggle="tooltip" aria-label="{{ ms.name }}">{% if ms.icon %}<i class="{{ ms.icon }}"></i>{% else %}{{ ms.label|default:ms.name }}{% endif %}</span>
                     {% endif %}
                     {% endfor %}
-                    <span class="badge rounded-pill me-1 status-pill {% if item.voice_caption_processing %}status-processing{% elif item.voice_caption_processed %}status-processed{% else %}status-absent{% endif %} position-relative" title="Voice{% if item.voice_caption_count %} ({{ item.voice_caption_count }} caption{{ item.voice_caption_count|pluralize }}){% endif %}" data-bs-toggle="tooltip" aria-label="Voice">
+                    <span class="badge rounded-pill me-1 status-pill {% if item.voice_caption_processing %}status-processing{% elif item.voice_caption_processed %}status-processed{% else %}status-absent{% endif %} position-relative" data-modality-slug="voice" title="Voice{% if item.voice_caption_count %} ({{ item.voice_caption_count }} caption{{ item.voice_caption_count|pluralize }}){% endif %}" data-bs-toggle="tooltip" aria-label="Voice">
                         <i class="fas fa-comment"></i>
                         {% if item.voice_caption_count > 0 %}
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-success" style="font-size: 0.65rem; padding: 0.15rem 0.35rem;">
@@ -223,7 +226,7 @@
                     <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="btn btn-outline-primary btn-open" title="View" data-bs-toggle="tooltip" aria-label="View"><i class="fas fa-eye"></i>
                     </a>
                     {% if user_profile.is_admin %}
-                    <button class="btn btn-outline-secondary btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" title="Rerun processing" data-bs-toggle="tooltip" aria-label="Rerun"><i class="fas fa-sync"></i>
+                    <button class="btn btn-outline-secondary btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-modalities="{% for ms in item.modality_status_list %}{% if ms.slug != 'rawzip' and ms.status != 'absent' %}{% if not forloop.first %},{% endif %}{{ ms.slug }}{% endif %}{% endfor %}{% if item.voice_caption_count > 0 or item.voice_caption_processing or item.voice_caption_processed %},voice{% endif %}" title="Rerun processing" data-bs-toggle="tooltip" aria-label="Rerun"><i class="fas fa-sync"></i>
                     </button>
                     {% endif %}
                     {% if item.can_delete %}
@@ -356,22 +359,7 @@
       </div>
       <div class="modal-body">
         <div class="mb-2"><small class="text-muted" id="rerunScanSubtitle"></small></div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="ios" id="rerunIos">
-          <label class="form-check-label" for="rerunIos">IOS processing</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="bite_classification" id="rerunBite">
-          <label class="form-check-label" for="rerunBite">Bite classification</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="cbct" id="rerunCbct">
-          <label class="form-check-label" for="rerunCbct">CBCT</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="voice" id="rerunVoice">
-          <label class="form-check-label" for="rerunVoice">All voice transcriptions</label>
-        </div>
+        <div id="rerunModalityOptions"></div>
         <div class="mt-2"><small class="text-muted">This will set existing jobs to pending. No new jobs will be created.</small></div>
       </div>
       <div class="modal-footer">
@@ -380,7 +368,36 @@
           <span class="label">Rerun selected</span>
           <span class="spinner d-none"><i class="fas fa-spinner fa-spin"></i></span>
         </button>
-      </div>
+</div>
+
+<script id="rerun-modality-labels" type="application/json">{
+{% for m in modality_filter_specs %}
+  "{{ m.slug }}": "{% if m.slug == 'voice' %}All voice transcriptions{% elif m.slug == 'ios' %}IOS processing{% else %}{{ m.label|default:m.name }}{% endif %}"{% if not forloop.last %},{% endif %}
+{% endfor %}
+}</script>
     </div>
   </div>
     </div>
+
+<div class="modal fade" id="bulkRerunProcessingModal" tabindex="-1" aria-labelledby="bulkRerunProcessingModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="bulkRerunProcessingModalLabel">Bulk rerun processing</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2"><small class="text-muted" id="bulkRerunScanSubtitle"></small></div>
+        <div id="bulkRerunModalityOptions"></div>
+        <div class="mt-2"><small class="text-muted">This reruns only the latest existing job per selected modality per patient. No new jobs are created.</small></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="confirmBulkRerunBtn">
+          <span class="label">Rerun selected</span>
+          <span class="spinner d-none"><i class="fas fa-spinner fa-spin"></i></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

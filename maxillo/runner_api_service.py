@@ -35,7 +35,7 @@ def _serialize_job_for_runner(job: Job) -> Dict[str, Any]:
         "domain": getattr(job, "domain", "maxillo"),
         "modality_slug": job.modality_slug,
         "status": job.status,
-        "input_file_path": job.input_file_path,
+        "input_files": job.input_files or {},
         "output_files": job.output_files or {},
         "project_slug": _project_slug_for_job(job),
         "patient_id": _patient_public_id_for_job(job),

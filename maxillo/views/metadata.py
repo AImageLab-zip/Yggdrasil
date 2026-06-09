@@ -354,6 +354,7 @@ def update_nifti_metadata(request, patient_id):
                 },
             )
 
+
             # Return updated metadata
             return get_nifti_metadata(request, patient_id)
 

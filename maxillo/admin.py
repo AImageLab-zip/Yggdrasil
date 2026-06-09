@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db.models import Count
 from django.contrib.auth.models import User
 from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
 from common.models import Project, Modality, ProjectAccess, Job, FileRegistry, Invitation
@@ -113,6 +114,7 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ['id', 'modality_slug', 'status', 'patient', 'voice_caption', 'priority', 'dependencies_count', 'created_at', 'started_at', 'completed_at', 'retry_count']
     list_filter = ['modality_slug', 'status', 'created_at', 'started_at', 'completed_at', 'priority', ('dependencies', admin.EmptyFieldListFilter)]
     search_fields = ['patient__patient_id', 'voice_caption__id', 'worker_id']
+    autocomplete_fields = ['dependencies']
     readonly_fields = ['created_at', 'started_at', 'completed_at', 'dependencies_list']
     
     fieldsets = (
@@ -124,7 +126,7 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
             'description': 'Jobs that must complete before this job can start'
         }),
         ('Files & Processing', {
-            'fields': ('input_file_path', 'output_files')
+            'fields': ('input_files', 'output_files')
         }),
         ('Timing', {
             'fields': ('created_at', 'started_at', 'completed_at')
@@ -140,12 +142,14 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj and obj.status in ['processing', 'completed']:
             # Prevent editing jobs that are being processed or completed
-            return self.readonly_fields + ['modality_slug', 'patient', 'voice_caption', 'input_file_path']
+            return self.readonly_fields + ['modality_slug', 'patient', 'voice_caption', 'input_files']
         return self.readonly_fields
     
     def dependencies_count(self, obj):
         """Display the number of dependencies for this job"""
-        count = obj.dependencies.count()
+        count = getattr(obj, 'dependencies_count_annotated', None)
+        if count is None:
+            count = obj.dependencies.count()
         if count == 0:
             return "-"
         return f"{count} dep(s)"
@@ -163,8 +167,10 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     dependencies_list.short_description = "Dependency Jobs"
     
     def get_queryset(self, request):
-        """Optimize queryset to include dependencies count."""
-        qs = super().get_queryset(request).prefetch_related('dependencies')
+        """Optimize queryset for changelist dependency rendering."""
+        qs = super().get_queryset(request).annotate(
+            dependencies_count_annotated=Count('dependencies', distinct=True)
+        )
         return qs
     
     def get_fieldsets(self, request, obj=None):
@@ -172,10 +178,13 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         fieldsets = list(super().get_fieldsets(request, obj))
         
         # Add dependent jobs info if this job has dependents
-        if obj and obj.dependent_jobs.exists():
+        dependent_count = 0
+        if obj:
+            dependent_count = obj.dependent_jobs.count()
+        if dependent_count:
             dependent_info = {
                 'fields': (),
-                'description': f'This job has {obj.dependent_jobs.count()} dependent job(s) waiting for it to complete'
+                'description': f'This job has {dependent_count} dependent job(s) waiting for it to complete'
             }
             fieldsets.append(('Dependent Jobs', dependent_info))
         

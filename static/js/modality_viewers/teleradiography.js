@@ -29,29 +29,42 @@ window.TeleradiographyViewer = {
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'none';
         
-        // Make API call to get teleradiography image
-        fetch(`/maxillo/api/patient/${this.patientId}/teleradiography/`)
+        const namespace = window.projectNamespace || 'maxillo';
+        // Make API call to get teleradiography image metadata
+        fetch(`/${namespace}/api/patient/${this.patientId}/teleradiography/?meta=1`)
             .then(response => {
-                if (loading) loading.style.display = 'none';
-                
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
-                
-                // Set the image source to the API endpoint
+                return response.json();
+            })
+            .then(data => {
+                if (loading) loading.style.display = 'none';
                 if (img) {
-                    img.src = `/maxillo/api/patient/${this.patientId}/teleradiography/`;
-                    img.onload = () => {
+                    img.src = data.url;
+                    img.addEventListener('load', () => {
                         if (content) content.style.display = 'block';
-                    };
+                        if (window.RGBImageEditor && data.source_file_id) {
+                            const container = img.parentElement;
+                            if (container) {
+                                container.querySelectorAll('.rgb-edit-toolbar').forEach((el) => el.remove());
+                            }
+                            delete img.dataset.rgbEditorMounted;
+                            window.RGBImageEditor.attachToImage(img, {
+                                patientId: this.patientId,
+                                modalitySlug: 'teleradiography',
+                                sourceFileId: data.source_file_id,
+                                rawUrl: data.raw_url,
+                                container,
+                            });
+                        }
+                    }, { once: true });
                     img.onerror = () => {
                         if (error) error.style.display = 'block';
                     };
                     
-                    // Add click handler for fullscreen view
-                    img.onclick = () => {
-                        this.showFullscreenImage(img.src, 'Teleradiography');
-                    };
+                    // Keep image inline; no fullscreen modal for RGB editing workflow.
+                    img.onclick = null;
                 }
             })
             .catch(error => {
@@ -61,20 +74,5 @@ window.TeleradiographyViewer = {
             });
     },
     
-    showFullscreenImage: function(src, title) {
-        const modal = document.getElementById('fullscreenImageModal');
-        const modalTitle = document.getElementById('fullscreenImageModalLabel');
-        const fullscreenImg = document.getElementById('fullscreenImage');
-        
-        if (modalTitle) modalTitle.textContent = title || 'Image Viewer';
-        if (fullscreenImg) fullscreenImg.src = src;
-        
-        if (modal) {
-            const bsModal = new bootstrap.Modal(modal);
-            bsModal.show();
-        }
-    }
+    showFullscreenImage: function() {}
 };
-
-
-

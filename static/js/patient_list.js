@@ -308,6 +308,42 @@ function initAdminActions() {
     const rerunModalEl = document.getElementById('rerunProcessingModal');
     let rerunModal = null;
     let rerunTargetScanId = null;
+    let rerunSelectedSlugs = [];
+    const rerunModalityOptionsEl = document.getElementById('rerunModalityOptions');
+    const rerunLabelsEl = document.getElementById('rerun-modality-labels');
+    let rerunModalityLabels = {};
+    if (rerunLabelsEl) {
+        try {
+            rerunModalityLabels = JSON.parse(rerunLabelsEl.textContent || '{}');
+        } catch (_err) {
+            rerunModalityLabels = {};
+        }
+    }
+    window.rerunModalityLabels = rerunModalityLabels;
+
+    function renderRerunOptions(modalitySlugs) {
+        if (!rerunModalityOptionsEl) return;
+        rerunModalityOptionsEl.innerHTML = '';
+        if (!modalitySlugs.length) {
+            rerunModalityOptionsEl.innerHTML = '<small class="text-muted">No rerunnable modalities available for this patient.</small>';
+            return;
+        }
+
+        modalitySlugs.forEach((slug, index) => {
+            const safeSlug = String(slug || '').trim();
+            if (!safeSlug) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            const checkboxId = `rerunModality_${safeSlug}_${index}`;
+            const label = rerunModalityLabels[safeSlug] || safeSlug.replace(/_/g, ' ');
+            wrapper.innerHTML = `
+                <input class="form-check-input rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
+                <label class="form-check-label" for="${checkboxId}">${label}</label>
+            `;
+            rerunModalityOptionsEl.appendChild(wrapper);
+        });
+    }
+
     if (rerunModalEl && window.bootstrap) {
         rerunModal = new window.bootstrap.Modal(rerunModalEl);
     }
@@ -318,22 +354,20 @@ function initAdminActions() {
             const scanName = this.dataset.scanName || `Scan #${rerunTargetScanId}`;
             const subtitle = document.getElementById('rerunScanSubtitle');
             if (subtitle) subtitle.textContent = scanName;
-            // reset checkboxes
-            ['rerunIos','rerunBite','rerunCbct','rerunVoice'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.checked = false;
-            });
+            rerunSelectedSlugs = (this.dataset.availableModalities || '')
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .filter((slug, idx, arr) => arr.indexOf(slug) === idx)
+                .filter(slug => slug !== 'rawzip');
+            renderRerunOptions(rerunSelectedSlugs);
             if (rerunModal) rerunModal.show();
         });
     });
     const confirmRerunBtn = document.getElementById('confirmRerunBtn');
     if (confirmRerunBtn) {
         confirmRerunBtn.addEventListener('click', function() {
-            const jobs = [];
-            if (document.getElementById('rerunIos')?.checked) jobs.push('ios');
-            if (document.getElementById('rerunBite')?.checked) jobs.push('bite_classification');
-            if (document.getElementById('rerunCbct')?.checked) jobs.push('cbct');
-            if (document.getElementById('rerunVoice')?.checked) jobs.push('voice');
+            const jobs = Array.from(document.querySelectorAll('.rerun-modality-checkbox:checked')).map(el => el.value);
             if (!jobs.length) {
                 showNotification('error', 'Select at least one job to rerun');
                 return;
@@ -353,35 +387,12 @@ function initAdminActions() {
                     // Update status indicators for this row based on selected jobs
                     const row = document.querySelector(`.patient-row[data-scan-id="${rerunTargetScanId}"]`) || document.querySelector(`.scan-row[data-scan-id="${rerunTargetScanId}"]`);
                     if (row) {
-                        if (jobs.includes('ios')) {
-                            // first .status-icon with tooth
-                            const icon = row.querySelector('.status-icon i.fas.fa-tooth')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-pending');
-                                icon.classList.add('status-processing');
-                            }
-                        }
-                        if (jobs.includes('cbct')) {
-                            const icon = row.querySelector('.status-icon i.fas.fa-cube')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-pending');
-                                icon.classList.add('status-processing');
-                            }
-                        }
-                        if (jobs.includes('voice')) {
-                            const icon = row.querySelector('.status-icon i.fas.fa-microphone')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-pending');
-                                icon.classList.add('status-processing');
-                            }
-                        }
-                        if (jobs.includes('bite_classification')) {
-                            const icon = row.querySelector('.status-icon i.fas.fa-teeth')?.parentElement;
-                            if (icon) {
-                                icon.classList.remove('status-processed','status-failed','status-absent');
-                                icon.classList.add('status-processing');
-                            }
-                        }
+                        jobs.forEach(slug => {
+                            const pill = row.querySelector(`.status-pill[data-modality-slug="${slug}"]`);
+                            if (!pill) return;
+                            pill.classList.remove('status-processed', 'status-failed', 'status-pending', 'status-absent');
+                            pill.classList.add('status-processing');
+                        });
                     }
                 } else {
                     showNotification('error', data.error || 'Failed to rerun jobs');
@@ -496,6 +507,7 @@ function initBulkSelection() {
     const clearBtn = document.getElementById('btnClearSelection');
     const moveBtn = document.getElementById('btnMoveSelected');
     const moveSelect = document.getElementById('moveFolderSelect');
+    const bulkRerunBtn = document.getElementById('btnBulkRerunSelected');
     
     // Only proceed if essential elements exist
     if (!toolbar || !countEl) {
@@ -609,6 +621,112 @@ function initBulkSelection() {
             }).catch(() => showNotification('error', 'Network error')).finally(() => {
                 deleteBtn.disabled = false;
                 deleteBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
+            });
+        });
+    }
+
+    const bulkRerunModalEl = document.getElementById('bulkRerunProcessingModal');
+    const bulkRerunModalityOptionsEl = document.getElementById('bulkRerunModalityOptions');
+    const bulkRerunSubtitleEl = document.getElementById('bulkRerunScanSubtitle');
+    const confirmBulkRerunBtn = document.getElementById('confirmBulkRerunBtn');
+    let bulkRerunModal = null;
+    if (bulkRerunModalEl && window.bootstrap) {
+        bulkRerunModal = new window.bootstrap.Modal(bulkRerunModalEl);
+    }
+
+    function getSelectedPatientIds() {
+        return Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value, 10)).filter(Number.isFinite);
+    }
+
+    function collectAvailableModalitiesForSelectedRows() {
+        const selectedRows = Array.from(document.querySelectorAll('.row-select:checked'))
+            .map(cb => cb.closest('.patient-row') || cb.closest('.scan-row'))
+            .filter(Boolean);
+        const slugSet = new Set();
+        selectedRows.forEach(row => {
+            row.querySelectorAll('.status-pill[data-modality-slug]').forEach(pill => {
+                const slug = (pill.dataset.modalitySlug || '').trim();
+                if (!slug || slug === 'rawzip') return;
+                if (pill.classList.contains('status-absent')) return;
+                if (slug === 'voice') {
+                    slugSet.add('voice');
+                    return;
+                }
+                slugSet.add(slug);
+            });
+        });
+        return Array.from(slugSet).sort((a, b) => a.localeCompare(b));
+    }
+
+    function renderBulkRerunOptions(modalitySlugs) {
+        if (!bulkRerunModalityOptionsEl) return;
+        bulkRerunModalityOptionsEl.innerHTML = '';
+        if (!modalitySlugs.length) {
+            bulkRerunModalityOptionsEl.innerHTML = '<small class="text-muted">No rerunnable modalities available for the selected scans.</small>';
+            return;
+        }
+        modalitySlugs.forEach((slug, index) => {
+            const safeSlug = String(slug || '').trim();
+            if (!safeSlug) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            const checkboxId = `bulkRerunModality_${safeSlug}_${index}`;
+            const label = (window.rerunModalityLabels && window.rerunModalityLabels[safeSlug]) || safeSlug.replace(/_/g, ' ');
+            wrapper.innerHTML = `
+                <input class="form-check-input bulk-rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
+                <label class="form-check-label" for="${checkboxId}">${label}</label>
+            `;
+            bulkRerunModalityOptionsEl.appendChild(wrapper);
+        });
+    }
+
+    if (bulkRerunBtn) {
+        bulkRerunBtn.addEventListener('click', function() {
+            const ids = getSelectedPatientIds();
+            if (!ids.length) return;
+            const modalities = collectAvailableModalitiesForSelectedRows();
+            renderBulkRerunOptions(modalities);
+            if (bulkRerunSubtitleEl) {
+                bulkRerunSubtitleEl.textContent = `${ids.length} selected patient${ids.length === 1 ? '' : 's'}`;
+            }
+            if (bulkRerunModal) bulkRerunModal.show();
+        });
+    }
+
+    if (confirmBulkRerunBtn) {
+        confirmBulkRerunBtn.addEventListener('click', function() {
+            const scan_ids = getSelectedPatientIds();
+            const jobs = Array.from(document.querySelectorAll('.bulk-rerun-modality-checkbox:checked')).map(el => el.value);
+            if (!scan_ids.length) {
+                showNotification('error', 'Select at least one scan');
+                return;
+            }
+            if (!jobs.length) {
+                showNotification('error', 'Select at least one modality to rerun');
+                return;
+            }
+
+            const label = this.querySelector('.label');
+            const spinner = this.querySelector('.spinner');
+            this.disabled = true;
+            if (label) label.classList.add('d-none');
+            if (spinner) spinner.classList.remove('d-none');
+
+            secureFetch(`/${window.projectNamespace}/patients/bulk-rerun-processing/`, {
+                method: 'POST',
+                body: JSON.stringify({ scan_ids, jobs })
+            }).then(r => r.json()).then(data => {
+                if (data.success) {
+                    showNotification('success', data.message || 'Bulk rerun queued');
+                    if (bulkRerunModal) bulkRerunModal.hide();
+                    window.location.reload();
+                } else {
+                    showNotification('error', data.error || 'Failed to rerun jobs');
+                }
+            }).catch(() => showNotification('error', 'Network error')).finally(() => {
+                confirmBulkRerunBtn.disabled = false;
+                if (label) label.classList.remove('d-none');
+                if (spinner) spinner.classList.add('d-none');
             });
         });
     }

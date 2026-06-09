@@ -175,8 +175,8 @@ class Job(models.Model):
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 
 	# IO
-	input_file_path = models.CharField(max_length=500, help_text='Primary input object key', blank=True)
-	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output file paths and metadata')
+	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
+	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output object keys and metadata written on completion')
 
 	# Timing and metadata
 	created_at = models.DateTimeField(auto_now_add=True)
@@ -203,8 +203,17 @@ class Job(models.Model):
 		db_table = 'maxillo_job'
 
 	def __str__(self):
-		related_obj = self.patient or self.brain_patient or self.voice_caption or self.brain_voice_caption
-		return f"Job {self.id} - {self.modality_slug} - {self.get_status_display()} - {related_obj}"
+		related_bits = []
+		if self.patient_id:
+			related_bits.append(f"patient:{self.patient_id}")
+		if self.brain_patient_id:
+			related_bits.append(f"brain_patient:{self.brain_patient_id}")
+		if self.voice_caption_id:
+			related_bits.append(f"voice:{self.voice_caption_id}")
+		if self.brain_voice_caption_id:
+			related_bits.append(f"brain_voice:{self.brain_voice_caption_id}")
+		related_str = f" [{' | '.join(related_bits)}]" if related_bits else ""
+		return f"Job {self.id} - {self.modality_slug} - {self.status}{related_str}"
 
 	def can_retry(self):
 		return self.status == 'failed' and self.retry_count < self.max_retries
@@ -312,8 +321,8 @@ class ProcessingJob(models.Model):
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 
 	# File paths
-	input_file_path = models.CharField(max_length=500, help_text='Input object key')
-	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output file paths and metadata')
+	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
+	output_files = models.JSONField(default=dict, blank=True, help_text='Dict of output object keys and metadata written on completion')
 
 	# Processing info
 	docker_image = models.CharField(max_length=200, help_text='Docker image used for processing')
@@ -343,8 +352,17 @@ class ProcessingJob(models.Model):
 		db_table = 'maxillo_processingjob'
 
 	def __str__(self):
-		related_obj = self.patient or self.brain_patient or self.voice_caption or self.brain_voice_caption
-		return f"ProcessingJob {self.id} - {self.get_job_type_display()} - {self.get_status_display()} - {related_obj}"
+		related_bits = []
+		if self.patient_id:
+			related_bits.append(f"patient:{self.patient_id}")
+		if self.brain_patient_id:
+			related_bits.append(f"brain_patient:{self.brain_patient_id}")
+		if self.voice_caption_id:
+			related_bits.append(f"voice:{self.voice_caption_id}")
+		if self.brain_voice_caption_id:
+			related_bits.append(f"brain_voice:{self.brain_voice_caption_id}")
+		related_str = f" [{' | '.join(related_bits)}]" if related_bits else ""
+		return f"ProcessingJob {self.id} - {self.job_type} - {self.status}{related_str}"
 
 	def can_retry(self):
 		return self.status == 'failed' and self.retry_count < self.max_retries
@@ -457,6 +475,7 @@ class FileRegistry(models.Model):
 		# Maxillo image modalities
 		('intraoral_raw', 'Intraoral Photographs Raw'),
 		('intraoral_processed', 'Intraoral Photographs Processed'),
+		('intraoral-photo_processed', 'Intraoral Photo Processed'),
 		('teleradiography_raw', 'Teleradiography Raw'),
 		('teleradiography_processed', 'Teleradiography Processed'),
 		('panoramic_raw', 'panoramic Raw'),

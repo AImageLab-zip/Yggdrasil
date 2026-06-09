@@ -23,6 +23,16 @@ def _job_pre_save(sender, instance: Job, **kwargs):
     except Exception:
         instance._previous_status = None
 
+    if (
+        instance._previous_status != instance.status
+        and instance.status in {"pending", "retrying"}
+    ):
+        instance.output_files = {}
+        instance.started_at = None
+        instance.completed_at = None
+        instance.worker_id = ""
+        instance.error_logs = ""
+
 
 @receiver(post_save, sender=Job)
 def _job_post_save(sender, instance: Job, created: bool, **kwargs):

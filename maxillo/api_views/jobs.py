@@ -38,7 +38,7 @@ def _serialize_job(job):
         "modality": job.modality_slug,
         "status": job.status,
         "priority": job.priority,
-        "input_file_path": job.input_file_path,
+        "input_files": job.input_files,
         "output_files": job.output_files,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "started_at": job.started_at.isoformat() if job.started_at else None,

@@ -395,7 +395,7 @@ class Patient(models.Model):
             modality_slug='bite_classification',
             status='dependency',
             patient=self,
-            input_file_path='',
+            input_files={},
         )
         
         bite_job.add_dependency(ios_job)
