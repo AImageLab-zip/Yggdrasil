@@ -85,7 +85,7 @@ def save_brain_modality_file(patient, modality_slug, uploaded_file):
         domain="brain",
         brain_patient=patient,
         modality_slug=modality_slug,
-        input_file_path=key,
+        input_files={"input": key},
         status=status,
         output_files={"input_format": file_format, "file_path": key}
         if status == "completed"
