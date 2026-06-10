@@ -12,7 +12,6 @@ from common.file_access import exists as artifact_exists
 from common.permissions import (
     user_can_delete_caption,
     user_can_edit_caption,
-    user_can_read_folder,
     user_can_write_annotations,
     user_is_project_admin,
 )
@@ -170,7 +169,7 @@ def upload_text_caption(request, patient_id):
     
     patient = get_object_or_404(Patient, patient_id=patient_id)
 
-    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_read_folder(request.user, patient.folder, request))):
+    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
     # Check permissions

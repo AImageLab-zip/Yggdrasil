@@ -1,6 +1,7 @@
 """
 DOMAIN_CHOICES i srepeated multiple times across many models, might be the case to generalize it into some king of global variable?
 """
+import uuid
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -148,6 +149,14 @@ class Invitation(models.Model):
 		else:
 			project_str = f" - {self.project.name}" if self.project else ""
 		return f"Invitation {self.code} - {self.role}{project_str}"
+
+	def save(self, *args, **kwargs):
+		if not self.code:
+			self.code = str(uuid.uuid4())
+			update_fields = kwargs.get('update_fields')
+			if update_fields is not None:
+				kwargs['update_fields'] = set(update_fields) | {'code'}
+		super().save(*args, **kwargs)
 
 	class Meta:
 		db_table = 'maxillo_invitation'

@@ -1,3 +1,5 @@
+import json
+
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
@@ -12,6 +14,7 @@ from common.permissions import (
     user_can_move_patient,
     user_can_perform_bulk_operations,
     user_can_read_folder,
+    user_can_view_caption_content,
     user_can_write_annotations,
 )
 from maxillo.models import Folder, FolderAccess, Patient, VoiceCaption
@@ -72,6 +75,65 @@ class MaxilloFolderAclTests(TestCase):
         self.assertFalse(user_can_edit_caption(self.other, caption))
         self.assertTrue(user_can_edit_caption(self.admin, caption))
         self.assertTrue(user_can_delete_caption(self.admin, caption))
+
+    def test_caption_content_visibility_by_folder_role(self):
+        owner = User.objects.create_user(username="caption_owner", password="x")
+        standard = User.objects.create_user(username="caption_standard", password="x")
+        annotator = User.objects.create_user(username="caption_annotator", password="x")
+        project_manager = User.objects.create_user(username="caption_pm", password="x")
+        outsider = User.objects.create_user(username="caption_outsider", password="x")
+
+        ProjectAccess.objects.create(user=owner, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=standard, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=annotator, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=project_manager, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=outsider, project=self.project, role="standard")
+
+        FolderAccess.objects.create(user=owner, folder=self.folder, role="annotator")
+        FolderAccess.objects.create(user=standard, folder=self.folder, role="standard")
+        FolderAccess.objects.create(user=annotator, folder=self.folder, role="annotator")
+        FolderAccess.objects.create(user=project_manager, folder=self.folder, role="project_manager")
+
+        caption = VoiceCaption.objects.create(patient=self.patient, user=owner, modality="audio", duration=1.0)
+
+        self.assertTrue(user_can_view_caption_content(owner, caption, "maxillo"))
+        self.assertTrue(user_can_view_caption_content(self.admin, caption, "maxillo"))
+        self.assertTrue(user_can_view_caption_content(standard, caption, "maxillo"))
+        self.assertTrue(user_can_view_caption_content(project_manager, caption, "maxillo"))
+        self.assertFalse(user_can_view_caption_content(annotator, caption, "maxillo"))
+        self.assertFalse(user_can_view_caption_content(outsider, caption, "maxillo"))
+
+    def test_standard_role_cannot_create_text_caption(self):
+        FolderAccess.objects.create(user=self.user, folder=self.folder, role="standard")
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse(
+                "maxillo:upload_text_caption",
+                kwargs={"patient_id": self.patient.patient_id},
+            ),
+            data=json.dumps({"text": "A read-only user should not be able to save this caption."}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(VoiceCaption.objects.count(), 0)
+
+    def test_annotator_role_can_create_text_caption(self):
+        FolderAccess.objects.create(user=self.user, folder=self.folder, role="annotator")
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse(
+                "maxillo:upload_text_caption",
+                kwargs={"patient_id": self.patient.patient_id},
+            ),
+            data=json.dumps({"text": "An annotator can save this caption."}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(VoiceCaption.objects.count(), 1)
 
 
 class MaxilloJobApiAclTests(TestCase):

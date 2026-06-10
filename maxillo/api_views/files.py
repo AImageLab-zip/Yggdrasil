@@ -12,7 +12,12 @@ import logging
 import traceback
 import mimetypes
 from common.models import FileRegistry, ProjectAccess
-from common.permissions import user_can_read_folder, user_is_project_admin, filter_patients_for_user
+from common.permissions import (
+    filter_patients_for_user,
+    user_can_read_folder,
+    user_can_view_caption_content,
+    user_is_project_admin,
+)
 from common.file_access import exists as artifact_exists, streaming_response
 
 logger = logging.getLogger(__name__)
@@ -27,9 +32,12 @@ def serve_file(request, file_id):
     URL: /api/processing/files/serve/<file_id>/
     """
     try:
-        file_obj = FileRegistry.objects.select_related("patient", "brain_patient").get(
-            id=file_id
-        )
+        file_obj = FileRegistry.objects.select_related(
+            "patient",
+            "brain_patient",
+            "voice_caption__patient",
+            "brain_voice_caption__patient",
+        ).get(id=file_id)
         resolved_file_path = file_obj.file_path
         requested_file_key = (request.GET.get('file_key') or '').strip()
 
@@ -100,6 +108,21 @@ def serve_file(request, file_id):
                         f"User {request.user.id} denied project access for file {file_id}"
                     )
                     return JsonResponse({"error": "Project access denied"}, status=403)
+
+            voice_caption = (
+                file_obj.brain_voice_caption
+                if file_domain == "brain"
+                else file_obj.voice_caption
+            )
+            if not voice_caption:
+                voice_caption = file_obj.voice_caption or file_obj.brain_voice_caption
+            if voice_caption and not user_can_view_caption_content(
+                request.user, voice_caption, file_domain
+            ):
+                logger.warning(
+                    f"User {request.user.id} denied access to voice caption file {file_id}"
+                )
+                return JsonResponse({"error": "Permission denied"}, status=403)
         else:
             # If file is not associated with a patient, check any project access
             has_any_admin_access = ProjectAccess.objects.filter(
