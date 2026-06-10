@@ -101,6 +101,19 @@ def user_can_edit_caption(user, caption):
     return user_is_project_admin(user, caption._meta.app_label)
 
 
+def user_can_view_caption_content(user, caption, project_or_app_context=None):
+    if not user or not user.is_authenticated:
+        return False
+    if caption.user_id == user.id:
+        return True
+    if user_is_project_admin(user, project_or_app_context or caption._meta.app_label):
+        return True
+
+    patient = getattr(caption, "patient", None)
+    folder = getattr(patient, "folder", None) if patient else None
+    return get_user_folder_role(user, folder) in {"standard", "project_manager"}
+
+
 def user_can_delete_caption(user, caption):
     return user_can_edit_caption(user, caption)
 

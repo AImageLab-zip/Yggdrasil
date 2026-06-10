@@ -10,7 +10,9 @@ import logging
 
 from common.file_access import exists as artifact_exists
 from common.permissions import (
+    user_can_edit_caption,
     user_can_read_folder,
+    user_can_view_caption_content,
     user_can_write_annotations,
     user_is_project_admin,
 )
@@ -287,12 +289,17 @@ def patient_detail(request, patient_id):
 
 
     # Voice captions
-    # Non-admin users can see caption metadata for all captions, but only access
-    # content (text/audio) for their own captions.
+    # Non-admin users can see caption metadata for all captions. Caption content
+    # access depends on the user's folder role.
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, request)
+    can_create_caption = bool(
+        is_admin_user
+        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    )
     for caption in voice_captions:
-        caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.can_view_content = user_can_view_caption_content(request.user, caption, request)
+        caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
 
     # Build modality files lookup for drag-drop grid
@@ -364,6 +371,7 @@ def patient_detail(request, patient_id):
         'patient_files': patient_files,
         'voice_captions': voice_captions,
         'is_admin_user': is_admin_user,
+        'can_create_caption': can_create_caption,
         'modality_files': modality_files,
         'modality_files_json': modality_files_json,
     }
