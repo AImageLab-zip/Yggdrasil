@@ -1,4 +1,4 @@
-# ToothFairy4M
+# Yggdrasil
 
 A Django web application for managing and processing dental and medical imaging data, including Intraoral Scans (IOS) and Cone Beam Computed Tomography (CBCT).
 
@@ -14,7 +14,7 @@ A Django web application for managing and processing dental and medical imaging 
 
 ## Description
 
-ToothFairy4M is a comprehensive platform designed for dental and maxillofacial imaging research. It provides tools for uploading, processing, annotating, and exporting medical imaging data with support for multiple modalities. The application features a modern web interface with 3D visualization capabilities and automated processing workflows.
+Yggdrasil is a comprehensive platform designed for dental and maxillofacial imaging research. It provides tools for uploading, processing, annotating, and exporting medical imaging data with support for multiple modalities. The application features a modern web interface with 3D visualization capabilities and automated processing workflows.
 
 Live instance: [https://toothfairy4m.ing.unimore.it](https://toothfairy4m.ing.unimore.it)
 
