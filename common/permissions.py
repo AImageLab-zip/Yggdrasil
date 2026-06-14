@@ -118,7 +118,7 @@ def filter_patients_for_user(user, patients_qs, app_label):
         return patients_qs
     FolderAccess = _folder_access_model(app_label)
     folder_ids = FolderAccess.objects.filter(user=user).values_list("folder_id", flat=True)
-    return patients_qs.filter(folder_id__in=folder_ids)
+    return patients_qs.filter(folders__id__in=folder_ids).distinct()
 
 
 class PermissionChecker:

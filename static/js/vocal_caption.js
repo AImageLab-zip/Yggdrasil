@@ -1469,6 +1469,11 @@ class VocalCaptionRecorder {
         if (this.captionTextArea) {
             this.captionTextArea.addEventListener('input', () => {
                 this.updateCharacterCount();
+                // If the user edits manually, the interim text is now part of the
+                // textarea value and no longer needs to be tracked for stripping.
+                if (this.brainStt && this.brainStt.displayedInterimText) {
+                    this.brainStt.displayedInterimText = '';
+                }
             });
             
             // Handle Enter key (Ctrl+Enter to save)

@@ -130,7 +130,7 @@ class Patient(models.Model):
         related_name='brain_patients',
         help_text='Modalities available for this patient',
     )
-    folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
+    folders = models.ManyToManyField('Folder', blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
 
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
@@ -152,10 +152,8 @@ class Patient(models.Model):
         indexes = [
             models.Index(fields=['visibility']),
             models.Index(fields=['uploaded_at']),
-            models.Index(fields=['folder']),
             models.Index(fields=['name']),
             models.Index(fields=['visibility', 'uploaded_at']),
-            models.Index(fields=['folder', 'visibility']),
         ]
 
     def __str__(self):
