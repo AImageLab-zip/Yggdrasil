@@ -70,7 +70,7 @@ def select_project(request, project_id):
 @login_required
 def patient_detail(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view = bool(patient.folder and user_can_read_folder(request.user, patient.folder, request))
+    can_view = bool(any(user_can_read_folder(request.user, f, request) for f in patient.folders.all()))
     if user_is_project_admin(request.user, "brain"):
         can_view = True
     if not can_view:
@@ -81,7 +81,7 @@ def patient_detail(request, patient_id):
     manual_classification = patient.classifications.filter(classifier="manual").first()
     management_form = PatientManagementForm(instance=patient, user=request.user)
 
-    can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    can_modify = bool(any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all()))
     if user_is_project_admin(request.user, "brain"):
         can_modify = True
 
@@ -192,7 +192,7 @@ def patient_detail(request, patient_id):
 
 @login_required
 def patient_list(request):
-    patients = Patient.objects.select_related("dataset", "uploaded_by", "folder").prefetch_related(
+    patients = Patient.objects.select_related("dataset", "uploaded_by").prefetch_related(
         "classifications",
         "voice_captions",
         "voice_captions__user",
@@ -214,10 +214,10 @@ def patient_list(request):
     folder_id = request.GET.get("folder")
     if folder_id and folder_id != "all":
         if folder_id == "root":
-            patients = patients.filter(folder__isnull=True)
+            patients = patients.filter(folders__isnull=True)
         else:
             try:
-                patients = patients.filter(folder_id=int(folder_id))
+                patients = patients.filter(folders__id=int(folder_id)).distinct()
             except ValueError:
                 pass
 
@@ -282,11 +282,11 @@ def patient_list(request):
             "voice_caption_count": len(voice_captions),
             "voice_annotators": list({vc.user.username for vc in voice_captions}),
             "tags": patient.tag_names(),
-            "folder": patient.folder,
+            "folder": patient.folders.first(),
             "available_modalities": [m.slug for m in patient.modalities.all()],
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
-            "can_delete": bool(is_admin or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))),
+            "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())),
         })
 
     per_page = int(request.GET.get("per_page", 20))
@@ -298,7 +298,7 @@ def patient_list(request):
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,
-        "folders": [{"folder": folder, "patient_count": patients.filter(folder=folder).count()} for folder in folders],
+        "folders": [{"folder": folder, "patient_count": patients.filter(folders=folder).count()} for folder in folders],
         "all_tags": Tag.objects.all().order_by("name"),
         "per_page": per_page,
         "user_profile": request.user.profile,
@@ -356,7 +356,7 @@ def upload_patient(request):
                         "patient_upload_form": patient_upload_form,
                         "folders": allowed_folders,
                     })
-                patient.folder = folder
+                patient.folders.set([folder])
 
             patient.save()
             patient_upload_form.instance = patient
@@ -447,7 +447,7 @@ def update_classification(request, patient_id):
 def update_patient_name(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not user_is_project_admin(request.user, "brain") and not (
-        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
+        any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
@@ -468,7 +468,7 @@ def delete_patient(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     can_delete = bool(
         user_is_project_admin(request.user, "brain")
-        or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+        or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())
     )
     if not can_delete:
         return JsonResponse(
@@ -679,7 +679,7 @@ def add_patient_tag(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
         user_is_project_admin(request.user, "brain")
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+        or any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
     ):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
@@ -700,7 +700,7 @@ def remove_patient_tag(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
         user_is_project_admin(request.user, "brain")
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+        or any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
     ):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
