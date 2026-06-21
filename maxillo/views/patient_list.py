@@ -1,4 +1,5 @@
 """Patient list and project selection views."""
+from django.apps import apps
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
