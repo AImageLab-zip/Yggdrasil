@@ -263,7 +263,7 @@ show_status() {
 
 # Function to show help
 show_help() {
-    echo "ToothFairy4M Development Environment Script"
+    echo "Yggdrasil Development Environment Script"
     echo
     echo "Usage: $0 [COMMAND]"
     echo

@@ -64,7 +64,7 @@ def test_endpoint(url, method="GET", data=None, expected_status=200):
 
 def main():
     """Run all tests"""
-    print("🚀 Testing ToothFairy4M External API Endpoints")
+    print("🚀 Testing Yggdrasil External API Endpoints")
     print(f"Base URL: {BASE_URL}")
     print(f"Project Slug: {PROJECT_SLUG}")
     

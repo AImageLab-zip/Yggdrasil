@@ -14,7 +14,7 @@ while IFS='=' read -r key value; do
     [[ "$key" == "UID" ]] && continue
     export "$key=$value"
 done < .env
-DB_CONTAINER="db${DOCKER_SUFFIX:+-${DOCKER_SUFFIX}}"
+DB_CONTAINER="toothfairy4m-db${DOCKER_SUFFIX:+-${DOCKER_SUFFIX}}"
 
 TEMP_SQL=$(mktemp)
 trap "rm -f $TEMP_SQL" EXIT
