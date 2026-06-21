@@ -2,6 +2,10 @@ import logging
 
 from django.core.management.base import BaseCommand, CommandError
 
+
+from laparoscopy.export_processor import LaparoscopyExportProcessor
+from laparoscopy.models import Export as LaparoscopyExport
+
 from ...models import Export as MaxilloExport
 from ...utils.export_processor import ExportProcessor
 
@@ -15,18 +19,42 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('export_id', type=int)
 
+parser.add_argument('--domain', choices=['maxillo', 'laparoscopy'])
     def handle(self, *args, **options):
         export_id = options['export_id']
+        domain = options.get('domain')
+        export = None
+        if domain == 'laparoscopy':
+            export = LaparoscopyExport.objects.filter(id=export_id).first()
+        elif domain == 'maxillo':
+            export = MaxilloExport.objects.filter(id=export_id).first()
+        else:
+            export = MaxilloExport.objects.filter(id=export_id).first()
+            if export:
+                domain = 'maxillo'
+            else:
+                export = LaparoscopyExport.objects.filter(id=export_id).first()
+                if export:
+                    domain = 'laparoscopy'
 
         export = MaxilloExport.objects.filter(id=export_id).first()
         if not export:
             raise CommandError(f'Export {export_id} not found')
 
+        if not domain:
+            if export.__class__.__module__.startswith('laparoscopy.'):
+                domain = 'laparoscopy'
+            else:
+                domain = 'maxillo'
+
         if export.status == 'pending':
             export.mark_processing()
 
-        logger.info('Running export %s', export_id)
-        processor = ExportProcessor(export, domain='maxillo')
+        logger.info('Running export %s for domain %s', export_id, domain)
+        if domain == 'laparoscopy':
+            processor = LaparoscopyExportProcessor(export)
+        else:
+            processor = ExportProcessor(export, domain=domain)
         processor.process_export()
 
         self.stdout.write(self.style.SUCCESS(f'Export {export_id} finished with status {export.status}'))

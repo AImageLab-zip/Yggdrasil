@@ -89,21 +89,21 @@ class VocalCaptionRecorder {
     }
     
     attachEventListeners() {
-        if (!this.startBtn) return;
-        
         const isSupported = navigator.mediaDevices && 
                            navigator.mediaDevices.getUserMedia && 
                            window.MediaRecorder;
         
-        if (isSupported) {
-            this.startBtn.addEventListener('click', () => this.startRecording());
-            this.pauseBtn?.addEventListener('click', () => this.togglePause());
-            this.saveBtn?.addEventListener('click', () => this.saveRecording());
-            this.discardBtn?.addEventListener('click', () => this.discardRecording());
-        } else {
-            this.startBtn.addEventListener('click', () => {
-                this.notify('error', 'Voice recording is not supported. Please use a modern browser.');
-            });
+        if (this.startBtn) {
+            if (isSupported) {
+                this.startBtn.addEventListener('click', () => this.startRecording());
+                this.pauseBtn?.addEventListener('click', () => this.togglePause());
+                this.saveBtn?.addEventListener('click', () => this.saveRecording());
+                this.discardBtn?.addEventListener('click', () => this.discardRecording());
+            } else {
+                this.startBtn.addEventListener('click', () => {
+                    this.notify('error', 'Voice recording is not supported. Please use a modern browser.');
+                });
+            }
         }
         
         document.addEventListener('click', (e) => {

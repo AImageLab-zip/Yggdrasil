@@ -102,17 +102,39 @@ def _get_patient(obj):
 
 
 def _domain_for_patient(patient) -> str:
+
+    app_label = getattr(getattr(patient, "_meta", None), "app_label", "")
+    if app_label == "laparoscopy":
+        return "laparoscopy"
     return "maxillo"
 
 
 def _entity_fk_kwargs(patient):
+
+    domain = _domain_for_patient(patient)
+    if domain == "laparoscopy":
+        return {
+            "domain": "laparoscopy",
+            "laparoscopy_patient": patient,
+            "patient": None,
+            "brain_patient": None,
+        }
     return {
         "domain": "maxillo",
         "patient": patient,
+        "brain_patient": None,
+        "laparoscopy_patient": None,
     }
 
 
 def _entity_filter_kwargs(patient):
+
+    domain = _domain_for_patient(patient)
+    if domain == "laparoscopy":
+        return {
+            "domain": "laparoscopy",
+            "laparoscopy_patient": patient,
+        }
     return {
         "domain": "maxillo",
         "patient": patient,
@@ -120,32 +142,79 @@ def _entity_filter_kwargs(patient):
 
 
 def _voice_entity_fk_kwargs(voice_caption):
+
+    patient = _get_patient(voice_caption)
+    domain = _domain_for_patient(patient)
+    if domain == "laparoscopy":
+        return {
+            "laparoscopy_voice_caption": voice_caption,
+            "voice_caption": None,
+            "brain_voice_caption": None,
+        }
     return {
         "voice_caption": voice_caption,
+        "brain_voice_caption": None,
+        "laparoscopy_voice_caption": None,
     }
 
 
 def _project_slug_from_patient(patient) -> str:
+
+    domain = _domain_for_patient(patient)
+    if domain == "laparoscopy":
+        return "laparoscopy"
+
     return "maxillo"
 
 
 def _domain_for_job(job) -> str:
+
+    if getattr(job, "domain", None) in ["maxillo", "laparoscopy"]:
+        return job.domain
+    if getattr(job, "laparoscopy_patient_id", None) or getattr(
+        job, "laparoscopy_voice_caption_id", None
+    ):
+        return "laparoscopy"
+
     return "maxillo"
 
 
 def _job_patient(job):
+
+    domain = _domain_for_job(job)
+    if domain == "laparoscopy":
+        return getattr(job, "laparoscopy_patient", None)
     return getattr(job, "patient", None)
 
 
 def _job_voice_caption(job):
+
+    domain = _domain_for_job(job)
+    if domain == "laparoscopy":
+        return getattr(job, "laparoscopy_voice_caption", None)
     return getattr(job, "voice_caption", None)
 
 
 def _job_entity_fk_kwargs(job):
+    domain = _domain_for_job(job)
+    if domain == "laparoscopy":
+        return {
+            "domain": "laparoscopy",
+            "laparoscopy_patient": _job_patient(job),
+            "patient": None,
+            "brain_patient": None,
+            "laparoscopy_voice_caption": _job_voice_caption(job),
+            "voice_caption": None,
+            "brain_voice_caption": None,
+        }
     return {
         "domain": "maxillo",
         "patient": _job_patient(job),
+        "brain_patient": None,
+        "laparoscopy_patient": None,
         "voice_caption": _job_voice_caption(job),
+        "brain_voice_caption": None,
+        "laparoscopy_voice_caption": None,
     }
 
 
@@ -871,7 +940,11 @@ def mark_job_completed(job_id, output_files, logs=None):
     )
 
     try:
-        job = Job.objects.select_related("patient", "voice_caption").get(id=job_id)
+        job = Job.objects.select_related(
+            "patient", "laparoscopy_patient",
+            "voice_caption", "laparoscopy_voice_caption",
+        ).get(id=job_id)
+
         logger.info(
             f"Found job: {job.id}, modality: {job.modality_slug}, status: {job.status}"
         )
@@ -1044,6 +1117,41 @@ def mark_job_completed(job_id, output_files, logs=None):
             output_files["skipped_confirmed_segmentations"] = skipped_confirmed_count
             job.output_files = output_files
             job.save(update_fields=["output_files"])
+        elif job.modality_slug == "video":
+            # Video jobs produce two named outputs ("compressed", "subsampled").
+            # Store each as video_processed with subtype=<output_key> so the
+            # player can reliably select only the compressed derivative.
+            modality_fk = None
+            try:
+                from common.models import Modality as _Modality
+                modality_fk = _Modality.objects.filter(slug="video").first()
+            except Exception:
+                pass
+            for output_key, out_spec in output_files.items():
+                path_or_key = _resolve_output_path_or_key(out_spec)
+                logger.info(f"Processing video output: key={output_key}, path={path_or_key}")
+                if not path_or_key or not artifact_exists(path_or_key):
+                    logger.warning(f"Video output not found: {path_or_key}")
+                    continue
+                file_size, file_hash = _size_hash_for_path_or_key(path_or_key)
+                FileRegistry.objects.update_or_create(
+                    file_path=path_or_key,
+                    defaults={
+                        "file_type": "video_processed",
+                        "subtype": output_key,
+                        "modality": modality_fk,
+                        "file_size": file_size or 0,
+                        "file_hash": file_hash or "object",
+                        "processing_job": job,
+                        **_job_entity_fk_kwargs(job),
+                        "metadata": {
+                            "processed_at": timezone.now().isoformat(),
+                            "output_key": output_key,
+                            "logs": logs if logs else "",
+                        },
+                    },
+                )
+                logger.info(f"Video FileRegistry entry stored: subtype={output_key}")
         else:
             # For non-CBCT modalities, register simple outputs idempotently.
             # Bite classification has a dedicated handler below.
@@ -1274,7 +1382,12 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         can_retry: Whether the job can be retried
     """
     try:
-        job = Job.objects.select_related("patient", "voice_caption").get(id=job_id)
+
+        job = Job.objects.select_related(
+            "patient", "laparoscopy_patient",
+            "voice_caption","laparoscopy_voice_caption",
+        ).get(id=job_id)
+
         job_patient = _job_patient(job)
         job_voice_caption = _job_voice_caption(job)
         job.mark_failed(error_msg, can_retry)

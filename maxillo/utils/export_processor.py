@@ -699,11 +699,14 @@ def start_export_processing(export_id, domain="maxillo"):
     Uses a subprocess instead of a daemon thread so the export completes even
     after the HTTP request ends (web workers can recycle and kill threads).
     """
+
+    from laparoscopy.models import Export as LaparoscopyExport
     from ..models import Export as MaxilloExport
-
     try:
-        export = MaxilloExport.objects.filter(id=export_id).first()
-
+        if domain == "laparoscopy":
+            export = LaparoscopyExport.objects.filter(id=export_id).first()
+        else:
+            export = MaxilloExport.objects.filter(id=export_id).first()
         if not export:
             logger.error(f"Export {export_id} not found for domain {domain}")
             return
@@ -736,7 +739,7 @@ def start_export_processing(export_id, domain="maxillo"):
         try:
             export = MaxilloExport.objects.filter(
                 id=export_id
-            ).first() or BrainExport.objects.get(id=export_id)
+            ).first() or LaparoscopyExport.objects.filter(id=export_id).first() or BrainExport.objects.get(id=export_id)
             export.mark_failed(str(e))
         except Exception:
             pass

@@ -80,6 +80,12 @@ class ObjectStorage:
             config=Config(
                 s3={"addressing_style": self.addressing_style or "path"},
                 retries={"max_attempts": 3, "mode": "standard"},
+                # Garage can advertise flexible checksums that botocore then
+                # rejects on plain get_object reads. Keep validation only for
+                # operations that explicitly require it.
+                # An optimization for video stream
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
             ),
         )
 
@@ -156,6 +162,24 @@ class ObjectStorage:
                 raise FileNotFoundError(key) from exc
             raise ObjectStorageError(str(exc)) from exc
 
+        info = ObjectInfo(
+            key=key,
+            content_length=resp.get("ContentLength"),
+            content_type=resp.get("ContentType"),
+            etag=(resp.get("ETag") or "").strip('"') or None,
+        )
+        return resp["Body"], info
+
+    def get_range(self, key: str, byte_range: str) -> Tuple[BinaryIO, ObjectInfo]:
+        """Fetch a byte range of an object (e.g. byte_range='bytes=0-1023')."""
+        key_n = self.normalize_key(key)
+        try:
+            resp = self._client.get_object(Bucket=self.bucket, Key=key_n, Range=byte_range)
+        except ClientError as exc:
+            code = self._client_error_code(exc)
+            if code in {"NoSuchKey", "404", "NotFound"}:
+                raise FileNotFoundError(key) from exc
+            raise ObjectStorageError(str(exc)) from exc
         info = ObjectInfo(
             key=key,
             content_length=resp.get("ContentLength"),

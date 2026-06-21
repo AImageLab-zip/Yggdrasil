@@ -10,12 +10,14 @@ import logging
 
 from common.file_access import exists as artifact_exists
 from common.permissions import (
+    user_can_edit_caption,
     user_can_read_folder,
+    user_can_view_caption_content,
     user_can_write_annotations,
     user_is_project_admin,
 )
 
-from .domain import get_domain_forms, get_domain_models
+from .domain import get_domain_forms, get_domain_models, get_namespace
 from .helpers import redirect_with_namespace, render_with_fallback
 from ..file_utils import get_file_type_for_modality
 
@@ -287,12 +289,17 @@ def patient_detail(request, patient_id):
 
 
     # Voice captions
-    # Non-admin users can see caption metadata for all captions, but only access
-    # content (text/audio) for their own captions.
+    # Non-admin users can see caption metadata for all captions. Caption content
+    # access depends on the user's folder role.
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, request)
+    can_create_caption = bool(
+        is_admin_user
+        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
+    )
     for caption in voice_captions:
-        caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.can_view_content = user_can_view_caption_content(request.user, caption, request)
+        caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
 
     # Build modality files lookup for drag-drop grid
@@ -364,6 +371,7 @@ def patient_detail(request, patient_id):
         'patient_files': patient_files,
         'voice_captions': voice_captions,
         'is_admin_user': is_admin_user,
+        'can_create_caption': can_create_caption,
         'modality_files': modality_files,
         'modality_files_json': modality_files_json,
     }
@@ -430,6 +438,38 @@ def patient_detail(request, patient_id):
         context['raw_file_type_options'] = raw_file_type_options
     except Exception:
         pass
+    try:
+        from django.db.models import Case, When, IntegerField as _IntegerField
+        from django.urls import reverse as _reverse
+        ns = get_namespace(request)
+        video_file = patient.files.filter(
+            file_type__in=['video_processed', 'video_raw']
+        ).annotate(
+            _prio=Case(
+                When(file_type='video_processed', subtype='compressed', then=0),
+                When(file_type='video_processed', then=1),
+                default=2,
+                output_field=_IntegerField(),
+            )
+        ).order_by('_prio', '-created_at').first()
+        if video_file:
+            context['video_file'] = video_file
+            context['video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': video_file.id})
+        context['has_video'] = bool(video_file)
+        subsampled_file = patient.files.filter(
+            file_type='video_processed', subtype='subsampled'
+        ).order_by('-created_at').first()
+        worker_source_file = subsampled_file or video_file
+        if subsampled_file:
+            context['subsampled_video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': subsampled_file.id})
+        if worker_source_file and getattr(worker_source_file, 'file_path', None):
+            context['worker_video_source_ref'] = worker_source_file.file_path
+            context['worker_video_source_file_id'] = worker_source_file.id
+    except Exception:
+        context['has_video'] = False
+        context['video_url'] = None
+        context['worker_video_source_ref'] = None
+        context['worker_video_source_file_id'] = None
     return render_with_fallback(request, 'patient_detail', context)
 
 @login_required
