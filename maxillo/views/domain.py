@@ -1,14 +1,11 @@
-"""Helpers to route maxillo/brain/laparoscopy namespaces to the correct domain models/forms."""
+"""Helpers to route maxillo/laparoscopy namespaces to the correct domain models/forms."""
+
 
 from django.apps import apps
 
 
 def get_namespace(request):
-    return (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-
-
-def is_brain_namespace(request):
-    return get_namespace(request) == 'brain'
+    return 'maxillo'
 
 
 def is_laparoscopy_namespace(request):
@@ -16,10 +13,9 @@ def is_laparoscopy_namespace(request):
 
 
 def get_domain_models(request):
+
     ns = get_namespace(request)
-    if ns == 'brain':
-        app_label = 'brain'
-    elif ns == 'laparoscopy':
+    if ns == 'laparoscopy':
         app_label = 'laparoscopy'
     else:
         app_label = 'maxillo'
@@ -51,15 +47,7 @@ def get_canonical_models():
 
 def get_domain_forms(request):
     ns = get_namespace(request)
-    if ns == 'brain':
-        from brain.forms import (
-            ClassificationForm,
-            DatasetForm,
-            PatientForm,
-            PatientManagementForm,
-            PatientUploadForm,
-        )
-    elif ns == 'laparoscopy':
+    if ns == 'laparoscopy':
         from laparoscopy.forms import (
             ClassificationForm,
             DatasetForm,

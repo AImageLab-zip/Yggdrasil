@@ -204,3 +204,10 @@ Trace-*.json
 Makefile
 CLAUDE.md
 .code-review-graph
+
+# Claude local artifacts
+*.claude*
+
+# ONNX Models
+static/vendor/transformers/models/
+static/vendor/transformers/onnxruntime*/

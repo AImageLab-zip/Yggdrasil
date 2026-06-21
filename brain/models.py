@@ -130,7 +130,7 @@ class Patient(models.Model):
         related_name='brain_patients',
         help_text='Modalities available for this patient',
     )
-    folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
+    folders = models.ManyToManyField('Folder', blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
 
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
@@ -152,10 +152,8 @@ class Patient(models.Model):
         indexes = [
             models.Index(fields=['visibility']),
             models.Index(fields=['uploaded_at']),
-            models.Index(fields=['folder']),
             models.Index(fields=['name']),
             models.Index(fields=['visibility', 'uploaded_at']),
-            models.Index(fields=['folder', 'visibility']),
         ]
 
     def __str__(self):
@@ -590,3 +588,23 @@ class Export(models.Model):
             self.share_token = secrets.token_urlsafe(32)
             self.save(update_fields=['share_token'])
         return self.share_token
+
+
+class UserPreference(models.Model):
+    """Stores per-user UI preferences for the Brain app."""
+
+    LANGUAGE_CHOICES = [
+        ('it', 'Italian'),
+        ('en', 'English'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='brain_preference')
+    report_language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='it')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'brain_user_preference'
+
+    def __str__(self):
+        return f"Preferences for {self.user.username}"
+

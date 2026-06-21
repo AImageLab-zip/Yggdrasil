@@ -2,7 +2,7 @@ import logging
 
 from django.core.management.base import BaseCommand, CommandError
 
-from brain.models import Export as BrainExport
+
 from laparoscopy.export_processor import LaparoscopyExportProcessor
 from laparoscopy.models import Export as LaparoscopyExport
 
@@ -18,39 +18,31 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('export_id', type=int)
-        parser.add_argument('--domain', choices=['maxillo', 'brain', 'laparoscopy'])
 
+parser.add_argument('--domain', choices=['maxillo', 'laparoscopy'])
     def handle(self, *args, **options):
         export_id = options['export_id']
         domain = options.get('domain')
-
         export = None
-        if domain == 'brain':
-            export = BrainExport.objects.filter(id=export_id).first()
-        elif domain == 'laparoscopy':
+        if domain == 'laparoscopy':
             export = LaparoscopyExport.objects.filter(id=export_id).first()
         elif domain == 'maxillo':
             export = MaxilloExport.objects.filter(id=export_id).first()
         else:
             export = MaxilloExport.objects.filter(id=export_id).first()
-            if not export:
-                export = BrainExport.objects.filter(id=export_id).first()
-                if export:
-                    domain = 'brain'
-                else:
-                    export = LaparoscopyExport.objects.filter(id=export_id).first()
-                    if export:
-                        domain = 'laparoscopy'
-            else:
+            if export:
                 domain = 'maxillo'
+            else:
+                export = LaparoscopyExport.objects.filter(id=export_id).first()
+                if export:
+                    domain = 'laparoscopy'
 
+        export = MaxilloExport.objects.filter(id=export_id).first()
         if not export:
             raise CommandError(f'Export {export_id} not found')
 
         if not domain:
-            if export.__class__.__module__.startswith('brain.'):
-                domain = 'brain'
-            elif export.__class__.__module__.startswith('laparoscopy.'):
+            if export.__class__.__module__.startswith('laparoscopy.'):
                 domain = 'laparoscopy'
             else:
                 domain = 'maxillo'

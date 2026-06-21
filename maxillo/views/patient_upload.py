@@ -192,29 +192,6 @@ def upload_patient(request):
                 except Exception as e:
                     messages.error(request, f"Error saving Intraoral Photos: {e}")
 
-            # Handle Brain MRI modalities (T1, T2, FLAIR, T1c)
-            brain_modalities = {
-                'braintumor-mri-t1': 'Brain MRI T1',
-                'braintumor-mri-t2': 'Brain MRI T2',
-                'braintumor-mri-flair': 'Brain MRI FLAIR',
-                'braintumor-mri-t1c': 'Brain MRI T1c',
-            }
-
-            for slug, display_name in brain_modalities.items():
-                file_obj = request.FILES.get(slug)
-                if file_obj:
-                    try:
-                        modality = Modality.objects.get(slug=slug)
-                        patient.modalities.add(modality)
-
-                        from ..file_utils import save_generic_modality_file
-                        fr, job = save_generic_modality_file(patient, slug, file_obj)
-                        if fr:
-                            uploaded_modalities.append(display_name)
-                            if job:
-                                processing_job_ids.append(job.id)
-                    except Exception as e:
-                        messages.error(request, f"Error saving {display_name}: {e}")
 
             # Generic video modality
             video_file = request.FILES.get('video')
@@ -241,6 +218,7 @@ def upload_patient(request):
                 messages.error(request, video_error)
                 if is_xhr:
                     return JsonResponse({'ok': False, 'error': video_error}, status=400)
+
 
             if uploaded_modalities:
                 unique_modalities = list(dict.fromkeys(uploaded_modalities))

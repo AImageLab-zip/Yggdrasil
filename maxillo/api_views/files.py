@@ -32,12 +32,7 @@ def serve_file(request, file_id):
     URL: /api/processing/files/serve/<file_id>/
     """
     try:
-        file_obj = FileRegistry.objects.select_related(
-            "patient",
-            "brain_patient",
-            "voice_caption__patient",
-            "brain_voice_caption__patient",
-        ).get(id=file_id)
+        file_obj = FileRegistry.objects.select_related("patient").get(id=file_id)
         resolved_file_path = file_obj.file_path
         requested_file_key = (request.GET.get('file_key') or '').strip()
 
@@ -68,13 +63,9 @@ def serve_file(request, file_id):
         if file_domain not in ["maxillo", "brain", "laparoscopy"]:
             file_domain = request_namespace
 
-        if not artifact_exists(resolved_file_path):
-            raise Http404("File not found")
 
         # Authentication: Check if user has access to the patient associated with this file
-        if file_domain == "brain":
-            patient = file_obj.brain_patient
-        elif file_domain == "laparoscopy":
+        if file_domain == "laparoscopy":
             patient = file_obj.laparoscopy_patient
         else:
             patient = file_obj.patient
@@ -86,10 +77,10 @@ def serve_file(request, file_id):
 
             from common.models import Project
 
-            project = Project.objects.filter(slug=file_domain).first()
+            project = Project.objects.filter(slug='maxillo').first()
 
-            can_view = user_is_project_admin(request.user, file_domain) or (
-                patient.folder and user_can_read_folder(request.user, patient.folder, file_domain)
+            can_view = user_is_project_admin(request.user, 'maxillo') or (
+                patient.folder and user_can_read_folder(request.user, patient.folder, 'maxillo')
             )
 
             if not can_view:
@@ -234,44 +225,25 @@ def get_file_registry(request):
         limit = int(request.GET.get("limit", 50))
         offset = int(request.GET.get("offset", 0))
 
-        from common.models import Project
-
-        namespace = (
-            getattr(request, "resolver_match", None)
-            and request.resolver_match.namespace
-        ) or "maxillo"
-        current_project = Project.objects.filter(slug=namespace).first()
-
         # Build query with authorization filtering
-        files = FileRegistry.objects.select_related("patient", "brain_patient")
+        files = FileRegistry.objects.select_related("patient")
 
-        files = files.filter(domain=namespace)
-        is_admin = user_is_project_admin(request.user, namespace)
-        if namespace == "brain":
-            files = files.filter(models.Q(brain_patient__isnull=True) | models.Q(brain_patient__deleted=False))
-            if not is_admin:
-                files = files.filter(brain_patient__isnull=False)
-        else:
-            files = files.filter(models.Q(patient__isnull=True) | models.Q(patient__deleted=False))
-            if not is_admin:
-                files = files.filter(patient__isnull=False)
+        files = files.filter(domain='maxillo')
+        is_admin = user_is_project_admin(request.user, 'maxillo')
+        files = files.filter(models.Q(patient__isnull=True) | models.Q(patient__deleted=False))
+        if not is_admin:
+            files = files.filter(patient__isnull=False)
 
         if not is_admin:
-            PatientModel = files.model._meta.apps.get_model('brain' if namespace == 'brain' else 'maxillo', 'Patient')
-            allowed_patients = filter_patients_for_user(request.user, PatientModel.objects.all(), namespace).values_list('patient_id', flat=True)
-            if namespace == 'brain':
-                files = files.filter(brain_patient_id__in=allowed_patients)
-            else:
-                files = files.filter(patient_id__in=allowed_patients)
+            from maxillo.models import Patient as MaxilloPatient
+            allowed_patients = filter_patients_for_user(request.user, MaxilloPatient.objects.all(), 'maxillo').values_list('patient_id', flat=True)
+            files = files.filter(patient_id__in=allowed_patients)
 
         # Apply additional filters
         if file_type:
             files = files.filter(file_type=file_type)
         if patient_id:
-            if namespace == "brain":
-                files = files.filter(brain_patient__patient_id=patient_id)
-            else:
-                files = files.filter(patient__patient_id=patient_id)
+            files = files.filter(patient__patient_id=patient_id)
 
         # Apply pagination
         total_count = files.count()
@@ -289,15 +261,9 @@ def get_file_registry(request):
                 "metadata": file_obj.metadata,
             }
 
-            if namespace == "brain" and getattr(file_obj, "brain_patient_id", None):
-                file_data["patient_id"] = file_obj.brain_patient_id
-            elif getattr(file_obj, "patient_id", None):
+            if getattr(file_obj, "patient_id", None):
                 file_data["patient_id"] = file_obj.patient_id
-            if namespace == "brain" and getattr(
-                file_obj, "brain_voice_caption_id", None
-            ):
-                file_data["voice_caption_id"] = file_obj.brain_voice_caption_id
-            elif file_obj.voice_caption:
+            if file_obj.voice_caption:
                 file_data["voice_caption_id"] = file_obj.voice_caption.id
             if file_obj.processing_job:
                 file_data["processing_job_id"] = file_obj.processing_job.id

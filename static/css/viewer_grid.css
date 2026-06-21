@@ -49,6 +49,20 @@
   color: #fff;
 }
 
+.viewer-tool-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.viewer-tool-btn--seg {
+  width: auto;
+  min-width: 58px;
+  padding: 0 0.55rem;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .viewer-tool-status {
   color: #495057;
   font-size: 0.86rem;

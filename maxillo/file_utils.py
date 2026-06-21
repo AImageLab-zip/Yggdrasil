@@ -29,7 +29,7 @@ def get_file_type_for_modality(
     Centralized function to determine the correct file_type for a given modality.
 
     Args:
-        modality_slug: The modality slug (e.g., 'cbct', 'ios', 'braintumor-mri-t1')
+        modality_slug: The modality slug (e.g., 'cbct', 'ios')
         is_processed: Whether this is a processed file (adds _processed suffix)
         file_format: Optional file format hint for fallback logic
         subtype: Optional subtype (e.g., 'upper', 'lower' for IOS)
@@ -102,23 +102,16 @@ def _get_patient(obj):
 
 
 def _domain_for_patient(patient) -> str:
+
     app_label = getattr(getattr(patient, "_meta", None), "app_label", "")
-    if app_label == "brain":
-        return "brain"
     if app_label == "laparoscopy":
         return "laparoscopy"
     return "maxillo"
 
 
 def _entity_fk_kwargs(patient):
+
     domain = _domain_for_patient(patient)
-    if domain == "brain":
-        return {
-            "domain": "brain",
-            "brain_patient": patient,
-            "patient": None,
-            "laparoscopy_patient": None,
-        }
     if domain == "laparoscopy":
         return {
             "domain": "laparoscopy",
@@ -135,12 +128,8 @@ def _entity_fk_kwargs(patient):
 
 
 def _entity_filter_kwargs(patient):
+
     domain = _domain_for_patient(patient)
-    if domain == "brain":
-        return {
-            "domain": "brain",
-            "brain_patient": patient,
-        }
     if domain == "laparoscopy":
         return {
             "domain": "laparoscopy",
@@ -153,14 +142,9 @@ def _entity_filter_kwargs(patient):
 
 
 def _voice_entity_fk_kwargs(voice_caption):
+
     patient = _get_patient(voice_caption)
     domain = _domain_for_patient(patient)
-    if domain == "brain":
-        return {
-            "brain_voice_caption": voice_caption,
-            "voice_caption": None,
-            "laparoscopy_voice_caption": None,
-        }
     if domain == "laparoscopy":
         return {
             "laparoscopy_voice_caption": voice_caption,
@@ -175,41 +159,37 @@ def _voice_entity_fk_kwargs(voice_caption):
 
 
 def _project_slug_from_patient(patient) -> str:
+
     domain = _domain_for_patient(patient)
-    if domain == "brain":
-        return "brain"
     if domain == "laparoscopy":
         return "laparoscopy"
+
     return "maxillo"
 
 
 def _domain_for_job(job) -> str:
-    if getattr(job, "domain", None) in ["brain", "maxillo", "laparoscopy"]:
+
+    if getattr(job, "domain", None) in ["maxillo", "laparoscopy"]:
         return job.domain
-    if getattr(job, "brain_patient_id", None) or getattr(
-        job, "brain_voice_caption_id", None
-    ):
-        return "brain"
     if getattr(job, "laparoscopy_patient_id", None) or getattr(
         job, "laparoscopy_voice_caption_id", None
     ):
         return "laparoscopy"
+
     return "maxillo"
 
 
 def _job_patient(job):
+
     domain = _domain_for_job(job)
-    if domain == "brain":
-        return getattr(job, "brain_patient", None)
     if domain == "laparoscopy":
         return getattr(job, "laparoscopy_patient", None)
     return getattr(job, "patient", None)
 
 
 def _job_voice_caption(job):
+
     domain = _domain_for_job(job)
-    if domain == "brain":
-        return getattr(job, "brain_voice_caption", None)
     if domain == "laparoscopy":
         return getattr(job, "laparoscopy_voice_caption", None)
     return getattr(job, "voice_caption", None)
@@ -217,16 +197,6 @@ def _job_voice_caption(job):
 
 def _job_entity_fk_kwargs(job):
     domain = _domain_for_job(job)
-    if domain == "brain":
-        return {
-            "domain": "brain",
-            "brain_patient": _job_patient(job),
-            "patient": None,
-            "laparoscopy_patient": None,
-            "brain_voice_caption": _job_voice_caption(job),
-            "voice_caption": None,
-            "laparoscopy_voice_caption": None,
-        }
     if domain == "laparoscopy":
         return {
             "domain": "laparoscopy",
@@ -389,10 +359,6 @@ def save_generic_modality_file(
             "panoramic",
             "teleradiography",
             "rawzip",
-            "braintumor-mri-t1",
-            "braintumor-mri-t2",
-            "braintumor-mri-flair",
-            "braintumor-mri-t1c",
         ]
 
         if modality_slug in no_processing_modalities:
@@ -975,9 +941,10 @@ def mark_job_completed(job_id, output_files, logs=None):
 
     try:
         job = Job.objects.select_related(
-            "patient", "brain_patient", "laparoscopy_patient",
-            "voice_caption", "brain_voice_caption", "laparoscopy_voice_caption",
+            "patient", "laparoscopy_patient",
+            "voice_caption", "laparoscopy_voice_caption",
         ).get(id=job_id)
+
         logger.info(
             f"Found job: {job.id}, modality: {job.modality_slug}, status: {job.status}"
         )
@@ -1415,10 +1382,12 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         can_retry: Whether the job can be retried
     """
     try:
+
         job = Job.objects.select_related(
-            "patient", "brain_patient", "laparoscopy_patient",
-            "voice_caption", "brain_voice_caption", "laparoscopy_voice_caption",
+            "patient", "laparoscopy_patient",
+            "voice_caption","laparoscopy_voice_caption",
         ).get(id=job_id)
+
         job_patient = _job_patient(job)
         job_voice_caption = _job_voice_caption(job)
         job.mark_failed(error_msg, can_retry)

@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4 mb-0">Profile</h1>
+        <a class="btn btn-outline-secondary btn-sm" href="{% url 'brain:patient_list' %}">Back to scans</a>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <section class="border rounded p-3">
+                <h2 class="h6 mb-3">Account</h2>
+                <dl class="mb-0">
+                    <dt>Username</dt>
+                    <dd>{{ profile_user.username }}</dd>
+
+                    <dt>Email</dt>
+                    <dd>{{ profile_user.email|default:"-" }}</dd>
+
+                    <dt>Name</dt>
+                    <dd>{{ profile_user.get_full_name|default:"-" }}</dd>
+                </dl>
+            </section>
+        </div>
+
+        <div class="col-md-6">
+            <section class="border rounded p-3">
+                <h2 class="h6 mb-3">Access</h2>
+                <dl class="mb-0">
+                    <dt>Staff</dt>
+                    <dd>{% if profile_user.is_staff %}Yes{% else %}No{% endif %}</dd>
+
+                    <dt>Superuser</dt>
+                    <dd>{% if profile_user.is_superuser %}Yes{% else %}No{% endif %}</dd>
+                </dl>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}

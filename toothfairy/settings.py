@@ -12,8 +12,12 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 import json as _json
+import mimetypes
 from pathlib import Path
 from decouple import config
+
+# Ensure .wasm files are served with the correct MIME type (required for ONNX runtime)
+mimetypes.add_type("application/wasm", ".wasm")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

@@ -1,11 +1,11 @@
 <!-- Vocal Caption Section -->
 <div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#vocalCaptionCollapse" aria-expanded="false" aria-controls="vocalCaptionCollapse" style="cursor: pointer;">
+    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#vocalCaptionCollapse" aria-expanded="{% if vocal_caption_open %}true{% else %}false{% endif %}" aria-controls="vocalCaptionCollapse" style="cursor: pointer;">
         <h6 class="mb-0"><i class="fas fa-microphone me-2"></i>Voice Captions</h6>
         <i class="fas fa-chevron-right collapse-indicator"></i>
     </div>
 
-    <div class="collapse" id="vocalCaptionCollapse">
+    <div class="collapse{% if vocal_caption_open %} show{% endif %}" id="vocalCaptionCollapse">
         {% firstof request.resolver_match.namespace 'maxillo' as ns %}
         <!-- Hidden CSRF token for AJAX usage -->
         <form style="display:none;">{% csrf_token %}</form>
@@ -28,6 +28,16 @@
                         <button type="button" class="btn btn-outline-danger btn-sm ms-1 d-none" id="discardRecording">
                             <i class="fas fa-times me-1"></i>Discard
                         </button>
+                        {% if ns == 'brain' %}
+                        <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Speech language" id="brainSpeechLanguageToggle">
+                            <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageEn" value="en" autocomplete="off" checked>
+                            <label class="btn btn-outline-secondary" for="brainSpeechLanguageEn">EN</label>
+                            <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageIt" value="it" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="brainSpeechLanguageIt">IT</label>
+                            <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageDe" value="de" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="brainSpeechLanguageDe">DE</label>
+                        </div>
+                        {% endif %}
                     </div>
                     <div id="textControls" class="d-flex align-items-center">
                         <small class="text-muted me-2">Characters: <span id="textCharCount">0</span></small>
@@ -43,7 +53,7 @@
                 </div>
 
                 <div id="textInputContainer" class="mb-2 position-relative">
-                    <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="Write your caption here..."></textarea>
+                    <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="{% if ns == 'brain' %}Speak or write your caption here...{% else %}Write your caption here...{% endif %}"></textarea>
                 </div>
 
                 <div id="recordingArea" class="d-none">
@@ -235,6 +245,7 @@
 
             var charCount = document.getElementById('textCharCount');
             var clearTextBtn = document.getElementById('clearTextCaption');
+            var isBrainCaption = '{{ ns }}' === 'brain';
 
             function updateCharCount() {
                 if (charCount && textArea) {
@@ -243,13 +254,13 @@
             }
 
             function enterRecordingMode() {
-                if (textArea) {
+                if (textArea && !isBrainCaption) {
                     textArea.setAttribute('disabled', 'disabled');
                 }
                 if (textControls) {
                     textControls.classList.add('d-none');
                 }
-                if (textInputContainer) {
+                if (textInputContainer && !isBrainCaption) {
                     textInputContainer.classList.add('d-none');
                 }
                 if (recordingArea) {

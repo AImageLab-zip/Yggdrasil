@@ -490,6 +490,8 @@ class FileRegistry(models.Model):
 		('braintumor_mri_t2_processed', 'Brain MRI T2 Processed'),
 		('braintumor_mri_flair_raw', 'Brain MRI FLAIR Raw'),
 		('braintumor_mri_flair_processed', 'Brain MRI FLAIR Processed'),
+		('braintumor_mri_seg_raw', 'Brain MRI Segmentation Raw'),
+		('braintumor_mri_seg_processed', 'Brain MRI Segmentation Processed'),
 		# Maxillo image modalities
 		('intraoral_raw', 'Intraoral Photographs Raw'),
 		('intraoral_processed', 'Intraoral Photographs Processed'),
