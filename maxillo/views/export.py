@@ -111,6 +111,11 @@ def _build_shared_download_url(request, share_token):
     )
 
 
+def _get_export_for_request_or_404(request, export_id):
+    ExportModel = get_domain_models(request)["Export"]
+    return get_object_or_404(ExportModel.objects.all(), id=export_id)
+
+
 def _shared_export_availability(request, share_token):
     """Return export and availability status for shared access."""
     ExportModel = get_domain_models(request)["Export"]
@@ -135,6 +140,73 @@ def is_admin(user):
     return user.is_staff or user.profile.is_admin()
 
 
+def _laparoscopy_export_query_summary(folder_count):
+    return ", ".join(
+        [
+            f"{folder_count} folder{'s' if folder_count != 1 else ''}",
+            "Laparoscopy subsampled videos",
+            "Per-frame multilayer NPZ masks",
+            "All subsampled frames",
+        ]
+    )
+
+
+def _laparoscopy_export_new(request, ExportModel):
+    from laparoscopy.export_processor import get_laparoscopy_export_folders
+
+    if request.method == "POST":
+        folder_ids = request.POST.getlist("folder_ids")
+        if not folder_ids:
+            messages.error(request, "Please select at least one folder.")
+            return redirect_with_namespace(request, "export_new")
+
+        query_params = {
+            "domain": "laparoscopy",
+            "export_variant": "video_masks_v1",
+            "folder_ids": [int(fid) for fid in folder_ids],
+            "mask_format": "npz_multilayer",
+            "include_all_frames": True,
+            "video_subtype": "subsampled",
+        }
+        export = ExportModel.objects.create(
+            user=request.user,
+            status="pending",
+            query_params=query_params,
+            query_summary=_laparoscopy_export_query_summary(len(folder_ids)),
+        )
+
+        from ..utils.export_processor import start_export_processing
+
+        start_export_processing(export.id, "laparoscopy")
+        messages.success(request, f"Export #{export.id} created and processing started.")
+        return redirect_with_namespace(request, "export_list")
+
+    return render(
+        request,
+        "laparoscopy/export_new.html",
+        {
+            "folders": get_laparoscopy_export_folders(),
+            "ns": get_namespace(request),
+        },
+    )
+
+
+def _laparoscopy_export_preview(folder_ids):
+    from laparoscopy.export_processor import build_laparoscopy_export_preview
+
+    preview = build_laparoscopy_export_preview(folder_ids)
+    size_bytes = int(preview["estimated_size_bytes"] or 0)
+    return JsonResponse(
+        {
+            "success": True,
+            "patient_count": preview["patient_count"],
+            "folder_count": len(folder_ids),
+            "exportable_patient_count": preview["exportable_patient_count"],
+            "file_count": preview["file_count"],
+            "estimated_size": format_file_size(size_bytes),
+            "estimated_size_bytes": size_bytes,
+        }
+    )
 def _can_use_exports(request):
     if user_is_project_admin(request.user, request):
         return True
@@ -202,6 +274,9 @@ def export_new(request):
         return redirect_with_namespace(request, "patient_list")
     domain_models = get_domain_models(request)
     ExportModel = domain_models["Export"]
+    if get_namespace(request) == "laparoscopy":
+        return _laparoscopy_export_new(request, ExportModel)
+
     FolderModel = domain_models["Folder"]
     PatientModel = domain_models["Patient"]
 
@@ -247,6 +322,7 @@ def export_new(request):
 
         # Create export record
         query_params = {
+            "domain": get_namespace(request),
             "folder_ids": [int(fid) for fid in folder_ids],
             "modality_slugs": modality_slugs,
             "filters": filters,
@@ -374,6 +450,9 @@ def export_preview(request):
             folder_ids = [int(fid) for fid in folder_ids.split(",") if fid]
         else:
             folder_ids = [int(fid) for fid in folder_ids if fid]
+
+        if domain == "laparoscopy":
+            return _laparoscopy_export_preview(folder_ids)
 
         if isinstance(modality_slugs, str):
             modality_slugs = modality_slugs.split(",") if modality_slugs else []
@@ -570,7 +649,7 @@ def _recover_stuck_export(export):
 @user_passes_test(is_admin)
 def export_status(request, export_id):
     """AJAX endpoint to get current export status."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     # Check permissions
     if export.user != request.user and not request.user.is_staff:
@@ -612,7 +691,7 @@ def export_status(request, export_id):
 @user_passes_test(is_admin)
 def export_download(request, export_id):
     """Download export ZIP file."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     # Check permissions
     if export.user != request.user and not request.user.is_staff:
@@ -653,7 +732,7 @@ def export_download(request, export_id):
 @require_POST
 def export_share_update(request, export_id):
     """Update share settings for a completed export."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     if export.user != request.user and not request.user.is_staff:
         return JsonResponse(
@@ -776,7 +855,7 @@ def export_shared_download(request, share_token):
 @require_POST
 def export_delete(request, export_id):
     """Delete export record and optionally the ZIP file."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     # Check permissions
     if export.user != request.user and not request.user.is_staff:

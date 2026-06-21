@@ -80,7 +80,7 @@ class ProjectSessionMiddleware(MiddlewareMixin):
             return None
 
         url_start = request.path.split('/')[1]
-        if url_start not in ['maxillo', 'brain']:
+        if url_start not in ['maxillo', 'brain', 'laparoscopy']:
             return None
 
         project = Project.objects.get(name=url_start)
@@ -116,7 +116,7 @@ class ActiveProfileMiddleware(MiddlewareMixin):
 
         app_key = path_parts[0]
 
-        if app_key not in ['maxillo', 'brain']:
+        if app_key not in ['maxillo', 'brain', 'laparoscopy']:
             return None
 
         try:

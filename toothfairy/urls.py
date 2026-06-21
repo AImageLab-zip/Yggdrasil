@@ -32,6 +32,7 @@ urlpatterns = [
     path("", scans_views.home, name="home"),
     path("maxillo/", include("maxillo.urls")),
     path("brain/", include("brain.urls")),
+    path("laparoscopy/", include("laparoscopy.urls")),
     # API root
     path("api/", include(("maxillo.api_urls", "api"), namespace="api")),
     path("login/", auth_views.LoginView.as_view(), name="login"),

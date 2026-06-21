@@ -17,7 +17,9 @@ def _sanitize_queue_name(name: Optional[str], *, default: str) -> str:
 
 def _project_slug_for_job(job: Any) -> Optional[str]:
     try:
-        if getattr(job, "domain", "") == "brain":
+        domain = getattr(job, "domain", "")
+
+        if domain == "brain":
             patient = getattr(job, "brain_patient", None)
             if patient is None:
                 voice_caption = getattr(job, "brain_voice_caption", None)
@@ -28,21 +30,33 @@ def _project_slug_for_job(job: Any) -> Optional[str]:
                 )
             return "brain" if patient is not None else None
 
-        patient = getattr(job, "patient", None)
-        if patient is None:
-            voice_caption = getattr(job, "voice_caption", None)
-            patient = (
-                getattr(voice_caption, "patient", None)
-                if voice_caption is not None
-                else None
-            )
+        if domain == "laparoscopy":
+            patient = getattr(job, "laparoscopy_patient", None)
+            if patient is None:
+                voice_caption = getattr(job, "laparoscopy_voice_caption", None)
+                patient = (
+                    getattr(voice_caption, "patient", None)
+                    if voice_caption is not None
+                    else None
+                )
+            return "laparoscopy" if patient is not None else None
+        if domain == "maxillo":
+            patient = getattr(job, "patient", None)
+            if patient is None:
+                voice_caption = getattr(job, "voice_caption", None)
+                patient = (
+                    getattr(voice_caption, "patient", None)
+                    if voice_caption is not None
+                    else None
+                )
 
-        if patient is not None:
-            project = getattr(patient, "project", None)
-            slug = getattr(project, "slug", None) if project is not None else None
-            if slug:
-                return str(slug)
-            return "maxillo"
+            if patient is not None:
+                project = getattr(patient, "project", None)
+                slug = getattr(project, "slug", None) if project is not None else None
+                if slug:
+                    return str(slug)
+                return "maxillo"
+            
     except Exception:
         return None
     return None

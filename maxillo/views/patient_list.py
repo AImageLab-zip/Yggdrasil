@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 def _get_domain_models(request):
+
+    ns = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or ''
+    if ns == 'laparoscopy':
+        return (
+            apps.get_model('laparoscopy', 'Patient'),
+            apps.get_model('laparoscopy', 'Folder'),
+            apps.get_model('laparoscopy', 'Tag'),
+        )
+
     return MaxilloPatient, MaxilloFolder, MaxilloTag
 
 def home(request):

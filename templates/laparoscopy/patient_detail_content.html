@@ -1,0 +1,635 @@
+{% load static %}
+
+<!-- django-data consumed by laparoscopy_annotator.js WebSocket bootstrap -->
+<script id="django-data" type="application/json">{"scanId": {{ patient.patient_id }}}</script>
+
+<div class="container-fluid laparoscopy-patient-detail">
+    <div class="row">
+
+        <!-- ======================================================== -->
+        <!-- Left column: video player + annotation interface          -->
+        <!-- ======================================================== -->
+        <div class="col-lg-8">
+
+            <!-- Patient header -->
+            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                <h4 class="mb-0">
+                    <i class="fas fa-video me-2"></i>
+                    {% if patient.name %}{{ patient.name }}{% else %}Patient {{ patient.patient_id }}{% endif %}
+                </h4>
+                <div class="d-flex gap-2 align-items-center flex-wrap">
+                    <button id="annotation-toggle-btn" class="btn btn-sm btn-outline-warning d-none">
+                        <i class="fas fa-draw-polygon me-1"></i>Enter Annotation Mode
+                    </button>
+                </div>
+            </div>
+
+            <!-- Annotation toolbar (hidden until annotation mode) -->
+            <div id="annotation-toolbar" class="d-none mb-2">
+                <div class="card">
+                    <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center gap-3">
+
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-primary active" data-tool="brush" title="Brush (B)">
+                                <i class="fas fa-paint-brush"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" data-tool="eraser" title="Eraser (E)">
+                                <i class="fas fa-eraser"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" data-tool="polygon"
+                                    title="Polygon (P) — click to add vertices, Enter to close, Esc to cancel">
+                                <i class="fas fa-draw-polygon"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" data-tool="point"
+                                    title="Point Tool — add Magic prompt points on the current frame">
+                                <i class="fas fa-crosshairs"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" data-tool="pan"
+                                    title="Pan (H)">
+                                <i class="fas fa-hand-paper"></i>
+                            </button>
+                        </div>
+
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="small mb-0 text-nowrap"><i class="fas fa-circle me-1"></i>Size</label>
+                            <input id="brush-size-input" type="range" class="form-range" min="1" max="60" value="8" style="width:90px;">
+                            <span id="brush-size-label" class="small text-muted" style="min-width:20px;">8</span>
+                        </div>
+
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button id="zoom-in-btn" class="btn btn-outline-secondary" title="Zoom in">
+                                <i class="fas fa-search-plus"></i>
+                            </button>
+                            <button id="zoom-reset-btn" class="btn btn-outline-secondary" title="Reset zoom">
+                                <i class="fas fa-compress-arrows-alt"></i>
+                            </button>
+                            <button id="zoom-out-btn" class="btn btn-outline-secondary" title="Zoom out">
+                                <i class="fas fa-search-minus"></i>
+                            </button>
+                        </div>
+
+                        <div class="ms-auto d-none d-lg-flex flex-column align-items-end" style="font-size:0.72rem;color:#6c757d;line-height:1.6;">
+                            <span><kbd>B</kbd> brush &nbsp; <kbd>E</kbd> eraser &nbsp; <kbd>P</kbd> polygon &nbsp; <kbd>H</kbd> pan</span>
+                            <span><kbd>←</kbd><kbd>→</kbd> frame &nbsp;&middot;&nbsp; <kbd>Shift+←</kbd><kbd>Shift+→</kbd> ±10 seconds</span>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video + canvas container -->
+            <div id="video-player-wrap" class="mb-2" style="background:#000;line-height:0;overflow:hidden;">
+                <p class="text-muted p-3 mb-0" id="video-placeholder" style="line-height:normal;">
+                    <i class="fas fa-hourglass-half me-2"></i>No video uploaded for this patient.
+                </p>
+            </div>
+
+            <!-- Frame navigation bar (hidden until a video is loaded) -->
+            <div id="frame-nav-bar" class="d-none">
+                <div class="card">
+                    <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center gap-3">
+
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button id="frame-first" class="btn btn-outline-secondary" title="Go to start">
+                                <i class="fas fa-step-backward"></i>
+                            </button>
+                            <button id="frame-prev10" class="btn btn-outline-secondary" title="Step back 10 seconds (Shift+←)" style="font-size:0.75rem;font-weight:600;">
+                                &minus;10s
+                            </button>
+                            <button id="frame-prev" class="btn btn-outline-secondary" title="Step back 1 second (←)" style="font-size:0.75rem;font-weight:600;">
+                                &minus;1s
+                            </button>
+                            <button id="frame-play" class="btn btn-outline-secondary" title="Play / Pause">
+                                <i class="fas fa-play"></i>
+                            </button>
+                            <button id="frame-next" class="btn btn-outline-secondary" title="Step forward 1 second (→)" style="font-size:0.75rem;font-weight:600;">
+                                +1s
+                            </button>
+                            <button id="frame-next10" class="btn btn-outline-secondary" title="Step forward 10 seconds (Shift+→)" style="font-size:0.75rem;font-weight:600;">
+                                +10s
+                            </button>
+                            <button id="frame-last" class="btn btn-outline-secondary" title="Go to end">
+                                <i class="fas fa-step-forward"></i>
+                            </button>
+                        </div>
+
+                        <span class="font-monospace small text-muted" id="frame-timestamp">00:00.000</span>
+
+                        <div id="polygon-drawing-hint" class="d-none ms-auto small text-info">
+                            <i class="fas fa-draw-polygon me-1"></i>
+                            Click to add points &nbsp;&middot;&nbsp; <kbd>Enter</kbd> to close &nbsp;&middot;&nbsp; <kbd>Esc</kbd> to cancel
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quadrant classification timeline -->
+            <div id="temporal-classification-bar" class="d-none mt-2">
+                <div class="card">
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <strong class="small me-1">
+                                <i class="fas fa-stream me-1"></i>Quadrant Classification
+                            </strong>
+
+                            <button id="timeline-add-pin-btn" class="btn btn-sm btn-outline-primary" type="button" title="Add marker at the current playhead time">
+                                <i class="fas fa-map-pin me-1"></i>Add Marker
+                            </button>
+
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                        id="timeline-class-dropdown-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <span id="timeline-class-active-swatch" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ccc;vertical-align:middle;margin-right:3px;"></span>
+                                    <span id="timeline-class-active-label">—</span>
+                                </button>
+                                <ul id="timeline-class-list" class="dropdown-menu" aria-labelledby="timeline-class-dropdown-btn"></ul>
+                            </div>
+
+                            <span id="timeline-active-class" class="badge text-bg-secondary ms-auto">Current: -</span>
+                        </div>
+
+                        <div id="timeline-track-wrap" class="timeline-track-wrap">
+                            <div id="timeline-track" class="timeline-track" role="slider" aria-label="Video timeline"></div>
+                            <div id="timeline-segments-layer" class="timeline-segments-layer"></div>
+                            <div id="timeline-pins-layer" class="timeline-pins-layer"></div>
+                            <button id="timeline-playhead" class="timeline-playhead" type="button" aria-label="Current frame position"></button>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mt-1 small text-muted font-monospace">
+                            <span id="timeline-current-time">00:00.000</span>
+                            <span id="timeline-duration">00:00.000</span>
+                        </div>
+
+                        <div class="small text-muted mt-1">
+                            Drag the playhead to scrub. Use Add Marker for new markers. Click a marker to reassign or delete.
+                        </div>
+
+                        {% if user_profile.is_admin %}
+                        <style>
+                            .quadrant-editor {
+                                display: flex;
+                                flex-wrap: wrap;
+                                gap: 0.35rem;
+                                align-items: center;
+                            }
+                            .quadrant-chip {
+                                display: inline-flex;
+                                align-items: center;
+                                gap: 0.35rem;
+                                max-width: 11rem;
+                                min-height: 1.75rem;
+                                padding: 0.18rem 0.25rem 0.18rem 0.45rem;
+                                border: 1px solid #d8dee7;
+                                border-radius: 999px;
+                                background: #fff;
+                                color: #26313d;
+                                font-size: 0.78rem;
+                                line-height: 1;
+                                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+                            }
+                            .quadrant-chip.is-active {
+                                border-color: var(--quadrant-color);
+                                background: color-mix(in srgb, var(--quadrant-color) 12%, white);
+                                box-shadow: 0 0 0 2px color-mix(in srgb, var(--quadrant-color) 18%, transparent);
+                            }
+                            .quadrant-chip-dot {
+                                width: 0.65rem;
+                                height: 0.65rem;
+                                border-radius: 999px;
+                                flex: 0 0 auto;
+                                background: var(--quadrant-color);
+                            }
+                            .quadrant-chip-name {
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                                white-space: nowrap;
+                            }
+                            .quadrant-chip-actions {
+                                display: inline-flex;
+                                gap: 0.1rem;
+                                margin-left: 0.1rem;
+                            }
+                            .quadrant-chip-btn {
+                                width: 1.25rem;
+                                height: 1.25rem;
+                                padding: 0;
+                                border: 0;
+                                border-radius: 999px;
+                                background: transparent;
+                                color: #667085;
+                                line-height: 1;
+                            }
+                            .quadrant-chip-btn:hover {
+                                background: rgba(15, 23, 42, 0.08);
+                                color: #111827;
+                            }
+                            .quadrant-chip-input {
+                                width: 6rem;
+                                height: 1.35rem;
+                                padding: 0 0.35rem;
+                                border-radius: 999px;
+                                font-size: 0.76rem;
+                            }
+                            .quadrant-add-chip {
+                                min-height: 1.75rem;
+                                padding: 0.18rem 0.65rem;
+                                border: 1px dashed #98a2b3;
+                                border-radius: 999px;
+                                background: #f8fafc;
+                                color: #344054;
+                                font-size: 0.78rem;
+                                line-height: 1;
+                            }
+                        </style>
+                        <div id="quadrant-types-panel" class="d-none mt-2 pt-2 border-top">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="small fw-semibold text-muted text-uppercase" style="letter-spacing:0.04em;">Quadrants</span>
+                                <button id="timeline-add-class-btn" class="quadrant-add-chip" type="button">
+                                    <i class="fas fa-plus me-1"></i>Add Quadrant
+                                </button>
+                            </div>
+                            <div id="timeline-class-admin-list" class="quadrant-editor"></div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /col-lg-8 -->
+
+        <!-- ======================================================== -->
+        <!-- Right column: annotation panels + sidebar                 -->
+        <!-- ======================================================== -->
+        <div class="col-lg-4">
+
+            {% include 'common/sections/vocal_caption_section.html' %}
+            {% include 'common/sections/scan_settings_section.html' %}
+            {% include 'common/sections/file_management_section.html' %}
+
+            <div id="magic-toolbox-panel" class="d-none mb-3">
+                <div class="card border-info-subtle">
+                    <div class="card-header d-flex justify-content-between align-items-center py-2">
+                        <strong class="small"><i class="fas fa-magic me-1"></i>Magic Toolbox</strong>
+                        <span id="magic-prompts-count" class="badge text-bg-light">0</span>
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            <button id="magic-tool-point-btn" type="button" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-crosshairs me-1"></i>Point Tool
+                            </button>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Magic point label">
+                                <button id="magic-point-positive-btn" type="button" class="btn btn-success active" title="Positive prompt point">+</button>
+                                <button id="magic-point-negative-btn" type="button" class="btn btn-outline-danger" title="Negative prompt point">-</button>
+                            </div>
+                            <button id="magic-send-prompts-btn" type="button" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-paper-plane me-1"></i>Send
+                            </button>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <input id="magic-window-seconds-input" type="number" class="form-control form-control-sm"
+                                   value="5.0" min="0.1" step="0.1" style="max-width:90px;" title="Propagation window (seconds)">
+                            <span class="small text-muted">s window</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Region Types panel (visible only in annotation mode) -->
+            <div id="region-types-panel" class="d-none mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center py-2">
+                        <strong class="small"><i class="fas fa-layer-group me-1"></i>Region Types</strong>
+                        <div class="d-flex align-items-center gap-2">
+                            <button id="toggle-regions-visibility-btn" type="button" class="btn btn-sm btn-outline-secondary py-0"
+                                    title="Hide all regions">
+                                <i class="fas fa-eye-slash me-1"></i>Hide all
+                            </button>
+                            {% if user_profile.is_admin %}
+                            <button id="add-region-btn" class="btn btn-sm btn-outline-success py-0">
+                                <i class="fas fa-plus me-1"></i>Add
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <ul id="region-list" class="list-unstyled d-flex flex-wrap gap-2 mb-0"
+                        style="max-height:220px;overflow-y:auto;"></ul>
+                </div>
+            </div>
+
+            <!-- Annotations list (visible only in annotation mode) -->
+            <div id="shapes-list-panel" class="d-none mb-3">
+                <div class="card">
+                    <div class="card-header py-2">
+                        <strong class="small"><i class="fas fa-shapes me-1"></i>Annotations</strong>
+                    </div>
+                    <ul id="shapes-list" class="list-group list-group-flush" style="max-height:200px;overflow-y:auto;"></ul>
+                </div>
+            </div>
+
+        </div><!-- /col-lg-4 -->
+
+    </div><!-- /row -->
+
+    <!-- Back button -->
+    <div class="row mt-3">
+        <div class="col-12">
+            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+            <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Back to Scan List
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Saving Indicator -->
+<div class="saving-indicator" id="savingIndicator">
+    <i class="fas fa-check me-1"></i>Saved!
+</div>
+
+<!-- Konva.js (required by the annotation canvas layer) -->
+<script src="https://unpkg.com/konva@9/konva.min.js"></script>
+
+{{ worker_video_source_ref|json_script:"worker-video-source-ref" }}
+{{ worker_video_source_file_id|json_script:"worker-video-source-file-id" }}
+<script>
+(function () {
+    function readJsonScript(id) {
+        var el = document.getElementById(id);
+        if (!el) return null;
+        try {
+            return JSON.parse(el.textContent);
+        } catch (_err) {
+            return null;
+        }
+    }
+
+    window.workerVideoSourceRef = readJsonScript('worker-video-source-ref');
+    window.workerVideoSourceFileId = readJsonScript('worker-video-source-file-id');
+})();
+</script>
+
+<!-- Annotator mixins must load before the main annotator -->
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_utils.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_shapes.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_timeline.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_api.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_mask.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_worker.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator_magic.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_annotator.js' %}"></script>
+
+<script>
+(function () {
+    'use strict';
+
+    {% if not has_video or not video_url %}return;{% endif %}
+
+    var playerWrap  = document.getElementById('video-player-wrap');
+    var placeholder = document.getElementById('video-placeholder');
+    var toggleBtn   = document.getElementById('annotation-toggle-btn');
+    var frameNavBar = document.getElementById('frame-nav-bar');
+    var temporalBar = document.getElementById('temporal-classification-bar');
+    var quadrantTypesPanel = document.getElementById('quadrant-types-panel');
+    var regionPanel = document.getElementById('region-types-panel');
+    var magicPanel = document.getElementById('magic-toolbox-panel');
+
+    placeholder.remove();
+
+    var zoomInner = document.createElement('div');
+    zoomInner.id = 'video-zoom-inner';
+    zoomInner.style.cssText = 'position:relative;transform-origin:0 0;';
+    playerWrap.appendChild(zoomInner);
+
+    var video = document.createElement('video');
+    video.controls = true;
+    video.style.cssText = 'width:100%;display:block;max-height:65vh;background:#000;position:relative;z-index:1;';
+    video.setAttribute('preload', 'metadata');
+    video.src = '{{ video_url }}';
+    window.__laparoscopyVideoEl = video;
+    zoomInner.appendChild(video);
+
+    var subsampledPreviewVideo = null;
+    {% if subsampled_video_url %}
+    subsampledPreviewVideo = document.createElement('video');
+    subsampledPreviewVideo.muted = true;
+    subsampledPreviewVideo.setAttribute('playsinline', 'playsinline');
+    subsampledPreviewVideo.setAttribute('preload', 'auto');
+    subsampledPreviewVideo.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:none;pointer-events:none;background:#000;object-fit:contain;z-index:2;';
+    subsampledPreviewVideo.src = '{{ subsampled_video_url }}';
+    zoomInner.appendChild(subsampledPreviewVideo);
+    {% endif %}
+
+    toggleBtn.classList.remove('d-none');
+    frameNavBar.classList.remove('d-none');
+    temporalBar.classList.remove('d-none');
+    if (quadrantTypesPanel) quadrantTypesPanel.classList.remove('d-none');
+
+    // ── Snap-to-second + subsampled overlay ─────────────────────────────────
+    // Whenever the video is paused (by any means — pause button, timeline drag,
+    // step buttons), snap currentTime to the nearest whole second and show the
+    // corresponding 1-fps subsampled frame as an overlay.
+    // A debounce of 120 ms prevents premature snapping while the user is still
+    // dragging the timeline playhead (continuous seeked events reset the timer).
+    if (subsampledPreviewVideo) {
+        var _snapTimer    = null;
+        var _isSnapping   = false;   // true while we're mid-snap seek
+
+        function _showSubFrame(snapped) {
+            subsampledPreviewVideo.currentTime = snapped;
+            subsampledPreviewVideo.style.display = 'block';
+        }
+
+        function _doSnap() {
+            if (!video.paused || _isSnapping) return;
+            var snapped = Math.round(video.currentTime);
+            if (Math.abs(video.currentTime - snapped) < 0.02) {
+                _showSubFrame(snapped);
+            } else {
+                _isSnapping = true;
+                video.currentTime = snapped;
+                // next seeked will be caught below
+            }
+        }
+
+        function _scheduleSnap() {
+            if (_snapTimer) clearTimeout(_snapTimer);
+            _snapTimer = setTimeout(function () { _snapTimer = null; _doSnap(); }, 120);
+        }
+
+        video.addEventListener('seeked', function () {
+            if (!video.paused) return;
+            if (_isSnapping) {
+                _isSnapping = false;
+                _showSubFrame(Math.round(video.currentTime));
+                return;
+            }
+            _scheduleSnap();
+        });
+
+        video.addEventListener('pause', function () {
+            _scheduleSnap();
+        });
+
+        video.addEventListener('play', function () {
+            _isSnapping = false;
+            if (_snapTimer) { clearTimeout(_snapTimer); _snapTimer = null; }
+            subsampledPreviewVideo.style.display = 'none';
+        });
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    function initAnnotator() {
+        var shapesPanelEl = document.getElementById('shapes-list-panel');
+        var regionPanelEl = document.getElementById('region-types-panel');
+        var annotator = new VideoAnnotator({
+            videoEl:        video,
+            wrapEl:         zoomInner,
+            outerEl:        playerWrap,
+            toolbarEl:      document.getElementById('annotation-toolbar'),
+            regionListEl:   document.getElementById('region-list'),
+            shapesListEl:   document.getElementById('shapes-list'),
+            toggleBtn:      toggleBtn,
+            timestampEl:    document.getElementById('frame-timestamp'),
+            brushSizeInput: document.getElementById('brush-size-input'),
+            brushSizeLabel: document.getElementById('brush-size-label'),
+            polygonHintEl:  document.getElementById('polygon-drawing-hint'),
+            timelineTrackWrapEl:     document.getElementById('timeline-track-wrap'),
+            timelineTrackEl:         document.getElementById('timeline-track'),
+            timelineSegmentsLayerEl: document.getElementById('timeline-segments-layer'),
+            timelinePinsLayerEl:     document.getElementById('timeline-pins-layer'),
+            timelinePlayheadEl:      document.getElementById('timeline-playhead'),
+            timelineClassListEl:     document.getElementById('timeline-class-list'),
+            timelineCurrentTimeEl:   document.getElementById('timeline-current-time'),
+            timelineDurationEl:      document.getElementById('timeline-duration'),
+            timelineActiveClassEl:   document.getElementById('timeline-active-class'),
+            timelineAddPinBtnEl:     document.getElementById('timeline-add-pin-btn'),
+            timelineClassAdminListEl: document.getElementById('timeline-class-admin-list'),
+            timelineAddClassBtnEl:   document.getElementById('timeline-add-class-btn'),
+            patientId:               {{ patient.patient_id }},
+            isAdmin:                 {{ user_profile.is_admin|yesno:"true,false" }},
+            csrfToken:               '{{ csrf_token }}',
+            subsampledVideoFps:      1,
+            workerWsHost:            window.workerWsHost || 'zip-dgx.ing.unimore.it',
+            workerVideoId:           null,
+            workerVideoSource:       window.workerVideoSourceRef,
+            subsampledVideoEl:       subsampledPreviewVideo,
+            magicPanelEl:            magicPanel,
+            magicPointToolBtnEl:     document.getElementById('magic-tool-point-btn'),
+            magicPointPositiveBtnEl: document.getElementById('magic-point-positive-btn'),
+            magicPointNegativeBtnEl: document.getElementById('magic-point-negative-btn'),
+            magicSendBtnEl:          document.getElementById('magic-send-prompts-btn'),
+            magicPromptsListEl:      document.getElementById('magic-prompts-list'),
+            magicPromptsCountEl:     document.getElementById('magic-prompts-count'),
+            magicWindowInputEl:      document.getElementById('magic-window-seconds-input'),
+        });
+
+        // ── Fast timeline drag ───────────────────────────────────────────────
+        // During drag we ONLY update UI + seek the tiny 1-fps subsampled video.
+        // The compressed main video is seeked once, to the snapped second, on
+        // mouse-release — avoiding dozens of expensive seeks per second.
+        var _lastDragTime = null;
+
+        function _fmtTL(t) {
+            var mm = Math.floor(t / 60), ss = Math.floor(t % 60), ms = Math.floor((t % 1) * 1000);
+            return String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0') + '.' + String(ms).padStart(3,'0');
+        }
+
+        annotator._dragTimelineToClientX = function (clientX) {
+            if (!this._timelineDrag) return;
+            var t = this._timelineTimeFromClientX(clientX);
+            _lastDragTime = t;
+            this._timelinePreviewTime = t;
+
+            // Move playhead visually
+            var pct = this._timelineTimeToPct(t);
+            if (this.timelinePlayheadEl) {
+                this.timelinePlayheadEl.style.left = 'calc(8px + (100% - 16px) * ' + pct.toFixed(6) + ')';
+            }
+            if (this.timelineCurrentTimeEl) {
+                this.timelineCurrentTimeEl.textContent = _fmtTL(t);
+            }
+            // Keep #frame-timestamp in sync with the timeline drag position
+            if (this.timestampEl) {
+                this.timestampEl.textContent = _fmtTL(t);
+            }
+            if (this.timelineActiveClassEl) {
+                var cls = this._timelineClassAt(t);
+                this.timelineActiveClassEl.textContent = 'Current: ' + (cls ? cls.name : '-');
+                this.timelineActiveClassEl.style.backgroundColor = this._timelineClassColor(cls);
+                this.timelineActiveClassEl.style.color = '#fff';
+            }
+
+            // Seek the tiny subsampled video only in annotation mode
+            if (subsampledPreviewVideo && this.annotationMode) {
+                subsampledPreviewVideo.currentTime = Math.round(t);
+                subsampledPreviewVideo.style.display = 'block';
+            }
+            if (typeof this._renderMagicOverlay === 'function') this._renderMagicOverlay();
+            if (typeof this._renderMagicPromptList === 'function') this._renderMagicPromptList();
+            if (typeof this._syncMaskToCurrentVideoTime === 'function') this._syncMaskToCurrentVideoTime();
+        };
+
+        // On mouse-release: commit one seek on the main video at the snapped second
+        window.addEventListener('mouseup', function () {
+            if (_lastDragTime === null) return;
+            var seekTo = Math.round(_lastDragTime);
+            _lastDragTime = null;
+            video.currentTime = seekTo;
+        });
+        // ────────────────────────────────────────────────────────────────────
+
+        // Step buttons are labelled ±1s / ±10s but the annotator uses
+        // FRAME_STEP_S (0.033 s) * count. Override to treat count as seconds.
+        annotator._stepForward = function (seconds) {
+            this.videoEl.pause();
+            var base = this._seekPending !== null ? this._seekPending : this.videoEl.currentTime;
+            var max  = isFinite(this.videoEl.duration) ? this.videoEl.duration : Infinity;
+            this._seekPending = Math.min(max, base + seconds);
+            // Show the lightweight 1-fps preview immediately — no need to wait
+            // for the main video to decode from a keyframe.
+            if (subsampledPreviewVideo) {
+                subsampledPreviewVideo.currentTime = Math.round(this._seekPending);
+                subsampledPreviewVideo.style.display = 'block';
+            }
+            this._flushSeek();
+        };
+        annotator._stepBack = function (seconds) {
+            this.videoEl.pause();
+            var base = this._seekPending !== null ? this._seekPending : this.videoEl.currentTime;
+            this._seekPending = Math.max(0, base - seconds);
+            // Show the lightweight 1-fps preview immediately — no need to wait
+            // for the main video to decode from a keyframe.
+            if (subsampledPreviewVideo) {
+                subsampledPreviewVideo.currentTime = Math.round(this._seekPending);
+                subsampledPreviewVideo.style.display = 'block';
+            }
+            this._flushSeek();
+        };
+
+        var origEnter = annotator._enterAnnotationMode.bind(annotator);
+        var origExit  = annotator._exitAnnotationMode.bind(annotator);
+
+        annotator._enterAnnotationMode = function () {
+            origEnter();
+            if (shapesPanelEl) shapesPanelEl.classList.remove('d-none');
+            if (regionPanelEl) regionPanelEl.classList.remove('d-none');
+            if (magicPanel) magicPanel.classList.remove('d-none');
+        };
+        annotator._exitAnnotationMode = function () {
+            origExit();
+            if (shapesPanelEl) shapesPanelEl.classList.add('d-none');
+            if (regionPanelEl) regionPanelEl.classList.add('d-none');
+            if (magicPanel) magicPanel.classList.add('d-none');
+            if (annotator.currentTool === 'point') annotator._setTool(annotator._lastNonPointTool || 'brush');
+            if (subsampledPreviewVideo) subsampledPreviewVideo.style.display = 'none';
+        };
+    }
+
+    if (video.readyState >= 1) {
+        initAnnotator();
+    } else {
+        video.addEventListener('loadedmetadata', initAnnotator, { once: true });
+    }
+})();
+</script>

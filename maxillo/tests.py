@@ -1,5 +1,11 @@
-from django.test import SimpleTestCase
+from datetime import timedelta
 
+from django.test import SimpleTestCase
+from django.test import TestCase
+from django.utils import timezone
+
+from common.models import Invitation, Project
+from .views.auth import _repair_empty_invitation_codes
 from .views.intraoral_segmentation import _normalize_teeth_payload
 
 
@@ -33,3 +39,31 @@ class IntraoralSegmentationNormalizationTests(SimpleTestCase):
 
         with self.assertRaisesMessage(ValueError, 'Point coordinates must stay inside image bounds.'):
             _normalize_teeth_payload(payload, image_bounds=(10, 10))
+
+
+class InvitationCodeTests(TestCase):
+    def setUp(self):
+        self.project = Project.objects.create(name='Test Project')
+
+    def test_save_generates_missing_code(self):
+        invitation = Invitation.objects.create(
+            code='',
+            project=self.project,
+            expires_at=timezone.now() + timedelta(days=7),
+        )
+
+        self.assertTrue(invitation.code)
+
+    def test_repair_empty_invitation_codes_updates_existing_rows(self):
+        Invitation.objects.bulk_create([
+            Invitation(
+                code='',
+                project=self.project,
+                expires_at=timezone.now() + timedelta(days=7),
+            )
+        ])
+
+        _repair_empty_invitation_codes()
+
+        invitation = Invitation.objects.get()
+        self.assertTrue(invitation.code)

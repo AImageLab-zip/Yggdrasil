@@ -18,6 +18,12 @@ from common.models import ProjectAccess
 logger = logging.getLogger(__name__)
 
 
+def _repair_empty_invitation_codes():
+    for invitation in Invitation.objects.filter(code='').only('pk', 'code'):
+        invitation.code = str(uuid.uuid4())
+        invitation.save(update_fields=['code'])
+
+
 def register(request):
     if request.method == 'POST':
         form = InvitedUserCreationForm(request.POST)
@@ -63,6 +69,8 @@ def register(request):
 @login_required
 @user_passes_test(lambda u: u.is_staff)
 def invitation_list(request):
+    _repair_empty_invitation_codes()
+
     invitations = Invitation.objects.all().prefetch_related('projects').order_by('-created_at')
     if request.method == 'POST':
         form = InvitationForm(request.POST)
