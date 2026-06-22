@@ -34,20 +34,20 @@ class PatientUploadForm(forms.ModelForm):
 
     class Meta:
         model = Patient
-        fields = ['name', 'visibility', 'folder']
+        fields = ['name', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Patient X'}),
-            'visibility': forms.Select(attrs={'class': 'form-control'}),
+            #'visibility': forms.Select(attrs={'class': 'form-control'}),
         }
         labels = {
             'name': 'Patient Name',
-            'visibility': 'Visibility',
+            #'visibility': 'Visibility',
             'folder': 'Folder',
         }
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if user and hasattr(user, 'profile'):
+        '''if user and hasattr(user, 'profile'):
             if user.profile.is_student_developer():
                 self.fields['visibility'].choices = [('debug', 'Debug')]
                 self.fields['visibility'].initial = 'debug'
@@ -58,7 +58,7 @@ class PatientUploadForm(forms.ModelForm):
                 self.fields['visibility'].choices = [
                     ('public', 'Public'),
                     ('private', 'Private'),
-                ]
+                ]'''
 
     def save(self, commit=True):
         instance = super().save(commit)
