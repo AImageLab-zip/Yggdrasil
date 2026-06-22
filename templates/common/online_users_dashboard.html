@@ -69,6 +69,7 @@
 						<span class="online-dot"></span>
 						<strong>{{ u.full_name }}</strong>
 						<span class="text-muted">@{{ u.username }}</span>
+						{% if u.project_slug %}<span class="badge bg-secondary ms-1">{{ u.project_slug }}</span>{% endif %}
 					</div>
 					<div class="online-path"><code>{{ u.path }}</code></div>
 				</div>
@@ -105,6 +106,7 @@
 						'<span class="online-dot"></span>' +
 						'<strong>' + escapeHtml(u.full_name) + '</strong> ' +
 						'<span class="text-muted">@' + escapeHtml(u.username) + '</span>' +
+						(u.project_slug ? ' <span class="badge bg-secondary ms-1">' + escapeHtml(u.project_slug) + '</span>' : '') +
 					'</div>' +
 					'<div class="online-path"><code>' + escapeHtml(u.path) + '</code></div>' +
 				'</div>'

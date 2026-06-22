@@ -146,24 +146,33 @@ def online_users_api(request):
     return JsonResponse({"users": presence.get_online_users()})
 
 
+_PROJECT_LABELS = {"maxillo": "Maxillo", "brain": "Brain", "laparoscopy": "Laparoscopy", "": "Other"}
+
+
 @login_required
 @user_passes_test(lambda u: u.is_staff)
 def user_activity_stats(request):
-    """Admin-only per-user connected-time stats and timeline."""
+    """Admin-only per-user, per-project connected-time stats and timeline."""
     try:
         days = max(1, min(int(request.GET.get("days", 7)), 90))
     except ValueError:
         days = 7
     cutoff = timezone.now() - timedelta(days=days)
 
+    selected_project = request.GET.get("project", "")  # "" means "all projects"
     sessions = UserSession.objects.filter(last_seen_at__gte=cutoff).select_related("user")
+    if selected_project:
+        sessions = sessions.filter(project_slug="" if selected_project == "other" else selected_project)
 
     totals = {}
     for session in sessions:
-        entry = totals.setdefault(session.user_id, {
+        key = (session.user_id, session.project_slug)
+        entry = totals.setdefault(key, {
             "user_id": session.user_id,
             "username": session.user.username,
             "full_name": session.user.get_full_name() or session.user.username,
+            "project_slug": session.project_slug,
+            "project_label": _PROJECT_LABELS.get(session.project_slug, session.project_slug),
             "total_seconds": 0,
             "session_count": 0,
         })
@@ -172,18 +181,40 @@ def user_activity_stats(request):
 
     summary = sorted(totals.values(), key=lambda e: e["total_seconds"], reverse=True)
 
+    view = request.GET.get("view") if request.GET.get("view") in {"single", "all"} else "single"
     selected_user_id = request.GET.get("user")
     timeline = []
-    if selected_user_id:
-        user_sessions = (
-            UserSession.objects.filter(user_id=selected_user_id, last_seen_at__gte=cutoff)
-            .order_by("started_at")
-        )
+
+    if view == "all":
+        # Cap to the busiest users in this window so the shared timeline stays readable.
+        top_user_ids = list({e["user_id"] for e in summary[:25]})
+        all_sessions = sessions.filter(user_id__in=top_user_ids).order_by("started_at")
+        timeline = [
+            {
+                "user_id": s.user_id,
+                "username": s.user.username,
+                "started_at": s.started_at.isoformat(),
+                "last_seen_at": s.last_seen_at.isoformat(),
+                "duration_seconds": s.duration_seconds,
+                "project_slug": s.project_slug,
+                "project_label": _PROJECT_LABELS.get(s.project_slug, s.project_slug),
+            }
+            for s in all_sessions
+        ]
+    elif selected_user_id:
+        # Single-user mode: always show every project for that user — the
+        # chart color-codes by project so mixing them is the point, not a bug.
+        user_sessions = UserSession.objects.filter(
+            user_id=selected_user_id,
+            last_seen_at__gte=cutoff,
+        ).order_by("started_at")
         timeline = [
             {
                 "started_at": s.started_at.isoformat(),
                 "last_seen_at": s.last_seen_at.isoformat(),
                 "duration_seconds": s.duration_seconds,
+                "project_slug": s.project_slug,
+                "project_label": _PROJECT_LABELS.get(s.project_slug, s.project_slug),
             }
             for s in user_sessions
         ]
@@ -191,6 +222,9 @@ def user_activity_stats(request):
     context = {
         "days": days,
         "summary": summary,
+        "selected_project": selected_project,
+        "project_choices": [(slug, label) for slug, label in _PROJECT_LABELS.items() if slug],
+        "view": view,
         "selected_user_id": int(selected_user_id) if selected_user_id else None,
         "timeline_json": json.dumps(timeline),
     }

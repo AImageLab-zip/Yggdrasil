@@ -67,12 +67,14 @@ class UserSession(models.Model):
     instead of extending the previous one, so gaps naturally split sessions.
     """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    project_slug = models.CharField(max_length=50, blank=True, default="")
     started_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()
 
     class Meta:
         indexes = [
             models.Index(fields=["user", "-last_seen_at"]),
+            models.Index(fields=["user", "project_slug", "-last_seen_at"]),
         ]
         ordering = ["-started_at"]
 
