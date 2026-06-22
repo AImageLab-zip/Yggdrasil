@@ -20,6 +20,24 @@
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end">
                     <li class="px-3 py-2 text-muted small">Signed in as <strong>{{ user.username }}</strong></li>
+                    {% if user.is_staff %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="{% url 'online_users_dashboard' %}">
+                                <i class="fas fa-circle-dot me-1"></i>Live Users
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{% url 'admin_control_panel' %}">
+                                <i class="fas fa-tachometer-alt me-1"></i>Admin Control Panel
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{% url 'user_activity_stats' %}">
+                                <i class="fas fa-chart-line me-1"></i>User Activity
+                            </a>
+                        </li>
+                    {% endif %}
                     <li><hr class="dropdown-divider"></li>
                     <li>
                         <form method="post" action="{% url 'logout' %}" class="px-3 py-1 m-0">

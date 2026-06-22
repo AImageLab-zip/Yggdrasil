@@ -1,7 +1,7 @@
 from django import forms
 
 from common.permissions import filter_folders_for_user
-from .models import Classification, Dataset, Folder, Patient, Tag
+from .models import Dataset, Folder, Patient, Tag
 
 
 class PatientForm(forms.ModelForm):
@@ -11,29 +11,6 @@ class PatientForm(forms.ModelForm):
 
 
 class PatientUploadForm(forms.ModelForm):
-    ios_upper = forms.FileField(
-        required=False,
-        label='IOS - Upper',
-        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.stl'}),
-    )
-    ios_lower = forms.FileField(
-        required=False,
-        label='IOS - Lower',
-        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.stl'}),
-    )
-
-    teleradiography = forms.FileField(
-        required=False,
-        label='Teleradiography',
-        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.jpg,.jpeg,.png'}),
-    )
-
-    panoramic = forms.FileField(
-        required=False,
-        label='Panoramic',
-        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.jpg,.jpeg,.png'}),
-    )
-
     folder = forms.ModelChoiceField(
         queryset=Folder.objects.all().order_by('name'),
         required=False,
@@ -64,14 +41,6 @@ class PatientUploadForm(forms.ModelForm):
         else:
             self.fields['folder'].queryset = Folder.objects.none()
 
-    def clean(self):
-        cleaned_data = super().clean()
-        ios_upper = cleaned_data.get('ios_upper')
-        ios_lower = cleaned_data.get('ios_lower')
-        if (ios_upper and not ios_lower) or (ios_lower and not ios_upper):
-            raise forms.ValidationError('Both upper and lower IOS scans must be provided together.')
-        return cleaned_data
-
     def save(self, commit=True):
         instance = super().save(commit)
         tags_text = self.cleaned_data.get('tags_text', '') or ''
@@ -83,19 +52,6 @@ class PatientUploadForm(forms.ModelForm):
                 tags.append(tag)
             instance.tags.set(tags + list(instance.tags.all()))
         return instance
-
-
-class ClassificationForm(forms.ModelForm):
-    class Meta:
-        model = Classification
-        fields = ['sagittal_left', 'sagittal_right', 'vertical', 'transverse', 'midline']
-        widgets = {
-            'sagittal_left': forms.Select(attrs={'class': 'form-control'}),
-            'sagittal_right': forms.Select(attrs={'class': 'form-control'}),
-            'vertical': forms.Select(attrs={'class': 'form-control'}),
-            'transverse': forms.Select(attrs={'class': 'form-control'}),
-            'midline': forms.Select(attrs={'class': 'form-control'}),
-        }
 
 
 class PatientManagementForm(forms.ModelForm):

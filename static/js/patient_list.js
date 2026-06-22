@@ -196,7 +196,7 @@ function initListNameEditing() {
                         name: newName
                     })
                 })
-                .then(response => response.json())
+                .then(parseJsonResponse)
                 .then(data => {
                     if (data.success) {
                         nameDisplay.textContent = data.name;
@@ -267,7 +267,7 @@ function initAdminActions() {
             secureFetch(`/${window.projectNamespace}/patient/${scanId}/delete/`, {
                 method: 'POST'
             })
-            .then(response => response.json())
+            .then(parseJsonResponse)
             .then(data => {
                 if (data.success) {
                     // Remove the row with animation
@@ -380,7 +380,7 @@ function initAdminActions() {
             secureFetch(`/${window.projectNamespace}/patient/${rerunTargetScanId}/rerun-processing/`, {
                 method: 'POST',
                 body: JSON.stringify({ jobs })
-            }).then(r => r.json()).then(data => {
+            }).then(parseJsonResponse).then(data => {
                 if (data.success) {
                     showNotification('success', data.message || 'Jobs set to pending');
                     if (rerunModal) rerunModal.hide();
@@ -397,7 +397,7 @@ function initAdminActions() {
                 } else {
                     showNotification('error', data.error || 'Failed to rerun jobs');
                 }
-            }).catch(() => showNotification('error', 'Network error')).finally(() => {
+            }).catch(error => showNotification('error', error.message || 'Network error')).finally(() => {
                 confirmRerunBtn.disabled = false;
                 if (label) label.classList.remove('d-none');
                 if (spinner) spinner.classList.add('d-none');
@@ -473,6 +473,14 @@ function secureFetch(url, options = {}) {
         }
         return response;
     });
+}
+
+async function parseJsonResponse(response) {
+    const contentType = response.headers.get('Content-Type') || '';
+    if (!contentType.includes('application/json')) {
+        throw new Error(`Expected JSON but received ${contentType || 'unknown content'} (${response.status})`);
+    }
+    return response.json();
 }
 
 // Show notification
@@ -576,7 +584,7 @@ function initBulkSelection() {
             secureFetch(`/${window.projectNamespace}/folders/move-patients/`, {
                 method: 'POST',
                 body: JSON.stringify({ scan_ids: ids, folder_id })
-            }).then(r => r.json()).then(data => {
+            }).then(parseJsonResponse).then(data => {
                 if (data.success) {
                     showNotification('success', 'Scans moved successfully');
                     window.location.reload();
@@ -611,14 +619,14 @@ function initBulkSelection() {
             secureFetch(`/${window.projectNamespace}/patients/bulk-delete/`, {
                 method: 'POST',
                 body: JSON.stringify({ scan_ids: ids })
-            }).then(r => r.json()).then(data => {
+            }).then(parseJsonResponse).then(data => {
                 if (data.success) {
                     showNotification('success', data.message || 'Scans deleted successfully');
                     window.location.reload();
                 } else {
                     showNotification('error', data.error || 'Failed to delete scans');
                 }
-            }).catch(() => showNotification('error', 'Network error')).finally(() => {
+            }).catch(error => showNotification('error', error.message || 'Network error')).finally(() => {
                 deleteBtn.disabled = false;
                 deleteBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
             });
@@ -715,7 +723,7 @@ function initBulkSelection() {
             secureFetch(`/${window.projectNamespace}/patients/bulk-rerun-processing/`, {
                 method: 'POST',
                 body: JSON.stringify({ scan_ids, jobs })
-            }).then(r => r.json()).then(data => {
+            }).then(parseJsonResponse).then(data => {
                 if (data.success) {
                     showNotification('success', data.message || 'Bulk rerun queued');
                     if (bulkRerunModal) bulkRerunModal.hide();
@@ -743,7 +751,7 @@ function initCreateFolder() {
         secureFetch(`/${window.projectNamespace}/folders/create/`, {
             method: 'POST',
             body: JSON.stringify({ name, parent_id })
-        }).then(r => r.json()).then(data => {
+        }).then(parseJsonResponse).then(data => {
             if (data.success) {
                 showNotification('success', 'Folder created');
                 const url = new URL(window.location);
@@ -755,7 +763,7 @@ function initCreateFolder() {
             } else {
                 showNotification('error', data.error || 'Failed to create folder');
             }
-        }).catch(() => showNotification('error', 'Network error'));
+        }).catch(error => showNotification('error', error.message || 'Network error'));
     });
 }
 
@@ -791,7 +799,7 @@ function initFolderContextMenu() {
         statsBtn.addEventListener('click', function () {
             if (!selectedFolder) return;
             secureFetch(`/${window.projectNamespace}/folders/${selectedFolder.id}/stats/`)
-                .then(r => r.json())
+                .then(parseJsonResponse)
                 .then(data => {
                     if (!data.success) throw new Error(data.error || 'Failed to load stats');
                     alert(`Folder: ${data.folder.name}\nPatients: ${data.stats.patient_count}`);
@@ -809,7 +817,7 @@ function initFolderContextMenu() {
             secureFetch(`/${window.projectNamespace}/folders/${selectedFolder.id}/rename/`, {
                 method: 'POST',
                 body: JSON.stringify({ name }),
-            }).then(r => r.json()).then(data => {
+            }).then(parseJsonResponse).then(data => {
                 if (!data.success) throw new Error(data.error || 'Failed to rename folder');
                 window.location.reload();
             }).catch(err => showNotification('error', err.message || 'Failed to rename folder'));
@@ -829,7 +837,7 @@ function initFolderContextMenu() {
         const title = document.getElementById('folderPermissionsModalLabel');
         if (title) title.textContent = `Folder Permissions - ${folderName}`;
         secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/`)
-            .then(r => r.json())
+            .then(parseJsonResponse)
             .then(data => {
                 if (!data.success) throw new Error(data.error || 'Failed to load permissions');
                 const userSel = document.getElementById('folderPermUser');
@@ -854,7 +862,7 @@ function initFolderContextMenu() {
                         btn.addEventListener('click', function () {
                             const uid = this.dataset.userId;
                             secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/${uid}/delete/`, { method: 'DELETE' })
-                                .then(r => r.json())
+                                .then(parseJsonResponse)
                                 .then(resp => {
                                     if (!resp.success) throw new Error(resp.error || 'Failed to remove permission');
                                     loadFolderPermissions(folderId, folderName);
@@ -873,7 +881,7 @@ function initFolderContextMenu() {
                         secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/upsert/`, {
                             method: 'POST',
                             body: JSON.stringify({ user_id: Number(userId), role }),
-                        }).then(r => r.json()).then(resp => {
+                        }).then(parseJsonResponse).then(resp => {
                             if (!resp.success) throw new Error(resp.error || 'Failed to save permission');
                             loadFolderPermissions(folderId, folderName);
                         }).catch(err => showNotification('error', err.message || 'Failed to save permission'));
@@ -891,13 +899,10 @@ function initTagAddInline() {
             const scanId = this.dataset.scanId;
             const tag = prompt('New tag');
             if (!tag) return;
-            fetch(`/${window.projectNamespace}/patient/${scanId}/tags/add/`, {
+            secureFetch(`/${window.projectNamespace}/patient/${scanId}/tags/add/`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
                 body: JSON.stringify({ tag })
-            }).then(r => r.json()).then(data => {
+            }).then(parseJsonResponse).then(data => {
                 if (data.success) {
                     const tagsCol = this.closest('.tags-col');
                     if (tagsCol) {
@@ -1195,7 +1200,7 @@ function initInlineTagRemoval() {
                 secureFetch(`/${window.projectNamespace}/patient/${scanId}/tags/remove/`, {
                     method: 'POST',
                     body: JSON.stringify({ tag })
-                }).then(r => r.json()).then(data => {
+                }).then(parseJsonResponse).then(data => {
                     if (data.success) {
                         // Remove the tag badge from the UI
                         const tagBadge = e.target.closest('.tag-badge');

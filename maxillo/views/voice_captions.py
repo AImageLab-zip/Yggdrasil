@@ -16,7 +16,7 @@ from common.permissions import (
     user_is_project_admin,
 )
 
-from .domain import get_domain_models, is_brain_namespace
+from .domain import get_domain_models
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ def upload_voice_caption(request, patient_id):
     try:
         audio_file = request.FILES.get('audio_file')
         duration = float(request.POST.get('duration', 0))
-        is_brain = is_brain_namespace(request)
         modality = request.POST.get('modality', '').strip()
         
         if not audio_file:
@@ -46,15 +45,12 @@ def upload_voice_caption(request, patient_id):
         if duration <= 0:
             return JsonResponse({'error': 'Invalid duration'}, status=400)
         
-        if is_brain:
-            modality = ''
-        else:
-            # Validate modality against database
-            from ..modality_helpers import is_valid_modality_slug, get_all_modalities
-            if not modality or not is_valid_modality_slug(modality):
-                # Fallback to first available modality
-                all_modalities = get_all_modalities()
-                modality = all_modalities[0].slug if all_modalities else 'unknown'
+        # Validate modality against database
+        from ..modality_helpers import is_valid_modality_slug, get_all_modalities
+        if not modality or not is_valid_modality_slug(modality):
+            # Fallback to first available modality
+            all_modalities = get_all_modalities()
+            modality = all_modalities[0].slug if all_modalities else 'unknown'
         
         # Create VoiceCaption instance (without audio file initially)
         voice_caption = VoiceCaption.objects.create(
@@ -92,7 +88,7 @@ def upload_voice_caption(request, patient_id):
             'caption': {
                 'id': voice_caption.id,
                 'user_username': voice_caption.user.username,
-                'modality_display': '' if is_brain else voice_caption.get_modality_display(),
+                'modality_display': voice_caption.get_modality_display(),
                 'display_duration': voice_caption.get_display_duration(),
                 'quality_color': quality_status['color'],
                 'created_at': voice_caption.created_at.strftime('%b %d, %H:%M'),
@@ -179,18 +175,14 @@ def upload_text_caption(request, patient_id):
     try:
         data = json.loads(request.body)
         text_content = data.get('text', '').strip()
-        is_brain = is_brain_namespace(request)
         modality = data.get('modality', '').strip()
         
-        if is_brain:
-            modality = ''
-        else:
-            # Validate modality against database
-            from ..modality_helpers import is_valid_modality_slug, get_all_modalities
-            if not modality or not is_valid_modality_slug(modality):
-                # Fallback to first available modality
-                all_modalities = get_all_modalities()
-                modality = all_modalities[0].slug if all_modalities else 'unknown'
+        # Validate modality against database
+        from ..modality_helpers import is_valid_modality_slug, get_all_modalities
+        if not modality or not is_valid_modality_slug(modality):
+            # Fallback to first available modality
+            all_modalities = get_all_modalities()
+            modality = all_modalities[0].slug if all_modalities else 'unknown'
         
         if not text_content:
             return JsonResponse({'error': 'Text content cannot be empty'}, status=400)
@@ -216,7 +208,7 @@ def upload_text_caption(request, patient_id):
             'caption': {
                 'id': voice_caption.id,
                 'user_username': voice_caption.user.username,
-                'modality_display': '' if is_brain else voice_caption.get_modality_display(),
+                'modality_display': voice_caption.get_modality_display(),
                 'display_duration': 'Text',  # Special display for text captions
                 'quality_color': 'success',  # Text captions are always "good quality"
                 'created_at': voice_caption.created_at.strftime('%b %d, %H:%M'),
@@ -311,9 +303,6 @@ def update_voice_caption_modality(request, patient_id, caption_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     voice_caption = get_object_or_404(VoiceCaption, id=caption_id, patient=patient)
 
-    if is_brain_namespace(request):
-        return JsonResponse({'error': 'Modality is not used for brain voice captions.'}, status=400)
-    
     # Check permissions
     if not user_can_edit_caption(request.user, voice_caption):
         return JsonResponse({

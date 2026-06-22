@@ -130,7 +130,7 @@ class Patient(models.Model):
         related_name='brain_patients',
         help_text='Modalities available for this patient',
     )
-    folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
+    folders = models.ManyToManyField('Folder', blank=True, related_name='patients')
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
 
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
@@ -152,10 +152,8 @@ class Patient(models.Model):
         indexes = [
             models.Index(fields=['visibility']),
             models.Index(fields=['uploaded_at']),
-            models.Index(fields=['folder']),
             models.Index(fields=['name']),
             models.Index(fields=['visibility', 'uploaded_at']),
-            models.Index(fields=['folder', 'visibility']),
         ]
 
     def __str__(self):
@@ -191,52 +189,6 @@ class Patient(models.Model):
             self.name = f"Patient {self.patient_id}"
             super().save(update_fields=['name'])
 
-    def has_ios_scans(self):
-        try:
-            upper_raw = self.files.filter(file_type='ios_raw_upper').exists()
-            lower_raw = self.files.filter(file_type='ios_raw_lower').exists()
-            upper_processed = self.files.filter(file_type='ios_processed_upper').exists()
-            lower_processed = self.files.filter(file_type='ios_processed_lower').exists()
-            return (upper_raw or upper_processed) and (lower_raw or lower_processed)
-        except Exception as exc:
-            logger.error('Error checking IOS files for brain patient %s: %s', self.patient_id, exc, exc_info=True)
-            return False
-
-    def has_cbct_scan(self):
-        try:
-            has_raw = self.files.filter(file_type='cbct_raw').exists()
-            has_processed = self.files.filter(file_type='cbct_processed').exists()
-            return has_raw or has_processed
-        except Exception as exc:
-            logger.error('Error checking CBCT files for brain patient %s: %s', self.patient_id, exc, exc_info=True)
-            return False
-
-    def _processing_status(self, modality_slug):
-        job = self.jobs.filter(modality_slug=modality_slug).order_by('-created_at').first()
-        if not job:
-            return 'not_uploaded'
-        if job.status in ('pending', 'processing', 'retrying'):
-            return 'processing'
-        if job.status == 'failed':
-            return 'failed'
-        if job.status == 'completed':
-            return 'processed'
-        return 'not_uploaded'
-
-    @property
-    def ios_job_status(self):
-        return self._processing_status('ios')
-
-    @property
-    def cbct_job_status(self):
-        return self._processing_status('cbct')
-
-    def is_ios_processed(self):
-        return self.ios_job_status == 'processed'
-
-    def is_cbct_processed(self):
-        return self.cbct_job_status == 'processed'
-
     def has_rgb_images(self):
         try:
             return self.files.filter(file_type='rgb_image').exists()
@@ -246,121 +198,6 @@ class Patient(models.Model):
 
     def get_rgb_images(self):
         return self.files.filter(file_type='rgb_image').order_by('-created_at')
-
-    def get_raw_files(self):
-        return self.files.filter(file_type__in=['cbct_raw', 'ios_raw_upper', 'ios_raw_lower', 'audio_raw'])
-
-    def get_processed_files(self):
-        return self.files.filter(file_type__in=['cbct_processed', 'ios_processed_upper', 'ios_processed_lower', 'audio_processed'])
-
-    def get_cbct_raw_file(self):
-        from common.models import FileRegistry
-
-        try:
-            return self.files.get(file_type='cbct_raw')
-        except FileRegistry.DoesNotExist:
-            return None
-
-    def get_cbct_processed_file(self):
-        from common.models import FileRegistry
-
-        try:
-            return self.files.get(file_type='cbct_processed')
-        except FileRegistry.DoesNotExist:
-            return None
-
-    def get_ios_raw_files(self):
-        from common.models import FileRegistry
-
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_raw_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_raw_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
-
-    def get_ios_processed_files(self):
-        from common.models import FileRegistry
-
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_processed_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_processed_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
-
-
-class Classification(models.Model):
-    CLASSIFIER_CHOICES = [
-        ('manual', 'Manual'),
-        ('pipeline', 'Pipeline'),
-    ]
-
-    SAGITTAL_CHOICES = [
-        ('Unknown', 'Unknown'),
-        ('I', 'Class I'),
-        ('II_edge', 'Class II Edge'),
-        ('II_full', 'Class II Full'),
-        ('III', 'Class III'),
-    ]
-
-    VERTICAL_CHOICES = [
-        ('Unknown', 'Unknown'),
-        ('normal', 'Normal'),
-        ('deep', 'Deep Bite'),
-        ('reverse', 'Reverse Bite'),
-        ('open', 'Open Bite'),
-    ]
-
-    TRANSVERSE_CHOICES = [
-        ('Unknown', 'Unknown'),
-        ('normal', 'Normal'),
-        ('cross', 'Cross Bite'),
-        ('scissor', 'Scissor Bite'),
-    ]
-
-    MIDLINE_CHOICES = [
-        ('Unknown', 'Unknown'),
-        ('centered', 'Centered'),
-        ('deviated', 'Deviated'),
-    ]
-
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='classifications', null=True, blank=True)
-    classifier = models.CharField(max_length=10, choices=CLASSIFIER_CHOICES)
-    sagittal_left = models.CharField(max_length=10, choices=SAGITTAL_CHOICES)
-    sagittal_right = models.CharField(max_length=10, choices=SAGITTAL_CHOICES)
-    vertical = models.CharField(max_length=10, choices=VERTICAL_CHOICES)
-    transverse = models.CharField(max_length=10, choices=TRANSVERSE_CHOICES)
-    midline = models.CharField(max_length=10, choices=MIDLINE_CHOICES)
-    annotator = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='brain_classifications_authored',
-    )
-    timestamp = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = 'brain_classification'
-        ordering = ['-timestamp']
-        indexes = [
-            models.Index(fields=['patient', 'classifier']),
-            models.Index(fields=['classifier']),
-        ]
-
-    def __str__(self):
-        return f"Classification {self.id} - {self.get_classifier_display()}"
 
 
 class VoiceCaption(models.Model):
@@ -590,3 +427,23 @@ class Export(models.Model):
             self.share_token = secrets.token_urlsafe(32)
             self.save(update_fields=['share_token'])
         return self.share_token
+
+
+class UserPreference(models.Model):
+    """Stores per-user UI preferences for the Brain app."""
+
+    LANGUAGE_CHOICES = [
+        ('it', 'Italian'),
+        ('en', 'English'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='brain_preference')
+    report_language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='it')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'brain_user_preference'
+
+    def __str__(self):
+        return f"Preferences for {self.user.username}"
+

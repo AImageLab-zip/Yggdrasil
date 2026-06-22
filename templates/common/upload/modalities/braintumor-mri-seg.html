@@ -1,0 +1,29 @@
+<div class="mb-4 cbct-upload-container" data-group="braintumor-mri-seg" data-filetype="braintumor_mri_seg_raw">
+	<h6 class="mb-2"><i class="fas fa-cube me-2"></i>Brain MRI Segmentation Mask</h6>
+	<div class="mb-3">
+		<label class="form-label">Upload Type</label>
+		<div class="btn-group w-100" role="group" aria-label="Brain MRI segmentation upload type">
+			<input type="radio" class="btn-check" name="braintumor-mri-seg_upload_type" id="braintumor-mri-seg_file_upload" value="file" checked>
+			<label class="btn btn-outline-primary" for="braintumor-mri-seg_file_upload">
+				<i class="fas fa-file me-1"></i>Single File
+			</label>
+			<input type="radio" class="btn-check" name="braintumor-mri-seg_upload_type" id="braintumor-mri-seg_folder_upload" value="folder">
+			<label class="btn btn-outline-primary" for="braintumor-mri-seg_folder_upload">
+				<i class="fas fa-folder me-1"></i>DICOM Folder
+			</label>
+		</div>
+	</div>
+	<div class="mb-3 cbct-file-section" id="braintumor-mri-seg_file_section">
+		<label for="braintumor-mri-seg_cbct" class="form-label">Brain MRI Segmentation File</label>
+		<input type="file" name="braintumor-mri-seg" id="braintumor-mri-seg_cbct" class="form-control" accept=".dcm,.dicom,.nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz,application/dicom">
+		{% if patient_upload_form.cbct.errors %}
+			<div class="text-danger">{{ patient_upload_form.cbct.errors }}</div>
+		{% endif %}
+		<div class="form-text">Upload single Brain MRI segmentation mask file: DICOM (.dcm), NIfTI (.nii, .nii.gz), MetaImage (.mha, .mhd), NRRD (.nrrd, .nhdr), or archives (.zip, .tar)</div>
+	</div>
+	<div class="mb-3 cbct-folder-section" id="braintumor-mri-seg_folder_section" style="display: none;">
+		<label for="braintumor-mri-seg_folder" class="form-label">Brain MRI Segmentation Folder</label>
+		<input type="file" name="braintumor-mri-seg_folder_files" id="braintumor-mri-seg_folder" class="form-control" webkitdirectory directory multiple accept=".dcm,.dicom,application/dicom">
+		<div class="form-text">Select a folder containing DICOM files (.dcm, .dicom, or no extension) and/or a DICOMDIR file.</div>
+	</div>
+</div>

@@ -21,11 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _folder_access_model(request):
-    app_label = 'brain' if (
-        getattr(request, 'resolver_match', None)
-        and request.resolver_match.namespace == 'brain'
-    ) else 'maxillo'
-    return apps.get_model(app_label, 'FolderAccess')
+    return apps.get_model('maxillo', 'FolderAccess')
 
 @login_required
 @require_POST
