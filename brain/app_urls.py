@@ -94,6 +94,16 @@ urlpatterns = [
         views.move_patients_to_folder,
         name="move_patients_to_folder",
     ),
+    path(
+        "folders/add-patients/",
+        views.add_patients_to_folder,
+        name="add_patients_to_folder",
+    ),
+    path(
+        "folders/remove-patients/",
+        views.remove_patients_from_folder,
+        name="remove_patients_from_folder",
+    ),
     path("export/", views.export_list, name="export_list"),
     path("export/new/", views.export_new, name="export_new"),
     path("export/preview/", views.export_preview, name="export_preview"),

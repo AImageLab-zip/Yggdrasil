@@ -192,6 +192,7 @@ def patient_list(request):
     if current_project_id and any(field.name == "project" for field in Patient._meta.fields):
         patients = patients.filter(project_id=current_project_id)
     patients = filter_patients_for_user(request.user, patients, "brain")
+    patients_for_folder_counts = patients
 
     search_query = request.GET.get("search", "").strip()
     if search_query:
@@ -276,7 +277,7 @@ def patient_list(request):
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,
-        "folders": [{"folder": folder, "patient_count": patients.filter(folders=folder).count()} for folder in folders],
+        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folders=folder).count()} for folder in folders],
         "all_tags": Tag.objects.all().order_by("name"),
         "per_page": per_page,
         "user_profile": request.user.profile,
@@ -720,7 +721,59 @@ def move_patients_to_folder(request):
     folder = None
     if folder_id and folder_id not in ("root", "all"):
         folder = get_object_or_404(Folder, id=folder_id)
-    updated = Patient.objects.filter(patient_id__in=scan_ids).update(folder=folder)
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    updated = 0
+    for patient in patients:
+        patient.folders.set([folder] if folder else [])
+        updated += 1
+    return JsonResponse({"success": True, "updated": updated})
+
+
+@login_required
+@require_POST
+def add_patients_to_folder(request):
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    scan_ids = data.get("scan_ids", [])
+    folder_id = data.get("folder_id")
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+    if not folder_id or folder_id in ("root", "all"):
+        return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = get_object_or_404(Folder, id=folder_id)
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    updated = 0
+    for patient in patients:
+        patient.folders.add(folder)
+        updated += 1
+    return JsonResponse({"success": True, "updated": updated})
+
+
+@login_required
+@require_POST
+def remove_patients_from_folder(request):
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    scan_ids = data.get("scan_ids", [])
+    folder_id = data.get("folder_id")
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+    if not folder_id or folder_id in ("root", "all"):
+        return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = get_object_or_404(Folder, id=folder_id)
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    updated = 0
+    for patient in patients:
+        patient.folders.remove(folder)
+        updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
 
