@@ -186,7 +186,7 @@ DATA_UPLOAD_MAX_NUMBER_FILES = 1500  # large DICOM folder uploads
 
 if ENABLE_SSL:
     CORS_ALLOWED_ORIGINS = [
-        "https://toothfairy4m.ing.unimore.it",
+        "https://yggdrasil.ing.unimore.it",
         "https://localhost:8000",
         "https://127.0.0.1:8000",
     ]
@@ -200,7 +200,7 @@ else:
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = config(
     "CSRF_TRUSTED_ORIGINS",
-    default="https://toothfairy4m.ing.unimore.it,http://localhost:8000,http://127.0.0.1:8000",
+    default="https://yggdrasil.ing.unimore.it,http://localhost:8000,http://127.0.0.1:8000",
     cast=str,
 ).split(",")
 

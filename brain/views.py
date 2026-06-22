@@ -29,7 +29,7 @@ from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from .helpers import redirect_with_namespace, render_with_fallback
-from .models import Classification, Export, Folder, FolderAccess, Patient, Tag, UserPreference
+from .models import Export, Folder, FolderAccess, Patient, Tag, UserPreference
 
 
 logger = logging.getLogger(__name__)
@@ -77,8 +77,6 @@ def patient_detail(request, patient_id):
         messages.error(request, "You do not have permission to view this scan.")
         return redirect("brain:patient_list")
 
-    ai_classification = patient.classifications.filter(classifier="pipeline").first()
-    manual_classification = patient.classifications.filter(classifier="manual").first()
     management_form = PatientManagementForm(instance=patient, user=request.user)
 
     can_modify = bool(any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all()))
@@ -87,19 +85,6 @@ def patient_detail(request, patient_id):
 
     if request.method == "POST" and can_modify:
         action = request.POST.get("action")
-        if action == "accept_ai" and ai_classification:
-            Classification.objects.create(
-                patient=patient,
-                classifier="manual",
-                sagittal_left=ai_classification.sagittal_left,
-                sagittal_right=ai_classification.sagittal_right,
-                vertical=ai_classification.vertical,
-                transverse=ai_classification.transverse,
-                midline=ai_classification.midline,
-                annotator=request.user,
-            )
-            messages.success(request, "AI classification accepted!")
-            return redirect("brain:patient_detail", patient_id=patient_id)
         if action == "update_management":
             management_form = PatientManagementForm(request.POST, instance=patient, user=request.user)
             if management_form.is_valid():
@@ -164,8 +149,6 @@ def patient_detail(request, patient_id):
 
     context = {
         "patient": patient,
-        "ai_classification": ai_classification,
-        "manual_classification": manual_classification,
         "user_profile": request.user.profile,
         "management_form": management_form,
         "has_cbct": False,
@@ -193,7 +176,6 @@ def patient_detail(request, patient_id):
 @login_required
 def patient_list(request):
     patients = Patient.objects.select_related("dataset", "uploaded_by").prefetch_related(
-        "classifications",
         "voice_captions",
         "voice_captions__user",
         "tags",
@@ -235,9 +217,6 @@ def patient_list(request):
     patients_with_status = []
     is_admin = user_is_project_admin(request.user, "brain")
     for patient in patients:
-        classifications = list(patient.classifications.all())
-        manual_classification = next((c for c in classifications if c.classifier == "manual"), None)
-        ai_classification = next((c for c in classifications if c.classifier == "pipeline"), None)
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
         patient_jobs = list(patient.jobs.all()) if hasattr(patient, "jobs") else []
@@ -272,11 +251,6 @@ def patient_list(request):
             })
         patients_with_status.append({
             "patient": patient,
-            "manual_classification": manual_classification,
-            "ai_classification": ai_classification,
-            "has_manual": manual_classification is not None,
-            "has_ai_only": ai_classification is not None and manual_classification is None,
-            "needs_processing": manual_classification is None and ai_classification is None,
             "voice_caption_processing": any(vc.processing_status in ["pending", "processing"] for vc in voice_captions),
             "voice_caption_processed": bool(voice_captions) and all(vc.processing_status == "completed" for vc in voice_captions),
             "voice_caption_count": len(voice_captions),
@@ -435,11 +409,6 @@ def _with_brain_export_mappings(view_func):
         return view_func(request, *args, **kwargs)
 
     return wrapped
-
-
-@login_required
-def update_classification(request, patient_id):
-    return redirect("brain:patient_detail", patient_id=patient_id)
 
 
 @login_required

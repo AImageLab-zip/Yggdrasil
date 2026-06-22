@@ -15,11 +15,6 @@ urlpatterns = [
     ),
     path("patient/<int:patient_id>/", views.patient_detail, name="patient_detail"),
     path(
-        "patient/<int:patient_id>/update/",
-        views.update_classification,
-        name="update_classification",
-    ),
-    path(
         "patient/<int:patient_id>/update-name/",
         views.update_patient_name,
         name="update_patient_name",

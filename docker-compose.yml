@@ -26,7 +26,7 @@ services:
         user: "$UID:$GID"
         restart: unless-stopped
         networks:
-            - app-net-prod
+            - app-net-$DOCKER_SUFFIX
             - proxy-net
 
     db:
@@ -59,7 +59,7 @@ services:
             start_period: 30s
         restart: unless-stopped
         networks:
-            - app-net-prod
+            - app-net-$DOCKER_SUFFIX
 
     redis:
         image: redis:7-alpine
@@ -69,7 +69,7 @@ services:
         ports:
             - "$REDIS_EXTERNAL_PORT:6379"
         networks:
-            - app-net-prod
+            - app-net-$DOCKER_SUFFIX
 
 volumes:
     mysql_data:
@@ -77,6 +77,6 @@ volumes:
 networks:
     proxy-net:
         external: true
-    app-net-prod:
-        name: app-net-prod
+    app-net-$DOCKER_SUFFIX:
+        name: app-net-$DOCKER_SUFFIX
         external: true
