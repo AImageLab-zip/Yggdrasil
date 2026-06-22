@@ -7,16 +7,16 @@ from common.models import Project, ProjectAccess
 
 def _namespace(request_or_namespace):
     if isinstance(request_or_namespace, str):
-        return "brain" if request_or_namespace == "brain" else "maxillo"
+        return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
     namespace = (
         getattr(request_or_namespace, "resolver_match", None)
         and request_or_namespace.resolver_match.namespace
     ) or "maxillo"
-    return "brain" if namespace == "brain" else "maxillo"
+    return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
 
 
 def _folder_access_model(namespace):
-    app_label = "brain" if namespace == "brain" else "maxillo"
+    app_label = _namespace(namespace)
     return apps.get_model(app_label, "FolderAccess")
 
 
