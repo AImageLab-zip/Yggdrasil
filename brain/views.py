@@ -140,6 +140,7 @@ def patient_detail(request, patient_id):
     is_admin_user = user_is_project_admin(request.user, "brain")
     for caption in voice_captions:
         caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.can_edit_content = bool(is_admin_user or caption.user_id == request.user.id)
         caption.is_ghost = not caption.can_view_content
 
     pref = UserPreference.objects.filter(user=request.user).first()
@@ -155,6 +156,7 @@ def patient_detail(request, patient_id):
         "has_uploaded_panoramic": False,
         "has_intraoral_modality": False,
         "can_modify_segmentation": can_modify,
+        "can_create_caption": can_modify,
         "patient_modalities": patient_modalities,
         "default_modality_slug": next((m["slug"] for m in patient_modalities if m["slug"] != "braintumor-mri-seg"), None),
         "patient_modalities_json": _json.dumps(patient_modalities),
