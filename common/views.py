@@ -1,3 +1,5 @@
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.contrib.auth.models import User
 from django.db.models import Count, Q
@@ -5,7 +7,11 @@ from django.db import connection
 from django.utils.text import slugify
 from django.utils import timezone
 
-from .models import Job, ProcessingJob, Project, Modality
+import json
+from datetime import timedelta
+
+from . import presence
+from .models import Job, ProcessingJob, Project, Modality, UserSession
 from .object_storage import get_object_storage
 
 
@@ -122,3 +128,70 @@ def admin_control_panel(request):
         "project_user_list": project_user_list,
     }
     return render(request, "common/admin_control_panel.html", context)
+
+
+@login_required
+@user_passes_test(lambda u: u.is_staff)
+def online_users_dashboard(request):
+    """Admin-only live view of currently connected users."""
+    return render(request, "common/online_users_dashboard.html", {
+        "online_users": presence.get_online_users(),
+    })
+
+
+@login_required
+@user_passes_test(lambda u: u.is_staff)
+def online_users_api(request):
+    """JSON feed polled by the live dashboard."""
+    return JsonResponse({"users": presence.get_online_users()})
+
+
+@login_required
+@user_passes_test(lambda u: u.is_staff)
+def user_activity_stats(request):
+    """Admin-only per-user connected-time stats and timeline."""
+    try:
+        days = max(1, min(int(request.GET.get("days", 7)), 90))
+    except ValueError:
+        days = 7
+    cutoff = timezone.now() - timedelta(days=days)
+
+    sessions = UserSession.objects.filter(last_seen_at__gte=cutoff).select_related("user")
+
+    totals = {}
+    for session in sessions:
+        entry = totals.setdefault(session.user_id, {
+            "user_id": session.user_id,
+            "username": session.user.username,
+            "full_name": session.user.get_full_name() or session.user.username,
+            "total_seconds": 0,
+            "session_count": 0,
+        })
+        entry["total_seconds"] += session.duration_seconds
+        entry["session_count"] += 1
+
+    summary = sorted(totals.values(), key=lambda e: e["total_seconds"], reverse=True)
+
+    selected_user_id = request.GET.get("user")
+    timeline = []
+    if selected_user_id:
+        user_sessions = (
+            UserSession.objects.filter(user_id=selected_user_id, last_seen_at__gte=cutoff)
+            .order_by("started_at")
+        )
+        timeline = [
+            {
+                "started_at": s.started_at.isoformat(),
+                "last_seen_at": s.last_seen_at.isoformat(),
+                "duration_seconds": s.duration_seconds,
+            }
+            for s in user_sessions
+        ]
+
+    context = {
+        "days": days,
+        "summary": summary,
+        "selected_user_id": int(selected_user_id) if selected_user_id else None,
+        "timeline_json": json.dumps(timeline),
+    }
+    return render(request, "common/user_activity_stats.html", context)

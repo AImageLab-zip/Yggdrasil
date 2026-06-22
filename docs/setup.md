@@ -66,6 +66,7 @@ This builds the web image, then starts `web` (Django), `db` (MySQL), and `redis`
 `entrypoint.sh` deliberately does **not** run `migrate` on container start (it's commented out, since auto-migrating on every restart is unsafe with multiple stacks sharing a DB). On first run — and after pulling any change with new migrations — run it yourself:
 
 ```bash
+export DOCKER_SUFFIX=YOUR-DOCKER-SUFFIX
 docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate
 ```
 

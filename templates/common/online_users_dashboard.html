@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+
+{% block title %}Online Users{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+	<div class="container">
+		<span class="navbar-brand mb-0 h1"><i class="fas fa-circle-dot me-2"></i>Live Users</span>
+	</div>
+</nav>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+	.online-row {
+		border: 1px solid #d7dde6;
+		border-radius: 10px;
+		padding: 0.6rem 0.9rem;
+		background: linear-gradient(135deg, #fbfdff, #f4f8fc);
+		margin-bottom: 0.5rem;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.online-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background: #2ecc71;
+		display: inline-block;
+		margin-right: 0.5rem;
+		box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.6);
+		animation: pulse 1.8s infinite;
+	}
+
+	@keyframes pulse {
+		0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.5); }
+		70% { box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
+		100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+	}
+
+	.online-path {
+		font-size: 0.8rem;
+		color: #5f6b78;
+	}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+	<div class="d-flex justify-content-between align-items-center mb-4">
+		<h1><i class="fas fa-users me-2"></i>Online Users</h1>
+		<a href="{% url 'admin_control_panel' %}" class="btn btn-secondary">
+			<i class="fas fa-arrow-left me-2"></i>Back to Control Panel
+		</a>
+	</div>
+
+	<div class="card">
+		<div class="card-body py-3">
+			<div class="d-flex justify-content-between align-items-center mb-3">
+				<h5 class="card-title mb-0"><span id="onlineCount">{{ online_users|length }}</span> connected now</h5>
+				<small class="text-muted">refreshes every 5s</small>
+			</div>
+			<div id="onlineUsersList">
+				{% for u in online_users %}
+				<div class="online-row" data-user-id="{{ u.user_id }}">
+					<div>
+						<span class="online-dot"></span>
+						<strong>{{ u.full_name }}</strong>
+						<span class="text-muted">@{{ u.username }}</span>
+					</div>
+					<div class="online-path"><code>{{ u.path }}</code></div>
+				</div>
+				{% empty %}
+				<p class="text-muted mb-0" id="noUsersMessage">No one else is online right now.</p>
+				{% endfor %}
+			</div>
+		</div>
+	</div>
+</div>
+
+<script>
+(function () {
+	function escapeHtml(str) {
+		const div = document.createElement('div');
+		div.textContent = str;
+		return div.innerHTML;
+	}
+
+	function render(users) {
+		const list = document.getElementById('onlineUsersList');
+		const count = document.getElementById('onlineCount');
+		count.textContent = users.length;
+
+		if (users.length === 0) {
+			list.innerHTML = '<p class="text-muted mb-0" id="noUsersMessage">No one else is online right now.</p>';
+			return;
+		}
+
+		list.innerHTML = users.map(function (u) {
+			return (
+				'<div class="online-row" data-user-id="' + u.user_id + '">' +
+					'<div>' +
+						'<span class="online-dot"></span>' +
+						'<strong>' + escapeHtml(u.full_name) + '</strong> ' +
+						'<span class="text-muted">@' + escapeHtml(u.username) + '</span>' +
+					'</div>' +
+					'<div class="online-path"><code>' + escapeHtml(u.path) + '</code></div>' +
+				'</div>'
+			);
+		}).join('');
+	}
+
+	function poll() {
+		fetch("{% url 'online_users_api' %}", { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+			.then(function (response) { return response.json(); })
+			.then(function (data) { render(data.users || []); })
+			.catch(function (error) { console.error('Failed to refresh online users:', error); });
+	}
+
+	setInterval(poll, 5000);
+})();
+</script>
+{% endblock %}
