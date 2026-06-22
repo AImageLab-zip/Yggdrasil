@@ -5,7 +5,7 @@ from django.apps import apps
 
 
 def get_namespace(request):
-    return 'maxillo'
+    return (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
 
 
 def is_laparoscopy_namespace(request):
