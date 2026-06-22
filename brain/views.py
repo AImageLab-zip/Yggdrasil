@@ -333,11 +333,13 @@ def upload_patient(request):
                         "patient_upload_form": patient_upload_form,
                         "folders": allowed_folders,
                     })
-                patient.folders.set([folder])
 
             patient.save()
             patient_upload_form.instance = patient
             patient_upload_form.save(commit=True)
+
+            if folder:
+                patient.folders.set([folder])
 
             uploaded_modalities = []
             processing_job_ids = []
