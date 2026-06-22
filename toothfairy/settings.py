@@ -94,6 +94,7 @@ MIDDLEWARE = [
     "toothfairy.middleware.RequestLoggingMiddleware",
     "toothfairy.middleware.ProjectSessionMiddleware",
     "toothfairy.middleware.ActiveProfileMiddleware",
+    "toothfairy.middleware.PresenceMiddleware",
 ]
 
 ROOT_URLCONF = "toothfairy.urls"
@@ -253,7 +254,10 @@ _REDIS_HOST = config("REDIS_HOST", default="redis")
 _REDIS_PORT = config("REDIS_PORT", default=6379, cast=int)
 _REDIS_BROKER_DB = config("REDIS_BROKER_DB", default=0, cast=int)
 _REDIS_RESULT_DB = config("REDIS_RESULT_DB", default=1, cast=int)
+REDIS_PRESENCE_DB = config("REDIS_PRESENCE_DB", default=2, cast=int)
 _DEFAULT_REDIS_URL = f"redis://:{_REDIS_PASSWORD}@{_REDIS_HOST}:{_REDIS_PORT}"
+REDIS_PRESENCE_URL = f"{_DEFAULT_REDIS_URL}/{REDIS_PRESENCE_DB}"
+PRESENCE_TTL_SECONDS = config("PRESENCE_TTL_SECONDS", default=90, cast=int)
 CELERY_BROKER_URL = config(
     "CELERY_BROKER_URL",
     default=f"{_DEFAULT_REDIS_URL}/{_REDIS_BROKER_DB}",

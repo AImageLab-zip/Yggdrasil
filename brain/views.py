@@ -20,6 +20,7 @@ from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
     user_can_delete_single_patient,
+    user_can_edit_caption,
     user_can_read_folder,
     user_can_write_annotations,
     user_is_project_admin,
@@ -732,13 +733,77 @@ def upload_text_caption(request, patient_id):
 @login_required
 def delete_voice_caption(request, patient_id, caption_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    patient.voice_captions.filter(id=caption_id, user=request.user).delete()
+    caption = get_object_or_404(patient.voice_captions, id=caption_id)
+
+    is_owner = caption.user_id == request.user.id
+    is_admin = user_is_project_admin(request.user, "brain")
+    if not is_owner and not is_admin:
+        return JsonResponse(
+            {
+                "error": "You cannot delete voice captions created by other users.",
+                "code": "not_owner",
+            },
+            status=403,
+        )
+
+    if is_admin and not is_owner:
+        data = _json.loads(request.body) if request.body else {}
+        if not data.get("admin_confirmed"):
+            return JsonResponse(
+                {
+                    "error": "Admin confirmation required",
+                    "code": "admin_confirmation_required",
+                    "message": f"You are about to delete a voice caption created by {caption.user.username}. Please confirm this action.",
+                },
+                status=403,
+            )
+
+    caption.delete()
     return JsonResponse({"success": True})
 
 
 @login_required
+@require_POST
 def edit_voice_caption_transcription(request, patient_id, caption_id):
-    return JsonResponse({"success": True})
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    caption = get_object_or_404(patient.voice_captions, id=caption_id)
+
+    if not user_can_edit_caption(request.user, caption):
+        return JsonResponse(
+            {
+                "error": "You do not have permission to edit this transcription.",
+                "code": "permission_denied",
+            },
+            status=403,
+        )
+
+    try:
+        data = _json.loads(request.body) if request.body else {}
+        action = data.get("action")
+
+        if action == "edit":
+            new_text = (data.get("text") or "").strip()
+            if not new_text:
+                return JsonResponse({"error": "Transcription text cannot be empty"}, status=400)
+            caption.edit_transcription(new_text, request.user)
+        elif action == "revert":
+            caption.revert_to_original(request.user)
+        else:
+            return JsonResponse({"error": 'Invalid action. Use "edit" or "revert"'}, status=400)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "caption": {
+                "id": caption.id,
+                "text_caption": caption.text_caption,
+                "is_edited": caption.is_edited,
+                "edit_history": caption.edit_history,
+            },
+        }
+    )
 
 
 @login_required

@@ -59,6 +59,33 @@ class Modality(models.Model):
 		super().save(*args, **kwargs)
 
 
+class UserSession(models.Model):
+    """
+    A reconstructed period of continuous activity for a user, built from
+    presence heartbeats (see common.presence). A request occurring more
+    than PRESENCE_TTL_SECONDS after the last heartbeat starts a new row
+    instead of extending the previous one, so gaps naturally split sessions.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    project_slug = models.CharField(max_length=50, blank=True, default="")
+    started_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-last_seen_at"]),
+            models.Index(fields=["user", "project_slug", "-last_seen_at"]),
+        ]
+        ordering = ["-started_at"]
+
+    @property
+    def duration_seconds(self):
+        return (self.last_seen_at - self.started_at).total_seconds()
+
+    def __str__(self):
+        return f"{self.user.username} {self.started_at} -> {self.last_seen_at}"
+
+
 class ProjectAccess(models.Model):
 	ROLE_CHOICES = [
 		('standard', 'Standard User'),

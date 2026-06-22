@@ -1,6 +1,7 @@
 import logging
 import time
 import json
+from common import presence
 from common.models import Project, ProjectAccess
 from django.utils.deprecation import MiddlewareMixin
 import traceback
@@ -146,4 +147,16 @@ class ActiveProfileMiddleware(MiddlewareMixin):
             logger.error(f"ActiveProfileMiddleware: Unexpected error for user {request.user.id} in app '{app_key}': {e}")
             return redirect('/')
 
+        return None
+
+
+class PresenceMiddleware(MiddlewareMixin):
+    """
+    Refreshes a short-lived Redis key for every authenticated request,
+    used to power the live "who's online" admin dashboard.
+    """
+
+    def process_request(self, request):
+        if request.user.is_authenticated:
+            presence.touch(request.user, request.path)
         return None
