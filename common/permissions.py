@@ -7,16 +7,18 @@ from common.models import Project, ProjectAccess
 
 def _namespace(request_or_namespace):
     if isinstance(request_or_namespace, str):
-        return "brain" if request_or_namespace == "brain" else "maxillo"
+        return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
     namespace = (
         getattr(request_or_namespace, "resolver_match", None)
         and request_or_namespace.resolver_match.namespace
     ) or "maxillo"
-    return "brain" if namespace == "brain" else "maxillo"
+    return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
 
 
 def _folder_access_model(namespace):
-    app_label = "brain" if namespace == "brain" else "maxillo"
+    app_label = _namespace(namespace)
+    if app_label == "laparoscopy":
+        return None
     return apps.get_model(app_label, "FolderAccess")
 
 
@@ -43,6 +45,8 @@ def get_user_folder_role(user, folder):
         return None
     namespace = folder._meta.app_label
     FolderAccess = _folder_access_model(namespace)
+    if FolderAccess is None:
+        return None
     row = FolderAccess.objects.filter(user=user, folder=folder).only("role").first()
     return row.role if row else None
 
@@ -119,6 +123,9 @@ def user_can_delete_caption(user, caption):
 
 
 def filter_folders_for_user(user, folders_qs, app_label):
+    if _namespace(app_label) == "laparoscopy":
+        return folders_qs
+
     if user_is_project_admin(user, app_label):
         return folders_qs
     FolderAccess = _folder_access_model(app_label)
@@ -127,6 +134,9 @@ def filter_folders_for_user(user, folders_qs, app_label):
 
 
 def filter_patients_for_user(user, patients_qs, app_label):
+    if _namespace(app_label) == "laparoscopy":
+        return patients_qs
+
     if user_is_project_admin(user, app_label):
         return patients_qs
     FolderAccess = _folder_access_model(app_label)
