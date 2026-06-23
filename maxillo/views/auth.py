@@ -128,7 +128,7 @@ def invitation_list(request):
 
 
 @login_required
-@user_passes_test(lambda u: u.profile.is_admin())
+@user_passes_test(lambda u: u.is_staff)
 def delete_invitation(request, code):
     invitation = get_object_or_404(Invitation, code=code)
     if not invitation.used_at:  # Only allow deleting unused invitations
