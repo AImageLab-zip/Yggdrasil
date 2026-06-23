@@ -57,7 +57,8 @@ def save_video_to_dataset(patient, video_file):
         job_obj = Job.objects.create(
             modality_slug="video",
             **_entity_fk_kwargs(patient),
-            input_file_path=key,
+            # input_file_path=key,
+            input_files={"input": key},
             status="pending",
             output_files={
                 "schema_version": 1,
