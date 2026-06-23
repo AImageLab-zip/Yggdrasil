@@ -1305,19 +1305,19 @@ class VocalCaptionRecorder {
             });
             
             if (response.ok) {
-                const result = await response.json();
-                
+                await this.parseJsonOrThrow(response, 'Failed to save transcription');
+
                 // Update the caption display
                 this.updateCaptionDisplay(this.currentCaptionId, newText, true);
-                
+
                 // Show success message
                 this.showSavedIndicator();
-                
+
                 // Close modal
                 this.editModal.hide();
-                
+
             } else {
-                const errorData = await response.json();
+                const errorData = await this.parseJsonError(response, 'Failed to save transcription');
                 throw new Error(errorData.error || 'Failed to save transcription');
             }
         } catch (error) {
@@ -1334,7 +1334,7 @@ class VocalCaptionRecorder {
         }
         
         try {
-            const response = await fetch(`/${window.projectNamespace}/patient/${this.scanId}/voice-caption/${this.currentCaptionId}/edit/`, {
+            const response = await fetch(`/${window.projectNamespace}/patient/${window.scanId}/voice-caption/${this.currentCaptionId}/edit/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1346,24 +1346,50 @@ class VocalCaptionRecorder {
             });
             
             if (response.ok) {
-                const result = await response.json();
-                
+                const result = await this.parseJsonOrThrow(response, 'Failed to revert transcription');
+
                 // Update the caption display
                 this.updateCaptionDisplay(this.currentCaptionId, result.caption.text_caption, false);
-                
+
                 // Show success message
                 this.showSavedIndicator();
-                
+
                 // Close modal
                 this.editModal.hide();
-                
+
             } else {
-                const errorData = await response.json();
+                const errorData = await this.parseJsonError(response, 'Failed to revert transcription');
                 throw new Error(errorData.error || 'Failed to revert transcription');
             }
         } catch (error) {
             console.error('Error reverting transcription:', error);
             this.notify('error', 'Failed to revert transcription: ' + error.message);
+        }
+    }
+
+    async parseJsonError(response, fallbackMessage) {
+        try {
+            const errorData = await response.json();
+            return errorData && typeof errorData === 'object'
+                ? errorData
+                : { error: fallbackMessage };
+        } catch (error) {
+            return { error: `${fallbackMessage} (${response.status} ${response.statusText || 'HTTP error'})` };
+        }
+    }
+
+    // Like parseJsonError, but for the "response.ok" success path: a redirect
+    // to the login page (expired session) still resolves with status 200, so
+    // response.json() throws a misleading "Unexpected token '<'" parse error
+    // instead of surfacing the real cause.
+    async parseJsonOrThrow(response, fallbackMessage) {
+        try {
+            return await response.json();
+        } catch (error) {
+            if (response.redirected && /\/login\/?($|\?)/.test(response.url)) {
+                throw new Error('Your session has expired. Please log in again.');
+            }
+            throw new Error(`${fallbackMessage}: server did not return valid JSON (${response.status} ${response.statusText || ''})`.trim());
         }
     }
     

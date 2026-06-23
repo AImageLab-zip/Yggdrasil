@@ -42,6 +42,11 @@ class MaxilloFolderAclTests(TestCase):
         qs = filter_patients_for_user(self.user, Patient.objects.all(), "maxillo")
         self.assertEqual(qs.count(), 0)
 
+    def test_non_admin_with_folder_access_sees_patient(self):
+        FolderAccess.objects.create(user=self.user, folder=self.folder, role="standard")
+        qs = filter_patients_for_user(self.user, Patient.objects.all(), "maxillo")
+        self.assertEqual(list(qs), [self.patient])
+
     def test_standard_role_read_only(self):
         FolderAccess.objects.create(user=self.user, folder=self.folder, role="standard")
         self.assertTrue(user_can_read_folder(self.user, self.folder, "maxillo"))
