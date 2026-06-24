@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from datetime import timedelta
@@ -225,13 +226,18 @@ class InvitationForm(forms.ModelForm):
     email = forms.EmailField(required=False, 
                            widget=forms.EmailInput(attrs={'class': 'form-control'}),
                            help_text="Optional: Restrict invitation to specific email")
+    email_host_user = forms.ChoiceField(
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Sender',
+        help_text="Email account used to authenticate and send the invitation",
+    )
     expiry_days = forms.IntegerField(min_value=1, max_value=30, initial=7,
                                    widget=forms.NumberInput(attrs={'class': 'form-control'}),
                                    help_text="Number of days before invitation expires")
     
     class Meta:
         model = Invitation
-        fields = ['email', 'role', 'projects', 'expiry_days']
+        fields = ['email', 'email_host_user', 'role', 'projects', 'expiry_days']
         widgets = {
             'role': forms.Select(attrs={'class': 'form-control'}),
             'projects': forms.SelectMultiple(attrs={'class': 'form-control', 'size': '6'}),
@@ -251,6 +257,15 @@ class InvitationForm(forms.ModelForm):
             if selected_projects:
                 instance.projects.set(selected_projects)
         return instance
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        sender_choices = [(username, username) for username in settings.EMAIL_HOST_USERS]
+        self.fields['email_host_user'].choices = sender_choices
+        if settings.EMAIL_HOST_USER in settings.EMAIL_HOST_USERS:
+            self.fields['email_host_user'].initial = settings.EMAIL_HOST_USER
+        elif settings.EMAIL_HOST_USERS:
+            self.fields['email_host_user'].initial = settings.EMAIL_HOST_USERS[0]
 
 
 class InvitedUserCreationForm(UserCreationForm):
