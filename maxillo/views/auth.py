@@ -2,7 +2,8 @@
 import logging
 import uuid
 
-from django.core.mail import send_mail
+from django.conf import settings
+from django.core.mail import get_connection, send_mail
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
@@ -93,12 +94,26 @@ def invitation_list(request):
                     'role_display': invitation.get_role_display(),
                     'expires_at': expires_at,
                     'register_url': register_url,
+                    'signature': form.cleaned_data.get('signature') or 'The Yggdrasil team',
                 }
                 subject = render_to_string('registration/emails/invitation_subject.txt', email_context).strip()
                 message = render_to_string('registration/emails/invitation_body.txt', email_context)
+                sender_email = form.cleaned_data.get('sender_email')
 
                 try:
-                    send_mail(subject, message, None, [invitation.email], fail_silently=False)
+                    connection = get_connection(
+                        username=settings.EMAIL_HOST_USER,
+                        password=settings.EMAIL_HOST_PASSWORD,
+                        fail_silently=False,
+                    )
+                    send_mail(
+                        subject,
+                        message,
+                        sender_email,
+                        [invitation.email],
+                        fail_silently=False,
+                        connection=connection,
+                    )
                     invitation.email_sent_at = timezone.now()
                     invitation.email_send_error = ''
                     invitation.save(update_fields=['email_sent_at', 'email_send_error'])
@@ -128,7 +143,7 @@ def invitation_list(request):
 
 
 @login_required
-@user_passes_test(lambda u: u.profile.is_admin())
+@user_passes_test(lambda u: u.is_staff)
 def delete_invitation(request, code):
     invitation = get_object_or_404(Invitation, code=code)
     if not invitation.used_at:  # Only allow deleting unused invitations

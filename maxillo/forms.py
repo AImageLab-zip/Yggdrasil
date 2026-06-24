@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from datetime import timedelta
@@ -225,13 +226,23 @@ class InvitationForm(forms.ModelForm):
     email = forms.EmailField(required=False, 
                            widget=forms.EmailInput(attrs={'class': 'form-control'}),
                            help_text="Optional: Restrict invitation to specific email")
+    sender_email = forms.ChoiceField(
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label='Sender',
+        help_text="Email address used as the invitation sender",
+    )
     expiry_days = forms.IntegerField(min_value=1, max_value=30, initial=7,
                                    widget=forms.NumberInput(attrs={'class': 'form-control'}),
                                    help_text="Number of days before invitation expires")
+    signature = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text='Optional: Defaults to "The Yggdrasil team"',
+    )
     
     class Meta:
         model = Invitation
-        fields = ['email', 'role', 'projects', 'expiry_days']
+        fields = ['email', 'sender_email', 'role', 'projects', 'expiry_days', 'signature']
         widgets = {
             'role': forms.Select(attrs={'class': 'form-control'}),
             'projects': forms.SelectMultiple(attrs={'class': 'form-control', 'size': '6'}),
@@ -251,6 +262,15 @@ class InvitationForm(forms.ModelForm):
             if selected_projects:
                 instance.projects.set(selected_projects)
         return instance
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        sender_choices = [(email, email) for email in settings.EMAIL_SENDER_EMAILS]
+        self.fields['sender_email'].choices = sender_choices
+        if settings.DEFAULT_FROM_EMAIL in settings.EMAIL_SENDER_EMAILS:
+            self.fields['sender_email'].initial = settings.DEFAULT_FROM_EMAIL
+        elif settings.EMAIL_SENDER_EMAILS:
+            self.fields['sender_email'].initial = settings.EMAIL_SENDER_EMAILS[0]
 
 
 class InvitedUserCreationForm(UserCreationForm):

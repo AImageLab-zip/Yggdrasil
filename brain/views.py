@@ -15,7 +15,8 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django.http import JsonResponse
 
 from common.file_access import exists as artifact_exists
-from common.models import Job, Modality, Project, ProjectAccess
+from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
+from common.object_storage import get_object_storage
 from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
@@ -191,6 +192,7 @@ def patient_list(request):
     if current_project_id and any(field.name == "project" for field in Patient._meta.fields):
         patients = patients.filter(project_id=current_project_id)
     patients = filter_patients_for_user(request.user, patients, "brain")
+    patients_for_folder_counts = patients
 
     search_query = request.GET.get("search", "").strip()
     if search_query:
@@ -275,7 +277,7 @@ def patient_list(request):
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,
-        "folders": [{"folder": folder, "patient_count": patients.filter(folders=folder).count()} for folder in folders],
+        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folders=folder).count()} for folder in folders],
         "all_tags": Tag.objects.all().order_by("name"),
         "per_page": per_page,
         "user_profile": request.user.profile,
@@ -333,11 +335,13 @@ def upload_patient(request):
                         "patient_upload_form": patient_upload_form,
                         "folders": allowed_folders,
                     })
-                patient.folders.set([folder])
 
             patient.save()
             patient_upload_form.instance = patient
             patient_upload_form.save(commit=True)
+
+            if folder:
+                patient.folders.set([folder])
 
             uploaded_modalities = []
             processing_job_ids = []
@@ -485,6 +489,56 @@ def bulk_delete_patients(request):
 
 @login_required
 @require_POST
+def bulk_purge_patients(request):
+    """Permanently delete patients: removes their stored files from object
+    storage, then hard-deletes the Patient rows (cascades to FileRegistry/Job)."""
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+
+    scan_ids = data.get("scan_ids", [])
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse(
+            {"success": False, "error": "You do not have permission to permanently delete scans."},
+            status=403,
+        )
+
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    found_ids = list(patients.values_list("patient_id", flat=True))
+    if not found_ids:
+        return JsonResponse({"success": False, "error": "No valid scans found to delete"}, status=404)
+
+    storage = get_object_storage()
+    file_paths = list(
+        FileRegistry.objects.filter(brain_patient_id__in=found_ids).values_list("file_path", flat=True)
+    )
+    storage_errors = []
+    for file_path in file_paths:
+        try:
+            storage.delete(file_path)
+        except Exception as exc:
+            logger.exception("Error deleting object storage file %s", file_path)
+            storage_errors.append(file_path)
+
+    deleted_count, _ = patients.delete()
+
+    response = {
+        "success": True,
+        "message": f"Permanently deleted {len(found_ids)} scan(s) and {len(file_paths)} file(s).",
+        "deleted_count": len(found_ids),
+        "files_deleted": len(file_paths) - len(storage_errors),
+    }
+    if storage_errors:
+        response["storage_errors"] = storage_errors
+    return JsonResponse(response)
+
+
+@login_required
+@require_POST
 def rerun_processing(request, patient_id):
     return JsonResponse(
         {"success": False, "error": "Brain processing rerun is not configured."},
@@ -571,6 +625,32 @@ def rename_folder(request, folder_id):
 
 
 @login_required
+@require_http_methods(["DELETE"])
+def delete_folder(request, folder_id):
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    folder = get_object_or_404(Folder, id=folder_id)
+
+    patient_count = folder.patients.count()
+    force = request.GET.get("force") == "true"
+    if patient_count and not force:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": (
+                    f"Folder still contains {patient_count} patient(s). "
+                    "Move or delete them first, or pass ?force=true to delete the folder anyway."
+                ),
+            },
+            status=400,
+        )
+
+    folder.delete()
+    return JsonResponse({"success": True})
+
+
+@login_required
 def folder_permissions(request, folder_id):
     folder = get_object_or_404(Folder, id=folder_id)
     if not user_is_project_admin(request.user, "brain"):
@@ -641,7 +721,59 @@ def move_patients_to_folder(request):
     folder = None
     if folder_id and folder_id not in ("root", "all"):
         folder = get_object_or_404(Folder, id=folder_id)
-    updated = Patient.objects.filter(patient_id__in=scan_ids).update(folder=folder)
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    updated = 0
+    for patient in patients:
+        patient.folders.set([folder] if folder else [])
+        updated += 1
+    return JsonResponse({"success": True, "updated": updated})
+
+
+@login_required
+@require_POST
+def add_patients_to_folder(request):
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    scan_ids = data.get("scan_ids", [])
+    folder_id = data.get("folder_id")
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+    if not folder_id or folder_id in ("root", "all"):
+        return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = get_object_or_404(Folder, id=folder_id)
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    updated = 0
+    for patient in patients:
+        patient.folders.add(folder)
+        updated += 1
+    return JsonResponse({"success": True, "updated": updated})
+
+
+@login_required
+@require_POST
+def remove_patients_from_folder(request):
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except _json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    scan_ids = data.get("scan_ids", [])
+    folder_id = data.get("folder_id")
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+    if not folder_id or folder_id in ("root", "all"):
+        return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
+    if not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    folder = get_object_or_404(Folder, id=folder_id)
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    updated = 0
+    for patient in patients:
+        patient.folders.remove(folder)
+        updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
 

@@ -228,6 +228,16 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool)
 EMAIL_USE_SSL = config("EMAIL_USE_SSL", cast=bool)
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
+EMAIL_SENDER_EMAILS = [
+    email
+    for email in (
+        item.strip()
+        for item in config("EMAIL_SENDER_EMAILS", default=DEFAULT_FROM_EMAIL).split(",")
+    )
+    if email
+]
+if DEFAULT_FROM_EMAIL and DEFAULT_FROM_EMAIL not in EMAIL_SENDER_EMAILS:
+    EMAIL_SENDER_EMAILS.insert(0, DEFAULT_FROM_EMAIL)
 
 # Object storage (S3-compatible, e.g. Garage)
 OBJECT_STORAGE_ENDPOINT_URL = config(
