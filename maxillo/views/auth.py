@@ -97,18 +97,18 @@ def invitation_list(request):
                 }
                 subject = render_to_string('registration/emails/invitation_subject.txt', email_context).strip()
                 message = render_to_string('registration/emails/invitation_body.txt', email_context)
-                email_host_user = form.cleaned_data.get('email_host_user')
+                sender_email = form.cleaned_data.get('sender_email')
 
                 try:
                     connection = get_connection(
-                        username=email_host_user,
+                        username=settings.EMAIL_HOST_USER,
                         password=settings.EMAIL_HOST_PASSWORD,
                         fail_silently=False,
                     )
                     send_mail(
                         subject,
                         message,
-                        email_host_user,
+                        sender_email,
                         [invitation.email],
                         fail_silently=False,
                         connection=connection,
