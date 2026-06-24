@@ -2,7 +2,8 @@
 import logging
 import uuid
 
-from django.core.mail import send_mail
+from django.conf import settings
+from django.core.mail import get_connection, send_mail
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
@@ -96,9 +97,22 @@ def invitation_list(request):
                 }
                 subject = render_to_string('registration/emails/invitation_subject.txt', email_context).strip()
                 message = render_to_string('registration/emails/invitation_body.txt', email_context)
+                email_host_user = form.cleaned_data.get('email_host_user')
 
                 try:
-                    send_mail(subject, message, None, [invitation.email], fail_silently=False)
+                    connection = get_connection(
+                        username=email_host_user,
+                        password=settings.EMAIL_HOST_PASSWORD,
+                        fail_silently=False,
+                    )
+                    send_mail(
+                        subject,
+                        message,
+                        email_host_user,
+                        [invitation.email],
+                        fail_silently=False,
+                        connection=connection,
+                    )
                     invitation.email_sent_at = timezone.now()
                     invitation.email_send_error = ''
                     invitation.save(update_fields=['email_sent_at', 'email_send_error'])

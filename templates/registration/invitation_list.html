@@ -19,6 +19,11 @@
                             <div class="form-text">{{ form.email.help_text }}</div>
                         </div>
                         <div class="mb-3">
+                            <label for="{{ form.email_host_user.id_for_label }}" class="form-label">Sender</label>
+                            {{ form.email_host_user }}
+                            <div class="form-text">{{ form.email_host_user.help_text }}</div>
+                        </div>
+                        <div class="mb-3">
                             <label for="{{ form.role.id_for_label }}" class="form-label">Role</label>
                             {{ form.role }}
                         </div>
