@@ -234,10 +234,15 @@ class InvitationForm(forms.ModelForm):
     expiry_days = forms.IntegerField(min_value=1, max_value=30, initial=7,
                                    widget=forms.NumberInput(attrs={'class': 'form-control'}),
                                    help_text="Number of days before invitation expires")
+    signature = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+        help_text='Optional: Defaults to "The Yggdrasil team"',
+    )
     
     class Meta:
         model = Invitation
-        fields = ['email', 'sender_email', 'role', 'projects', 'expiry_days']
+        fields = ['email', 'sender_email', 'role', 'projects', 'expiry_days', 'signature']
         widgets = {
             'role': forms.Select(attrs={'class': 'form-control'}),
             'projects': forms.SelectMultiple(attrs={'class': 'form-control', 'size': '6'}),

@@ -94,6 +94,7 @@ def invitation_list(request):
                     'role_display': invitation.get_role_display(),
                     'expires_at': expires_at,
                     'register_url': register_url,
+                    'signature': form.cleaned_data.get('signature') or 'The Yggdrasil team',
                 }
                 subject = render_to_string('registration/emails/invitation_subject.txt', email_context).strip()
                 message = render_to_string('registration/emails/invitation_body.txt', email_context)

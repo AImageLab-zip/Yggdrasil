@@ -12,7 +12,7 @@ To register your account, open the link below and complete the form:
 {{ register_url }}
 
 If the link does not open directly, copy and paste it into your browser.
-For any issue please contact me by replying to this email.
+For any issue please contact us by replying to this email.
 
 Best regards,
-Luca Lumetti
+{{ signature }}
