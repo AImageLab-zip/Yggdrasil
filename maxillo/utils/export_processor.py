@@ -136,6 +136,14 @@ class ExportProcessor:
         return False
 
     @staticmethod
+    def _content_bucket(file_type):
+        """Map a file_type to its ZIP content-type subfolder (raw vs processed)."""
+        file_type = file_type or ""
+        if file_type.endswith("_raw") or file_type.startswith("ios_raw_"):
+            return "raw"
+        return "processed"
+
+    @staticmethod
     def _infer_modality_slug_from_path(file_path):
         path = (file_path or "").lower()
         if "/raw/ios/" in path or "/processed/ios/" in path:
@@ -615,8 +623,10 @@ class ExportProcessor:
                                 or "file"
                             )
 
-                        # Create destination path: patient_folder/modality/filename
-                        dest_path = f"{patient_folder}/{modality_slug}/{filename}"
+                        # Create destination path:
+                        # patient_folder/modality/<raw|processed>/filename
+                        bucket = self._content_bucket(file_reg.file_type)
+                        dest_path = f"{patient_folder}/{modality_slug}/{bucket}/{filename}"
 
                         try:
                             with zipf.open(dest_path, mode="w", force_zip64=True) as zf:
@@ -632,15 +642,14 @@ class ExportProcessor:
                                 pct,
                             )
 
-                # Add report files: one folder per modality (reports_{slug}/)
+                # Add report files: patient_folder/modality/reports/
                 for modality_slug, reports in patient_data["reports"].items():
-                    report_folder = f"reports_{modality_slug}"
                     for report_info in reports:
                         content = report_info["content"]
                         user_id = report_info.get("user_id", "unknown")
                         vc_id = report_info["voice_caption"].id
                         filename = f"{user_id}_{vc_id}.txt"
-                        dest_path = f"{patient_folder}/{report_folder}/{filename}"
+                        dest_path = f"{patient_folder}/{modality_slug}/reports/{filename}"
                         zipf.writestr(dest_path, content)
                         current_entry[0] += 1
                         if total_entries and current_entry[0] % progress_interval == 0:
