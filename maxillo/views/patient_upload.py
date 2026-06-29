@@ -39,20 +39,27 @@ def upload_patient(request):
         patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
         patient_form = PatientForm()
 
-        # For now, we do not support CBCT folder uploads
+        # Validate CBCT folder uploads before creating the patient so invalid
+        # folder selections do not leave behind empty patient rows.
         cbct_upload_type = request.POST.get('cbct_upload_type', 'file')
-        if cbct_upload_type == 'folder' and request.FILES.getlist('cbct_folder_files'):
-            messages.error(request, 'CBCT Folder uploads have been disabled.')
-            allowed_folders = filter_folders_for_user(
-                request.user,
-                Folder.objects.filter(parent__isnull=True).order_by('name'),
-                namespace,
-            )
-            return render(request, 'common/upload/upload.html', {
-                'patient_form': patient_form,
-                'patient_upload_form': patient_upload_form,
-                'folders': allowed_folders,
-            })
+        cbct_folder_files = request.FILES.getlist('cbct_folder_files')
+        if cbct_upload_type == 'folder' and cbct_folder_files:
+            try:
+                from ..models import validate_cbct_folder
+
+                validate_cbct_folder(cbct_folder_files)
+            except Exception as e:
+                messages.error(request, f'Error validating CBCT folder: {e}')
+                allowed_folders = filter_folders_for_user(
+                    request.user,
+                    Folder.objects.filter(parent__isnull=True).order_by('name'),
+                    namespace,
+                )
+                return render(request, 'common/upload/upload.html', {
+                    'patient_form': patient_form,
+                    'patient_upload_form': patient_upload_form,
+                    'folders': allowed_folders,
+                })
 
         if patient_upload_form.is_valid():
             # Create and populate Patient from the form
@@ -97,7 +104,6 @@ def upload_patient(request):
             
             # Handle CBCT (single file or folder)
             cbct_file = request.FILES.get('cbct')
-            cbct_folder_files = request.FILES.getlist('cbct_folder_files')
             if cbct_file or cbct_folder_files:
                 try:
                     modality = Modality.objects.get(slug='cbct')
@@ -111,9 +117,10 @@ def upload_patient(request):
                             if job:
                                 processing_job_ids.append(job.id)
                     elif cbct_folder_files:
-                        from ..file_utils import save_generic_modality_folder
-                        fr, job = save_generic_modality_folder(patient, 'cbct', cbct_folder_files)
-                        if fr:
+                        from ..file_utils import save_cbct_folder_to_dataset
+
+                        folder_path, job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
+                        if folder_path:
                             uploaded_modalities.append('CBCT')
                             if job:
                                 processing_job_ids.append(job.id)
