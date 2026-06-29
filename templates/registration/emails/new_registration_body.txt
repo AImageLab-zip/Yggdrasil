@@ -1,0 +1,9 @@
+A new user has registered on Yggdrasil.
+
+Email:     {{ email }}
+Username:  {{ username }}
+Project:   {{ project_names }}
+Date/Time: {{ registered_at }}
+
+---
+The Yggdrasil team
