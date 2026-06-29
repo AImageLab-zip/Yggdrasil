@@ -4,6 +4,3 @@ Email:     {{ email }}
 Username:  {{ username }}
 Project:   {{ project_names }}
 Date/Time: {{ registered_at }}
-
----
-The Yggdrasil team
