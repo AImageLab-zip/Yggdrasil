@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
 from django.http import JsonResponse
 
-from common.file_access import exists as artifact_exists
+from common.file_access import exists as artifact_exists, streaming_response
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
 from common.permissions import (
@@ -995,7 +995,45 @@ def export_list(request):
 @_with_brain_export_mappings
 def export_new(request):
     if request.method == "POST":
-        export = Export.objects.create(user=request.user, status="pending", query_params=dict(request.POST), query_summary="Brain export")
+        folder_ids = [int(fid) for fid in request.POST.getlist("folder_ids")]
+        modality_slugs = request.POST.getlist("modality_slugs")
+
+        if not folder_ids:
+            messages.error(request, "Please select at least one folder.")
+            return redirect("brain:export_new")
+        if not modality_slugs:
+            messages.error(request, "Please select at least one modality.")
+            return redirect("brain:export_new")
+
+        filters = {
+            key.replace("filter_", ""): True
+            for key in request.POST.keys()
+            if key.startswith("filter_")
+        }
+
+        query_params = {
+            "domain": "brain",
+            "folder_ids": folder_ids,
+            "modality_slugs": modality_slugs,
+            "filters": filters,
+        }
+        # Content selection: pass through only if the form provides it; otherwise
+        # the processor defaults to raw + processed (legacy behavior).
+        for key in ("include_raw", "include_processed", "include_reports"):
+            if key in request.POST:
+                query_params[key] = request.POST.get(key) in ("1", "true", "on", "yes")
+
+        export = Export.objects.create(
+            user=request.user,
+            status="pending",
+            query_params=query_params,
+            query_summary=f"{len(folder_ids)} folder(s), {len(modality_slugs)} modality(ies)",
+        )
+
+        from maxillo.utils.export_processor import start_export_processing
+
+        start_export_processing(export.id, "brain")
+
         messages.success(request, f"Export #{export.id} created.")
         return redirect("brain:export_list")
     folders = filter_folders_for_user(request.user, Folder.objects.filter(parent__isnull=True), "brain")
@@ -1016,7 +1054,31 @@ def export_status(request, export_id):
 
 @login_required
 def export_download(request, export_id):
-    return JsonResponse({"error": "Brain export download is not implemented in the decoupled view yet."}, status=501)
+    export = get_object_or_404(Export, id=export_id)
+
+    if export.user != request.user and not request.user.is_staff:
+        messages.error(request, "You do not have permission to download this export.")
+        return redirect("brain:export_list")
+
+    if export.status != "completed":
+        messages.error(request, "Export is not yet completed.")
+        return redirect("brain:export_list")
+
+    if not export.file_path or not artifact_exists(export.file_path):
+        messages.error(request, "Export file not found.")
+        export.mark_failed("Export file not found in storage")
+        return redirect("brain:export_list")
+
+    filename = (
+        os.path.basename((export.file_path or "").rstrip("/"))
+        or f"export_{export.id}.zip"
+    )
+    return streaming_response(
+        path_or_key=export.file_path,
+        content_type="application/zip",
+        filename=filename,
+        as_attachment=True,
+    )
 
 
 @login_required
