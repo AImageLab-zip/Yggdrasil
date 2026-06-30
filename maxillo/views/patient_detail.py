@@ -343,7 +343,9 @@ def patient_detail(request, patient_id):
     can_see_all_captions = is_admin_user or folder_role in ('standard', 'project_manager')
     for caption in voice_captions:
         caption.can_view_content = bool(can_see_all_captions or caption.user_id == request.user.id)
+        caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
+    can_create_caption = can_modify
 
     # Build modality files lookup for drag-drop grid
     modality_files = {}
