@@ -235,27 +235,10 @@ def patient_cbct_data(request, patient_id):
     except Exception:
         pass
 
-    # Get CBCT file path - prioritize converted .nii.gz from processed files
+    # Get CBCT file path from raw NIfTI uploads.
     file_path = None
 
-    # First, check for processed CBCT (converted .nii.gz)
-    try:
-        processed_entry = patient.files.filter(file_type="cbct_processed").first()
-        if processed_entry:
-            if (
-                processed_entry.file_hash == "multi-file"
-                and "files" in processed_entry.metadata
-            ):
-                # New structure: look for converted volume in metadata
-                files_data = processed_entry.metadata.get("files", {})
-                volume_data = files_data.get("volume_nifti", {})
-                volume_path = volume_data.get("path")
-                if volume_path and artifact_exists(volume_path):
-                    file_path = volume_path
-    except:
-        pass
-
-    # Fallback to raw CBCT if no processed version available
+    # Use raw CBCT if available.
     if not file_path:
         try:
             # Do not rely on get_cbct_raw_file() because legacy data may contain
@@ -300,8 +283,7 @@ def patient_volume_data(request, patient_id, modality_slug):
     """Generic API endpoint to serve NIfTI volume for arbitrary modality (no panoramic).
 
     Strategy:
-    - Prefer processed entry with volume_nifti in metadata for (patient, modality)
-    - Fallback to latest FileRegistry entry for (patient, modality) that endswith .nii or .nii.gz
+    - Use latest FileRegistry entry for (patient, modality) that endswith .nii or .nii.gz
     """
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
@@ -311,8 +293,17 @@ def patient_volume_data(request, patient_id, modality_slug):
         from common.models import FileRegistry as _FR
     except Exception:
         return JsonResponse({"error": "File registry unavailable"}, status=500)
-    # Try processed entry first
     file_path = None
+    # Use the latest raw NIfTI.
+    if not file_path:
+        try:
+            raw_filter = {"domain": domain, "modality__slug": modality_slug}
+            if modality_slug == "cbct":
+                raw_filter["file_type"] = "cbct_raw"
+            if domain == "brain":
+                raw_filter["brain_patient_id"] = patient.patient_id
+            else:
+                raw_filter["patient_id"] = patient.patient_id
     try:
         processed_filter = {
             "domain": "maxillo",
@@ -372,9 +363,8 @@ def patient_volume_data(request, patient_id, modality_slug):
 def patient_panoramic_data(request, patient_id):
     """API endpoint to serve panoramic image data
 
-    Priority:
-    1. If patient has panoramic modality uploaded -> serve that
-    2. Otherwise, if patient has CBCT -> serve CBCT-generated panoramic
+    Only explicit panoramic modality uploads are served here. CBCT processing
+    no longer generates or exposes a panoramic preview.
     """
 
     Patient = get_domain_models(request)["Patient"]
@@ -441,97 +431,10 @@ def patient_panoramic_data(request, patient_id):
     except Exception as e:
         logger.warning(f"Error checking for uploaded panoramic file: {e}")
 
-    # PRIORITY 2: Fall back to CBCT-generated panoramic image
-    logger.debug(
-        "No uploaded panoramic file found, checking for CBCT-generated panoramic"
+    return JsonResponse(
+        {"error": "No panoramic modality file available", "status": "not_found"},
+        status=404,
     )
-
-    # Check if CBCT exists but is still processing
-    if patient.has_cbct_scan() and patient.cbct_job_status == "processing":
-        return JsonResponse(
-            {
-                "error": "CBCT is still being processed",
-                "status": "processing",
-                "message": "The panoramic view will be available once CBCT processing is complete.",
-            },
-            status=202,
-        )
-
-    # Check if processing failed
-    if patient.has_cbct_scan() and patient.cbct_job_status == "failed":
-        return JsonResponse(
-            {
-                "error": "CBCT processing failed",
-                "status": "failed",
-                "message": "The CBCT processing failed. Panoramic view is not available.",
-            },
-            status=500,
-        )
-
-    # Check if CBCT processing is complete (panoramic is only available after processing)
-    logger.debug(f"CBCT processing status: {patient.cbct_job_status}")
-    logger.debug(f"is_cbct_processed(): {patient.is_cbct_processed()}")
-    if not patient.is_cbct_processed():
-        return JsonResponse(
-            {
-                "error": "CBCT processing not complete",
-                "status": "not_processed",
-                "message": "Panoramic view not available yet",
-            },
-            status=404,
-        )
-
-    # Look for panoramic file in FileRegistry (CBCT Processed files)
-    try:
-        # Find the CBCT processed file entry for this scan pair
-        processed_entry = patient.files.filter(file_type="cbct_processed").first()
-
-        if not processed_entry:
-            return JsonResponse({"error": "Processed CBCT files not found"}, status=404)
-
-        # Check if using new multi-file structure
-        panoramic_path = None
-        if (
-            processed_entry.file_hash == "multi-file"
-            and "files" in processed_entry.metadata
-        ):
-            # New structure: multiple files in metadata
-            files_data = processed_entry.metadata.get("files", {})
-            logger.debug(f"files_data keys: {list(files_data.keys())}")
-            pano_data = files_data.get("panoramic_view", {})
-            logger.debug(f"pano_data: {pano_data}")
-            panoramic_path = pano_data.get("path")
-            logger.debug(f"panoramic_path: {panoramic_path}")
-        else:
-            # Legacy structure: single file path (backward compatibility)
-            if processed_entry.file_path.endswith("_pano.png"):
-                panoramic_path = processed_entry.file_path
-
-        if not panoramic_path:
-            logger.debug(f"panoramic_path ({panoramic_path=}) is None or empty")
-            return JsonResponse(
-                {"error": "Panoramic image not found in processed files"}, status=404
-            )
-
-        logger.debug(f"Checking if file exists: {panoramic_path}")
-        if not artifact_exists(panoramic_path):
-            logger.debug(f"File does not exist in storage: {panoramic_path}")
-            return JsonResponse(
-                {"error": "Panoramic image file not found in storage"},
-                status=404,
-            )
-        logger.debug(f"File exists in storage: {panoramic_path}")
-
-        return streaming_response(
-            path_or_key=panoramic_path,
-            content_type="image/png",
-            filename=f"panoramic_{patient_id}.png",
-            as_attachment=False,
-        )
-
-    except Exception as e:
-        logger.error(f"Error serving panoramic data: {e}", exc_info=True)
-        return JsonResponse({"error": "Internal server error"}, status=500)
 
 
 @login_required

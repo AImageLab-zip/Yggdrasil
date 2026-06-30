@@ -62,6 +62,19 @@ def _project_slug_for_job(job: Any) -> Optional[str]:
     return None
 
 
+def is_runner_enabled_for_modality(modality_slug: Optional[str]) -> bool:
+    queue_by_modality = getattr(settings, "RUNNER_QUEUE_BY_MODALITY", None) or {}
+    if not isinstance(queue_by_modality, dict) or not queue_by_modality:
+        return True
+
+    slug = str(modality_slug or "").strip()
+    if not slug:
+        return False
+
+    queue = queue_by_modality.get(slug)
+    return isinstance(queue, str) and bool(queue.strip())
+
+
 def select_runner_queue(job: Any) -> str:
     default_queue = getattr(settings, "RUNNER_DEFAULT_QUEUE", "runner") or "runner"
     queue_by_project = getattr(settings, "RUNNER_QUEUE_BY_PROJECT", None) or {}

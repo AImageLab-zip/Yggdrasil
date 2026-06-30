@@ -435,9 +435,11 @@ class ExportProcessor:
                         and file_reg.metadata
                         and "files" in file_reg.metadata
                     ):
-                        # Export all files from metadata (volume_nifti, panoramic_view, etc.)
+                        # Export only the CBCT segmentation artifact from metadata.
                         cbct_files = file_reg.metadata.get("files", {})
                         for file_type_key, file_data in cbct_files.items():
+                            if file_type_key != "segmentation_nifti":
+                                continue
                             if isinstance(file_data, dict) and "path" in file_data:
                                 file_path = file_data["path"]
                                 if artifact_exists(file_path):
@@ -448,7 +450,7 @@ class ExportProcessor:
                                             "file_registry": file_reg,
                                             "path": file_path,
                                             "modality_slug": modality_slug,
-                                            "cbct_file_type": file_type_key,  # e.g., 'volume_nifti', 'panoramic_view'
+                                            "cbct_file_type": file_type_key,
                                         }
                                     )
                                     # Use individual file size from metadata
@@ -592,8 +594,7 @@ class ExportProcessor:
                             cbct_file_type = file_info["cbct_file_type"]
                             # Map CBCT file types to descriptive names
                             cbct_filename_map = {
-                                "volume_nifti": "volume.nii.gz",
-                                "panoramic_view": "panoramic.png",
+                                "segmentation_nifti": "segmentation.nii.gz",
                                 "structures_mesh": "structures.stl",
                             }
                             # Handle multiple mesh files (structures_mesh_1, structures_mesh_2, etc.)

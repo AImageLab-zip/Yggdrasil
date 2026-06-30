@@ -28,27 +28,9 @@ def get_nifti_metadata(request, patient_id):
         if not patient.has_cbct_scan():
             return JsonResponse({"error": "No CBCT scan available"}, status=404)
 
-        # Get CBCT file path - prioritize processed NIFTI files
+        # Get CBCT file path from raw NIfTI uploads.
         cbct_path = None
 
-        # First, try to get processed CBCT (converted .nii.gz)
-        try:
-            processed_entry = patient.files.filter(file_type="cbct_processed").first()
-            if processed_entry:
-                if (
-                    processed_entry.file_hash == "multi-file"
-                    and "files" in processed_entry.metadata
-                ):
-                    # New structure: look for converted volume in metadata
-                    files_data = processed_entry.metadata.get("files", {})
-                    volume_data = files_data.get("volume_nifti", {})
-                    volume_path = volume_data.get("path")
-                    if volume_path and artifact_exists(volume_path):
-                        cbct_path = volume_path
-        except:
-            pass
-
-        # Fallback to raw CBCT if no processed version available
         if not cbct_path:
             try:
                 # Try to get from FileRegistry first
@@ -240,21 +222,6 @@ def update_nifti_metadata(request, patient_id):
             return JsonResponse({"error": "No CBCT scan available"}, status=404)
 
         cbct_path = None
-
-        try:
-            processed_entry = patient.files.filter(file_type="cbct_processed").first()
-            if processed_entry:
-                if (
-                    processed_entry.file_hash == "multi-file"
-                    and "files" in processed_entry.metadata
-                ):
-                    files_data = processed_entry.metadata.get("files", {})
-                    volume_data = files_data.get("volume_nifti", {})
-                    volume_path = volume_data.get("path")
-                    if volume_path and artifact_exists(volume_path):
-                        cbct_path = volume_path
-        except:
-            pass
 
         if not cbct_path:
             try:

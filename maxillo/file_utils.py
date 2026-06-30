@@ -9,6 +9,7 @@ import traceback
 import zipfile
 from pathlib import Path
 
+from common.job_routing import is_runner_enabled_for_modality
 from common.models import FileRegistry, Job
 from django.db import transaction
 from django.utils import timezone
@@ -20,6 +21,15 @@ logger = logging.getLogger(__name__)
 from common.file_access import exists as artifact_exists
 from common.file_access import open_binary
 from common.object_storage import get_object_storage
+
+
+def _create_job_if_runner_enabled(modality_slug, **kwargs):
+    if not is_runner_enabled_for_modality(modality_slug):
+        logger.info(
+            "Not creating Job for disabled modality '%s'", modality_slug
+        )
+        return None
+    return Job.objects.create(modality_slug=modality_slug, **kwargs)
 
 
 def get_file_type_for_modality(
@@ -363,19 +373,20 @@ def save_generic_modality_file(
 
         if modality_slug in no_processing_modalities:
             # Create completed job
-            job_obj = Job.objects.create(
-                modality_slug=modality_slug,
+            job_obj = _create_job_if_runner_enabled(
+                modality_slug,
                 **_entity_fk_kwargs(patient),
                 input_files={"input": key},
                 status="completed",
             )
-            job_obj.started_at = timezone.now()
-            job_obj.completed_at = timezone.now()
-            job_obj.save()
+            if job_obj:
+                job_obj.started_at = timezone.now()
+                job_obj.completed_at = timezone.now()
+                job_obj.save()
         else:
             # Create pending job for modalities that need processing
-            job_obj = Job.objects.create(
-                modality_slug=modality_slug,
+            job_obj = _create_job_if_runner_enabled(
+                modality_slug,
                 **_entity_fk_kwargs(patient),
                 input_files={"input": key},
                 status="pending",
@@ -445,8 +456,8 @@ def save_generic_modality_folder(patient: Patient, modality_slug: str, folder_fi
             modality_slug,
         )
         fr = None
-    job = Job.objects.create(
-        modality_slug=modality_slug,
+    job = _create_job_if_runner_enabled(
+        modality_slug,
         **_entity_fk_kwargs(patient),
         input_files={"files": [f.get("path") for f in saved_files if isinstance(f, dict)]},
     )
@@ -555,9 +566,9 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         },
     )
 
-    # Create job
-    processing_job = Job.objects.create(
-        modality_slug="cbct",
+    # Create job only when a CBCT worker route is configured.
+    processing_job = _create_job_if_runner_enabled(
+        "cbct",
         **_entity_fk_kwargs(patient),
         input_files={"input": key},
     )
@@ -637,9 +648,9 @@ def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
         },
     )
 
-    # Create job
-    processing_job = Job.objects.create(
-        modality_slug="cbct",
+    # Create job only when a CBCT worker route is configured.
+    processing_job = _create_job_if_runner_enabled(
+        "cbct",
         **_entity_fk_kwargs(patient),
         input_files={"files": [f.get("path") for f in saved_files if isinstance(f, dict)]},
     )
@@ -727,26 +738,27 @@ def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):
     if saved_files:
         input_files = {scan_type: path for scan_type, path in saved_files}
 
-        processing_job = Job.objects.create(
-            modality_slug="ios",
+        processing_job = _create_job_if_runner_enabled(
+            "ios",
             **_entity_fk_kwargs(patient),
             input_files=input_files,
         )
 
         # Always create a fresh stage-2 bite job for every new IOS upload.
         # Reusing completed jobs can leave status transitions stale and skip execution.
-        bite_classification_job = Job.objects.create(
-            modality_slug="bite_classification",
-            status="dependency",
-            **_entity_fk_kwargs(patient),
-            input_files={},
-            priority=processing_job.priority,
-        )
-        bite_classification_job.add_dependency(processing_job)
+        if processing_job and is_runner_enabled_for_modality("bite_classification"):
+            bite_classification_job = Job.objects.create(
+                modality_slug="bite_classification",
+                status="dependency",
+                **_entity_fk_kwargs(patient),
+                input_files={},
+                priority=processing_job.priority,
+            )
+            bite_classification_job.add_dependency(processing_job)
 
-        logger.info(
-            f"Created bite classification job #{bite_classification_job.id} with dependency on IOS job #{processing_job.id}"
-        )
+            logger.info(
+                f"Created bite classification job #{bite_classification_job.id} with dependency on IOS job #{processing_job.id}"
+            )
 
     return {
         "files": saved_files,
@@ -794,9 +806,9 @@ def save_audio_to_dataset(voice_caption, audio_file):
         },
     )
 
-    # Create processing job
-    processing_job = Job.objects.create(
-        modality_slug="audio",
+    # Create processing job only when an audio worker route is configured.
+    processing_job = _create_job_if_runner_enabled(
+        "audio",
         **_voice_entity_fk_kwargs(voice_caption),
         **_entity_fk_kwargs(patient),
         input_files={"input": key},
@@ -921,8 +933,8 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
     job = None
     if saved_files:
         try:
-            job = Job.objects.create(
-                modality_slug="intraoral-photo",
+            job = _create_job_if_runner_enabled(
+                "intraoral-photo",
                 **_entity_fk_kwargs(patient),
                 input_files={str(item["file_id"]): item["path"] for item in saved_files},
                 status="pending",
@@ -946,6 +958,7 @@ def mark_job_completed(job_id, output_files, logs=None):
     logger.info(
         f"mark_job_completed called with job_id={job_id}, output_files={output_files}, logs present={logs is not None}"
     )
+    output_files = dict(output_files or {})
 
     try:
         job = Job.objects.select_related(
@@ -958,6 +971,16 @@ def mark_job_completed(job_id, output_files, logs=None):
         )
         job_patient = _job_patient(job)
         job_voice_caption = _job_voice_caption(job)
+
+        if job.modality_slug == "cbct":
+            segmentation_path = _resolve_output_path_or_key(
+                output_files.get("segmentation_nifti")
+            )
+            if not segmentation_path or not artifact_exists(segmentation_path):
+                raise ValueError(
+                    "CBCT completion missing required output_files.segmentation_nifti"
+                )
+            output_files = {"segmentation_nifti": output_files["segmentation_nifti"]}
 
         # For IOS -> bite stage chaining, update dependent job inputs before
         # marking IOS as completed. This avoids enqueueing bite jobs without
@@ -990,8 +1013,7 @@ def mark_job_completed(job_id, output_files, logs=None):
         logger.info(f"Registering output files for modality: {job.modality_slug}")
 
         if job.modality_slug == "cbct":
-            # For CBCT, we expect multiple output files
-            # output_files should contain: pano, volume_nifti, structures_mesh_*, etc.
+            # CBCT processing exposes only the segmentation artifact.
             processed_files = {}
             total_size = 0
 
@@ -1035,19 +1057,26 @@ def mark_job_completed(job_id, output_files, logs=None):
 
             # Create single FileRegistry entry for CBCT with all outputs in metadata
             if processed_files:
-                # Use pano path as primary file path (for backward compatibility)
-                primary_path = processed_files.get("panoramic_view", {}).get("path", "")
+                primary_path = processed_files.get("segmentation_nifti", {}).get("path", "")
                 if not primary_path and processed_files:
-                    # Fallback to first available file
                     primary_path = list(processed_files.values())[0]["path"]
+
+                cbct_modality = None
+                try:
+                    from common.models import Modality as _Modality
+
+                    cbct_modality = _Modality.objects.filter(slug="cbct").first()
+                except Exception:
+                    cbct_modality = None
 
                 FileRegistry.objects.create(
                     file_type=get_file_type_for_modality("cbct", is_processed=True),
-                    file_path=primary_path,  # Primary file path (e.g., pano)
+                    file_path=primary_path,
                     file_size=total_size,  # Total size of all files
                     file_hash="multi-file",  # Indicator that this contains multiple files
                     processing_job=job,
                     **_job_entity_fk_kwargs(job),
+                    modality=cbct_modality,
                     metadata={
                         "processed_at": timezone.now().isoformat(),
                         "files": processed_files,  # All output files stored here

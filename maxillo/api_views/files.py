@@ -35,25 +35,29 @@ def serve_file(request, file_id):
         file_obj = FileRegistry.objects.select_related("patient").get(id=file_id)
         resolved_file_path = file_obj.file_path
         requested_file_key = (request.GET.get('file_key') or '').strip()
+        bundle_filename = ""
 
-        # CBCT processed files may be stored as a multi-file bundle where the
-        # actual NIfTI volume path is in metadata.files.volume_nifti.path.
+        # CBCT processed files may be stored as a multi-file bundle. Allow a
+        # specific metadata.files key, defaulting to the segmentation.
         if (
             file_obj.file_type == "cbct_processed"
             and file_obj.file_hash == "multi-file"
             and isinstance(file_obj.metadata, dict)
         ):
             files_data = file_obj.metadata.get("files", {})
-            volume_nifti = (
-                files_data.get("volume_nifti", {})
-                if isinstance(files_data, dict)
-                else {}
-            )
-            volume_path = (
-                volume_nifti.get("path") if isinstance(volume_nifti, dict) else None
-            )
-            if volume_path and artifact_exists(volume_path):
-                resolved_file_path = volume_path
+            if isinstance(files_data, dict):
+                bundle_key = (
+                    requested_file_key
+                    if requested_file_key and requested_file_key != "primary"
+                    else "segmentation_nifti"
+                )
+                bundle_file = files_data.get(bundle_key, {})
+                bundle_path = (
+                    bundle_file.get("path") if isinstance(bundle_file, dict) else None
+                )
+                if bundle_path and artifact_exists(bundle_path):
+                    resolved_file_path = bundle_path
+                    bundle_filename = str(bundle_path).split("/")[-1]
 
         request_namespace = (
             getattr(request, "resolver_match", None)
@@ -138,7 +142,8 @@ def serve_file(request, file_id):
                 content_type = "application/octet-stream"
 
         filename = (
-            (file_obj.metadata or {}).get("original_filename")
+            bundle_filename
+            or (file_obj.metadata or {}).get("original_filename")
             or (file_obj.metadata or {}).get("filename")
             or (
                 str(resolved_file_path).split("/")[-1]

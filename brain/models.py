@@ -189,6 +189,69 @@ class Patient(models.Model):
             self.name = f"Patient {self.patient_id}"
             super().save(update_fields=['name'])
 
+    def has_ios_scans(self):
+        try:
+            upper_raw = self.files.filter(file_type='ios_raw_upper').exists()
+            lower_raw = self.files.filter(file_type='ios_raw_lower').exists()
+            upper_processed = self.files.filter(file_type='ios_processed_upper').exists()
+            lower_processed = self.files.filter(file_type='ios_processed_lower').exists()
+            return (upper_raw or upper_processed) and (lower_raw or lower_processed)
+        except Exception as exc:
+            logger.error('Error checking IOS files for brain patient %s: %s', self.patient_id, exc, exc_info=True)
+            return False
+
+    def has_cbct_scan(self):
+        try:
+            has_raw = self.files.filter(file_type='cbct_raw').exists()
+            has_processed = self.files.filter(file_type='cbct_processed').exists()
+            return has_raw or has_processed
+        except Exception as exc:
+            logger.error('Error checking CBCT files for brain patient %s: %s', self.patient_id, exc, exc_info=True)
+            return False
+
+    def _processing_status(self, modality_slug):
+        from common.job_routing import is_runner_enabled_for_modality
+
+        job = self.jobs.filter(modality_slug=modality_slug).order_by('-created_at').first()
+        if not is_runner_enabled_for_modality(modality_slug):
+            if job and job.status == 'completed':
+                return 'processed'
+            base = str(modality_slug or '').replace('-', '_')
+            file_types = [f'{base}_raw', f'{base}_processed']
+            if modality_slug == 'cbct':
+                file_types = ['cbct_raw', 'cbct_processed']
+            elif modality_slug == 'ios':
+                return 'processed' if self.has_ios_scans() else 'not_uploaded'
+            if self.files.filter(file_type__in=file_types).exists():
+                return 'processed'
+            if self.files.filter(modality__slug=modality_slug).exists():
+                return 'processed'
+            return 'not_uploaded'
+
+        if not job:
+            return 'not_uploaded'
+        if job.status in ('pending', 'processing', 'retrying'):
+            return 'processing'
+        if job.status == 'failed':
+            return 'failed'
+        if job.status == 'completed':
+            return 'processed'
+        return 'not_uploaded'
+
+    @property
+    def ios_job_status(self):
+        return self._processing_status('ios')
+
+    @property
+    def cbct_job_status(self):
+        return self._processing_status('cbct')
+
+    def is_ios_processed(self):
+        return self.ios_job_status == 'processed'
+
+    def is_cbct_processed(self):
+        return self.cbct_job_status == 'processed'
+
     def has_rgb_images(self):
         try:
             return self.files.filter(file_type='rgb_image').exists()

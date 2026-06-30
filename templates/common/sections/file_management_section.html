@@ -123,12 +123,25 @@
                                         </div>
                                     </div>
                                 </div>
-                                <a href="{% url 'api:api_serve_file' file_id=file.id %}?file_key=primary" 
-                                   class="btn btn-outline-success btn-sm" 
+                                {% if file.file_type == 'cbct_processed' and file.bundle_files %}
+                                <div class="btn-group btn-group-sm" role="group">
+                                    {% for bundle_file in file.bundle_files %}
+                                    <a href="{% url 'api:api_serve_file' file_id=file.id %}?file_key={{ bundle_file.key|urlencode }}"
+                                       class="btn btn-outline-success btn-sm"
+                                       title="Download {{ bundle_file.label }}"
+                                       download>
+                                        <i class="fas fa-download"></i>
+                                    </a>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <a href="{% url 'api:api_serve_file' file_id=file.id %}?file_key=primary"
+                                   class="btn btn-outline-success btn-sm"
                                    title="Download file"
                                    download>
                                     <i class="fas fa-download"></i>
                                 </a>
+                                {% endif %}
                             </div>
                             {% endfor %}
                         </div>
