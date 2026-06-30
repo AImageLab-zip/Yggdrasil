@@ -150,7 +150,7 @@ def check_file_access(user, file_obj) -> AuthorizationResult:
         logger.warning(f"User {user.id} has no profile - denying file access")
         return AuthorizationResult(False, "Invalid user profile")
     
-    patient = file_obj.patient or getattr(file_obj, 'brain_patient', None)
+    patient = file_obj.patient
 
     # If file is not associated with a patient, only admins can access it
     if not patient:
@@ -167,7 +167,7 @@ def check_file_access(user, file_obj) -> AuthorizationResult:
     
     # Check project access based on file domain
     from common.models import Project
-    file_domain = file_obj.domain or ('brain' if getattr(file_obj, 'brain_patient_id', None) else 'maxillo')
+    file_domain = file_obj.domain or 'maxillo'
     project = Project.objects.filter(slug=file_domain).first()
     if project:
         project_result = check_project_access(user, project)
@@ -195,7 +195,7 @@ def require_patient_access(require_modify: bool = False):
             from django.apps import apps
 
             namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-            app_label = 'brain' if namespace == 'brain' else 'maxillo'
+            app_label = 'maxillo'
             Patient = apps.get_model(app_label, 'Patient')
             
             try:

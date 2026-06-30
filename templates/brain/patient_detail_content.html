@@ -5,8 +5,9 @@
 <script id="viewerGridData" type="application/json">
 {
     "scanId": {{ patient.patient_id }},
-    "projectNamespace": "{% firstof request.resolver_match.namespace 'maxillo' %}",
-    "modalityFiles": {{ modality_files_json|safe }}
+    "projectNamespace": "{% firstof request.resolver_match.namespace 'brain' %}",
+    "modalityFiles": {{ modality_files_json|safe }},
+    "segmentationFile": {{ segmentation_file_json|safe }}
 }
 </script>
 
@@ -29,7 +30,7 @@
                     <div id="modalityChipsContainer">
                         {% if patient_modalities %}
                             {% for m in patient_modalities %}
-                                {% if m.slug != 'rawzip' %}
+                                {% if m.slug != 'rawzip' and m.slug != 'braintumor-mri-seg' %}
                                     <div class="modality-chip"
                                          data-modality="{{ m.slug }}"
                                          draggable="true">
@@ -89,7 +90,8 @@
 
         <!-- Classification Column -->
         <div class="col-lg-4">
-            {% include 'common/sections/vocal_caption_section.html' %}
+            {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
+            {% include 'brain/sections/report_template_section.html' %}
             {% include 'common/sections/scan_settings_section.html' %}
             {% include 'common/sections/nifti_metadata_section.html' %}
             {% include 'common/sections/file_management_section.html' %}
@@ -99,7 +101,7 @@
     <!-- Back Button -->
     <div class="row mt-3">
         <div class="col-12">
-            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+            {% firstof request.resolver_match.namespace 'brain' as ns %}
             <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
                 <i class="fas fa-arrow-left me-2"></i>Back to Scan List
             </a>
@@ -154,6 +156,17 @@
                                         <li><strong>Left-click + drag:</strong> Adjust window/level (brightness/contrast)</li>
                                         <li><strong>Ruler tool:</strong> Click the ruler above the grid, then click two points (can be on different slices/views). Hover a point or line to see the 3D Euclidean distance in mm.</li>
                                         <li><strong>Free Scroll button (link icon):</strong> Toggle synchronization — By default, windows with the same orientation scroll together. Click to unlink and scroll independently, or click again to re-sync.</li>
+                                    </ul>
+                                </div>
+
+                                <div class="instruction-group">
+                                    <h6 class="text-primary mb-2">
+                                        <i class="fas fa-layer-group me-1"></i>Segmentation Overlay
+                                    </h6>
+                                    <ul class="list-unstyled instruction-list">
+                                        <li><strong>SEG button:</strong> Toggle the tumor segmentation mask on or off across all loaded windows simultaneously</li>
+                                        <li><strong>Color coding:</strong> The overlay uses three colors — <span style="color:#00cc00;font-weight:600;">green</span> for label 1, <span style="color:#cc0000;font-weight:600;">red</span> for label 2, and <span style="color:#0044ff;font-weight:600;">blue</span> for label 3</li>
+                                        <li><strong>First load:</strong> The segmentation is preloaded in the background when the viewer opens — subsequent toggles are near-instant</li>
                                     </ul>
                                 </div>
 

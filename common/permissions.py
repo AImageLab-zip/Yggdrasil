@@ -7,16 +7,18 @@ from common.models import Project, ProjectAccess
 
 def _namespace(request_or_namespace):
     if isinstance(request_or_namespace, str):
-        return "brain" if request_or_namespace == "brain" else "maxillo"
+        return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
     namespace = (
         getattr(request_or_namespace, "resolver_match", None)
         and request_or_namespace.resolver_match.namespace
     ) or "maxillo"
-    return "brain" if namespace == "brain" else "maxillo"
+    return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
 
 
 def _folder_access_model(namespace):
-    app_label = "brain" if namespace == "brain" else "maxillo"
+    app_label = _namespace(namespace)
+    if app_label == "laparoscopy":
+        return None
     return apps.get_model(app_label, "FolderAccess")
 
 
@@ -43,6 +45,8 @@ def get_user_folder_role(user, folder):
         return None
     namespace = folder._meta.app_label
     FolderAccess = _folder_access_model(namespace)
+    if FolderAccess is None:
+        return None
     row = FolderAccess.objects.filter(user=user, folder=folder).only("role").first()
     return row.role if row else None
 
@@ -101,11 +105,27 @@ def user_can_edit_caption(user, caption):
     return user_is_project_admin(user, caption._meta.app_label)
 
 
+def user_can_view_caption_content(user, caption, project_or_app_context=None):
+    if not user or not user.is_authenticated:
+        return False
+    if caption.user_id == user.id:
+        return True
+    if user_is_project_admin(user, project_or_app_context or caption._meta.app_label):
+        return True
+
+    patient = getattr(caption, "patient", None)
+    folder = getattr(patient, "folder", None) if patient else None
+    return get_user_folder_role(user, folder) in {"standard", "project_manager"}
+
+
 def user_can_delete_caption(user, caption):
     return user_can_edit_caption(user, caption)
 
 
 def filter_folders_for_user(user, folders_qs, app_label):
+    if _namespace(app_label) == "laparoscopy":
+        return folders_qs
+
     if user_is_project_admin(user, app_label):
         return folders_qs
     FolderAccess = _folder_access_model(app_label)
@@ -114,10 +134,16 @@ def filter_folders_for_user(user, folders_qs, app_label):
 
 
 def filter_patients_for_user(user, patients_qs, app_label):
+    if _namespace(app_label) == "laparoscopy":
+        return patients_qs
+
     if user_is_project_admin(user, app_label):
         return patients_qs
     FolderAccess = _folder_access_model(app_label)
     folder_ids = FolderAccess.objects.filter(user=user).values_list("folder_id", flat=True)
+    patient_model = patients_qs.model
+    if any(field.name == "folders" for field in patient_model._meta.get_fields()):
+        return patients_qs.filter(folders__id__in=folder_ids).distinct()
     return patients_qs.filter(folder_id__in=folder_ids)
 
 

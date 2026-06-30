@@ -1,3 +1,8 @@
+"""
+DOMAIN_CHOICES i srepeated multiple times across many models, might be the case to generalize it into some king of global variable?
+"""
+import uuid
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils.text import slugify
@@ -52,6 +57,33 @@ class Modality(models.Model):
 		if not self.slug:
 			self.slug = slugify(self.name)
 		super().save(*args, **kwargs)
+
+
+class UserSession(models.Model):
+    """
+    A reconstructed period of continuous activity for a user, built from
+    presence heartbeats (see common.presence). A request occurring more
+    than PRESENCE_TTL_SECONDS after the last heartbeat starts a new row
+    instead of extending the previous one, so gaps naturally split sessions.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    project_slug = models.CharField(max_length=50, blank=True, default="")
+    started_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-last_seen_at"]),
+            models.Index(fields=["user", "project_slug", "-last_seen_at"]),
+        ]
+        ordering = ["-started_at"]
+
+    @property
+    def duration_seconds(self):
+        return (self.last_seen_at - self.started_at).total_seconds()
+
+    def __str__(self):
+        return f"{self.user.username} {self.started_at} -> {self.last_seen_at}"
 
 
 class ProjectAccess(models.Model):
@@ -145,6 +177,14 @@ class Invitation(models.Model):
 			project_str = f" - {self.project.name}" if self.project else ""
 		return f"Invitation {self.code} - {self.role}{project_str}"
 
+	def save(self, *args, **kwargs):
+		if not self.code:
+			self.code = str(uuid.uuid4())
+			update_fields = kwargs.get('update_fields')
+			if update_fields is not None:
+				kwargs['update_fields'] = set(update_fields) | {'code'}
+		super().save(*args, **kwargs)
+
 	class Meta:
 		db_table = 'maxillo_invitation'
 
@@ -153,6 +193,7 @@ class Job(models.Model):
 	DOMAIN_CHOICES = [
 		('maxillo', 'Maxillo'),
 		('brain', 'Brain'),
+		('laparoscopy', 'Laparoscopy'),
 	]
 
 	STATUS_CHOICES = [
@@ -171,8 +212,10 @@ class Job(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 
 	# IO
 	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
@@ -292,6 +335,7 @@ class ProcessingJob(models.Model):
 	DOMAIN_CHOICES = [
 		('maxillo', 'Maxillo'),
 		('brain', 'Brain'),
+		('laparoscopy', 'Laparoscopy'),
 	]
 
 	JOB_TYPE_CHOICES = [
@@ -317,8 +361,10 @@ class ProcessingJob(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
+	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
+	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 
 	# File paths
 	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
@@ -442,6 +488,7 @@ class FileRegistry(models.Model):
 	DOMAIN_CHOICES = [
 		('maxillo', 'Maxillo'),
 		('brain', 'Brain'),
+		('laparoscopy', 'Laparoscopy'),
 	]
 
 	FILE_TYPE_CHOICES = [
@@ -470,6 +517,8 @@ class FileRegistry(models.Model):
 		('braintumor_mri_t2_processed', 'Brain MRI T2 Processed'),
 		('braintumor_mri_flair_raw', 'Brain MRI FLAIR Raw'),
 		('braintumor_mri_flair_processed', 'Brain MRI FLAIR Processed'),
+		('braintumor_mri_seg_raw', 'Brain MRI Segmentation Raw'),
+		('braintumor_mri_seg_processed', 'Brain MRI Segmentation Processed'),
 		# Maxillo image modalities
 		('intraoral_raw', 'Intraoral Photographs Raw'),
 		('intraoral_processed', 'Intraoral Photographs Processed'),
@@ -478,6 +527,9 @@ class FileRegistry(models.Model):
 		('teleradiography_processed', 'Teleradiography Processed'),
 		('panoramic_raw', 'panoramic Raw'),
 		('panoramic_processed', 'panoramic Processed'),
+		# Generic video modality (used by laparoscopy and any future video domain)
+		('video_raw', 'Video Raw'),
+		('video_processed', 'Video Processed'),
 	]
 
 	file_type = models.CharField(max_length=255, choices=FILE_TYPE_CHOICES)
@@ -490,8 +542,10 @@ class FileRegistry(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
+	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
+	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	processing_job = models.ForeignKey('common.Job', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	metadata = models.JSONField(default=dict, blank=True, help_text='Additional file metadata')

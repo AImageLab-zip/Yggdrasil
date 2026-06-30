@@ -12,8 +12,12 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 import json as _json
+import mimetypes
 from pathlib import Path
 from decouple import config
+
+# Ensure .wasm files are served with the correct MIME type (required for ONNX runtime)
+mimetypes.add_type("application/wasm", ".wasm")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -75,6 +79,7 @@ INSTALLED_APPS = [
     "common",
     "maxillo",
     "brain",
+    "laparoscopy",
 ]
 
 MIDDLEWARE = [
@@ -89,6 +94,7 @@ MIDDLEWARE = [
     "toothfairy.middleware.RequestLoggingMiddleware",
     "toothfairy.middleware.ProjectSessionMiddleware",
     "toothfairy.middleware.ActiveProfileMiddleware",
+    "toothfairy.middleware.PresenceMiddleware",
 ]
 
 ROOT_URLCONF = "toothfairy.urls"
@@ -181,7 +187,7 @@ DATA_UPLOAD_MAX_NUMBER_FILES = 1500  # large DICOM folder uploads
 
 if ENABLE_SSL:
     CORS_ALLOWED_ORIGINS = [
-        "https://toothfairy4m.ing.unimore.it",
+        "https://yggdrasil.ing.unimore.it",
         "https://localhost:8000",
         "https://127.0.0.1:8000",
     ]
@@ -195,7 +201,7 @@ else:
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = config(
     "CSRF_TRUSTED_ORIGINS",
-    default="https://toothfairy4m.ing.unimore.it,http://localhost:8000,http://127.0.0.1:8000",
+    default="https://yggdrasil.ing.unimore.it,http://localhost:8000,http://127.0.0.1:8000",
     cast=str,
 ).split(",")
 
@@ -222,6 +228,16 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool)
 EMAIL_USE_SSL = config("EMAIL_USE_SSL", cast=bool)
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
+EMAIL_SENDER_EMAILS = [
+    email
+    for email in (
+        item.strip()
+        for item in config("EMAIL_SENDER_EMAILS", default=DEFAULT_FROM_EMAIL).split(",")
+    )
+    if email
+]
+if DEFAULT_FROM_EMAIL and DEFAULT_FROM_EMAIL not in EMAIL_SENDER_EMAILS:
+    EMAIL_SENDER_EMAILS.insert(0, DEFAULT_FROM_EMAIL)
 
 # Object storage (S3-compatible, e.g. Garage)
 OBJECT_STORAGE_ENDPOINT_URL = config(
@@ -248,7 +264,10 @@ _REDIS_HOST = config("REDIS_HOST", default="redis")
 _REDIS_PORT = config("REDIS_PORT", default=6379, cast=int)
 _REDIS_BROKER_DB = config("REDIS_BROKER_DB", default=0, cast=int)
 _REDIS_RESULT_DB = config("REDIS_RESULT_DB", default=1, cast=int)
+REDIS_PRESENCE_DB = config("REDIS_PRESENCE_DB", default=2, cast=int)
 _DEFAULT_REDIS_URL = f"redis://:{_REDIS_PASSWORD}@{_REDIS_HOST}:{_REDIS_PORT}"
+REDIS_PRESENCE_URL = f"{_DEFAULT_REDIS_URL}/{REDIS_PRESENCE_DB}"
+PRESENCE_TTL_SECONDS = config("PRESENCE_TTL_SECONDS", default=90, cast=int)
 CELERY_BROKER_URL = config(
     "CELERY_BROKER_URL",
     default=f"{_DEFAULT_REDIS_URL}/{_REDIS_BROKER_DB}",

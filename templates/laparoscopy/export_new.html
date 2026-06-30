@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}New Laparoscopy Export - Yggdrasil{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="mb-3">
+        <a href="{% url ns|default:'laparoscopy'|add:':export_list' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Export History
+        </a>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <form id="laparoscopyExportForm" method="post" action="{% url ns|default:'laparoscopy'|add:':export_new' %}">
+                {% csrf_token %}
+
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <strong><i class="fas fa-info-circle me-2"></i>Export Content</strong>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2">This export creates one ZIP per job with:</p>
+                        <ul class="mb-0">
+                            <li>the latest subsampled laparoscopy video for each exportable patient</li>
+                            <li>one <code>.npz</code> mask stack for every subsampled frame, including empty frames</li>
+                            <li>mask arrays stored as <code>masks[class, height, width]</code> with one binary layer per laparoscopy region type</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong><i class="fas fa-folder me-2"></i>Folders</strong>
+                        <span class="text-muted small">Only patients with a subsampled video are exportable</span>
+                    </div>
+                    <div class="card-body">
+                        {% for folder_data in folders %}
+                            <div class="form-check mb-2">
+                                <input class="form-check-input lap-folder-checkbox" type="checkbox" name="folder_ids" value="{{ folder_data.folder.id }}" id="lap_folder_{{ folder_data.folder.id }}">
+                                <label class="form-check-label" for="lap_folder_{{ folder_data.folder.id }}">
+                                    {{ folder_data.full_path }}
+                                    <span class="badge bg-secondary ms-2">{{ folder_data.patient_count }}</span>
+                                </label>
+                            </div>
+                        {% empty %}
+                            <p class="text-muted mb-0">No laparoscopy folders available.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg" id="createLaparoscopyExportBtn" disabled>
+                        <i class="fas fa-download me-2"></i>Create Export
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card border-primary mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-users me-1"></i>Patients</h6>
+                    <h2 class="card-title mb-0 text-primary" id="lap-stat-patients">0</h2>
+                    <small class="text-muted">Patients in selected folders</small>
+                </div>
+            </div>
+
+            <div class="card border-success mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-video me-1"></i>Exportable Videos</h6>
+                    <h2 class="card-title mb-0 text-success" id="lap-stat-exportable">0</h2>
+                    <small class="text-muted">Patients with a subsampled video</small>
+                </div>
+            </div>
+
+            <div class="card border-warning mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-hdd me-1"></i>Base Video Size</h6>
+                    <h2 class="card-title mb-0 text-warning" id="lap-stat-size">0 B</h2>
+                    <small class="text-muted">Subsampled videos only; masks are added on top</small>
+                </div>
+            </div>
+
+            <div class="card border-secondary mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-file me-1"></i>Files</h6>
+                    <h2 class="card-title mb-0 text-secondary" id="lap-stat-files">0</h2>
+                    <small class="text-muted">Subsampled videos included</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    window.laparoscopyExportPreviewUrl = '{% url ns|default:"laparoscopy"|add:":export_preview" %}';
+</script>
+<script src="{% static 'js/laparoscopy/laparoscopy_export.js' %}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        initLaparoscopyExportPage();
+    });
+</script>
+{% endblock %}

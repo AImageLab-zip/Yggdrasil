@@ -1,15 +1,16 @@
 <!-- Vocal Caption Section -->
 <div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#vocalCaptionCollapse" aria-expanded="false" aria-controls="vocalCaptionCollapse" style="cursor: pointer;">
+    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#vocalCaptionCollapse" aria-expanded="{% if vocal_caption_open %}true{% else %}false{% endif %}" aria-controls="vocalCaptionCollapse" style="cursor: pointer;">
         <h6 class="mb-0"><i class="fas fa-microphone me-2"></i>Voice Captions</h6>
         <i class="fas fa-chevron-right collapse-indicator"></i>
     </div>
 
-    <div class="collapse" id="vocalCaptionCollapse">
+    <div class="collapse{% if vocal_caption_open %} show{% endif %}" id="vocalCaptionCollapse">
         {% firstof request.resolver_match.namespace 'maxillo' as ns %}
         <!-- Hidden CSRF token for AJAX usage -->
         <form style="display:none;">{% csrf_token %}</form>
 
+        {% if can_create_caption %}
         <!-- Unified Caption Card (Text + Voice) -->
         <div id="captionUnifiedCard" class="card mb-2">
             <div class="card-body p-2">
@@ -27,6 +28,16 @@
                         <button type="button" class="btn btn-outline-danger btn-sm ms-1 d-none" id="discardRecording">
                             <i class="fas fa-times me-1"></i>Discard
                         </button>
+                        {% if ns == 'brain' %}
+                        <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Speech language" id="brainSpeechLanguageToggle">
+                            <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageEn" value="en" autocomplete="off" checked>
+                            <label class="btn btn-outline-secondary" for="brainSpeechLanguageEn">EN</label>
+                            <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageIt" value="it" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="brainSpeechLanguageIt">IT</label>
+                            <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageDe" value="de" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="brainSpeechLanguageDe">DE</label>
+                        </div>
+                        {% endif %}
                     </div>
                     <div id="textControls" class="d-flex align-items-center">
                         <small class="text-muted me-2">Characters: <span id="textCharCount">0</span></small>
@@ -42,7 +53,7 @@
                 </div>
 
                 <div id="textInputContainer" class="mb-2 position-relative">
-                    <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="Write your caption here..."></textarea>
+                    <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="{% if ns == 'brain' %}Speak or write your caption here...{% else %}Write your caption here...{% endif %}"></textarea>
                 </div>
 
                 <div id="recordingArea" class="d-none">
@@ -84,6 +95,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Captions List -->
         <div class="voice-captions-list">
@@ -97,19 +109,19 @@
                                     <small class="text-primary me-2">{{ c.user.username }}</small>
                                     {% if ns != 'brain' %}
                                     <div class="dropdown d-inline-block me-2">
-                                        <span class="badge bg-secondary {% if c.can_view_content %}dropdown-toggle modality-badge-clickable{% endif %}" 
+                                        <span class="badge bg-secondary {% if c.can_edit_content %}dropdown-toggle modality-badge-clickable{% endif %}" 
                                               id="modalityDropdown{{ c.id }}" 
-                                              {% if c.can_view_content %}data-bs-toggle="dropdown"{% endif %}
+                                              {% if c.can_edit_content %}data-bs-toggle="dropdown"{% endif %}
                                               data-bs-auto-close="true"
                                               data-bs-boundary="viewport"
                                               aria-expanded="false"
                                               data-caption-id="{{ c.id }}"
                                               data-current-modality="{{ c.modality }}"
-                                              style="cursor: {% if c.can_view_content %}pointer{% else %}default{% endif %};"
-                                              title="{% if c.can_view_content %}Click to change modality{% else %}Modality{% endif %}">
+                                              style="cursor: {% if c.can_edit_content %}pointer{% else %}default{% endif %};"
+                                              title="{% if c.can_edit_content %}Click to change modality{% else %}Modality{% endif %}">
                                             {{ c.get_modality_display }}
                                         </span>
-                                        {% if c.can_view_content %}
+                                        {% if c.can_edit_content %}
                                         <ul class="dropdown-menu" aria-labelledby="modalityDropdown{{ c.id }}">
                                             {% for modality in allowed_modalities %}
                                             <li>
@@ -140,13 +152,13 @@
                                     {% endwith %}
                                     {% endif %}
                                     {% if c.text_caption %}
-                                    {% if c.user_id == user.id or user.is_staff %}
+                                    {% if c.can_edit_content %}
                                     <button class="btn btn-outline-secondary btn-sm btn-edit-caption" data-caption-id="{{ c.id }}" title="Edit">
                                         <i class="fas fa-edit" style="font-size: 0.75rem;"></i>
                                     </button>
                                     {% endif %}
                                     {% endif %}
-                                    {% if c.user_id == user.id or user.is_staff %}
+                                    {% if c.can_edit_content %}
                                     <button class="btn btn-outline-danger btn-sm btn-delete-caption" data-caption-id="{{ c.id }}" title="Delete">
                                         <i class="fas fa-trash" style="font-size: 0.75rem;"></i>
                                     </button>
@@ -194,7 +206,7 @@
                     <div class="no-captions">
                         <p class="text-muted mb-0 text-center">
                             <i class="fas fa-comment me-1"></i>
-                            No captions yet. Record audio or write text to describe your findings!
+                            {% if can_create_caption %}No captions yet. Record audio or write text to describe your findings!{% else %}No captions yet.{% endif %}
                         </p>
                     </div>
                 {% endif %}
@@ -233,6 +245,7 @@
 
             var charCount = document.getElementById('textCharCount');
             var clearTextBtn = document.getElementById('clearTextCaption');
+            var isBrainCaption = '{{ ns }}' === 'brain';
 
             function updateCharCount() {
                 if (charCount && textArea) {
@@ -241,13 +254,13 @@
             }
 
             function enterRecordingMode() {
-                if (textArea) {
+                if (textArea && !isBrainCaption) {
                     textArea.setAttribute('disabled', 'disabled');
                 }
                 if (textControls) {
                     textControls.classList.add('d-none');
                 }
-                if (textInputContainer) {
+                if (textInputContainer && !isBrainCaption) {
                     textInputContainer.classList.add('d-none');
                 }
                 if (recordingArea) {

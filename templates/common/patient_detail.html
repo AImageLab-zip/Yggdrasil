@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Patient {{ patient.name }} - ToothFairy4M{% endblock %}
+{% block title %}Patient {{ patient.name }} - Yggdrasil{% endblock %}
 
 {% block extra_css %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
@@ -58,6 +58,12 @@
 {% if ns == 'maxillo' %}
 <script src="https://cdn.jsdelivr.net/npm/konva@9.3.20/konva.min.js"></script>
 <script src="{% static 'js/intraoral_segmentation.js' %}"></script>
+{% endif %}
+
+{# Brain STT: load transformers.js as a classic script so document.currentScript #}
+{# is available during ONNX/wasm initialisation (null inside dynamic import()). #}
+{% if ns == 'brain' %}
+<script src="{% static 'vendor/transformers/dist/transformers.min.js' %}"></script>
 {% endif %}
 
 {# Additional features #}

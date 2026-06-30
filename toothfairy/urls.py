@@ -28,10 +28,26 @@ urlpatterns = [
         common_views.admin_control_panel,
         name="admin_control_panel",
     ),
+    path(
+        "admin/online-users/",
+        common_views.online_users_dashboard,
+        name="online_users_dashboard",
+    ),
+    path(
+        "admin/online-users/api/",
+        common_views.online_users_api,
+        name="online_users_api",
+    ),
+    path(
+        "admin/user-activity/",
+        common_views.user_activity_stats,
+        name="user_activity_stats",
+    ),
     path("admin/", admin.site.urls),
     path("", scans_views.home, name="home"),
     path("maxillo/", include("maxillo.urls")),
     path("brain/", include("brain.urls")),
+    path("laparoscopy/", include("laparoscopy.urls")),
     # API root
     path("api/", include(("maxillo.api_urls", "api"), namespace="api")),
     path("login/", auth_views.LoginView.as_view(), name="login"),

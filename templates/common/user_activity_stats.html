@@ -1,0 +1,235 @@
+{% extends 'base.html' %}
+
+{% block title %}User Activity{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+	<div class="container">
+		<span class="navbar-brand mb-0 h1"><i class="fas fa-chart-line me-2"></i>User Activity</span>
+	</div>
+</nav>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+	.summary-row {
+		border: 1px solid #d7dde6;
+		border-radius: 10px;
+		padding: 0.5rem 0.8rem;
+		margin-bottom: 0.4rem;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		cursor: pointer;
+		background: #fbfdff;
+	}
+
+	.summary-row.active {
+		border-color: #0d6efd;
+		background: #eef5ff;
+	}
+
+	.summary-row:hover {
+		background: #f0f4f9;
+	}
+
+	#timelineChart {
+		max-height: 480px;
+	}
+
+	.project-badge {
+		color: #fff;
+	}
+
+	.project-badge[data-project="maxillo"] { background: #0d6efd; }
+	.project-badge[data-project="brain"] { background: #fd7e14; }
+	.project-badge[data-project="laparoscopy"] { background: #20c997; }
+	.project-badge[data-project=""] { background: #6c757d; }
+
+	.legend-swatch {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		border-radius: 2px;
+		margin-right: 0.35rem;
+	}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+	<div class="d-flex justify-content-between align-items-center mb-4">
+		<h1><i class="fas fa-chart-line me-2"></i>User Activity</h1>
+		<a href="{% url 'admin_control_panel' %}" class="btn btn-secondary">
+			<i class="fas fa-arrow-left me-2"></i>Back to Control Panel
+		</a>
+	</div>
+
+	<form method="get" class="d-flex align-items-center gap-2 mb-4">
+		{% if selected_user_id %}<input type="hidden" name="user" value="{{ selected_user_id }}">{% endif %}
+		<label for="days" class="form-label mb-0">Window:</label>
+		<select name="days" id="days" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+			<option value="1" {% if days == 1 %}selected{% endif %}>Last 24h</option>
+			<option value="7" {% if days == 7 %}selected{% endif %}>Last 7 days</option>
+			<option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+			<option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+		</select>
+		<label for="project" class="form-label mb-0 ms-3">Project:</label>
+		<select name="project" id="project" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+			<option value="" {% if not selected_project %}selected{% endif %}>All projects</option>
+			{% for slug, label in project_choices %}
+			<option value="{{ slug }}" {% if selected_project == slug %}selected{% endif %}>{{ label }}</option>
+			{% endfor %}
+			<option value="other" {% if selected_project == 'other' %}selected{% endif %}>Other</option>
+		</select>
+		<label for="view" class="form-label mb-0 ms-3">Timeline:</label>
+		<select name="view" id="view" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+			<option value="single" {% if view == 'single' %}selected{% endif %}>Single user</option>
+			<option value="all" {% if view == 'all' %}selected{% endif %}>All users (top 25)</option>
+		</select>
+	</form>
+
+	<div class="row">
+		<div class="col-md-4">
+			<h5 class="mb-3">Connected time, last {{ days }} day{{ days|pluralize }}</h5>
+			{% for entry in summary %}
+			<a class="summary-row text-decoration-none text-dark {% if entry.user_id == selected_user_id %}active{% endif %}"
+			   href="?user={{ entry.user_id }}&days={{ days }}{% if selected_project %}&project={{ selected_project }}{% endif %}">
+				<div>
+					<strong>{{ entry.full_name }}</strong>
+					<span class="badge project-badge" data-project="{{ entry.project_slug }}">{{ entry.project_label }}</span>
+					<div class="text-muted small">@{{ entry.username }} &middot; {{ entry.session_count }} session{{ entry.session_count|pluralize }}</div>
+				</div>
+				<span class="badge bg-primary" data-seconds="{{ entry.total_seconds }}"></span>
+			</a>
+			{% empty %}
+			<p class="text-muted">No activity recorded in this window.</p>
+			{% endfor %}
+		</div>
+
+		<div class="col-md-8">
+			<h5 class="mb-3">
+				Timeline
+				{% if view == 'all' %}<small class="text-muted">busiest users in window, color-coded by project</small>
+				{% elif selected_user_id %}<small class="text-muted">all projects, color-coded</small>{% endif %}
+			</h5>
+			{% if view == 'all' or selected_user_id %}
+				<canvas id="timelineChart"></canvas>
+				<div id="timelineLegend" class="mt-2 d-flex gap-3"></div>
+			{% else %}
+				<p class="text-muted">Select a user on the left to see their connection timeline.</p>
+			{% endif %}
+		</div>
+	</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+(function () {
+	function formatDuration(totalSeconds) {
+		const hours = Math.floor(totalSeconds / 3600);
+		const minutes = Math.floor((totalSeconds % 3600) / 60);
+		if (hours > 0) return hours + 'h ' + minutes + 'm';
+		return minutes + 'm';
+	}
+
+	document.querySelectorAll('[data-seconds]').forEach(function (el) {
+		el.textContent = formatDuration(parseFloat(el.dataset.seconds));
+	});
+
+	const timeline = {{ timeline_json|safe }};
+	const mode = "{{ view|default:'single' }}";
+	const canvas = document.getElementById('timelineChart');
+	if (!canvas || !timeline.length) return;
+
+	const PROJECT_COLORS = {
+		maxillo: '#0d6efd',
+		brain: '#fd7e14',
+		laparoscopy: '#20c997',
+		'': '#6c757d',
+	};
+	const PROJECT_LABELS = {
+		maxillo: 'Maxillo',
+		brain: 'Brain',
+		laparoscopy: 'Laparoscopy',
+		'': 'Other',
+	};
+
+	function dayKey(iso) {
+		return iso.slice(0, 10);
+	}
+
+	const projectsPresent = [...new Set(timeline.map(function (s) { return s.project_slug; }))];
+
+	// "all" mode: one row per user, bars placed on the real timeline so
+	// overlapping/concurrent sessions across users are visible.
+	// "single" mode: one row per day, bars placed by time-of-day, so a
+	// single user's daily routine is easy to read.
+	const isAllMode = mode === 'all';
+	const rowKey = isAllMode
+		? function (s) { return s.username; }
+		: function (s) { return dayKey(s.started_at); };
+	const rows = [...new Set(timeline.map(rowKey))];
+
+	const datasets = projectsPresent.map(function (slug) {
+		return {
+			label: PROJECT_LABELS[slug] || slug,
+			data: timeline
+				.filter(function (s) { return s.project_slug === slug; })
+				.map(function (s) {
+					return {
+						y: rowKey(s),
+						x: [new Date(s.started_at).getTime(), new Date(s.last_seen_at).getTime()],
+					};
+				}),
+			backgroundColor: PROJECT_COLORS[slug] || '#6c757d',
+			borderRadius: 4,
+			barThickness: isAllMode ? 12 : 14,
+		};
+	});
+
+	const legend = document.getElementById('timelineLegend');
+	if (legend) {
+		legend.innerHTML = projectsPresent.map(function (slug) {
+			const color = PROJECT_COLORS[slug] || '#6c757d';
+			const label = PROJECT_LABELS[slug] || slug;
+			return '<span><span class="legend-swatch" style="background:' + color + '"></span>' + label + '</span>';
+		}).join('');
+	}
+
+	new Chart(canvas, {
+		type: 'bar',
+		data: { datasets: datasets },
+		options: {
+			indexAxis: 'y',
+			scales: {
+				x: {
+					type: 'time',
+					time: isAllMode ? {} : { unit: 'hour' },
+					title: { display: true, text: isAllMode ? 'Date / time' : 'Time of day' },
+				},
+				y: {
+					type: 'category',
+					labels: rows,
+					title: { display: true, text: isAllMode ? 'User' : 'Day' },
+					stacked: true,
+				},
+			},
+			plugins: {
+				tooltip: {
+					callbacks: {
+						label: function (ctx) {
+							const [start, end] = ctx.raw.x;
+							const minutes = Math.round((end - start) / 60000);
+							return ctx.dataset.label + ': ' + new Date(start).toLocaleString() + ' - ' + new Date(end).toLocaleTimeString() + ' (' + minutes + ' min)';
+						},
+					},
+				},
+				legend: { display: false },
+			},
+		},
+	});
+})();
+</script>
+{% endblock %}

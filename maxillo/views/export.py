@@ -60,22 +60,6 @@ EXPORT_MODALITY_FILE_TYPES = {
         "raw": ["panoramic_raw"],
         "processed": ["panoramic_processed"],
     },
-    "braintumor-mri-t1": {
-        "raw": ["braintumor_mri_t1_raw"],
-        "processed": ["braintumor_mri_t1_processed"],
-    },
-    "braintumor-mri-t1c": {
-        "raw": ["braintumor_mri_t1c_raw"],
-        "processed": ["braintumor_mri_t1c_processed"],
-    },
-    "braintumor-mri-t2": {
-        "raw": ["braintumor_mri_t2_raw"],
-        "processed": ["braintumor_mri_t2_processed"],
-    },
-    "braintumor-mri-flair": {
-        "raw": ["braintumor_mri_flair_raw"],
-        "processed": ["braintumor_mri_flair_processed"],
-    },
     "rawzip": {
         "raw": ["generic_raw"],
         "processed": ["generic_processed"],
@@ -127,6 +111,11 @@ def _build_shared_download_url(request, share_token):
     )
 
 
+def _get_export_for_request_or_404(request, export_id):
+    ExportModel = get_domain_models(request)["Export"]
+    return get_object_or_404(ExportModel.objects.all(), id=export_id)
+
+
 def _shared_export_availability(request, share_token):
     """Return export and availability status for shared access."""
     ExportModel = get_domain_models(request)["Export"]
@@ -151,6 +140,73 @@ def is_admin(user):
     return user.is_staff or user.profile.is_admin()
 
 
+def _laparoscopy_export_query_summary(folder_count):
+    return ", ".join(
+        [
+            f"{folder_count} folder{'s' if folder_count != 1 else ''}",
+            "Laparoscopy subsampled videos",
+            "Per-frame multilayer NPZ masks",
+            "All subsampled frames",
+        ]
+    )
+
+
+def _laparoscopy_export_new(request, ExportModel):
+    from laparoscopy.export_processor import get_laparoscopy_export_folders
+
+    if request.method == "POST":
+        folder_ids = request.POST.getlist("folder_ids")
+        if not folder_ids:
+            messages.error(request, "Please select at least one folder.")
+            return redirect_with_namespace(request, "export_new")
+
+        query_params = {
+            "domain": "laparoscopy",
+            "export_variant": "video_masks_v1",
+            "folder_ids": [int(fid) for fid in folder_ids],
+            "mask_format": "npz_multilayer",
+            "include_all_frames": True,
+            "video_subtype": "subsampled",
+        }
+        export = ExportModel.objects.create(
+            user=request.user,
+            status="pending",
+            query_params=query_params,
+            query_summary=_laparoscopy_export_query_summary(len(folder_ids)),
+        )
+
+        from ..utils.export_processor import start_export_processing
+
+        start_export_processing(export.id, "laparoscopy")
+        messages.success(request, f"Export #{export.id} created and processing started.")
+        return redirect_with_namespace(request, "export_list")
+
+    return render(
+        request,
+        "laparoscopy/export_new.html",
+        {
+            "folders": get_laparoscopy_export_folders(),
+            "ns": get_namespace(request),
+        },
+    )
+
+
+def _laparoscopy_export_preview(folder_ids):
+    from laparoscopy.export_processor import build_laparoscopy_export_preview
+
+    preview = build_laparoscopy_export_preview(folder_ids)
+    size_bytes = int(preview["estimated_size_bytes"] or 0)
+    return JsonResponse(
+        {
+            "success": True,
+            "patient_count": preview["patient_count"],
+            "folder_count": len(folder_ids),
+            "exportable_patient_count": preview["exportable_patient_count"],
+            "file_count": preview["file_count"],
+            "estimated_size": format_file_size(size_bytes),
+            "estimated_size_bytes": size_bytes,
+        }
+    )
 def _can_use_exports(request):
     if user_is_project_admin(request.user, request):
         return True
@@ -218,6 +274,9 @@ def export_new(request):
         return redirect_with_namespace(request, "patient_list")
     domain_models = get_domain_models(request)
     ExportModel = domain_models["Export"]
+    if get_namespace(request) == "laparoscopy":
+        return _laparoscopy_export_new(request, ExportModel)
+
     FolderModel = domain_models["Folder"]
     PatientModel = domain_models["Patient"]
 
@@ -228,6 +287,7 @@ def export_new(request):
         include_raw, include_processed = _resolve_content_selection(
             request.POST, default_when_missing=False
         )
+        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
 
         # Get filters
         filters = {}
@@ -253,39 +313,33 @@ def export_new(request):
             messages.error(request, "Please select at least one modality.")
             return redirect_with_namespace(request, "export_new")
 
-        if not include_raw and not include_processed:
+        if not include_raw and not include_processed and not include_reports:
             messages.error(
                 request,
-                "Please select at least one content type: Raw files and/or Processed files.",
+                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
             )
             return redirect_with_namespace(request, "export_new")
 
         # Create export record
         query_params = {
+            "domain": get_namespace(request),
             "folder_ids": [int(fid) for fid in folder_ids],
             "modality_slugs": modality_slugs,
             "filters": filters,
             "include_raw": include_raw,
             "include_processed": include_processed,
+            "include_reports": include_reports,
         }
 
         # Generate query summary
         folder_count = len(folder_ids)
         modality_names = []
-        include_reports = False
         for slug in modality_slugs:
-            if slug == "reports":
-                include_reports = True
-            else:
-                try:
-                    modality = Modality.objects.get(slug=slug)
-                    modality_names.append(modality.name)
-                except Modality.DoesNotExist:
-                    modality_names.append(slug)
-
-        # Add Reports to summary if selected
-        if include_reports:
-            modality_names.append("Reports")
+            try:
+                modality = Modality.objects.get(slug=slug)
+                modality_names.append(modality.name)
+            except Modality.DoesNotExist:
+                modality_names.append(slug)
 
         filter_parts = []
         if filters.get("has_cbct"):
@@ -314,6 +368,8 @@ def export_new(request):
             selected_content.append("Raw")
         if include_processed:
             selected_content.append("Processed")
+        if include_reports:
+            selected_content.append("Reports")
         query_summary_parts.append(f"Content: {' + '.join(selected_content)}")
 
         query_summary = ", ".join(query_summary_parts)
@@ -386,6 +442,7 @@ def export_preview(request):
         modality_slugs = data.get("modality_slugs", [])
         filters = data.get("filters", {})
         include_raw, include_processed = _resolve_content_selection(data)
+        include_reports = _coerce_bool(data.get("include_reports"), default=False)
         file_type_map = _file_type_map_for_selection(include_raw, include_processed)
 
         # Convert to proper types
@@ -393,6 +450,9 @@ def export_preview(request):
             folder_ids = [int(fid) for fid in folder_ids.split(",") if fid]
         else:
             folder_ids = [int(fid) for fid in folder_ids if fid]
+
+        if domain == "laparoscopy":
+            return _laparoscopy_export_preview(folder_ids)
 
         if isinstance(modality_slugs, str):
             modality_slugs = modality_slugs.split(",") if modality_slugs else []
@@ -404,10 +464,6 @@ def export_preview(request):
             else PatientModel.objects.none()
         )
 
-        file_patient_filter = (
-            "brain_patient__in" if domain == "brain" else "patient__in"
-        )
-
         # Apply filters (checking for processed files)
         if filters.get("has_cbct"):
             cbct_file_types = file_type_map.get("cbct", [])
@@ -416,9 +472,7 @@ def export_preview(request):
             # Patients with CBCT files for selected content
             cbct_patient_ids = FileRegistry.objects.filter(
                 domain=domain, file_type__in=cbct_file_types
-            ).values_list(
-                "brain_patient_id" if domain == "brain" else "patient_id", flat=True
-            )
+            ).values_list("patient_id", flat=True)
             cbct_patients = PatientModel.objects.filter(
                 patient_id__in=cbct_patient_ids
             ).distinct()
@@ -434,9 +488,7 @@ def export_preview(request):
             ios_patient_ids = FileRegistry.objects.filter(
                 domain=domain,
                 file_type__in=ios_file_types,
-            ).values_list(
-                "brain_patient_id" if domain == "brain" else "patient_id", flat=True
-            )
+            ).values_list("patient_id", flat=True)
             ios_patients = PatientModel.objects.filter(
                 patient_id__in=ios_patient_ids
             ).distinct()
@@ -453,10 +505,7 @@ def export_preview(request):
                 if file_types:
                     modality_patient_ids = FileRegistry.objects.filter(
                         domain=domain, file_type__in=file_types
-                    ).values_list(
-                        "brain_patient_id" if domain == "brain" else "patient_id",
-                        flat=True,
-                    )
+                    ).values_list("patient_id", flat=True)
                     modality_patients = PatientModel.objects.filter(
                         patient_id__in=modality_patient_ids
                     ).distinct()
@@ -472,52 +521,30 @@ def export_preview(request):
         for key, value in filters.items():
             if key.startswith("has_reports_") and value:
                 modality_slug = key.replace("has_reports_", "")
-                # Patients with files for this modality AND voice captions
-                try:
-                    modality = Modality.objects.get(slug=modality_slug)
-                    # Get patients with voice captions for this modality
-                    report_patients = (
-                        PatientModel.objects.filter(
-                            voice_captions__modality=modality,
-                            voice_captions__text_caption__isnull=False,
-                        )
-                        .exclude(voice_captions__text_caption="")
-                        .distinct()
+                report_patients = (
+                    PatientModel.objects.filter(
+                        voice_captions__modality=modality_slug,
+                        voice_captions__text_caption__isnull=False,
                     )
-                    patients = patients.filter(
-                        patient_id__in=report_patients.values_list(
-                            "patient_id", flat=True
-                        )
+                    .exclude(voice_captions__text_caption="")
+                    .distinct()
+                )
+                patients = patients.filter(
+                    patient_id__in=report_patients.values_list(
+                        "patient_id", flat=True
                     )
-                except Modality.DoesNotExist:
-                    pass
+                )
 
         patient_count = patients.count()
         folder_count = len(folder_ids) if folder_ids else 0
-        actual_modality_slugs = (
-            [slug for slug in modality_slugs if slug != "reports"]
-            if modality_slugs
-            else []
-        )
-        # When reports-only, count as 1 modality for display
-        modality_count = (
-            len(actual_modality_slugs)
-            if actual_modality_slugs
-            else (1 if modality_slugs else 0)
-        )
-
-        # Calculate file count and size estimate
-        # Separate reports from actual modalities
-        include_reports = "reports" in modality_slugs
-        actual_modality_slugs = [slug for slug in modality_slugs if slug != "reports"]
+        modality_count = len(modality_slugs) if modality_slugs else 0
 
         if patient_count > 0:
             file_count = 0
             total_size = 0
-            if actual_modality_slugs:
-                # Get files for selected modalities
+            if modality_slugs and (include_raw or include_processed):
                 file_types = []
-                for slug in actual_modality_slugs:
+                for slug in modality_slugs:
                     file_types.extend(file_type_map.get(slug, []))
                 file_filter = {
                     "domain": domain,
@@ -528,27 +555,13 @@ def export_preview(request):
                 file_count = files.count()
                 total_size = files.aggregate(total=Sum("file_size"))["total"] or 0
 
-            # Add voice caption reports if reports are selected (selected modalities or all when reports-only)
-            if include_reports:
-                report_modality_slugs = (
-                    actual_modality_slugs
-                    if actual_modality_slugs
-                    else list(
-                        Modality.objects.filter(is_active=True).values_list(
-                            "slug", flat=True
-                        )
-                    )
-                )
-                modality_objects = Modality.objects.filter(
-                    slug__in=report_modality_slugs
-                )
+            if include_reports and modality_slugs:
                 voice_captions = VoiceCaptionModel.objects.filter(
                     patient__in=patients,
-                    modality__in=modality_objects,
+                    modality__in=modality_slugs,
                     text_caption__isnull=False,
                 ).exclude(text_caption="")
-                voice_caption_count = voice_captions.count()
-                file_count += voice_caption_count
+                file_count += voice_captions.count()
                 for vc in voice_captions:
                     total_size += len(vc.text_caption.encode("utf-8"))
         else:
@@ -636,7 +649,7 @@ def _recover_stuck_export(export):
 @user_passes_test(is_admin)
 def export_status(request, export_id):
     """AJAX endpoint to get current export status."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     # Check permissions
     if export.user != request.user and not request.user.is_staff:
@@ -678,7 +691,7 @@ def export_status(request, export_id):
 @user_passes_test(is_admin)
 def export_download(request, export_id):
     """Download export ZIP file."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     # Check permissions
     if export.user != request.user and not request.user.is_staff:
@@ -719,7 +732,7 @@ def export_download(request, export_id):
 @require_POST
 def export_share_update(request, export_id):
     """Update share settings for a completed export."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     if export.user != request.user and not request.user.is_staff:
         return JsonResponse(
@@ -842,7 +855,7 @@ def export_shared_download(request, share_token):
 @require_POST
 def export_delete(request, export_id):
     """Delete export record and optionally the ZIP file."""
-    export = get_object_or_404(get_domain_models(request)["Export"], id=export_id)
+    export = _get_export_for_request_or_404(request, export_id)
 
     # Check permissions
     if export.user != request.user and not request.user.is_staff:

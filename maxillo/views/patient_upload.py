@@ -2,6 +2,7 @@
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.http import JsonResponse
 
 from common.models import Project
 from common.permissions import filter_folders_for_user, user_is_project_admin
@@ -38,20 +39,27 @@ def upload_patient(request):
         patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
         patient_form = PatientForm()
 
-        # For now, we do not support CBCT folder uploads
+        # Validate CBCT folder uploads before creating the patient so invalid
+        # folder selections do not leave behind empty patient rows.
         cbct_upload_type = request.POST.get('cbct_upload_type', 'file')
-        if cbct_upload_type == 'folder' and request.FILES.getlist('cbct_folder_files'):
-            messages.error(request, 'CBCT Folder uploads have been disabled.')
-            allowed_folders = filter_folders_for_user(
-                request.user,
-                Folder.objects.filter(parent__isnull=True).order_by('name'),
-                namespace,
-            )
-            return render(request, 'common/upload/upload.html', {
-                'patient_form': patient_form,
-                'patient_upload_form': patient_upload_form,
-                'folders': allowed_folders,
-            })
+        cbct_folder_files = request.FILES.getlist('cbct_folder_files')
+        if cbct_upload_type == 'folder' and cbct_folder_files:
+            try:
+                from ..models import validate_cbct_folder
+
+                validate_cbct_folder(cbct_folder_files)
+            except Exception as e:
+                messages.error(request, f'Error validating CBCT folder: {e}')
+                allowed_folders = filter_folders_for_user(
+                    request.user,
+                    Folder.objects.filter(parent__isnull=True).order_by('name'),
+                    namespace,
+                )
+                return render(request, 'common/upload/upload.html', {
+                    'patient_form': patient_form,
+                    'patient_upload_form': patient_upload_form,
+                    'folders': allowed_folders,
+                })
 
         if patient_upload_form.is_valid():
             # Create and populate Patient from the form
@@ -96,7 +104,6 @@ def upload_patient(request):
             
             # Handle CBCT (single file or folder)
             cbct_file = request.FILES.get('cbct')
-            cbct_folder_files = request.FILES.getlist('cbct_folder_files')
             if cbct_file or cbct_folder_files:
                 try:
                     modality = Modality.objects.get(slug='cbct')
@@ -110,9 +117,10 @@ def upload_patient(request):
                             if job:
                                 processing_job_ids.append(job.id)
                     elif cbct_folder_files:
-                        from ..file_utils import save_generic_modality_folder
-                        fr, job = save_generic_modality_folder(patient, 'cbct', cbct_folder_files)
-                        if fr:
+                        from ..file_utils import save_cbct_folder_to_dataset
+
+                        folder_path, job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
+                        if folder_path:
                             uploaded_modalities.append('CBCT')
                             if job:
                                 processing_job_ids.append(job.id)
@@ -191,29 +199,33 @@ def upload_patient(request):
                 except Exception as e:
                     messages.error(request, f"Error saving Intraoral Photos: {e}")
 
-            # Handle Brain MRI modalities (T1, T2, FLAIR, T1c)
-            brain_modalities = {
-                'braintumor-mri-t1': 'Brain MRI T1',
-                'braintumor-mri-t2': 'Brain MRI T2',
-                'braintumor-mri-flair': 'Brain MRI FLAIR',
-                'braintumor-mri-t1c': 'Brain MRI T1c',
-            }
 
-            for slug, display_name in brain_modalities.items():
-                file_obj = request.FILES.get(slug)
-                if file_obj:
-                    try:
-                        modality = Modality.objects.get(slug=slug)
-                        patient.modalities.add(modality)
+            # Generic video modality
+            video_file = request.FILES.get('video')
+            video_error = None
+            if video_file:
+                try:
+                    modality = Modality.objects.get(slug='video')
+                    patient.modalities.add(modality)
 
-                        from ..file_utils import save_generic_modality_file
-                        fr, job = save_generic_modality_file(patient, slug, file_obj)
-                        if fr:
-                            uploaded_modalities.append(display_name)
-                            if job:
-                                processing_job_ids.append(job.id)
-                    except Exception as e:
-                        messages.error(request, f"Error saving {display_name}: {e}")
+                    from laparoscopy.file_utils import save_video_to_dataset
+                    fr, job = save_video_to_dataset(patient, video_file)
+                    if fr:
+                        uploaded_modalities.append('Video')
+                        if job:
+                            processing_job_ids.append(job.id)
+                    else:
+                        video_error = 'Video file could not be saved (storage may be unavailable).'
+                except Exception as e:
+                    video_error = f"Error saving Video: {e}"
+
+            is_xhr = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+            if video_error:
+                messages.error(request, video_error)
+                if is_xhr:
+                    return JsonResponse({'ok': False, 'error': video_error}, status=400)
+
 
             if uploaded_modalities:
                 unique_modalities = list(dict.fromkeys(uploaded_modalities))
@@ -228,6 +240,16 @@ def upload_patient(request):
                 messages.success(request, summary_message)
             else:
                 messages.success(request, 'Patient uploaded successfully!')
+
+            if is_xhr:
+                from django.urls import reverse, NoReverseMatch
+                ns = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
+                try:
+                    redirect_url = reverse(f"{ns}:patient_list")
+                except NoReverseMatch:
+                    redirect_url = reverse('maxillo:patient_list')
+                return JsonResponse({'ok': True, 'redirect': redirect_url})
+
             return redirect_with_namespace(request, 'patient_list')
     else:
         patient_form = PatientForm()

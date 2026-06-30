@@ -27,10 +27,11 @@ function updateStatistics() {
     const filterCheckboxes = document.querySelectorAll('.filter-checkbox:checked');
     const includeRaw = document.getElementById('include_raw')?.checked ?? true;
     const includeProcessed = document.getElementById('include_processed')?.checked ?? true;
-    
+    const includeReports = document.getElementById('include_reports')?.checked ?? false;
+
     const folderIds = Array.from(folderCheckboxes).map(cb => cb.value);
     const modalitySlugs = Array.from(modalityCheckboxes).map(cb => cb.value);
-    
+
     const filters = {};
     filterCheckboxes.forEach(cb => {
         if (cb.name.startsWith('filter_')) {
@@ -38,16 +39,16 @@ function updateStatistics() {
             filters[filterName] = true;
         }
     });
-    
-    // Don't make request if no folders or modalities selected
-    if (folderIds.length === 0 || modalitySlugs.length === 0 || (!includeRaw && !includeProcessed)) {
+
+    // Don't make request if no folders, modalities, or content type selected
+    if (folderIds.length === 0 || modalitySlugs.length === 0 || (!includeRaw && !includeProcessed && !includeReports)) {
         // Reset statistics
         document.getElementById('stat-patients').textContent = '0';
         document.getElementById('stat-folders').textContent = '0';
         document.getElementById('stat-modalities').textContent = '0';
         document.getElementById('stat-size').textContent = '-';
         document.getElementById('stat-files').textContent = '0';
-        
+
         // Disable create button
         const createBtn = document.getElementById('createExportBtn');
         if (createBtn) {
@@ -80,6 +81,7 @@ function updateStatistics() {
             filters: filters,
             include_raw: includeRaw,
             include_processed: includeProcessed,
+            include_reports: includeReports,
         }),
     })
     .then(response => response.json())

@@ -25,7 +25,18 @@ class NiiVueViewer {
         this.initialized = false;
         this.currentOrientation = 'axial';
         this.modalitySlug = null;
+        this.segmentationOverlayLoaded = false;
         this.onLocationChangeCallback = null;
+    }
+
+    async _payloadToArrayBuffer(filePayload) {
+        if (filePayload instanceof ArrayBuffer) {
+            return filePayload;
+        }
+        if (filePayload && typeof filePayload.arrayBuffer === 'function') {
+            return filePayload.arrayBuffer();
+        }
+        throw new Error('Unsupported volume payload type. Expected Blob or ArrayBuffer.');
     }
 
     /**
@@ -68,14 +79,7 @@ class NiiVueViewer {
         // Load volume from pre-fetched blob data. loadFromArrayBuffer
         // parses the buffer directly without any HTTP request. The name
         // must end in .nii.gz so NiiVue selects the correct parser.
-        let arrayBuffer;
-        if (fileBlob instanceof ArrayBuffer) {
-            arrayBuffer = fileBlob;
-        } else if (fileBlob && typeof fileBlob.arrayBuffer === 'function') {
-            arrayBuffer = await fileBlob.arrayBuffer();
-        } else {
-            throw new Error('Unsupported volume payload type. Expected Blob or ArrayBuffer.');
-        }
+        let arrayBuffer = await this._payloadToArrayBuffer(fileBlob);
         await this.nv.loadFromArrayBuffer(arrayBuffer, modalitySlug + '.nii.gz');
 
         // Keep 2D crosshair behavior deterministic across viewers.
@@ -87,6 +91,124 @@ class NiiVueViewer {
         this.setOrientation('axial');
 
         this.initialized = true;
+    }
+
+    /**
+     * Load (first time) or show (subsequent calls) a semi-transparent segmentation mask.
+     *
+     * On the first call the NIfTI is parsed and uploaded to the GPU.
+     * On later calls only the overlay opacity is restored — no re-parse, no GPU re-upload.
+     *
+     * @param {Blob|ArrayBuffer} fileBlob - NIfTI payload as Blob or ArrayBuffer
+     * @param {{opacity?: number}} options
+     * @returns {Promise<void>}
+     */
+    async setSegmentationOverlay(fileBlob, options = {}) {
+        if (!this.nv || !this.initialized) {
+            throw new Error('Cannot load segmentation overlay before base volume is initialized');
+        }
+
+        const opacity = typeof options.opacity === 'number' ? options.opacity : 0.5;
+
+        // Fast path: overlay already loaded in GPU memory — just make it visible again.
+        if (this.segmentationOverlayLoaded && this.nv.volumes && this.nv.volumes.length >= 2) {
+            this._setOverlayOpacity(this.nv.volumes.length - 1, opacity);
+            return;
+        }
+
+        // Slow path (first call only): parse + GPU upload.
+        // Remove any stale overlay volumes first (handles edge cases only).
+        this._unloadOverlayVolumes();
+
+        const arrayBuffer = await this._payloadToArrayBuffer(fileBlob);
+        const previousVolumeCount = this.nv.volumes ? this.nv.volumes.length : 0;
+
+        await this.nv.loadFromArrayBuffer(arrayBuffer, 'braintumor-mri-seg.nii.gz');
+
+        const overlayIndex = this.nv.volumes ? this.nv.volumes.length - 1 : -1;
+        if (overlayIndex < previousVolumeCount || overlayIndex < 1) {
+            throw new Error('Segmentation overlay volume was not loaded');
+        }
+
+        const overlay = this.nv.volumes[overlayIndex];
+
+        // addColormap is confirmed public in NiiVue 0.67.
+        // I=[0,85,170,255] evenly maps labels 0/1/2/3 across the 0-255 LUT range:
+        //   voxel N → LUT index (N/3)*255  →  0→0, 1→85, 2→170, 3→255
+        // cal_max is hardcoded to 3 — do NOT use global_max which NiiVue may
+        // report as 1.0 for integer label files.
+        try {
+            this.nv.addColormap('segmentationMask', {
+                R: [0,   0,   255, 0  ],
+                G: [0,   255, 0,   0  ],
+                B: [0,   0,   0,   255],
+                A: [0,   255, 255, 255],
+                I: [0,   85,  170, 255]
+            });
+            overlay.colormap = 'segmentationMask';
+        } catch (e) {
+            overlay.colormap = 'red';
+        }
+
+        this._setOverlayOpacity(overlayIndex, opacity);
+
+        // Set cal range after the GPU update inside _setOverlayOpacity so it
+        // is not overwritten by any internal reset, then flush to GPU.
+        overlay.cal_min = 0;
+        overlay.cal_max = 3;
+        if (typeof this.nv.updateGLVolume === 'function') {
+            this.nv.updateGLVolume();
+        } else {
+            this.nv.drawScene();
+        }
+
+        this.segmentationOverlayLoaded = true;
+    }
+
+    /**
+     * Hide the segmentation overlay by setting its opacity to 0.
+     * The GPU-resident volume is kept so re-showing it is instant.
+     */
+    removeSegmentationOverlay() {
+        if (!this.nv || !this.nv.volumes || this.nv.volumes.length < 2) {
+            this.segmentationOverlayLoaded = false;
+            return;
+        }
+
+        // Hide via opacity — avoids GPU teardown and keeps the volume ready for re-show.
+        this._setOverlayOpacity(this.nv.volumes.length - 1, 0);
+        // Keep segmentationOverlayLoaded = true so the fast path is used next time.
+    }
+
+    /**
+     * Actually unload overlay volumes from NiiVue (called on dispose / base-volume replace).
+     * @private
+     */
+    _unloadOverlayVolumes() {
+        if (!this.nv || !this.nv.volumes || this.nv.volumes.length < 2) {
+            this.segmentationOverlayLoaded = false;
+            return;
+        }
+        for (let i = this.nv.volumes.length - 1; i >= 1; i--) {
+            this.nv.closeVolume(i);
+        }
+        this.segmentationOverlayLoaded = false;
+        this.nv.drawScene();
+    }
+
+    /**
+     * Set the opacity of an overlay volume and trigger a redraw.
+     * @private
+     */
+    _setOverlayOpacity(overlayIndex, opacity) {
+        const clamped = Math.max(0, Math.min(1, opacity));
+        const overlay = this.nv.volumes[overlayIndex];
+        overlay.opacity = clamped;
+        if (typeof this.nv.setOpacity === 'function') {
+            this.nv.setOpacity(overlayIndex, clamped);
+        } else {
+            this.nv.drawScene();
+        }
     }
 
     /**
@@ -375,7 +497,9 @@ class NiiVueViewer {
 
             // Clear all volumes
             if (this.nv.volumes && this.nv.volumes.length > 0) {
-                this.nv.closeVolume(0);
+                for (let i = this.nv.volumes.length - 1; i >= 0; i--) {
+                    this.nv.closeVolume(i);
+                }
             }
             this.nv = null;
         }
@@ -383,6 +507,7 @@ class NiiVueViewer {
         this.initialized = false;
         this.currentOrientation = 'axial';
         this.modalitySlug = null;
+        this.segmentationOverlayLoaded = false;
     }
 }
 

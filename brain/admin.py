@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Classification, Dataset, Export, Folder, Patient, Tag, VoiceCaption
+from .models import Dataset, Export, Folder, Patient, Tag, VoiceCaption
 
 
 @admin.register(Dataset)
@@ -23,15 +23,9 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
-    list_display = ['patient_id', 'name', 'visibility', 'folder', 'uploaded_at', 'uploaded_by']
+    list_display = ['patient_id', 'name', 'visibility', 'uploaded_at', 'uploaded_by']
     list_filter = ['visibility', 'uploaded_at']
     search_fields = ['patient_id', 'name']
-
-
-@admin.register(Classification)
-class ClassificationAdmin(admin.ModelAdmin):
-    list_display = ['id', 'patient', 'classifier', 'timestamp']
-    list_filter = ['classifier', 'timestamp']
 
 
 @admin.register(VoiceCaption)

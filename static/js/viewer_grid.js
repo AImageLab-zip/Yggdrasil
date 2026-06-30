@@ -14,6 +14,12 @@ const ViewerGrid = (function() {
     // Note: Cache persists across window clears for network optimization.
     const volumeCache = {};
     const volumeFetchPromises = {};
+    const SEGMENTATION_OPACITY = 0.5;
+    const segmentationVolumeCache = {};
+    const segmentationFetchPromises = {};
+    let segmentationOverlayEnabled = false;
+    let segmentationOverlayLoading = false;
+    let segmentationOverlayError = null;
 
     // Per-window load generation counters used to invalidate stale async loads.
     // If a window is cleared or reloaded while an older load is still running,
@@ -105,6 +111,7 @@ const ViewerGrid = (function() {
         scanId: null,
         projectNamespace: null,
         modalityFiles: {},
+        segmentationFile: null,
         fixedMode: false,
         enableDragDrop: true,
         enableContextMenu: true,
@@ -184,12 +191,26 @@ const ViewerGrid = (function() {
             button.setAttribute('aria-pressed', activeTool === TOOL_IDS.MEASURE ? 'true' : 'false');
         });
 
+        const segButtons = document.querySelectorAll('.viewer-seg-toggle');
+        segButtons.forEach((button) => {
+            button.classList.toggle('active', segmentationOverlayEnabled);
+            button.disabled = segmentationOverlayLoading;
+            button.setAttribute('aria-pressed', segmentationOverlayEnabled ? 'true' : 'false');
+            button.title = segmentationOverlayLoading
+                ? 'Loading segmentation overlay'
+                : (segmentationOverlayEnabled ? 'Hide segmentation overlay' : 'Show segmentation overlay');
+        });
+
         const statusEls = document.querySelectorAll('.viewer-tool-status');
         let statusText = 'Tool: None';
         if (activeTool === TOOL_IDS.MEASURE) {
             statusText = measurementState.pendingStartPoint
                 ? 'Measure: select second point'
                 : 'Measure: select first point';
+        } else if (segmentationOverlayLoading) {
+            statusText = 'Loading SEG overlay';
+        } else if (segmentationOverlayError) {
+            statusText = segmentationOverlayError;
         }
         statusEls.forEach((el) => {
             el.textContent = statusText;
@@ -220,6 +241,11 @@ const ViewerGrid = (function() {
                     <button type="button" class="viewer-tool-btn" data-tool-action="clear-measurements" title="Clear measurements">
                         <i class="fas fa-eraser"></i>
                     </button>
+                    ${hasSegmentationFile() ? `
+                    <button type="button" class="viewer-tool-btn viewer-tool-btn--seg viewer-seg-toggle" data-tool-action="toggle-segmentation" title="Show segmentation overlay" aria-pressed="false">
+                        <i class="fas fa-layer-group"></i><span>SEG</span>
+                    </button>
+                    ` : ''}
                 </div>
                 <div class="viewer-tool-status">Tool: None</div>
             `;
@@ -244,8 +270,137 @@ const ViewerGrid = (function() {
                 });
             }
 
+            const segBtn = toolbar.querySelector('[data-tool-action="toggle-segmentation"]');
+            if (segBtn) {
+                segBtn.addEventListener('click', () => {
+                    toggleSegmentationOverlay();
+                });
+            }
+
             gridEl.parentNode.insertBefore(toolbar, gridEl);
         });
+    }
+
+    function hasSegmentationFile() {
+        return !!(djangoData.segmentationFile && djangoData.segmentationFile.id);
+    }
+
+    function getSegmentationFileId() {
+        return hasSegmentationFile() ? String(djangoData.segmentationFile.id) : null;
+    }
+
+    async function fetchSegmentationArrayBuffer() {
+        const fileId = getSegmentationFileId();
+        if (!fileId) {
+            throw new Error('No segmentation file is available');
+        }
+
+        if (segmentationVolumeCache[fileId]) {
+            return segmentationVolumeCache[fileId];
+        }
+
+        if (!segmentationFetchPromises[fileId]) {
+            segmentationFetchPromises[fileId] = (async () => {
+                const response = await fetch(buildFileServeUrl(fileId, 'volume_nifti'));
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.arrayBuffer();
+            })();
+        }
+
+        try {
+            const arrayBuffer = await segmentationFetchPromises[fileId];
+            segmentationVolumeCache[fileId] = arrayBuffer;
+            return arrayBuffer;
+        } finally {
+            delete segmentationFetchPromises[fileId];
+        }
+    }
+
+    async function applySegmentationOverlayToWindow(windowIndex) {
+        if (!segmentationOverlayEnabled || !hasSegmentationFile()) {
+            return { ok: true, skipped: true };
+        }
+
+        const state = windowStates[windowIndex];
+        const viewer = state && state.niivueInstance;
+        if (!viewer || !viewer.isReady()) {
+            return { ok: true, skipped: true };
+        }
+
+        try {
+            const arrayBuffer = await fetchSegmentationArrayBuffer();
+            await viewer.setSegmentationOverlay(arrayBuffer, { opacity: SEGMENTATION_OPACITY });
+            return { ok: true };
+        } catch (error) {
+            console.warn(`Failed to apply segmentation overlay to window ${windowIndex}:`, error);
+            return { ok: false, error };
+        }
+    }
+
+    async function applySegmentationOverlayToReadyWindows() {
+        const readyWindowIndexes = Object.keys(windowStates)
+            .map((key) => parseInt(key, 10))
+            .filter((windowIndex) => {
+                const viewer = windowStates[windowIndex] && windowStates[windowIndex].niivueInstance;
+                return viewer && viewer.isReady();
+            });
+
+        if (readyWindowIndexes.length === 0) {
+            return true;
+        }
+
+        const results = await Promise.all(readyWindowIndexes.map((windowIndex) => applySegmentationOverlayToWindow(windowIndex)));
+        return results.some((result) => result.ok);
+    }
+
+    function removeSegmentationOverlayFromAllWindows() {
+        Object.keys(windowStates).forEach((key) => {
+            const state = windowStates[key];
+            const viewer = state && state.niivueInstance;
+            if (viewer && typeof viewer.removeSegmentationOverlay === 'function') {
+                viewer.removeSegmentationOverlay();
+            }
+        });
+    }
+
+    async function toggleSegmentationOverlay() {
+        if (!hasSegmentationFile() || segmentationOverlayLoading) {
+            return;
+        }
+
+        segmentationOverlayError = null;
+
+        if (segmentationOverlayEnabled) {
+            segmentationOverlayEnabled = false;
+            removeSegmentationOverlayFromAllWindows();
+            updateToolbarState();
+            renderMeasurementOverlays();
+            return;
+        }
+
+        segmentationOverlayEnabled = true;
+        segmentationOverlayLoading = true;
+        updateToolbarState();
+
+        let applied = false;
+        try {
+            applied = await applySegmentationOverlayToReadyWindows();
+        } catch (err) {
+            console.warn('toggleSegmentationOverlay: unexpected error', err);
+        } finally {
+            segmentationOverlayLoading = false;
+        }
+
+        if (!applied) {
+            segmentationOverlayEnabled = false;
+            removeSegmentationOverlayFromAllWindows();
+            segmentationOverlayError = 'SEG overlay unavailable';
+        }
+
+        updateToolbarState();
+        renderMeasurementOverlays();
     }
 
     function orientationToSliceType(viewer, orientation) {
@@ -796,6 +951,7 @@ const ViewerGrid = (function() {
                     scanId: data.scanId,
                     projectNamespace: data.projectNamespace,
                     modalityFiles: data.modalityFiles || {},
+                    segmentationFile: data.segmentationFile || null,
                     fixedMode: !!data.fixedMode,
                     enableDragDrop: data.enableDragDrop !== false,
                     enableContextMenu: data.enableContextMenu !== false,
@@ -1140,6 +1296,25 @@ const ViewerGrid = (function() {
             windowEl.querySelector('.niivue-viewer-container').appendChild(sliceCounter);
 
             renderMeasurementOverlayForWindow(windowIndex);
+
+            if (segmentationOverlayEnabled) {
+                const segResult = await applySegmentationOverlayToWindow(windowIndex);
+                if (!segResult.ok) {
+                    segmentationOverlayError = 'SEG overlay unavailable';
+                    updateToolbarState();
+                }
+            } else if (hasSegmentationFile()) {
+                // Preload the segmentation volume into GPU memory at opacity 0 so the
+                // first toggle-on is instant (no parse + upload delay).
+                applySegmentationOverlayToWindow(windowIndex)
+                    .then(result => {
+                        if (result.ok && !result.skipped) {
+                            // Keep it hidden — the toggle will restore opacity when needed.
+                            viewer.removeSegmentationOverlay();
+                        }
+                    })
+                    .catch(() => {/* non-critical, ignore */});
+            }
 
             // Attach orientation menu event handlers
             const menuBtns = windowEl.querySelectorAll('.orientation-btn');

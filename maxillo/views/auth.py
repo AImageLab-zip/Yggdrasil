@@ -2,7 +2,8 @@
 import logging
 import uuid
 
-from django.core.mail import send_mail
+from django.conf import settings
+from django.core.mail import get_connection, send_mail
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
@@ -16,6 +17,12 @@ from common.models import ProjectAccess
 
 
 logger = logging.getLogger(__name__)
+
+
+def _repair_empty_invitation_codes():
+    for invitation in Invitation.objects.filter(code='').only('pk', 'code'):
+        invitation.code = str(uuid.uuid4())
+        invitation.save(update_fields=['code'])
 
 
 def register(request):
@@ -44,6 +51,40 @@ def register(request):
             invitation.used_at = timezone.now()
             invitation.used_by = user
             invitation.save()
+
+            # Notify admin of new registration
+            try:
+                registered_at = timezone.localtime(invitation.used_at).strftime('%Y-%m-%d %H:%M %Z')
+                project_names = ', '.join(p.name for p in invitation_projects) or '—'
+                notification_context = {
+                    'email': user.email,
+                    'username': user.username,
+                    'project_names': project_names,
+                    'registered_at': registered_at,
+                }
+                notification_subject = render_to_string(
+                    'registration/emails/new_registration_subject.txt', notification_context
+                ).strip()
+                notification_message = render_to_string(
+                    'registration/emails/new_registration_body.txt', notification_context
+                )
+                admin_email = settings.DEFAULT_FROM_EMAIL
+                connection = get_connection(
+                    username=settings.EMAIL_HOST_USER,
+                    password=settings.EMAIL_HOST_PASSWORD,
+                    fail_silently=False,
+                )
+                send_mail(
+                    notification_subject,
+                    notification_message,
+                    admin_email,
+                    [admin_email],
+                    fail_silently=False,
+                    connection=connection,
+                )
+            except Exception:
+                logger.error('Failed to send new registration notification for user %s', user.username, exc_info=True)
+
             messages.success(request, f'Account created for {user.username}!')
             return redirect('login')
     else:
@@ -63,6 +104,8 @@ def register(request):
 @login_required
 @user_passes_test(lambda u: u.is_staff)
 def invitation_list(request):
+    _repair_empty_invitation_codes()
+
     invitations = Invitation.objects.all().prefetch_related('projects').order_by('-created_at')
     if request.method == 'POST':
         form = InvitationForm(request.POST)
@@ -85,12 +128,26 @@ def invitation_list(request):
                     'role_display': invitation.get_role_display(),
                     'expires_at': expires_at,
                     'register_url': register_url,
+                    'signature': form.cleaned_data.get('signature') or 'The Yggdrasil team',
                 }
                 subject = render_to_string('registration/emails/invitation_subject.txt', email_context).strip()
                 message = render_to_string('registration/emails/invitation_body.txt', email_context)
+                sender_email = form.cleaned_data.get('sender_email')
 
                 try:
-                    send_mail(subject, message, None, [invitation.email], fail_silently=False)
+                    connection = get_connection(
+                        username=settings.EMAIL_HOST_USER,
+                        password=settings.EMAIL_HOST_PASSWORD,
+                        fail_silently=False,
+                    )
+                    send_mail(
+                        subject,
+                        message,
+                        sender_email,
+                        [invitation.email],
+                        fail_silently=False,
+                        connection=connection,
+                    )
                     invitation.email_sent_at = timezone.now()
                     invitation.email_send_error = ''
                     invitation.save(update_fields=['email_sent_at', 'email_send_error'])
@@ -120,7 +177,7 @@ def invitation_list(request):
 
 
 @login_required
-@user_passes_test(lambda u: u.profile.is_admin())
+@user_passes_test(lambda u: u.is_staff)
 def delete_invitation(request, code):
     invitation = get_object_or_404(Invitation, code=code)
     if not invitation.used_at:  # Only allow deleting unused invitations

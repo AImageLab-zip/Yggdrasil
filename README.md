@@ -1,63 +1,55 @@
-# ToothFairy4M
+# Yggdrasil
 
-A Django web application for managing and processing dental and medical imaging data, including Intraoral Scans (IOS) and Cone Beam Computed Tomography (CBCT).
+A Django web application for managing and processing medical imaging data across multiple research projects, each mounted as its own app: **Maxillo** (`/maxillo/`), **Brain** (`/brain/`), and **Laparoscopy** (`/laparoscopy/`).
 
 ## Main Features
 
-- **Bite Classification**: Automatic and manual classification of dental occlusion
-- **AI-Powered Captioning**: IOS and CBCT annotation using speech-to-text technology
+### Maxillo (dental/maxillofacial imaging)
+
+- **Bite Classification**: Automatic and manual classification of dental occlusion (sagittal, vertical, transverse, midline)
+- **AI-Powered Captioning**: IOS and CBCT annotation using speech-to-text technology, with editable/versioned transcriptions
 - **CBCT Panoramic Extraction**: Automated extraction of panoramic views from CBCT scans
 - **IOS Normalization**: Standardized processing of intraoral scan data
-- **Multi-Modality Support**: Handle IOS, intraoral photos, teleradiography, and panoramic images
-- **Data Export**: Structured export of patient data and imaging files
-- **User Management**: Role-based access control and project organization
+- **Multi-Modality Support**: Handle IOS, intraoral photos, teleradiography, panoramic images, and CBCT
+- **Data Export**: Structured, shareable export of patient data and imaging files
+
+### Brain (brain tumor MRI imaging)
+
+`brain/` reuses the same patient/folder/export workflow as `maxillo/` for a separate project namespace, with its own database tables, folders, and modalities.
+
+- **Multi-Modality Support**: Handle brain tumor MRI sequences (T1, T2, FLAIR, T1c)
+- **AI-Powered Captioning**: Speech-to-text annotation with editable/versioned transcriptions
+- **Data Export**: Structured, shareable export of patient data and imaging files
+
+### Laparoscopy (surgical video annotation)
+
+- **Video Upload & Organization**: Upload laparoscopic surgery videos into folders, datasets, and tags
+- **Frame-Accurate Annotation**: Brush/eraser/polygon region annotation and time-stamped quadrant markers, with per-project, per-user color schemes
+- **AI-Assisted Segmentation**: Point-prompt segmentation proxied to an external worker service (requires `WORKER_BASE_URL` — see [docs/setup.md](docs/setup.md))
+- **Voice Captioning**: Speech-to-text clinical notes, same as Maxillo/Brain
+- **Data Export**: Subsampled video frames plus per-frame annotation masks (NPZ) as ZIP archives
 
 ## Description
 
-ToothFairy4M is a comprehensive platform designed for dental and maxillofacial imaging research. It provides tools for uploading, processing, annotating, and exporting medical imaging data with support for multiple modalities. The application features a modern web interface with 3D visualization capabilities and automated processing workflows.
+Yggdrasil is a comprehensive platform designed for medical imaging research. It provides tools for uploading, processing, annotating, and exporting imaging data with support for multiple modalities across its three projects. The application features a modern web interface with 3D visualization capabilities and automated processing workflows.
 
-Live instance: [https://toothfairy4m.ing.unimore.it](https://toothfairy4m.ing.unimore.it)
+Live instance: [https://yggdrasil.ing.unimore.it](https://yggdrasil.ing.unimore.it)
 
-## Environment variables
+## Documentation
 
-Minimum required for the web stack:
-
-- `SECRET_KEY` (Django)
-- `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` (MySQL)
-- `REDIS_PASSWORD` (Redis auth used by Celery defaults)
-- `RUNNER_API_TOKENS` (token(s) accepted by runner callback API)
+- [docs/setup.md](docs/setup.md) — first-time setup: `.env`, `DOCKER_SUFFIX`, Docker networks
+- [docs/running.md](docs/running.md) — day-to-day commands: start/stop, logs, migrations, shell access
+- [docs/runners.md](docs/runners.md) — distributed Celery runners and the runner callback API
+- [docs/admin-tasks.md](docs/admin-tasks.md) — one-off ops scripts (superuser, DB import)
+- [docs/new-project-type.md](docs/new-project-type.md) — adding a new project app (like Maxillo, Brain, or Laparoscopy)
 
 Notes:
 
-- Django accepts either `DB_NAME/DB_USER/DB_PASSWORD` or the `MYSQL_*` variables above.
+- Django accepts either `DB_NAME/DB_USER/DB_PASSWORD` or the `MYSQL_*` variables.
 - Object storage is S3-compatible (Garage/MinIO) via `OBJECT_STORAGE_*`.
-
-## Running web stack
-
-```bash
-docker compose --env-file .env up -d
-```
-
-This starts Django, MySQL, and Redis for distributed runners.
-
-## Distributed runners (hard cutover)
-
-CBCT/IOS preprocessing is executed by external Celery runners.
-
-- Web app enqueues `RUNNER_TASK_NAME` (default: `toothfairy4m_runner.process_job`).
-- Job routing uses `RUNNER_DEFAULT_QUEUE` with optional `RUNNER_QUEUE_BY_MODALITY` / `RUNNER_QUEUE_BY_PROJECT`.
-- For two-stage IOS workflows and speech-to-text, map queues by modality, for example:
-  - `{"ios":"runner_ios_dev","bite_classification":"runner_bite_dev","cbct":"runner_cbct_dev","audio":"runner_audio_dev"}`
-- External runner claims/completes/fails through token-protected endpoints:
-  - `POST /api/runner/jobs/<id>/claim/`
-  - `POST /api/runner/jobs/<id>/complete/`
-  - `POST /api/runner/jobs/<id>/fail/`
-
-Use `toothfairy4m-runner` (cookiecutter template) to run worker nodes.
 
 ## Contact
 
 For more information or to request an account, please contact:
 
-**Luca Lumetti**  
-Email: [luca.lumetti@unimore.it](mailto:luca.lumetti@unimore.it)
+Email: [yggdrasil@unimore.it](mailto:yggdrasil@unimore.it)

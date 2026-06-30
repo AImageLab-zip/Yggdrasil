@@ -18,18 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 def _request_domain(request):
-    namespace = (
-        getattr(request, "resolver_match", None) and request.resolver_match.namespace
-    ) or "maxillo"
-    return "brain" if namespace == "brain" else "maxillo"
+    return "maxillo"
 
 
 def _job_patient(job):
-    return job.brain_patient if job.domain == "brain" else job.patient
+    return job.patient
 
 
 def _job_voice_caption(job):
-    return job.brain_voice_caption if job.domain == "brain" else job.voice_caption
+    return job.voice_caption
 
 
 def _serialize_job(job):
@@ -79,13 +76,6 @@ def _apply_job_acl_filter(jobs_qs, user, domain):
     if user_is_project_admin(user, domain):
         return jobs_qs
 
-    if domain == "brain":
-        folder_ids = user.brain_folder_access.values_list("folder_id", flat=True)
-        return jobs_qs.filter(
-            Q(brain_patient__folder_id__in=folder_ids)
-            | Q(brain_voice_caption__patient__folder_id__in=folder_ids)
-        )
-
     folder_ids = user.maxillo_folder_access.values_list("folder_id", flat=True)
     return jobs_qs.filter(
         Q(patient__folder_id__in=folder_ids)
@@ -100,7 +90,7 @@ def get_job_status(request, job_id):
     try:
         domain = _request_domain(request)
         job = Job.objects.select_related(
-            "patient", "brain_patient", "voice_caption", "brain_voice_caption"
+            "patient", "voice_caption"
         ).get(id=job_id, domain=domain)
         if not _user_can_access_job(request.user, job):
             return JsonResponse({"error": "Permission denied"}, status=403)
@@ -128,7 +118,7 @@ class ProcessingJobListView(View):
 
             domain = _request_domain(request)
             jobs = Job.objects.filter(domain=domain).select_related(
-                "patient", "brain_patient", "voice_caption", "brain_voice_caption"
+                "patient", "voice_caption"
             )
             jobs = _apply_job_acl_filter(jobs, request.user, domain)
 
