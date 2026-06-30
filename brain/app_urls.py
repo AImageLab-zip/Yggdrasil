@@ -129,6 +129,7 @@ urlpatterns = [
         name="export_shared_download",
     ),
     path("export/<int:export_id>/delete/", views.export_delete, name="export_delete"),
+    path("export/<int:export_id>/stop/", views.export_stop, name="export_stop"),
     path(
         "api/patient/<int:patient_id>/data/",
         views.patient_viewer_data,

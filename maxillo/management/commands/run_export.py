@@ -18,17 +18,23 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('export_id', type=int)
+        parser.add_argument('--domain', choices=['maxillo', 'laparoscopy', 'brain'])
 
-parser.add_argument('--domain', choices=['maxillo', 'laparoscopy'])
     def handle(self, *args, **options):
+        from brain.models import Export as BrainExport
+
         export_id = options['export_id']
         domain = options.get('domain')
+
         export = None
         if domain == 'laparoscopy':
             export = LaparoscopyExport.objects.filter(id=export_id).first()
+        elif domain == 'brain':
+            export = BrainExport.objects.filter(id=export_id).first()
         elif domain == 'maxillo':
             export = MaxilloExport.objects.filter(id=export_id).first()
         else:
+            # No domain given: probe each table and infer the domain.
             export = MaxilloExport.objects.filter(id=export_id).first()
             if export:
                 domain = 'maxillo'
@@ -36,16 +42,13 @@ parser.add_argument('--domain', choices=['maxillo', 'laparoscopy'])
                 export = LaparoscopyExport.objects.filter(id=export_id).first()
                 if export:
                     domain = 'laparoscopy'
+                else:
+                    export = BrainExport.objects.filter(id=export_id).first()
+                    if export:
+                        domain = 'brain'
 
-        export = MaxilloExport.objects.filter(id=export_id).first()
         if not export:
             raise CommandError(f'Export {export_id} not found')
-
-        if not domain:
-            if export.__class__.__module__.startswith('laparoscopy.'):
-                domain = 'laparoscopy'
-            else:
-                domain = 'maxillo'
 
         if export.status == 'pending':
             export.mark_processing()

@@ -51,6 +51,40 @@ def register(request):
             invitation.used_at = timezone.now()
             invitation.used_by = user
             invitation.save()
+
+            # Notify admin of new registration
+            try:
+                registered_at = timezone.localtime(invitation.used_at).strftime('%Y-%m-%d %H:%M %Z')
+                project_names = ', '.join(p.name for p in invitation_projects) or '—'
+                notification_context = {
+                    'email': user.email,
+                    'username': user.username,
+                    'project_names': project_names,
+                    'registered_at': registered_at,
+                }
+                notification_subject = render_to_string(
+                    'registration/emails/new_registration_subject.txt', notification_context
+                ).strip()
+                notification_message = render_to_string(
+                    'registration/emails/new_registration_body.txt', notification_context
+                )
+                admin_email = settings.DEFAULT_FROM_EMAIL
+                connection = get_connection(
+                    username=settings.EMAIL_HOST_USER,
+                    password=settings.EMAIL_HOST_PASSWORD,
+                    fail_silently=False,
+                )
+                send_mail(
+                    notification_subject,
+                    notification_message,
+                    admin_email,
+                    [admin_email],
+                    fail_silently=False,
+                    connection=connection,
+                )
+            except Exception:
+                logger.error('Failed to send new registration notification for user %s', user.username, exc_info=True)
+
             messages.success(request, f'Account created for {user.username}!')
             return redirect('login')
     else:

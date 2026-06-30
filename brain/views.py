@@ -12,9 +12,11 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
-from django.http import JsonResponse
+from django.http import JsonResponse, Http404
+from django.utils import timezone
+from django.contrib.auth.views import redirect_to_login
 
-from common.file_access import exists as artifact_exists
+from common.file_access import exists as artifact_exists, streaming_response
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
 from common.permissions import (
@@ -27,6 +29,15 @@ from common.permissions import (
     user_is_project_admin,
 )
 
+from maxillo.utils.export_processor import ExportProcessor, start_export_processing
+from maxillo.views.export import (
+    _build_shared_download_url,
+    _coerce_bool,
+    _kill_export_processes,
+    _recover_stuck_export,
+    _resolve_content_selection,
+    format_file_size,
+)
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
@@ -984,55 +995,427 @@ def update_nifti_metadata(request, patient_id):
     return JsonResponse({"ok": True})
 
 
+def _brain_shared_export_availability(share_token):
+    """Resolve a brain export by share token and whether it's downloadable."""
+    export = Export.objects.filter(share_token=share_token).first()
+    if not export:
+        return None, False
+    if export.share_mode == "private":
+        return export, False
+    if export.status != "completed":
+        return export, False
+    if not export.file_path or not artifact_exists(export.file_path):
+        return export, False
+    return export, True
+
+
 @login_required
 @_with_brain_export_mappings
 def export_list(request):
+    """Export history page. Reuses the maxillo template with ns='brain'."""
     exports = Export.objects.filter(user=request.user).order_by("-created_at")
-    return render(request, "brain/export_list.html", {"exports": exports})
+
+    exports_with_sizes = [
+        {
+            "export": export,
+            "size_display": format_file_size(export.file_size) if export.file_size else None,
+        }
+        for export in exports
+    ]
+
+    paginator = Paginator(exports_with_sizes, 50)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "maxillo/export_list.html",
+        {"exports": page_obj, "page_obj": page_obj, "ns": "brain"},
+    )
 
 
 @login_required
 @_with_brain_export_mappings
 def export_new(request):
+    """Create-export page. Reuses the maxillo template with ns='brain'."""
     if request.method == "POST":
-        export = Export.objects.create(user=request.user, status="pending", query_params=dict(request.POST), query_summary="Brain export")
-        messages.success(request, f"Export #{export.id} created.")
+        folder_ids = [int(fid) for fid in request.POST.getlist("folder_ids")]
+        modality_slugs = request.POST.getlist("modality_slugs")
+
+        if not folder_ids:
+            messages.error(request, "Please select at least one folder.")
+            return redirect("brain:export_new")
+        if not modality_slugs:
+            messages.error(request, "Please select at least one modality.")
+            return redirect("brain:export_new")
+
+        filters = {
+            key.replace("filter_", ""): True
+            for key in request.POST.keys()
+            if key.startswith("filter_")
+        }
+        include_raw, include_processed = _resolve_content_selection(
+            request.POST, default_when_missing=False
+        )
+        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
+
+        if not include_raw and not include_processed and not include_reports:
+            messages.error(
+                request,
+                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
+            )
+            return redirect("brain:export_new")
+
+        query_params = {
+            "domain": "brain",
+            "folder_ids": folder_ids,
+            "modality_slugs": modality_slugs,
+            "filters": filters,
+            "include_raw": include_raw,
+            "include_processed": include_processed,
+            "include_reports": include_reports,
+        }
+
+        modality_names = list(
+            Modality.objects.filter(slug__in=modality_slugs).values_list("name", flat=True)
+        ) or modality_slugs
+        selected_content = [
+            label
+            for label, on in (
+                ("Raw", include_raw),
+                ("Processed", include_processed),
+                ("Reports", include_reports),
+            )
+            if on
+        ]
+        query_summary = ", ".join(
+            [
+                f"{len(folder_ids)} folder{'s' if len(folder_ids) != 1 else ''}",
+                " + ".join(modality_names),
+                f"Content: {' + '.join(selected_content)}",
+            ]
+        )
+
+        export = Export.objects.create(
+            user=request.user,
+            status="pending",
+            query_params=query_params,
+            query_summary=query_summary,
+        )
+
+        start_export_processing(export.id, "brain")
+        messages.success(request, f"Export #{export.id} created and processing started.")
         return redirect("brain:export_list")
-    folders = filter_folders_for_user(request.user, Folder.objects.filter(parent__isnull=True), "brain")
-    modalities = Modality.objects.filter(projects__slug="brain", is_active=True)
-    return render(request, "brain/export_new.html", {"folders": folders, "modalities": modalities})
+
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True).order_by("name"),
+        "brain",
+    )
+    folders_with_counts = [
+        {"folder": folder, "patient_count": folder.patients.count()} for folder in folders
+    ]
+    modalities = Modality.objects.filter(projects__slug="brain", is_active=True).order_by("name")
+    return render(
+        request,
+        "maxillo/export_new.html",
+        {"folders": folders_with_counts, "modalities": modalities, "ns": "brain"},
+    )
 
 
 @login_required
+@_with_brain_export_mappings
 def export_preview(request):
-    return JsonResponse({"files": []})
+    """AJAX export statistics. Reuses the generalized ExportProcessor for brain."""
+    try:
+        if request.method == "POST":
+            data = _json.loads(request.body) if request.body else {}
+        else:
+            data = request.GET
+
+        folder_ids = data.get("folder_ids", [])
+        if isinstance(folder_ids, str):
+            folder_ids = [int(fid) for fid in folder_ids.split(",") if fid]
+        else:
+            folder_ids = [int(fid) for fid in folder_ids if fid]
+
+        modality_slugs = data.get("modality_slugs", [])
+        if isinstance(modality_slugs, str):
+            modality_slugs = modality_slugs.split(",") if modality_slugs else []
+
+        include_raw, include_processed = _resolve_content_selection(data)
+        query_params = {
+            "domain": "brain",
+            "folder_ids": folder_ids,
+            "modality_slugs": modality_slugs,
+            "filters": data.get("filters", {}),
+            "include_raw": include_raw,
+            "include_processed": include_processed,
+            "include_reports": _coerce_bool(data.get("include_reports"), default=False),
+        }
+
+        proc = ExportProcessor(
+            Export(user=request.user, query_params=query_params), domain="brain"
+        )
+        patients = proc.query_patients()
+        patient_count = patients.count()
+        if patient_count:
+            files, total_size = proc.collect_files(patients)
+            file_count = len(files)
+        else:
+            file_count, total_size = 0, 0
+
+        return JsonResponse(
+            {
+                "success": True,
+                "patient_count": patient_count,
+                "folder_count": len(folder_ids),
+                "modality_count": len(modality_slugs),
+                "file_count": file_count,
+                "estimated_size": format_file_size(total_size),
+                "estimated_size_bytes": total_size,
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error in brain export_preview: {e}", exc_info=True)
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 @login_required
 def export_status(request, export_id):
+    """AJAX status endpoint polled by the export list page."""
     export = get_object_or_404(Export, id=export_id)
-    return render(request, "brain/export_status.html", {"export": export})
+    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    export = _recover_stuck_export(export)
+
+    data = {
+        "id": export.id,
+        "status": export.status,
+        "query_summary": export.query_summary,
+    }
+    if export.status == "completed":
+        data["file_size"] = export.file_size
+        data["file_size_human"] = format_file_size(export.file_size)
+        data["patient_count"] = export.patient_count
+        if export.completed_at:
+            data["completed_at"] = export.completed_at.isoformat()
+    if export.status == "failed":
+        data["error_message"] = export.error_message
+    if export.status == "processing":
+        if export.started_at:
+            data["started_at"] = export.started_at.isoformat()
+        if export.patient_count:
+            data["patient_count"] = export.patient_count
+        if export.progress_message:
+            data["progress_message"] = export.progress_message
+        if export.progress_percent is not None:
+            data["progress_percent"] = export.progress_percent
+    return JsonResponse(data)
 
 
 @login_required
 def export_download(request, export_id):
-    return JsonResponse({"error": "Brain export download is not implemented in the decoupled view yet."}, status=501)
+    export = get_object_or_404(Export, id=export_id)
+
+    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
+        messages.error(request, "You do not have permission to download this export.")
+        return redirect("brain:export_list")
+
+    if export.status != "completed":
+        messages.error(request, "Export is not yet completed.")
+        return redirect("brain:export_list")
+
+    if not export.file_path or not artifact_exists(export.file_path):
+        messages.error(request, "Export file not found.")
+        export.mark_failed("Export file not found in storage")
+        return redirect("brain:export_list")
+
+    filename = (
+        os.path.basename((export.file_path or "").rstrip("/"))
+        or f"export_{export.id}.zip"
+    )
+    return streaming_response(
+        path_or_key=export.file_path,
+        content_type="application/zip",
+        filename=filename,
+        as_attachment=True,
+    )
 
 
 @login_required
+@require_POST
 def export_share_update(request, export_id):
-    return JsonResponse({"ok": True})
+    export = get_object_or_404(Export, id=export_id)
+
+    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    if export.status != "completed":
+        return JsonResponse(
+            {"success": False, "error": "Only completed exports can be shared"}, status=400
+        )
+
+    try:
+        data = _json.loads(request.body) if request.body else request.POST
+    except ValueError:
+        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+
+    share_mode = (data.get("share_mode") or "").strip()
+    if share_mode not in ("private", "authenticated", "public"):
+        return JsonResponse({"success": False, "error": "Invalid share mode"}, status=400)
+
+    regenerate_raw = data.get("regenerate", False)
+    regenerate = (
+        regenerate_raw
+        if isinstance(regenerate_raw, bool)
+        else str(regenerate_raw).lower() in ("1", "true", "yes")
+    )
+
+    export.share_mode = share_mode
+    if share_mode == "private":
+        export.share_token = None
+        export.shared_at = None
+        export.save(update_fields=["share_mode", "share_token", "shared_at"])
+        return JsonResponse(
+            {"success": True, "share_mode": export.share_mode, "share_url": None}
+        )
+
+    if regenerate or not export.share_token:
+        export.ensure_share_token(force_new=regenerate)
+    export.shared_at = timezone.now()
+    export.save(update_fields=["share_mode", "shared_at"])
+
+    return JsonResponse(
+        {
+            "success": True,
+            "share_mode": export.share_mode,
+            "share_url": _build_shared_download_url(request, export.share_token),
+        }
+    )
 
 
+@require_http_methods(["GET"])
 def export_shared_landing(request, share_token):
-    return JsonResponse({"share_token": share_token})
+    export, is_available = _brain_shared_export_availability(share_token)
+    if (
+        export
+        and export.share_mode == "authenticated"
+        and not request.user.is_authenticated
+    ):
+        return redirect_to_login(request.get_full_path())
+    return render(
+        request,
+        "maxillo/export_shared_landing.html",
+        {
+            "ns": "brain",
+            "export": export,
+            "is_available": is_available,
+            "share_token": share_token,
+            "file_size_human": format_file_size(export.file_size)
+            if export and export.file_size
+            else None,
+        },
+    )
 
 
+@require_http_methods(["GET"])
 def export_shared_download(request, share_token):
-    return JsonResponse({"error": "Brain shared export download is not implemented."}, status=501)
+    export, is_available = _brain_shared_export_availability(share_token)
+    if not export or not is_available:
+        raise Http404("Export is not available.")
+    if export.share_mode == "authenticated" and not request.user.is_authenticated:
+        return redirect_to_login(request.get_full_path())
+    filename = (
+        os.path.basename((export.file_path or "").rstrip("/"))
+        or f"export_{export.id}.zip"
+    )
+    return streaming_response(
+        path_or_key=export.file_path,
+        content_type="application/zip",
+        filename=filename,
+        as_attachment=True,
+    )
 
 
 @login_required
+@require_POST
 def export_delete(request, export_id):
-    Export.objects.filter(id=export_id, user=request.user).delete()
-    return redirect("brain:export_list")
+    export = get_object_or_404(Export, id=export_id)
+    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    file_path = export.file_path
+    deleted_count, _ = Export.objects.filter(id=export_id).delete()
+    if not deleted_count:
+        return JsonResponse(
+            {"success": False, "error": "Export not found or already deleted."}, status=404
+        )
+
+    if file_path:
+        try:
+            get_object_storage().delete(file_path)
+        except Exception as e:
+            logger.warning(f"Could not delete export file {file_path}: {e}")
+
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def export_stop(request, export_id):
+    """Stop a processing/pending export: kill worker and delete partial ZIPs."""
+    export = get_object_or_404(Export, id=export_id)
+    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    if export.status not in {"processing", "pending"}:
+        return JsonResponse(
+            {"success": False, "error": f"Export is not running (status: {export.status})."},
+            status=409,
+        )
+
+    killed_pids = _kill_export_processes(export.id)
+
+    deleted_keys = []
+    warnings = []
+    storage = get_object_storage()
+
+    if export.file_path:
+        try:
+            storage.delete(export.file_path)
+            deleted_keys.append(export.file_path)
+        except Exception as e:
+            warnings.append(f"Could not delete {export.file_path}: {e}")
+
+    prefix = f"exports/export_{export.id}_"
+    try:
+        for key in storage.list_keys(prefix):
+            if not key.startswith(prefix) or not key.endswith(".zip"):
+                continue
+            try:
+                storage.delete(key)
+                deleted_keys.append(key)
+            except Exception as e:
+                warnings.append(f"Could not delete {key}: {e}")
+    except Exception as e:
+        warnings.append(f"Could not list keys for prefix {prefix}: {e}")
+
+    who = getattr(request.user, "username", "unknown")
+    stopped_at = timezone.now().strftime("%Y-%m-%d %H:%M:%S %Z")
+    message = f"Stopped manually by {who} at {stopped_at}."
+    if killed_pids:
+        message += f" Killed worker PID(s): {', '.join(str(p) for p in killed_pids)}."
+    if deleted_keys:
+        message += f" Deleted {len(set(deleted_keys))} ZIP object(s)."
+    export.mark_failed(message)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "killed_pids": killed_pids,
+            "deleted_keys": sorted(set(deleted_keys)),
+            "warnings": warnings,
+            "status": "failed",
+            "error_message": message,
+        }
+    )

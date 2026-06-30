@@ -612,6 +612,13 @@ def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
     hash_sha256 = hashlib.sha256()
     hash_sha256.update(combined_hashes.encode())
     folder_hash = hash_sha256.hexdigest()
+    modality_fk = None
+    try:
+        from common.models import Modality as _Modality
+
+        modality_fk = _Modality.objects.filter(slug="cbct").first()
+    except Exception:
+        modality_fk = None
 
     # Create file registry entry for the folder
     file_registry = FileRegistry.objects.create(
@@ -620,6 +627,7 @@ def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
         file_size=total_size,
         file_hash=folder_hash,
         **_entity_fk_kwargs(patient),
+        modality=modality_fk,
         metadata={
             "upload_type": "folder",
             "file_format": "dicom_folder",
