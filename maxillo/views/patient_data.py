@@ -304,6 +304,8 @@ def patient_volume_data(request, patient_id, modality_slug):
                 raw_filter["brain_patient_id"] = patient.patient_id
             else:
                 raw_filter["patient_id"] = patient.patient_id
+        except Exception:
+            return JsonResponse({"error": "Failed to construct file filter"}, status=500)
     try:
         processed_filter = {
             "domain": "maxillo",
