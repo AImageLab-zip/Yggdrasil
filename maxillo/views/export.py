@@ -288,6 +288,9 @@ def export_new(request):
             request.POST, default_when_missing=False
         )
         include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
+        include_bite_classification = _coerce_bool(
+            request.POST.get("include_bite_classification"), default=False
+        )
 
         # Get filters
         filters = {}
@@ -308,15 +311,19 @@ def export_new(request):
                 messages.error(request, "You do not have permission to export from selected folders.")
                 return redirect_with_namespace(request, "export_new")
 
-        # Require at least one selection (can be a modality and/or reports only)
-        if not modality_slugs:
-            messages.error(request, "Please select at least one modality.")
-            return redirect_with_namespace(request, "export_new")
-
-        if not include_raw and not include_processed and not include_reports:
+        # Require at least one selection (can be a modality and/or reports only,
+        # or bite classification alone since it isn't modality-gated)
+        if not modality_slugs and not include_bite_classification:
             messages.error(
                 request,
-                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
+                "Please select at least one modality, or enable Bite Classification.",
+            )
+            return redirect_with_namespace(request, "export_new")
+
+        if not include_raw and not include_processed and not include_reports and not include_bite_classification:
+            messages.error(
+                request,
+                "Please select at least one content type: Raw files, Processed files, Reports, and/or Bite Classification.",
             )
             return redirect_with_namespace(request, "export_new")
 
@@ -329,6 +336,7 @@ def export_new(request):
             "include_raw": include_raw,
             "include_processed": include_processed,
             "include_reports": include_reports,
+            "include_bite_classification": include_bite_classification,
         }
 
         # Generate query summary
@@ -346,6 +354,8 @@ def export_new(request):
             filter_parts.append("Has CBCT")
         if filters.get("has_ios"):
             filter_parts.append("Has IOS")
+        if filters.get("has_bite_classification"):
+            filter_parts.append("Has Bite Classification")
         for key, value in filters.items():
             if key.startswith("has_reports_") and value:
                 modality_slug = key.replace("has_reports_", "")
@@ -370,6 +380,8 @@ def export_new(request):
             selected_content.append("Processed")
         if include_reports:
             selected_content.append("Reports")
+        if include_bite_classification:
+            selected_content.append("Bite Classification")
         query_summary_parts.append(f"Content: {' + '.join(selected_content)}")
 
         query_summary = ", ".join(query_summary_parts)
@@ -430,6 +442,7 @@ def export_preview(request):
         domain_models = get_domain_models(request)
         PatientModel = domain_models["Patient"]
         VoiceCaptionModel = domain_models["VoiceCaption"]
+        ClassificationModel = domain_models["Classification"]
         domain = get_namespace(request)
 
         # Get parameters from request
@@ -443,6 +456,9 @@ def export_preview(request):
         filters = data.get("filters", {})
         include_raw, include_processed = _resolve_content_selection(data)
         include_reports = _coerce_bool(data.get("include_reports"), default=False)
+        include_bite_classification = _coerce_bool(
+            data.get("include_bite_classification"), default=False
+        )
         file_type_map = _file_type_map_for_selection(include_raw, include_processed)
 
         # Convert to proper types
@@ -496,9 +512,23 @@ def export_preview(request):
                 patient_id__in=ios_patients.values_list("patient_id", flat=True)
             )
 
+        # Bite classification presence filter (DB-only; excluded from the
+        # generic dynamic loop below since it isn't FileRegistry/modality based
+        # — see the matching guard in ExportProcessor.query_patients()).
+        if filters.get("has_bite_classification") and domain != "brain":
+            bc_patient_ids = ClassificationModel.objects.filter(
+                patient_id__in=patients.values_list("patient_id", flat=True)
+            ).values_list("patient_id", flat=True).distinct()
+            patients = patients.filter(patient_id__in=bc_patient_ids)
+
         # Dynamic modality presence filters
         for key, value in filters.items():
-            if key.startswith("has_") and not key.startswith("has_reports_") and value:
+            if (
+                key.startswith("has_")
+                and not key.startswith("has_reports_")
+                and key != "has_bite_classification"
+                and value
+            ):
                 modality_slug = key.replace("has_", "")
                 # Map modality slug to file types
                 file_types = file_type_map.get(modality_slug, [])
@@ -548,7 +578,7 @@ def export_preview(request):
                     file_types.extend(file_type_map.get(slug, []))
                 file_filter = {
                     "domain": domain,
-                    file_patient_filter: patients,
+                    "patient__in": patients,
                     "file_type__in": file_types,
                 }
                 files = FileRegistry.objects.filter(**file_filter)
@@ -564,6 +594,19 @@ def export_preview(request):
                 file_count += voice_captions.count()
                 for vc in voice_captions:
                     total_size += len(vc.text_caption.encode("utf-8"))
+
+            if include_bite_classification:
+                bc_count = (
+                    ClassificationModel.objects.filter(patient__in=patients)
+                    .values_list("patient_id", flat=True)
+                    .distinct()
+                    .count()
+                )
+                file_count += bc_count
+                # Fixed per-patient estimate: the manual+pipeline JSON blob is
+                # small and roughly constant-size, not worth an extra
+                # serialization pass per patient on a live-typing endpoint.
+                total_size += bc_count * 450
         else:
             file_count = 0
             total_size = 0
