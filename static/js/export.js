@@ -28,6 +28,7 @@ function updateStatistics() {
     const includeRaw = document.getElementById('include_raw')?.checked ?? true;
     const includeProcessed = document.getElementById('include_processed')?.checked ?? true;
     const includeReports = document.getElementById('include_reports')?.checked ?? false;
+    const includeBiteClassification = document.getElementById('include_bite_classification')?.checked ?? false;
 
     const folderIds = Array.from(folderCheckboxes).map(cb => cb.value);
     const modalitySlugs = Array.from(modalityCheckboxes).map(cb => cb.value);
@@ -40,8 +41,12 @@ function updateStatistics() {
         }
     });
 
-    // Don't make request if no folders, modalities, or content type selected
-    if (folderIds.length === 0 || modalitySlugs.length === 0 || (!includeRaw && !includeProcessed && !includeReports)) {
+    // Don't make request if no folders selected, no modality/bite-classification
+    // selected, or no content type selected. Bite classification isn't
+    // modality-gated, so it can stand in for a modality selection on its own.
+    if (folderIds.length === 0 ||
+        (modalitySlugs.length === 0 && !includeBiteClassification) ||
+        (!includeRaw && !includeProcessed && !includeReports && !includeBiteClassification)) {
         // Reset statistics
         document.getElementById('stat-patients').textContent = '0';
         document.getElementById('stat-folders').textContent = '0';
@@ -82,6 +87,7 @@ function updateStatistics() {
             include_raw: includeRaw,
             include_processed: includeProcessed,
             include_reports: includeReports,
+            include_bite_classification: includeBiteClassification,
         }),
     })
     .then(response => response.json())
