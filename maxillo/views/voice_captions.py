@@ -65,7 +65,10 @@ def upload_voice_caption(request, patient_id):
         try:
             from ..file_utils import save_audio_to_dataset
             file_path, processing_job = save_audio_to_dataset(voice_caption, audio_file)
-            logger.info(f"Audio file saved to {file_path}, processing job #{processing_job.id} created")
+            if processing_job:
+                logger.info(f"Audio file saved to {file_path}, processing job #{processing_job.id} created")
+            else:
+                logger.info(f"Audio file saved to {file_path}; audio processing is disabled")
         except Exception as e:
             logger.error(f"Error saving audio file or creating processing job: {e}", exc_info=True)
             # Continue anyway, the caption is saved

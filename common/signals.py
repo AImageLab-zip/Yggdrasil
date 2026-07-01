@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from common.job_routing import select_runner_queue
+from common.job_routing import is_runner_enabled_for_modality, select_runner_queue
 from common.models import Job
 from toothfairy.celery import app as celery_app
 
@@ -45,6 +45,14 @@ def _job_post_save(sender, instance: Job, created: bool, **kwargs):
             should_enqueue = True
 
         if not should_enqueue:
+            return
+
+        if not is_runner_enabled_for_modality(instance.modality_slug):
+            logger.info(
+                "Not enqueueing Job %s for disabled modality '%s'",
+                instance.id,
+                instance.modality_slug,
+            )
             return
 
         queue = select_runner_queue(instance)

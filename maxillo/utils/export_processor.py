@@ -1,5 +1,6 @@
 """Export processor for background export generation."""
 
+import json
 import logging
 import os
 import subprocess
@@ -15,6 +16,47 @@ from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+def build_patient_classification_blob(patient, classifications):
+    """Build a JSON-serializable summary of a patient's bite classification.
+
+    `classifications` is an iterable of 0-2 Classification rows (one per
+    classifier: 'manual' and/or 'pipeline'). Returns None if there is
+    nothing to export for this patient.
+    """
+    by_classifier = {c.classifier: c for c in classifications}
+    manual, pipeline = by_classifier.get("manual"), by_classifier.get("pipeline")
+    if not manual and not pipeline:
+        return None
+
+    def _serialize(c):
+        if c is None:
+            return None
+        return {
+            "sagittal_left": {
+                "code": c.sagittal_left,
+                "label": c.get_sagittal_left_display(),
+            },
+            "sagittal_right": {
+                "code": c.sagittal_right,
+                "label": c.get_sagittal_right_display(),
+            },
+            "vertical": {"code": c.vertical, "label": c.get_vertical_display()},
+            "transverse": {
+                "code": c.transverse,
+                "label": c.get_transverse_display(),
+            },
+            "midline": {"code": c.midline, "label": c.get_midline_display()},
+            "annotator": c.annotator.username if c.annotator_id else None,
+            "timestamp": c.timestamp.isoformat() if c.timestamp else None,
+        }
+
+    return {
+        "patient_id": patient.patient_id,
+        "manual": _serialize(manual),
+        "pipeline": _serialize(pipeline),
+    }
 
 
 class ExportProcessor:
@@ -94,6 +136,10 @@ class ExportProcessor:
         self.include_reports = self._coerce_bool(
             self.query_params.get("include_reports"),
             default="reports" in raw_slugs,
+        )
+        # include_bite_classification: independent flag, not modality-gated.
+        self.include_bite_classification = self._coerce_bool(
+            self.query_params.get("include_bite_classification"), default=False
         )
 
     @staticmethod
@@ -175,6 +221,8 @@ class ExportProcessor:
             selected_content.append("processed")
         if self.include_reports:
             selected_content.append("reports")
+        if self.include_bite_classification:
+            selected_content.append("bite classification")
 
         if not selected_content:
             return "No export content selected. Enable at least one of Raw files, Processed files, or Reports."
@@ -278,9 +326,26 @@ class ExportProcessor:
                 patient_id__in=ios_patients.values_list("patient_id", flat=True)
             )
 
+        # Bite classification presence filter (DB-only; NOT modality/FileRegistry
+        # based, so it must be excluded from the generic dynamic loop below —
+        # the stale "bite_classification" entry in MODALITY_TO_FILE_TYPES only
+        # covers the pipeline's FileRegistry JSON, not manual classifications).
+        if self.filters.get("has_bite_classification") and self.domain != "brain":
+            from ..models import Classification
+
+            bc_patient_ids = Classification.objects.filter(
+                patient_id__in=patients.values_list("patient_id", flat=True)
+            ).values_list("patient_id", flat=True).distinct()
+            patients = patients.filter(patient_id__in=bc_patient_ids)
+
         # Dynamic modality presence filters
         for key, value in self.filters.items():
-            if key.startswith("has_") and not key.startswith("has_reports_") and value:
+            if (
+                key.startswith("has_")
+                and not key.startswith("has_reports_")
+                and key != "has_bite_classification"
+                and value
+            ):
                 modality_slug = key.replace("has_", "")
                 file_types = self._modality_requested_file_types(modality_slug)
                 if file_types:
@@ -435,9 +500,11 @@ class ExportProcessor:
                         and file_reg.metadata
                         and "files" in file_reg.metadata
                     ):
-                        # Export all files from metadata (volume_nifti, panoramic_view, etc.)
+                        # Export only the CBCT segmentation artifact from metadata.
                         cbct_files = file_reg.metadata.get("files", {})
                         for file_type_key, file_data in cbct_files.items():
+                            if file_type_key != "segmentation_nifti":
+                                continue
                             if isinstance(file_data, dict) and "path" in file_data:
                                 file_path = file_data["path"]
                                 if artifact_exists(file_path):
@@ -448,7 +515,7 @@ class ExportProcessor:
                                             "file_registry": file_reg,
                                             "path": file_path,
                                             "modality_slug": modality_slug,
-                                            "cbct_file_type": file_type_key,  # e.g., 'volume_nifti', 'panoramic_view'
+                                            "cbct_file_type": file_type_key,
                                         }
                                     )
                                     # Use individual file size from metadata
@@ -508,6 +575,29 @@ class ExportProcessor:
                         )
                         total_size += len(vc.text_caption.encode("utf-8"))
 
+            # Collect Bite Classification data (DB-only content; independent of
+            # modality_slugs and not backed by any FileRegistry entry for the
+            # manual/clinician-corrected value).
+            if self.include_bite_classification and self.domain != "brain":
+                from ..models import Classification
+
+                classifications = list(
+                    Classification.objects.filter(patient=patient).select_related(
+                        "annotator"
+                    )
+                )
+                blob = build_patient_classification_blob(patient, classifications)
+                if blob is not None:
+                    content = json.dumps(blob, indent=2)
+                    files_to_export.append(
+                        {
+                            "type": "classification",
+                            "patient": patient,
+                            "content": content,
+                        }
+                    )
+                    total_size += len(content.encode("utf-8"))
+
         logger.info(
             f"Total files collected: {len(files_to_export)}, total size: {total_size} bytes"
         )
@@ -528,6 +618,7 @@ class ExportProcessor:
                     "patient": patient,
                     "files": [],
                     "reports": {},
+                    "classification": None,
                 }
 
             if file_info["type"] == "file":
@@ -537,6 +628,8 @@ class ExportProcessor:
                 if modality_slug not in patient_files[patient_key]["reports"]:
                     patient_files[patient_key]["reports"][modality_slug] = []
                 patient_files[patient_key]["reports"][modality_slug].append(file_info)
+            elif file_info["type"] == "classification":
+                patient_files[patient_key]["classification"] = file_info["content"]
 
         # Count total ZIP entries for progress
         total_entries = 0
@@ -547,6 +640,8 @@ class ExportProcessor:
                 modality_files.setdefault(modality_slug, []).append(file_info)
             total_entries += sum(len(f) for f in modality_files.values())
             total_entries += sum(len(r) for r in patient_data["reports"].values())
+            if patient_data.get("classification"):
+                total_entries += 1
 
         progress_interval = max(
             1, total_entries // 50
@@ -592,8 +687,7 @@ class ExportProcessor:
                             cbct_file_type = file_info["cbct_file_type"]
                             # Map CBCT file types to descriptive names
                             cbct_filename_map = {
-                                "volume_nifti": "volume.nii.gz",
-                                "panoramic_view": "panoramic.png",
+                                "segmentation_nifti": "segmentation.nii.gz",
                                 "structures_mesh": "structures.stl",
                             }
                             # Handle multiple mesh files (structures_mesh_1, structures_mesh_2, etc.)
@@ -659,16 +753,33 @@ class ExportProcessor:
                                 pct,
                             )
 
+                # Add bite classification blob: patient_folder/bite_classification/classification.json
+                if patient_data.get("classification"):
+                    dest_path = (
+                        f"{patient_folder}/bite_classification/classification.json"
+                    )
+                    zipf.writestr(dest_path, patient_data["classification"])
+                    current_entry[0] += 1
+                    if total_entries and current_entry[0] % progress_interval == 0:
+                        pct = 20 + int(75 * current_entry[0] / total_entries)
+                        self._update_progress(
+                            f"Writing ZIP ({current_entry[0]}/{total_entries} files)",
+                            pct,
+                        )
+
         return os.path.getsize(export_path)
 
     def process_export(self):
         """Main processing method. Queries patients, collects files, creates ZIP, and updates export."""
         try:
             if self.has_content_selection and not (
-                self.include_raw or self.include_processed or self.include_reports
+                self.include_raw
+                or self.include_processed
+                or self.include_reports
+                or self.include_bite_classification
             ):
                 self.export.mark_failed(
-                    "No export content selected. Please enable Raw files, Processed files, and/or Reports."
+                    "No export content selected. Please enable Raw files, Processed files, Reports, and/or Bite Classification."
                 )
                 return
 

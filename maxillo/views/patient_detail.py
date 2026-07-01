@@ -10,6 +10,7 @@ import logging
 
 from common.file_access import exists as artifact_exists
 from common.permissions import (
+    get_user_folder_role,
     user_can_edit_caption,
     user_can_read_folder,
     user_can_view_caption_content,
@@ -127,6 +128,7 @@ def patient_detail(request, patient_id):
             
             if updated_files:
                 from ..file_utils import save_cbct_to_dataset, save_ios_to_dataset
+                queued_processing = False
                 
                 if reprocess_ios and (has_upper_scan or has_lower_scan):
                     patient.classifications.filter(classifier='pipeline').delete()
@@ -139,8 +141,10 @@ def patient_detail(request, patient_id):
                             request.FILES.get('lower_scan')
                         )
                         if result['processing_job']:
+                            queued_processing = True
                             messages.success(request, f'IOS scan(s) uploaded and queued for processing (Job #{result["processing_job"].id})')
                         if result['bite_classification_job']:
+                            queued_processing = True
                             messages.success(request, f'Bite classification job #{result["bite_classification_job"].id} created (waiting for IOS completion)')
                     except Exception as e:
                         messages.error(request, f'Error uploading IOS scan(s): {e}')
@@ -155,18 +159,29 @@ def patient_detail(request, patient_id):
                             validate_cbct_folder(cbct_folder_files)
                             
                             folder_path, processing_job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
-                            messages.success(request, f'CBCT folder uploaded and queued for processing (Job #{processing_job.id})')
+                            if processing_job:
+                                queued_processing = True
+                                messages.success(request, f'CBCT folder uploaded and queued for processing (Job #{processing_job.id})')
+                            else:
+                                messages.success(request, 'CBCT folder uploaded successfully')
                         except Exception as e:
                             messages.error(request, f'Error uploading CBCT folder: {e}')
                     elif has_cbct_file:
                         try:
                             file_path, processing_job = save_cbct_to_dataset(patient, request.FILES['cbct'])
-                            messages.success(request, f'CBCT uploaded and queued for processing (Job #{processing_job.id})')
+                            if processing_job:
+                                queued_processing = True
+                                messages.success(request, f'CBCT uploaded and queued for processing (Job #{processing_job.id})')
+                            else:
+                                messages.success(request, 'CBCT uploaded successfully')
                         except Exception as e:
                             messages.error(request, f'Error uploading CBCT: {e}')
                 
                 files_str = ', '.join(updated_files)
-                messages.success(request, f'Successfully uploaded {files_str}! Files are queued for processing.')
+                if queued_processing:
+                    messages.success(request, f'Successfully uploaded {files_str}! Files are queued for processing.')
+                else:
+                    messages.success(request, f'Successfully uploaded {files_str}!')
 
                 # Update patient modalities based on actual uploaded files using helper
                 try:
@@ -274,6 +289,37 @@ def patient_detail(request, patient_id):
                 'file_size_mb': f"{file_obj.file_size / (1024 * 1024):.2f}" if file_obj.file_size else '0.00',
                 'modality_name': modality_name,
             }
+
+            if (
+                file_obj.file_type == 'cbct_processed'
+                and file_obj.file_hash == 'multi-file'
+                and isinstance(file_obj.metadata, dict)
+            ):
+                bundle_files = []
+                files_meta = file_obj.metadata.get('files', {})
+                if isinstance(files_meta, dict):
+                    primary_bundle = files_meta.get('segmentation_nifti')
+                    if isinstance(primary_bundle, dict) and primary_bundle.get('path'):
+                        file_data['filename'] = os.path.basename(primary_bundle.get('path', ''))
+
+                    bundle_labels = {
+                        'segmentation_nifti': 'Segmentation NIfTI',
+                    }
+                    bundle_order = ['segmentation_nifti']
+                    bundle_keys = [k for k in bundle_order if k in files_meta]
+                    bundle_keys.extend(k for k in files_meta.keys() if k not in bundle_keys)
+                    for bundle_key in bundle_keys:
+                        bundle_meta = files_meta[bundle_key]
+                        if bundle_key != 'segmentation_nifti':
+                            continue
+                        if not isinstance(bundle_meta, dict) or not bundle_meta.get('path'):
+                            continue
+                        bundle_files.append({
+                            'key': bundle_key,
+                            'label': bundle_labels.get(bundle_key, bundle_key.replace('_', ' ').title()),
+                            'filename': os.path.basename(bundle_meta.get('path', '')),
+                        })
+                file_data['bundle_files'] = bundle_files
             
             # Categorize files dynamically based on file_type
             # Check for raw files (contains _raw or is rgb_image)
@@ -289,18 +335,17 @@ def patient_detail(request, patient_id):
 
 
     # Voice captions
-    # Non-admin users can see caption metadata for all captions. Caption content
-    # access depends on the user's folder role.
+    # Admins, standard users, and project managers see all captions.
+    # Annotators can only see their own captions (to avoid bias during annotation).
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, request)
-    can_create_caption = bool(
-        is_admin_user
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-    )
+    folder_role = get_user_folder_role(request.user, patient.folder) if patient.folder else None
+    can_see_all_captions = is_admin_user or folder_role in ('standard', 'project_manager')
     for caption in voice_captions:
-        caption.can_view_content = user_can_view_caption_content(request.user, caption, request)
+        caption.can_view_content = bool(can_see_all_captions or caption.user_id == request.user.id)
         caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
+    can_create_caption = can_modify
 
     # Build modality files lookup for drag-drop grid
     modality_files = {}
@@ -315,31 +360,14 @@ def patient_detail(request, patient_id):
                     files_qs = patient.files.filter(modality=modality_obj)
 
                     if slug == 'cbct':
-                        # Prefer processed CBCT entries that expose a valid NIfTI volume.
                         file_obj = None
-                        processed_candidates = files_qs.filter(file_type='cbct_processed').order_by('-created_at')
-                        for processed_entry in processed_candidates:
-                            if processed_entry.file_hash == 'multi-file' and processed_entry.metadata:
-                                files_data = processed_entry.metadata.get('files', {})
-                                volume_data = files_data.get('volume_nifti', {}) if isinstance(files_data, dict) else {}
-                                volume_path = volume_data.get('path') if isinstance(volume_data, dict) else None
-                                if volume_path and artifact_exists(volume_path):
-                                    file_obj = processed_entry
-                                    break
-                            elif processed_entry.file_path and (
-                                processed_entry.file_path.endswith('.nii') or processed_entry.file_path.endswith('.nii.gz')
-                            ):
-                                file_obj = processed_entry
+                        raw_candidates = patient.files.filter(file_type='cbct_raw').order_by('-created_at')
+                        for raw_entry in raw_candidates:
+                            if raw_entry.file_path and (
+                                raw_entry.file_path.endswith('.nii') or raw_entry.file_path.endswith('.nii.gz')
+                            ) and artifact_exists(raw_entry.file_path):
+                                file_obj = raw_entry
                                 break
-
-                        if not file_obj:
-                            raw_candidates = files_qs.filter(file_type='cbct_raw').order_by('-created_at')
-                            for raw_entry in raw_candidates:
-                                if raw_entry.file_path and (
-                                    raw_entry.file_path.endswith('.nii') or raw_entry.file_path.endswith('.nii.gz')
-                                ):
-                                    file_obj = raw_entry
-                                    break
                     else:
                         file_obj = files_qs.order_by('-created_at').first()
 
