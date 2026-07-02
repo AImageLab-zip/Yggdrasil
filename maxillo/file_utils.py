@@ -1193,6 +1193,12 @@ def mark_job_completed(job_id, output_files, logs=None):
             # For non-CBCT modalities, register simple outputs idempotently.
             # Bite classification has a dedicated handler below.
             if job.modality_slug != "bite_classification":
+                if job.modality_slug == "ios":
+                    FileRegistry.objects.filter(
+                        file_type__in=["ios_processed_upper", "ios_processed_lower"],
+                        **_job_entity_fk_kwargs(job),
+                    ).delete()
+
                 for file_type, out_spec in output_files.items():
                     path_or_key = _resolve_output_path_or_key(out_spec)
                     logger.info(
