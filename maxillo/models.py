@@ -359,16 +359,8 @@ class Patient(models.Model):
     
     def get_ios_processed_files(self):
         """Get IOS processed files from FileRegistry"""
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_processed_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_processed_lower')
-        except FileRegistry.DoesNotExist:
-            pass
+        upper = self.files.filter(file_type='ios_processed_upper').order_by('-created_at', '-id').first()
+        lower = self.files.filter(file_type='ios_processed_lower').order_by('-created_at', '-id').first()
         return {'upper': upper, 'lower': lower}
     
     def has_ios_scans_new(self):
