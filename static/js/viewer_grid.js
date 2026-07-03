@@ -257,12 +257,12 @@ const ViewerGrid = (function() {
 
         resetBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            minRange.value = '0';
-            maxRange.value = '100';
-            minLabel.textContent = '0';
-            maxLabel.textContent = '100';
+            minRange.value = String(initMin);
+            maxRange.value = String(initMax);
+            minLabel.textContent = String(initMin);
+            maxLabel.textContent = String(initMax);
             if (viewer.isReady()) {
-                viewer.setWindowing(0, 100);
+                viewer.setWindowing(initMin, initMax);
             }
         });
     }
