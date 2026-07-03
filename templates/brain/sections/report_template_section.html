@@ -41,6 +41,10 @@
                         id="reportLangDeBtn"
                         class="btn {% if report_language == 'de' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn"
                         data-lang="de">DE</button>
+                <button type="button"
+                        id="reportLangEsBtn"
+                        class="btn {% if report_language == 'es' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn"
+                        data-lang="es">ES</button>
             </div>
             <i class="fas fa-chevron-right collapse-indicator"
                data-bs-toggle="collapse"
@@ -212,6 +216,59 @@
                     </details></li>
                 </ul>
 
+                <!-- SPANISH -->
+                <ul class="mb-0 ps-2 report-fields report-fields-es {% if report_language != 'es' %}d-none{% endif %}"
+                    style="font-size: 0.9rem; line-height: 1.9;">
+                    <li><details><summary>Lado del Centro del Tumor</summary>
+                        <p>Definido como la lateralidad anatómica del centro del tumor según la posición del baricentro del TC respecto a la línea media cerebral, por ejemplo izquierda, derecha o línea media.</p>
+                    </details></li>
+                    <li><details><summary>Calidad del Realce</summary>
+                        <p>Evaluación cualitativa del realce de contraste CET, indicando si el realce está presente y cuán pronunciado parece.</p>
+                    </details></li>
+                    <li><details><summary>Definición del Margen Realzante</summary>
+                        <p>Evalúa si la mayor parte del margen externo del realce está bien o mal definida.</p>
+                    </details></li>
+                    <li><details><summary>Definición del Margen No Realzante</summary>
+                        <p>Evalúa si la mayor parte del margen externo del componente no realzante está bien o mal definida.</p>
+                    </details></li>
+                    <li><details><summary>Hemorragia Intratumoral</summary>
+                        <p>Evalúa si hay hemorragia intrínseca visible en cualquier parte de la matriz tumoral.</p>
+                    </details></li>
+                    <li><details><summary>Heterogeneidad del Tumor</summary>
+                        <p>El grado de heterogeneidad de la arquitectura interna del tumor.</p>
+                    </details></li>
+                    <li><details><summary>Número de Lesiones</summary>
+                        <p>Número de lesiones independientes observadas en el cerebro.</p>
+                    </details></li>
+                    <li><details><summary>Tipo de Lesión</summary>
+                        <p>Variable categórica que indica el tipo de lesión observada. Valores posibles: única, multicéntrica o multifocal.</p>
+                    </details></li>
+                    <li><details><summary>Invasión Ependimaria</summary>
+                        <p>Evalúa si el TC está en contacto con alguna superficie ependimaria adyacente.</p>
+                    </details></li>
+                    <li><details><summary>Profundidad del TC</summary>
+                        <p>Determina la profundidad del TC. Valores posibles: cortical, sustancia blanca subcortical, sustancia blanca profunda y núcleos basales.</p>
+                    </details></li>
+                    <li><details><summary>Macroárea del Centro del Tumor</summary>
+                        <p>La macroárea, o lóbulo, en la que se encuentra el baricentro, obtenida mediante el atlas.</p>
+                    </details></li>
+                    <li><details><summary>Desplazamiento de la Línea Media (mm)</summary>
+                        <p>El desplazamiento de la línea media causado por la masa tumoral, en milímetros.</p>
+                    </details></li>
+                    <li><details><summary>Forma del Tumor</summary>
+                        <p>La forma aproximada de la masa tumoral.</p>
+                    </details></li>
+                    <li><details><summary>Origen del Tumor</summary>
+                        <p>Dónde se origina el tumor, según las categorías: periventricular, giral o sustancia blanca profunda.</p>
+                    </details></li>
+                    <li><details><summary>El Tumor Cruza la Línea Media</summary>
+                        <p>Indica si el tumor cruza la línea media.</p>
+                    </details></li>
+                    <li><details><summary>Hallazgos Específicos del Sujeto</summary>
+                        <p>Cualquier hallazgo específico del sujeto que no se incluya en ninguna categoría predefinida.</p>
+                    </details></li>
+                </ul>
+
             </div>
         </div>
     </div>
@@ -220,7 +277,7 @@
 <script>
 (function () {
     var LS_KEY = 'report_template_lang';
-    var LANGS = ['en', 'it', 'de'];
+    var LANGS = ['en', 'it', 'de', 'es'];
 
     function applyLang(lang) {
         LANGS.forEach(function (l) {
