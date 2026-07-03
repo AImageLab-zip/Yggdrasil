@@ -42,6 +42,8 @@ def _object_storage_health():
         }
 
 
+@login_required
+@user_passes_test(lambda u: u.is_staff)
 def admin_control_panel(request):
     """App-agnostic admin control panel with aggregated metrics."""
     system_health = {
