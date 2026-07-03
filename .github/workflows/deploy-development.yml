@@ -14,4 +14,4 @@ jobs:
           host: ${{ secrets.DEV_SSH_HOST }}
           username: ${{ secrets.DEV_SSH_USER }}
           key: ${{ secrets.DEV_SSH_KEY }}
-          script: /srv/Yggdrasil-dev/scripts/deploy_development.sh
+          script: /srv/Yggdrasil-dev/.github/deploy_development.sh
