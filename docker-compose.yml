@@ -29,6 +29,49 @@ services:
             - app-net
             - proxy-net
 
+    # Maintenance: celery beat scheduler + local worker for the maintenance
+    # queue (daily DB backups). MAINTENANCE_QUEUE must never overlap
+    # RUNNER_DEFAULT_QUEUE / RUNNER_QUEUE_BY_* - settings.py enforces this.
+    beat:
+        build: .
+        container_name: toothfairy4m-beat-$DOCKER_SUFFIX
+        volumes:
+            - .:/app
+        command: celery -A toothfairy beat --loglevel=info --schedule /tmp/celerybeat-schedule
+        environment:
+            DB_HOST: toothfairy4m-db-$DOCKER_SUFFIX
+        env_file:
+            - .env
+        user: "$UID:$GID"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        restart: unless-stopped
+        networks:
+            - app-net
+
+    maintenance-worker:
+        build: .
+        container_name: toothfairy4m-maintenance-$DOCKER_SUFFIX
+        volumes:
+            - .:/app
+        command: celery -A toothfairy worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
+        environment:
+            DB_HOST: toothfairy4m-db-$DOCKER_SUFFIX
+        env_file:
+            - .env
+        user: "$UID:$GID"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        restart: unless-stopped
+        networks:
+            - app-net
+
     db:
         image: mysql:8.0
         container_name: toothfairy4m-db-$DOCKER_SUFFIX

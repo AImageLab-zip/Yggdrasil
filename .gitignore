@@ -1,6 +1,7 @@
 *.zip
 .claude
 backup*
+!common/management/commands/backup_now.py
 # Python
 __pycache__/
 *.py[cod]

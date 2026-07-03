@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+
+{% block title %}System Status - Yggdrasil{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">System Status</h1>
+        <span class="text-muted small">Checked at {{ checked_at|date:"Y-m-d H:i:s" }} UTC</span>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h6 text-muted">Database</h2>
+                    <span class="badge {% if database.status == 'up' %}bg-success{% else %}bg-danger{% endif %}">
+                        {{ database.status|upper }}
+                    </span>
+                    <p class="small mb-0 mt-2">{{ database.message }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h6 text-muted">Object storage</h2>
+                    <span class="badge {% if object_storage.status == 'up' %}bg-success{% else %}bg-danger{% endif %}">
+                        {{ object_storage.status|upper }}
+                    </span>
+                    <p class="small mb-0 mt-2">{{ object_storage.message }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h6 text-muted">Database backup</h2>
+                    <span class="badge {% if backup.status == 'ok' %}bg-success{% elif backup.status == 'warn' %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                        {{ backup.status|upper }}
+                    </span>
+                    <p class="small mb-0 mt-2">{{ backup.message }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2 class="h5">Recent maintenance runs</h2>
+    {% if recent_checks %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Check</th>
+                    <th>Status</th>
+                    <th>Ran at (UTC)</th>
+                    <th>Duration</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for check in recent_checks %}
+                <tr>
+                    <td>{{ check.name }}</td>
+                    <td>
+                        <span class="badge {% if check.status == 'ok' %}bg-success{% elif check.status == 'warn' %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                            {{ check.get_status_display }}
+                        </span>
+                    </td>
+                    <td>{{ check.ran_at|date:"Y-m-d H:i:s" }}</td>
+                    <td>{% if check.duration_ms is not None %}{{ check.duration_ms }} ms{% else %}-{% endif %}</td>
+                    <td><code class="small">{{ check.details }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted">No maintenance runs recorded yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

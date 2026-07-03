@@ -231,3 +231,63 @@ def user_activity_stats(request):
         "timeline_json": json.dumps(timeline),
     }
     return render(request, "common/user_activity_stats.html", context)
+
+
+BACKUP_FRESHNESS_LIMIT_HOURS = 26
+
+
+def _backup_health():
+    """Latest backup run + freshness assessment for the status page."""
+    from .models import SystemCheck
+
+    latest = SystemCheck.objects.filter(name="database_backup").first()
+    latest_ok = (
+        SystemCheck.objects.filter(name="database_backup", status="ok").first()
+    )
+    if latest_ok is None:
+        return {
+            "status": "warn",
+            "message": "No successful backup recorded yet",
+            "latest": latest,
+        }
+    age = timezone.now() - latest_ok.ran_at
+    if age > timedelta(hours=BACKUP_FRESHNESS_LIMIT_HOURS):
+        hours = int(age.total_seconds() // 3600)
+        return {
+            "status": "warn",
+            "message": f"Last successful backup is {hours}h old "
+            f"(limit {BACKUP_FRESHNESS_LIMIT_HOURS}h)",
+            "latest": latest,
+        }
+    return {
+        "status": "ok" if latest and latest.status == "ok" else "warn",
+        "message": f"Last successful backup at {latest_ok.ran_at:%Y-%m-%d %H:%M} UTC",
+        "latest": latest,
+    }
+
+
+@login_required
+@user_passes_test(lambda u: u.is_staff)
+def status_page(request):
+    """Staff-only system status dashboard."""
+    from .models import SystemCheck
+
+    return render(request, "common/status.html", {
+        "database": _database_health(),
+        "object_storage": _object_storage_health(),
+        "backup": _backup_health(),
+        "recent_checks": SystemCheck.objects.all()[:20],
+        "checked_at": timezone.now(),
+    })
+
+
+def healthz(request):
+    """Unauthenticated liveness/readiness probe: 200 or 503, no details."""
+    healthy = (
+        _database_health()["status"] == "up"
+        and _object_storage_health()["status"] == "up"
+    )
+    return JsonResponse(
+        {"status": "ok" if healthy else "unavailable"},
+        status=200 if healthy else 503,
+    )

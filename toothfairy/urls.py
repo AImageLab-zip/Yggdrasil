@@ -44,6 +44,8 @@ urlpatterns = [
         name="user_activity_stats",
     ),
     path("admin/", admin.site.urls),
+    path("status/", common_views.status_page, name="status_page"),
+    path("healthz", common_views.healthz, name="healthz"),
     path("", scans_views.home, name="home"),
     path("maxillo/", include("maxillo.urls")),
     path("brain/", include("brain.urls")),

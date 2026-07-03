@@ -302,6 +302,34 @@ if not isinstance(RUNNER_QUEUE_BY_PROJECT, dict):
     RUNNER_QUEUE_BY_PROJECT = {}
 RUNNER_TASK_NAME = config("RUNNER_TASK_NAME", default="toothfairy4m_runner.process_job")
 
+# Maintenance queue: consumed ONLY by the local maintenance worker (compose
+# service), never by external runners. A collision would let runners eat
+# backup tasks, so fail hard at startup.
+MAINTENANCE_QUEUE = config("MAINTENANCE_QUEUE", default="maintenance")
+_runner_queues = {RUNNER_DEFAULT_QUEUE}
+_runner_queues.update(str(q) for q in RUNNER_QUEUE_BY_MODALITY.values())
+_runner_queues.update(str(q) for q in RUNNER_QUEUE_BY_PROJECT.values())
+if MAINTENANCE_QUEUE in _runner_queues:
+    raise ValueError(
+        f"MAINTENANCE_QUEUE '{MAINTENANCE_QUEUE}' collides with a runner queue; "
+        "external runners must never consume maintenance tasks."
+    )
+
+# Database backups (Phase 2): daily dump to object storage.
+BACKUP_KEEP_DAILY = config("BACKUP_KEEP_DAILY", default=14, cast=int)
+BACKUP_KEEP_WEEKLY = config("BACKUP_KEEP_WEEKLY", default=8, cast=int)
+BACKUP_KEY_PREFIX = config("BACKUP_KEY_PREFIX", default="backups/mysql/")
+
+from celery.schedules import crontab  # noqa: E402
+
+CELERY_BEAT_SCHEDULE = {
+    "backup-database-daily": {
+        "task": "common.tasks.backup_database",
+        "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": MAINTENANCE_QUEUE},
+    },
+}
+
 
 def _parse_runner_tokens(raw: str):
     raw = (raw or "").strip()
@@ -330,6 +358,7 @@ def _parse_runner_tokens(raw: str):
 RUNNER_API_TOKENS = _parse_runner_tokens(config("RUNNER_API_TOKENS", default=""))
 CELERY_TASK_ROUTES = {
     RUNNER_TASK_NAME: {"queue": RUNNER_DEFAULT_QUEUE},
+    "common.tasks.*": {"queue": MAINTENANCE_QUEUE},
 }
 
 # Logging Configuration

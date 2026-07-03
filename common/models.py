@@ -605,3 +605,28 @@ class FileRegistry(models.Model):
 		"""
 		choices_dict = cls.get_file_type_choices_dict()
 		return choices_dict.get(file_type, file_type.replace('_', ' ').title())
+
+
+class SystemCheck(models.Model):
+	"""Recorded outcome of a maintenance task or health check run.
+
+	One row per run (e.g. nightly database backup); the status dashboard
+	reads the latest row per name.
+	"""
+	STATUS_CHOICES = [
+		('ok', 'OK'),
+		('warn', 'Warning'),
+		('fail', 'Failed'),
+	]
+
+	name = models.CharField(max_length=100, db_index=True)
+	status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+	ran_at = models.DateTimeField(auto_now_add=True, db_index=True)
+	duration_ms = models.IntegerField(null=True, blank=True)
+	details = models.JSONField(default=dict, blank=True)
+
+	class Meta:
+		ordering = ['-ran_at']
+
+	def __str__(self):
+		return f"{self.name} [{self.status}] @ {self.ran_at:%Y-%m-%d %H:%M}"

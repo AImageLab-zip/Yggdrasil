@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - One-command local development bootstrap (`scripts/dev_bootstrap.sh`):
   standalone `docker-compose.dev.yml` with MySQL, Redis and a single-node
   Garage for object storage, plus an idempotent `manage.py seed_dev`.
+- Automated daily database backups (03:00 UTC): celery beat + a dedicated
+  `maintenance`-queue worker dump, verify and upload to object storage under
+  `backups/mysql/`, with daily/weekly retention pruning and a
+  `manage.py backup_now` wrapper. Settings refuse to start if the maintenance
+  queue collides with a runner queue.
+- `SystemCheck` model recording maintenance runs; staff-only `/status/` page
+  (DB, object storage, backup freshness — warns when the newest successful
+  backup is older than 26h) and unauthenticated `/healthz` (200/503, no
+  details).
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start
@@ -34,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `user_can_view_caption_content` ignored brain's `folders` M2M relation.
 - `patient_volume_data` always returned 500: a dead filter block referenced an
   undefined `domain` variable and its NameError short-circuited the endpoint.
+- `/admin/control-panel/` was reachable without authentication; it now
+  requires a staff login like its sibling admin views.
 
 ## [1.9.0]
 
