@@ -21,7 +21,8 @@ class BrainFolderAclTests(TestCase):
         ProjectAccess.objects.create(user=self.user, project=self.project, role="standard")
 
         self.folder = Folder.objects.create(name="B1")
-        self.patient = Patient.objects.create(name="PB", folder=self.folder)
+        self.patient = Patient.objects.create(name="PB")
+        self.patient.folders.add(self.folder)
 
     def test_brain_non_admin_needs_folder_acl(self):
         qs = filter_patients_for_user(self.user, Patient.objects.all(), "brain")

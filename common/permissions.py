@@ -12,13 +12,11 @@ def _namespace(request_or_namespace):
         getattr(request_or_namespace, "resolver_match", None)
         and request_or_namespace.resolver_match.namespace
     ) or "maxillo"
-    return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
+    return namespace if namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
 
 
 def _folder_access_model(namespace):
     app_label = _namespace(namespace)
-    if app_label == "laparoscopy":
-        return None
     return apps.get_model(app_label, "FolderAccess")
 
 
@@ -114,8 +112,17 @@ def user_can_view_caption_content(user, caption, project_or_app_context=None):
         return True
 
     patient = getattr(caption, "patient", None)
-    folder = getattr(patient, "folder", None) if patient else None
-    return get_user_folder_role(user, folder) in {"standard", "project_manager"}
+    if patient is None:
+        return False
+    if any(field.name == "folders" for field in patient._meta.get_fields()):
+        folders = patient.folders.all()
+    else:
+        folder = getattr(patient, "folder", None)
+        folders = [folder] if folder else []
+    return any(
+        get_user_folder_role(user, folder) in {"standard", "project_manager"}
+        for folder in folders
+    )
 
 
 def user_can_delete_caption(user, caption):
@@ -123,9 +130,6 @@ def user_can_delete_caption(user, caption):
 
 
 def filter_folders_for_user(user, folders_qs, app_label):
-    if _namespace(app_label) == "laparoscopy":
-        return folders_qs
-
     if user_is_project_admin(user, app_label):
         return folders_qs
     FolderAccess = _folder_access_model(app_label)
@@ -134,9 +138,6 @@ def filter_folders_for_user(user, folders_qs, app_label):
 
 
 def filter_patients_for_user(user, patients_qs, app_label):
-    if _namespace(app_label) == "laparoscopy":
-        return patients_qs
-
     if user_is_project_admin(user, app_label):
         return patients_qs
     FolderAccess = _folder_access_model(app_label)

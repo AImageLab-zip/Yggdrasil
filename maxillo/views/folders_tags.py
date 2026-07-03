@@ -8,20 +8,15 @@ from django.views.decorators.http import require_POST, require_http_methods
 import json
 import logging
 
-from django.apps import apps
-
 from .domain import get_domain_models
 from common.permissions import (
+    _folder_access_model,
     user_can_move_patient,
     user_can_write_annotations,
     user_is_project_admin,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _folder_access_model(request):
-    return apps.get_model('maxillo', 'FolderAccess')
 
 @login_required
 @require_POST
