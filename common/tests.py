@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from django.conf import settings
 from django.test import TestCase
 
 from common.permissions import _folder_access_model, _namespace
@@ -29,3 +30,17 @@ class NamespaceResolutionTests(TestCase):
         self.assertEqual(_folder_access_model("maxillo")._meta.app_label, "maxillo")
         self.assertEqual(_folder_access_model("brain")._meta.app_label, "brain")
         self.assertEqual(_folder_access_model("laparoscopy")._meta.app_label, "laparoscopy")
+
+
+class AppVersionTests(TestCase):
+    def test_app_version_is_semver(self):
+        self.assertRegex(settings.APP_VERSION, r"^\d+\.\d+\.\d+")
+
+    def test_app_version_matches_version_file(self):
+        version_file = settings.BASE_DIR / "VERSION"
+        self.assertEqual(settings.APP_VERSION, version_file.read_text().strip())
+
+    def test_footer_renders_version(self):
+        response = self.client.get("/login/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f"v{settings.APP_VERSION}")

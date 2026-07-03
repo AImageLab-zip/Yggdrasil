@@ -1,4 +1,10 @@
+from django.conf import settings
+
 from common.models import Project, ProjectAccess
+
+
+def app_meta(request):
+    return {'app_version': getattr(settings, 'APP_VERSION', '')}
 
 
 def current_project(request):

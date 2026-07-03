@@ -22,6 +22,17 @@ mimetypes.add_type("application/wasm", ".wasm")
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _read_app_version() -> str:
+    try:
+        return (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        # A missing VERSION file must never prevent the app from booting.
+        return "0.0.0-dev"
+
+
+APP_VERSION = _read_app_version()
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -110,6 +121,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "common.context_processors.current_project",
+                "common.context_processors.app_meta",
             ],
         },
     },
