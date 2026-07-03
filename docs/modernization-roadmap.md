@@ -16,8 +16,8 @@ Decisions already made with the maintainer:
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Prod hardening + ACL fixes | ✅ done (`release/2.0`, commits `4ee1cc6`, `61a23f0`) |
-| 1 | Versioning, CI, test baseline, dev bootstrap | ⬜ next |
-| 2 | Automated backup + status dashboard | ⬜ |
+| 1 | Versioning, CI, test baseline, dev bootstrap | ✅ done (`release/2.0`, tag `v1.9.0`, commits `5373b93`, `23d72e6`, `e9a60d3` + bootstrap commit) |
+| 2 | Automated backup + status dashboard | ⬜ next |
 | 3 | Export share expiry | ⬜ |
 | 4 | Admin-driven worker/modality config | ⬜ |
 | 5 | `common/` consolidation | ⬜ |
@@ -103,6 +103,7 @@ Explicit `is_demo` flag on folders + anonymous `/demo/<domain>/` namespace (GET/
 
 ## Risk register
 
+0. **CRUCIAL — v1.9 dump must restore into a fresh 2.0 VM.** The production upgrade path is: mysqldump the 1.x VM → restore onto a brand-new VM → start 2.0 (auto-migrate). Tag `v1.9.0` (commit `52d1557`) marks that schema. Never edit/squash migrations existing at that tag; every later migration must be additive and apply cleanly on a restored 1.9 dump. Rehearse before each risky phase: restore 1.9 dump into scratch MySQL → `manage.py migrate` → suite green.
 1. Runner HTTP contract frozen (claim/complete/fail + token auth) — contract test lands in Phase 1.
 2. Auto-migrate on deploy (Phase 0) — guarded by CI migrations (Phase 1) and daily backups (Phase 2) before the riskier migrations (Phases 3–5).
 3. `maintenance` queue collision with runner queues — check prod `.env` before Phase 2 deploy.

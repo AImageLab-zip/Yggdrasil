@@ -9,6 +9,14 @@ def _job(domain="maxillo", modality_slug="demo", **attrs):
     return SimpleNamespace(domain=domain, modality_slug=modality_slug, **attrs)
 
 
+# Class-level None overrides neutralize whatever a local .env put into
+# settings (select_runner_queue treats None like an absent setting), so these
+# tests pass identically on dev machines and in CI.
+@override_settings(
+    RUNNER_DEFAULT_QUEUE=None,
+    RUNNER_QUEUE_BY_PROJECT=None,
+    RUNNER_QUEUE_BY_MODALITY=None,
+)
 class SelectRunnerQueueTests(SimpleTestCase):
     def test_default_queue_without_settings(self):
         self.assertEqual(select_runner_queue(_job()), "runner")
@@ -50,6 +58,7 @@ class SelectRunnerQueueTests(SimpleTestCase):
         self.assertEqual(select_runner_queue(job), "lap-q")
 
 
+@override_settings(RUNNER_QUEUE_BY_MODALITY=None)
 class RunnerEnabledForModalityTests(SimpleTestCase):
     def test_enabled_when_no_map_configured(self):
         self.assertTrue(is_runner_enabled_for_modality("demo"))

@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preserving current visibility while making it revocable.
 - `VERSION` file exposed as `settings.APP_VERSION` and shown in the site footer.
 - This changelog.
+- CI on self-hosted GitHub Actions runners (ruff + full suite against MySQL/Redis,
+  `makemigrations --check` gate) and a release workflow on `v*` tags.
+- Contract tests freezing the external runner HTTP API (claim/complete/fail).
+- One-command local development bootstrap (`scripts/dev_bootstrap.sh`):
+  standalone `docker-compose.dev.yml` with MySQL, Redis and a single-node
+  Garage for object storage, plus an idempotent `manage.py seed_dev`.
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start

@@ -192,8 +192,11 @@ GitHub.sublime-settings
 prod_db.sql
 *.sql
 
-# Local scripts
-scripts/
+# Local scripts (tracked ones re-included explicitly below)
+scripts/*
+!scripts/backup_prod.sh
+!scripts/manual_test_external_api.py
+!scripts/dev_bootstrap.sh
 
 # OpenCode local artifacts
 AGENTS.md

@@ -1,7 +1,10 @@
 from types import SimpleNamespace
+from unittest import mock
 
 from django.conf import settings
-from django.test import TestCase
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.test import TestCase, override_settings
 
 from common.permissions import _folder_access_model, _namespace
 
@@ -44,6 +47,37 @@ class AppVersionTests(TestCase):
         response = self.client.get("/login/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f"v{settings.APP_VERSION}")
+
+
+class SeedDevCommandTests(TestCase):
+    @override_settings(DEBUG=False)
+    def test_refuses_to_run_without_debug(self):
+        with self.assertRaises(CommandError):
+            call_command("seed_dev")
+
+    @override_settings(DEBUG=True)
+    def test_seed_is_idempotent(self):
+        from brain.models import Patient as BrainPatient
+        from common.models import Project
+        from laparoscopy.models import Patient as LaparoscopyPatient
+        from maxillo.models import Patient as MaxilloPatient
+
+        with mock.patch("common.signals.celery_app.send_task"):
+            call_command("seed_dev")
+            call_command("seed_dev")
+
+        self.assertEqual(
+            set(Project.objects.values_list("slug", flat=True)),
+            {"maxillo", "brain", "laparoscopy"},
+        )
+        for model in (MaxilloPatient, BrainPatient, LaparoscopyPatient):
+            self.assertEqual(model.objects.filter(name="Demo Patient").count(), 1)
+
+        from django.contrib.auth.models import User
+
+        admin = User.objects.get(username="admin")
+        self.assertTrue(admin.is_superuser)
+        self.assertEqual(admin.project_access.count(), 3)
 
 
 class UrlSmokeTests(TestCase):

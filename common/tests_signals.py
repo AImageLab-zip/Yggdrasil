@@ -6,6 +6,13 @@ from django.test import TestCase, override_settings
 from common.models import Job
 
 
+# None overrides neutralize a local .env (treated like absent settings) so
+# the expected queue is the built-in default everywhere, incl. CI.
+@override_settings(
+    RUNNER_DEFAULT_QUEUE=None,
+    RUNNER_QUEUE_BY_PROJECT=None,
+    RUNNER_QUEUE_BY_MODALITY=None,
+)
 class JobEnqueueSignalTests(TestCase):
     def setUp(self):
         patcher = mock.patch("common.signals.celery_app.send_task")

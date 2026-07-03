@@ -1,0 +1,17 @@
+# Garage config for LOCAL DEVELOPMENT only (docker-compose.dev.yml).
+# Single node, replication factor 1, fixed dev secrets - never use in prod.
+
+replication_factor = 1
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "garage:3901"
+rpc_secret = "3e9c6b0d8a4f21c75e0b9d3a6c8f14e27b5d0a9c3e6f18b47d2a5c8e0b3f16d9"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
