@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: ["release/2.0", "main"]
+  pull_request:
+
+jobs:
+  lint:
+    # Runner labels: repo-level self-hosted runner with Docker (see CONTRIBUTING.md).
+    runs-on: [self-hosted, linux]
+    container: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ruff
+        run: pip install --no-cache-dir "$(grep '^ruff==' requirements-dev.txt)"
+      - name: Ruff check
+        run: ruff check .
+
+  test:
+    runs-on: [self-hosted, linux]
+    container: python:3.11-slim
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: citestpass
+          MYSQL_DATABASE: ygg
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pcitestpass"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      redis:
+        # bitnami: the official redis image cannot take a password via env,
+        # and GitHub `services:` offers no command override.
+        image: bitnami/redis:7.2
+        env:
+          REDIS_PASSWORD: citestpass
+        options: >-
+          --health-cmd "redis-cli -a citestpass ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      SECRET_KEY: ci-only-secret-key
+      DEBUG: "False"
+      DB_NAME: ygg
+      DB_USER: root
+      DB_PASSWORD: citestpass
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_PASSWORD: citestpass
+      REDIS_HOST: redis
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+      EMAIL_HOST: localhost
+      EMAIL_PORT: "25"
+      EMAIL_HOST_USER: ci
+      EMAIL_HOST_PASSWORD: ci
+      EMAIL_USE_TLS: "False"
+      EMAIL_USE_SSL: "False"
+      DEFAULT_FROM_EMAIL: ci@example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps for mysqlclient
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gcc pkg-config default-libmysqlclient-dev
+      - name: Install Python deps
+        run: pip install --no-cache-dir -r requirements.txt
+      - name: Migration hygiene gate
+        run: python manage.py makemigrations --check --dry-run
+      - name: Migrate
+        run: python manage.py migrate --noinput
+      - name: Test
+        run: python manage.py test --noinput -v 2

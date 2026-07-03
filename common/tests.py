@@ -44,3 +44,30 @@ class AppVersionTests(TestCase):
         response = self.client.get("/login/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f"v{settings.APP_VERSION}")
+
+
+class UrlSmokeTests(TestCase):
+    """Zero-fixture checks that the main entry points render at all.
+
+    Catches URLConf, template and import breakage without exercising any
+    domain logic.
+    """
+
+    def test_landing_renders_for_anonymous_user(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_app_indexes_redirect_anonymous_user_to_login(self):
+        for path in ("/maxillo/", "/brain/", "/laparoscopy/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response.url.startswith("/login/"))
+
+    def test_landing_renders_for_staff_user(self):
+        from django.contrib.auth.models import User
+
+        User.objects.create_superuser("smoke-admin", password="pw")
+        self.client.login(username="smoke-admin", password="pw")
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
