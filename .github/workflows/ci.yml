@@ -32,13 +32,12 @@ jobs:
           --health-timeout 5s
           --health-retries 30
       redis:
-        # bitnami: the official redis image cannot take a password via env,
-        # and GitHub `services:` offers no command override.
-        image: bitnami/redis:7.2
-        env:
-          REDIS_PASSWORD: citestpass
+        # No auth: the official image only takes a password via command args,
+        # which GitHub `services:` cannot override. Celery URLs are set
+        # explicitly below; the passworded presence URL fails gracefully.
+        image: redis:7-alpine
         options: >-
-          --health-cmd "redis-cli -a citestpass ping"
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
@@ -50,8 +49,10 @@ jobs:
       DB_PASSWORD: citestpass
       DB_HOST: mysql
       DB_PORT: "3306"
-      REDIS_PASSWORD: citestpass
+      REDIS_PASSWORD: ci-unused
       REDIS_HOST: redis
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
       EMAIL_HOST: localhost
       EMAIL_PORT: "25"
