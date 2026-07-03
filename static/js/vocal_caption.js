@@ -34,7 +34,8 @@ class VocalCaptionRecorder {
         this.brainSpeechLanguages = {
             en: { label: 'English', speechRecognition: 'en-US' },
             it: { label: 'Italian', speechRecognition: 'it-IT' },
-            de: { label: 'German', speechRecognition: 'de-DE' }
+            de: { label: 'German', speechRecognition: 'de-DE' },
+            es: { label: 'Spanish', speechRecognition: 'es-ES' }
         };
         this.brainSpeechLanguageStorageKey = 'toothfairy.brainSpeechLanguage';
         
