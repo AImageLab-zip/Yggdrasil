@@ -435,6 +435,8 @@ class UserPreference(models.Model):
     LANGUAGE_CHOICES = [
         ('it', 'Italian'),
         ('en', 'English'),
+        ('de', 'German'),
+        ('es', 'Spanish'),
     ]
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='brain_preference')

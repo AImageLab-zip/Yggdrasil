@@ -41,7 +41,7 @@ def set_report_language(request):
     except (json.JSONDecodeError, AttributeError):
         return JsonResponse({'error': 'Invalid request'}, status=400)
 
-    if language not in ('it', 'en'):
+    if language not in ('it', 'en', 'de', 'es'):
         return JsonResponse({'error': 'Invalid language'}, status=400)
 
     pref, _ = UserPreference.objects.get_or_create(user=request.user)
