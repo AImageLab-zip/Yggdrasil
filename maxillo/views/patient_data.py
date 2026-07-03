@@ -294,18 +294,6 @@ def patient_volume_data(request, patient_id, modality_slug):
     except Exception:
         return JsonResponse({"error": "File registry unavailable"}, status=500)
     file_path = None
-    # Use the latest raw NIfTI.
-    if not file_path:
-        try:
-            raw_filter = {"domain": domain, "modality__slug": modality_slug}
-            if modality_slug == "cbct":
-                raw_filter["file_type"] = "cbct_raw"
-            if domain == "brain":
-                raw_filter["brain_patient_id"] = patient.patient_id
-            else:
-                raw_filter["patient_id"] = patient.patient_id
-        except Exception:
-            return JsonResponse({"error": "Failed to construct file filter"}, status=500)
     try:
         processed_filter = {
             "domain": "maxillo",

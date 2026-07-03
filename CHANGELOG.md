@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Folder permission edits from brain pages silently wrote maxillo `FolderAccess` rows;
   folder-tag views now resolve the model per namespace.
 - `user_can_view_caption_content` ignored brain's `folders` M2M relation.
+- `patient_volume_data` always returned 500: a dead filter block referenced an
+  undefined `domain` variable and its NameError short-circuited the endpoint.
 
 ## [1.9.0]
 
