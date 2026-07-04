@@ -3,7 +3,7 @@
 {% block title %}User Activity{% endblock %}
 
 {% block navbar %}
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+<nav class="navbar navbar-expand-lg navbar-dark ygg-navbar">
 	<div class="container">
 		<span class="navbar-brand mb-0 h1"><i class="fas fa-chart-line me-2"></i>User Activity</span>
 	</div>
@@ -13,7 +13,7 @@
 {% block extra_css %}
 <style>
 	.summary-row {
-		border: 1px solid #d7dde6;
+		border: 1px solid var(--ygg-border);
 		border-radius: 10px;
 		padding: 0.5rem 0.8rem;
 		margin-bottom: 0.4rem;
@@ -21,11 +21,11 @@
 		justify-content: space-between;
 		align-items: center;
 		cursor: pointer;
-		background: #fbfdff;
+		background: var(--ygg-surface);
 	}
 
 	.summary-row.active {
-		border-color: #0d6efd;
+		border-color: var(--ygg-navy-500);
 		background: #eef5ff;
 	}
 
@@ -41,9 +41,9 @@
 		color: #fff;
 	}
 
-	.project-badge[data-project="maxillo"] { background: #0d6efd; }
-	.project-badge[data-project="brain"] { background: #fd7e14; }
-	.project-badge[data-project="laparoscopy"] { background: #20c997; }
+	.project-badge[data-project="maxillo"] { background: var(--ygg-maxillo); }
+	.project-badge[data-project="brain"] { background: var(--ygg-brain); }
+	.project-badge[data-project="laparoscopy"] { background: var(--ygg-laparoscopy); }
 	.project-badge[data-project=""] { background: #6c757d; }
 
 	.legend-swatch {
@@ -145,9 +145,9 @@
 	if (!canvas || !timeline.length) return;
 
 	const PROJECT_COLORS = {
-		maxillo: '#0d6efd',
-		brain: '#fd7e14',
-		laparoscopy: '#20c997',
+		maxillo: '#5b8def',
+		brain: '#3fc39b',
+		laparoscopy: '#e0785f',
 		'': '#6c757d',
 	};
 	const PROJECT_LABELS = {

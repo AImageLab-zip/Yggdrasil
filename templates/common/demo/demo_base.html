@@ -2,14 +2,14 @@
 {% load static %}
 
 {% block navbar %}
-<nav class="navbar navbar-dark bg-primary">
+<nav class="navbar navbar-dark ygg-navbar">
     <div class="container">
         <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'demo:index' %}">
             <img src="{% static 'icons/favicon.svg' %}" alt="" width="28" height="28">
             Yggdrasil
         </a>
         <div class="d-flex align-items-center gap-2">
-            <span class="badge bg-warning text-dark">Public demo · read-only</span>
+            <span class="badge ygg-badge-gold">Public demo · read-only</span>
             <a class="btn btn-light btn-sm" href="{% url 'login' %}">
                 <i class="fas fa-sign-in-alt me-1"></i>Log in
             </a>

@@ -149,6 +149,12 @@ main a:not(.btn):not(.nav-link):not(.dropdown-item):not(.badge) {
     color: inherit;
 }
 
+/* Gold badge (public-demo marker etc.) */
+.ygg-badge-gold {
+    background: var(--ygg-gold-500);
+    color: var(--ygg-ink-900);
+}
+
 /* ---- Footer (.ygg-footer) ------------------------------------------------ */
 .ygg-footer {
     background: var(--ygg-surface);
