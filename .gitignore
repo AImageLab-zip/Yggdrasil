@@ -196,6 +196,7 @@ prod_db.sql
 # Local scripts (tracked ones re-included explicitly below)
 scripts/*
 !scripts/backup_prod.sh
+!scripts/restore_prod.sh
 !scripts/manual_test_external_api.py
 !scripts/dev_bootstrap.sh
 

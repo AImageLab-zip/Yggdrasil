@@ -22,3 +22,5 @@ This is also what [set_llumetti_as_admin.sh](../set_llumetti_as_admin.sh) does �
 It reads `.env` from the repo root for DB credentials, and resolves the target container as `toothfairy4m-db-$DOCKER_SUFFIX`.
 
 This is destructive to the listed tables (`DROP TABLE IF EXISTS` is replayed from the dump) — back up first if unsure.
+
+> This is a **subset** import for seeding users/projects/modalities into a dev stack. It is **not** how you migrate a server. For a full v1.9 → 2.0 server migration (whole database restore + additive migrations + object storage), use `scripts/restore_prod.sh` and follow [upgrade-1.9-to-2.0.md](upgrade-1.9-to-2.0.md).

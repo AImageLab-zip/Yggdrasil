@@ -23,6 +23,9 @@ Decisions already made with the maintainer:
 | 5 | `common/` consolidation | ✅ done (`release/2.0`, PRs 5.1/5.2/5.3) |
 | 6 | Branding, landing, favicons, footer | ✅ done (`release/2.0`, PRs 6.1/6.2) |
 | 7 | Public guest demo | ✅ done (`release/2.0`, PRs 7.1/7.2) |
+| 8 | Brain API auth + bulk `resubmit_jobs` | ✅ done (`release/2.0`, `e195807`) — scope added from risk #6, not in the original 0–7 plan |
+
+Feature scope for 2.0 is **complete** (Phases 0–8). See **Road to 2.0 release** below for the remaining non-feature work (prod-env rehearsals + release cut).
 
 ## Phase 0 — DONE
 
@@ -112,6 +115,56 @@ Shipped on `release/2.0` (7.1 `2a7b60e`, 7.2 `d60a3cb`, tests `acce262`).
 - **Design deviation from the original note:** did NOT reuse the heavy `@login_required` patient list/detail views/templates in a `demo_mode`, and did NOT add an anonymous branch to the sensitive authed file endpoints (`maxillo/api_views/files.py`, `patient_data.py`, brain). De-authing those was judged too broad/risky for the intent ("anonymous read-only demo of curated folders"). Instead the demo is a fully separate, read-only surface — the authed endpoints keep `@login_required` untouched. The full annotation viewers are therefore NOT reproduced anonymously (a demo study shows metadata + inline previews of image/video files + download links for other formats). A future PR could reuse the viewers by mirroring the data endpoints under `/demo/`.
 - **Demo folders must contain only anonymized/synthetic studies** — enforced by review; documented in the `is_demo` field help_text.
 - Verified: fresh MySQL/Redis stack, `check` clean, `makemigrations --check` clean, full suite 169 green.
+
+## Phase 8 — Brain API auth + bulk resubmit — DONE
+
+Shipped on `release/2.0` (`e195807`; risk #6 marked resolved in `f620946`). Reactive scope
+from **risk #6** — not in the original 0–7 plan. Three deliverables:
+
+- **Security — brain API auth hardening.** The brain processing API was fully anonymous.
+  `serve_file` (`brain/api_views.py`) now requires login **and** enforces the brain folder
+  ACL (patients relate via the `folders` M2M, mirroring maxillo `files.serve_file`); the
+  monitoring endpoints (`get_file_registry`, `get_job_status`, `ProcessingJobListView`) are
+  staff-only. The unauthenticated per-domain runner routes (`runner_claim/complete/fail`,
+  formerly in `brain/app_urls.py`) are **removed** — external runners are domain-agnostic
+  and use the single token-authed contract at `/api/runner/...`, which is untouched, so
+  **risk #1 (frozen runner contract) is not affected** and no runner breaks.
+- **Feature — `manage.py resubmit_jobs --domain <d> --modality <slug>`**
+  (`common/management/commands/resubmit_jobs.py`): bulk-creates pending processing jobs for
+  existing patients that have the modality's raw file but no job yet (the "new algorithm,
+  reprocess old patients" case), reusing the normal enqueue signal. `--include-existing`
+  also re-pends patients that already have a job; `--folder-id`, `--limit`, `--dry-run`
+  supported.
+- **Fix — `common.uploads.domain_for_patient()`** returned `maxillo` for brain patients
+  (anything not laparoscopy), misfiling brain `Job`/`FileRegistry` FKs via the registry
+  helpers. Latent (brain's uploader sets `brain_patient` directly); surfaced by
+  `resubmit_jobs`. Now maps every domain app label correctly.
+
+Tests: `common/tests_phase8.py` (8 tests — brain runner routes 404/removed, global secure
+runner route intact, anonymous brain endpoints → login redirect, `resubmit_jobs`
+create/idempotency/re-pend). Verified on a fresh MySQL/Redis stack; full suite 177 green.
+CHANGELOG updated.
+
+## Road to 2.0 release
+
+Feature scope is closed (Phases 0–8). Remaining work is **non-feature** — the prod-like-env
+rehearsals the phases explicitly deferred, then the release cut. Most require a VM / prod
+clone and the real v1.9 dump, so they are the maintainer's pre-tag checklist, not runnable
+in dev. **Full step-by-step runbook (dump → restore → migrate → object storage → verify) in
+[upgrade-1.9-to-2.0.md](upgrade-1.9-to-2.0.md)** — its Verification section walks these five
+items:
+
+- **Risk-item-0 rehearsal — release blocker.** Restore the actual `v1.9.0` mysqldump onto a
+  fresh MySQL → `manage.py migrate` (applies every additive migration through Phase 8) →
+  full suite green. Owed by Phases 2, 4, 5.
+- **Backup restore test** (Phase 2): restore a `manage.py backup_now`-produced dump into
+  scratch MySQL.
+- **Large export streaming under gunicorn** (Phase 0): confirm a big export download streams
+  correctly under gunicorn, not just the dev server.
+- **Real-runner callback** (Phase 0 / risk #1): claim/complete/fail against a live external
+  runner over the token-authed contract.
+- **Release cut**: set the `[2.0.0]` date in `CHANGELOG.md` (currently `TBD`), fold
+  `[Unreleased]` in, tag `v2.0.0` (fires `release.yml`).
 
 ## Risk register
 
