@@ -22,7 +22,7 @@ Decisions already made with the maintainer:
 | 4 | Admin-driven worker/modality config | ✅ done (`release/2.0`) |
 | 5 | `common/` consolidation | ✅ done (`release/2.0`, PRs 5.1/5.2/5.3) |
 | 6 | Branding, landing, favicons, footer | ✅ done (`release/2.0`, PRs 6.1/6.2) |
-| 7 | Public guest demo | ⬜ |
+| 7 | Public guest demo | ✅ done (`release/2.0`, PRs 7.1/7.2) |
 
 ## Phase 0 — DONE
 
@@ -104,11 +104,14 @@ Original plan:
 - PR 6.1: Yggdrasil world-tree favicon/logo set in `static/icons/` + `<link>`s in `base.html`; footer (`base.html:225`): drop "developed by Luca Lumetti", keep GitHub link, add `v{{ app_version }}` + "Yggdrasil 2.0 is out" note.
 - PR 6.2: self-hosted webfont (GDPR — no Google CDN), `static/css/theme.css` polish **scoped away from annotation viewers** (`static/js/` and patient-detail partials untouched — annotators keep their known UI); expand `templates/common/landing.html` (runes theme exists) with name explanation + domain cards + demo link.
 
-## Phase 7 — Public guest demo
+## Phase 7 — Public guest demo — DONE
 
-Explicit `is_demo` flag on folders + anonymous `/demo/<domain>/` namespace (GET/HEAD only), NOT a synthetic guest login.
-- `@demo_view` decorator; querysets start from `Folder.objects.filter(is_demo=True)`; reuse patient templates with `demo_mode=True` hiding write controls; authed API endpoints stay `@login_required`; anonymous branch in `common/file_access.py` strictly for demo-folder assets; per-IP rate limit.
-- **Demo folders must contain only anonymized/synthetic studies** — checklist item in the PR.
+Shipped on `release/2.0` (7.1 `2a7b60e`, 7.2 `d60a3cb`, tests `acce262`).
+- 7.1: `is_demo` BooleanField on the shared `FolderBase` → additive migrations maxillo 0022 / brain 0017 / laparoscopy 0008; `list_editable`/`list_filter` in all three FolderAdmins so staff flag curated folders.
+- 7.2: **self-contained** anonymous demo — `common/demo.py` (querysets rooted at `is_demo` folders via the domain registry, handling the brain M2M `folders` vs maxillo/lap FK `folder` split; `demo_guard` = GET/HEAD + per-IP rate limit; `patient_in_demo`) + URLs `common/demo_urls.py` under `/demo/` (`demo:index`/`domain`/`patient`/`file`) + templates `templates/common/demo/`. The demo file endpoint streams a `FileRegistry` entry only if the patient (resolved via the **URL** domain's FK, not the untrusted `file_obj.domain`) is in a demo folder. Landing CTA wired via `landing_demo_url()` in both `home` views (shows only when a demo folder exists). Isolation locked by `common/tests_demo.py` (9 tests: private patient/file → 404, POST → 405, unknown domain → 404).
+- **Design deviation from the original note:** did NOT reuse the heavy `@login_required` patient list/detail views/templates in a `demo_mode`, and did NOT add an anonymous branch to the sensitive authed file endpoints (`maxillo/api_views/files.py`, `patient_data.py`, brain). De-authing those was judged too broad/risky for the intent ("anonymous read-only demo of curated folders"). Instead the demo is a fully separate, read-only surface — the authed endpoints keep `@login_required` untouched. The full annotation viewers are therefore NOT reproduced anonymously (a demo study shows metadata + inline previews of image/video files + download links for other formats). A future PR could reuse the viewers by mirroring the data endpoints under `/demo/`.
+- **Demo folders must contain only anonymized/synthetic studies** — enforced by review; documented in the `is_demo` field help_text.
+- Verified: fresh MySQL/Redis stack, `check` clean, `makemigrations --check` clean, full suite 169 green.
 
 ## Risk register
 
@@ -118,3 +121,4 @@ Explicit `is_demo` flag on folders + anonymous `/demo/<domain>/` namespace (GET/
 3. `maintenance` queue collision with runner queues — check prod `.env` before Phase 2 deploy.
 4. Phase 5 gated on the zero-SQL migration check + prod-clone rehearsal.
 5. Post-deploy of Phase 0: audit auto-granted laparoscopy FolderAccess rows; also note `_namespace()` fix means maxillo-only admins no longer get admin power on brain/laparoscopy pages (correct, but a visible behavior change).
+6. **Pre-existing (found in Phase 7 mapping, NOT introduced here):** brain's `serve_file` (`brain/api_views.py:80`) has no `@login_required` and no ACL check — it filters only `domain="brain"`. Independent of the demo (the demo never routes to it), but it means any request can fetch brain files by id. Worth a dedicated fix PR: add auth + `user_can_read_folder` like maxillo's `serve_file`.
