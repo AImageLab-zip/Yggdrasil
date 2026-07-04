@@ -196,21 +196,8 @@ urlpatterns = [
         api_views.get_job_status,
         name="api_get_job_status",
     ),
-    path(
-        "api/runner/jobs/<int:job_id>/claim/",
-        api_views.runner_claim_job,
-        name="api_runner_claim_job",
-    ),
-    path(
-        "api/runner/jobs/<int:job_id>/complete/",
-        api_views.runner_complete_job,
-        name="api_runner_complete_job",
-    ),
-    path(
-        "api/runner/jobs/<int:job_id>/fail/",
-        api_views.runner_fail_job,
-        name="api_runner_fail_job",
-    ),
+    # Runner callbacks intentionally removed — external runners use the single
+    # token-authenticated contract at /api/runner/jobs/<id>/... (domain-agnostic).
     path(
         "api/processing/files/",
         api_views.get_file_registry,

@@ -53,12 +53,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reach a patient (and its files) that lives in a demo folder. The landing
   "Explore the public demo" CTA appears only once at least one demo folder
   exists. Only anonymized or synthetic studies may be flagged.
+- `manage.py resubmit_jobs --domain <d> --modality <slug>`: bulk-create pending
+  processing jobs for existing patients that have the modality's raw file but no
+  job yet (e.g. after shipping a new algorithm for a modality), reusing the
+  normal enqueue signal. `--include-existing` also re-pends patients that
+  already have a job; `--folder-id`, `--limit`, `--dry-run` supported.
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start
   (`AUTO_MIGRATE=0` to opt out, `RUN_DEV_SERVER=1` for the dev server).
 
+### Security
+- Brain processing API was fully anonymous: `serve_file` let anyone fetch any
+  brain file by id, and `get_file_registry`/`get_job_status`/the job list
+  leaked file paths, patient ids and job state. These now require login (file
+  serving enforces the brain folder ACL; the monitoring endpoints are
+  staff-only). The unauthenticated per-domain runner callbacks
+  (`runner_claim/complete/fail`) that also mutated job state were removed —
+  external runners use the single token-authenticated contract under
+  `/api/runner/...` (domain-agnostic, unchanged).
+
 ### Fixed
+- `common.uploads.domain_for_patient()` returned `maxillo` for brain patients
+  (anything that wasn't laparoscopy), so registry-driven Job/FileRegistry FK
+  helpers misfiled brain entities; it now maps every domain app label correctly.
 - `common.permissions._namespace()` resolved every request-object call to `maxillo`,
   so brain and laparoscopy permission checks ran against the wrong domain.
 - Folder permission edits from brain pages silently wrote maxillo `FolderAccess` rows;

@@ -26,10 +26,12 @@ def get_patient(obj):
 
 
 def domain_for_patient(patient) -> str:
+    from common.domains import normalize_domain
+
     app_label = getattr(getattr(patient, "_meta", None), "app_label", "")
-    if app_label == "laparoscopy":
-        return "laparoscopy"
-    return "maxillo"
+    # app_label is the domain slug for every domain app (maxillo/brain/
+    # laparoscopy); normalize_domain falls back to the default for anything else.
+    return normalize_domain(app_label)
 
 
 def entity_fk_kwargs(patient):
