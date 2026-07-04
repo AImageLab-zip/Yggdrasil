@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   updated shares default to 30 days; the share UI offers 7/30/90 days or
   never, where "never" is allowed only for staff/project admins. Expired
   links answer 410 Gone on both the landing page and the download.
+- Yggdrasil world-tree branding: an original SVG logo and a full favicon set
+  (`static/icons/`, regenerable via `scripts/make_icons.sh`) wired into every
+  page. The footer drops the original single-tenant author credit, keeps the
+  GitHub link and version, and flags "Yggdrasil 2.0 is out".
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start
