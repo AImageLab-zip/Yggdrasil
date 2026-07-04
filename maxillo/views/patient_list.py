@@ -8,6 +8,7 @@ from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import render_with_fallback
+from common.demo import landing_demo_url
 from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
@@ -65,8 +66,9 @@ def home(request):
             'current_project_id': current_project_id,
             'current_project_name': current_project_name,
             'continue_url': continue_url,
+            'demo_url': landing_demo_url(),
         })
-    return render(request, 'common/landing.html')
+    return render(request, 'common/landing.html', {'demo_url': landing_demo_url()})
 
 
 @login_required

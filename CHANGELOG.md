@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrestyled. The landing page gains a Cinzel title, the world-tree logo, an
   explanation of the Yggdrasil name, and a demo call-to-action that stays
   hidden until a `demo_url` is provided (Phase 7).
+- Public guest demo (Phase 7): an anonymous, read-only, no-login window at
+  `/demo/` onto curated folders flagged `is_demo=True` (new `FolderBase`
+  field, editable per folder in the admin). GET/HEAD only, per-IP rate
+  limited; a self-contained set of views/templates that never touch the
+  authenticated app or its `@login_required` file endpoints and can only
+  reach a patient (and its files) that lives in a demo folder. The landing
+  "Explore the public demo" CTA appears only once at least one demo folder
+  exists. Only anonymized or synthetic studies may be flagged.
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start

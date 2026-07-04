@@ -1,0 +1,32 @@
+{% extends 'common/demo/demo_base.html' %}
+{% load static %}
+
+{% block title %}Public demo - Yggdrasil{% endblock %}
+
+{% block demo_content %}
+<div class="text-center mb-4">
+    <img src="{% static 'icons/ygg-logo.svg' %}" alt="Yggdrasil" width="72" height="72" class="mb-2">
+    <h1 class="h3">Explore Yggdrasil</h1>
+    <p class="text-muted">
+        A read-only look at curated, anonymized studies across our medical-imaging
+        domains. No account needed.
+    </p>
+</div>
+
+{% if domains %}
+<div class="row g-3 justify-content-center">
+    {% for d in domains %}
+    <div class="col-12 col-md-4">
+        <a class="card h-100 text-decoration-none shadow-sm" href="{% url 'demo:domain' d.slug %}">
+            <div class="card-body">
+                <h2 class="h5 card-title">{{ d.label }}</h2>
+                <p class="card-text text-muted mb-0">{{ d.patient_count }} demo stud{{ d.patient_count|pluralize:"y,ies" }}</p>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info text-center">No demo studies are published yet.</div>
+{% endif %}
+{% endblock %}

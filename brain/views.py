@@ -16,6 +16,7 @@ from django.http import JsonResponse, Http404, HttpResponseGone
 from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
+from common.demo import landing_demo_url
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
@@ -65,8 +66,9 @@ def home(request):
             "current_project_id": current_project_id,
             "current_project_name": current_project_name,
             "continue_url": "/brain/" if current_project_name else None,
+            "demo_url": landing_demo_url(),
         })
-    return render(request, "common/landing.html")
+    return render(request, "common/landing.html", {"demo_url": landing_demo_url()})
 
 
 @login_required

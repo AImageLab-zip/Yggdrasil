@@ -1,0 +1,53 @@
+{% extends 'common/demo/demo_base.html' %}
+
+{% block title %}{{ patient.name|default:patient.patient_id }} - {{ domain_label }} demo{% endblock %}
+
+{% block demo_content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{% url 'demo:index' %}">Demo</a></li>
+        <li class="breadcrumb-item"><a href="{% url 'demo:domain' domain %}">{{ domain_label }}</a></li>
+        <li class="breadcrumb-item active" aria-current="page">{{ patient.name|default:patient.patient_id }}</li>
+    </ol>
+</nav>
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h1 class="h4 mb-0">{{ patient.name|default:patient.patient_id }}</h1>
+    <span class="badge bg-secondary">Read-only</span>
+</div>
+
+<dl class="row small">
+    <dt class="col-sm-3">Patient ID</dt><dd class="col-sm-9">{{ patient.patient_id }}</dd>
+    {% if patient.uploaded_at %}
+    <dt class="col-sm-3">Uploaded</dt><dd class="col-sm-9">{{ patient.uploaded_at|date:"Y-m-d H:i" }}</dd>
+    {% endif %}
+</dl>
+
+<h2 class="h6 mt-4">Files</h2>
+{% if files %}
+<div class="list-group">
+    {% for f in files %}
+    <div class="list-group-item">
+        <div class="d-flex justify-content-between align-items-center">
+            <span>{{ f.file_type }}</span>
+            <span class="badge bg-light text-muted">{{ f.size|filesizeformat }}</span>
+        </div>
+        {% if f.is_image %}
+        <img src="{% url 'demo:file' domain f.id %}" alt="{{ f.file_type }}"
+             class="img-fluid rounded mt-2" loading="lazy" style="max-height: 420px;">
+        {% elif f.is_video %}
+        <video controls preload="metadata" class="w-100 rounded mt-2" style="max-height: 420px;">
+            <source src="{% url 'demo:file' domain f.id %}" type="{{ f.content_type }}">
+        </video>
+        {% else %}
+        <a class="btn btn-outline-secondary btn-sm mt-2" href="{% url 'demo:file' domain f.id %}">
+            <i class="fas fa-download me-1"></i>View file
+        </a>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No files available for this study.</p>
+{% endif %}
+{% endblock %}
