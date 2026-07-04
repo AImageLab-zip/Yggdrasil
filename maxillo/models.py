@@ -7,6 +7,16 @@ import os
 from django.utils import timezone
 from django.utils.text import slugify
 from common.models import Modality, ProjectAccess, Job, FileRegistry, Invitation
+from common.base_models import (
+    ActivePatientManager,
+    DatasetBase,
+    FolderAccessBase,
+    FolderBase,
+    TagBase,
+    ClassificationBase,
+    ExportBase,
+    VoiceCaptionBase,
+)
 import logging
 logger = logging.getLogger(__name__)
 
@@ -78,15 +88,8 @@ def validate_cbct_folder(files):
 # Users get ProjectAccess entries when they accept an invitation or are granted access by an admin
 
 
-class Dataset(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+class Dataset(DatasetBase):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    
-    def __str__(self):
-        return self.name
-    
 
     def scan_count(self):
         return self.patients.count()
@@ -94,12 +97,10 @@ class Dataset(models.Model):
     def patient_count(self):
         return self.patients.count()
 
-class Folder(models.Model):
-    name = models.CharField(max_length=100)
-    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
-    created_at = models.DateTimeField(auto_now_add=True)
+
+class Folder(FolderBase):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    
+
     class Meta:
         unique_together = ('name', 'parent')
         ordering = ['name']
@@ -107,31 +108,10 @@ class Folder(models.Model):
             models.Index(fields=['parent']),
             models.Index(fields=['name']),
         ]
-    
-    def __str__(self):
-        return self.get_full_path()
-    
-    def get_full_path(self):
-        parts = []
-        node = self
-        while node:
-            parts.append(node.name)
-            node = node.parent
-        return '/'.join(reversed(parts))
 
 
-class FolderAccess(models.Model):
-    ROLE_CHOICES = [
-        ('standard', 'Standard User'),
-        ('annotator', 'Annotator'),
-        ('project_manager', 'Project Manager'),
-    ]
-
+class FolderAccess(FolderAccessBase):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='maxillo_folder_access')
-    folder = models.ForeignKey(Folder, on_delete=models.CASCADE, related_name='access_list')
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='standard')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ('user', 'folder')
@@ -143,30 +123,13 @@ class FolderAccess(models.Model):
             models.Index(fields=['user', 'role']),
         ]
 
-    def __str__(self):
-        return f"{self.user.username} -> {self.folder.name} ({self.role})"
 
-
-class Tag(models.Model):
-    name = models.CharField(max_length=50, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
+class Tag(TagBase):
     class Meta:
         ordering = ['name']
         indexes = [
             models.Index(fields=['name']),
         ]
-    
-    def __str__(self):
-        return self.name
-
-
-
-class ActivePatientManager(models.Manager):
-    """Default manager that hides soft-deleted patients."""
-
-    def get_queryset(self):
-        return super().get_queryset().filter(deleted=False)
 
 
 class Patient(models.Model):
@@ -479,12 +442,7 @@ class IntraoralToothSegmentation(models.Model):
         return f"IntraoralSegmentation {self.patient_id}:{self.image_file_id}"
 
 
-class Classification(models.Model):
-    CLASSIFIER_CHOICES = [
-        ('manual', 'Manual'),
-        ('pipeline', 'Pipeline'),
-    ]
-    
+class Classification(ClassificationBase):
     SAGITTAL_CHOICES = [
         ('Unknown', 'Unknown'),
         ('I', 'Class I'),
@@ -492,7 +450,7 @@ class Classification(models.Model):
         ('II_full', 'Class II Full'),
         ('III', 'Class III'),
     ]
-    
+
     VERTICAL_CHOICES = [
         ('Unknown', 'Unknown'),
         ('normal', 'Normal'),
@@ -500,65 +458,50 @@ class Classification(models.Model):
         ('reverse', 'Reverse Bite'),
         ('open', 'Open Bite'),
     ]
-    
+
     TRANSVERSE_CHOICES = [
         ('Unknown', 'Unknown'),
         ('normal', 'Normal'),
         ('cross', 'Cross Bite'),
         ('scissor', 'Scissor Bite'),
     ]
-    
+
     MIDLINE_CHOICES = [
         ('Unknown', 'Unknown'),
         ('centered', 'Centered'),
         ('deviated', 'Deviated'),
     ]
-    
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='classifications', null=True, blank=True)
-    classifier = models.CharField(max_length=10, choices=CLASSIFIER_CHOICES)
-    
+
+    classifier = models.CharField(max_length=10, choices=ClassificationBase.CLASSIFIER_CHOICES)
     sagittal_left = models.CharField(max_length=10, choices=SAGITTAL_CHOICES)
     sagittal_right = models.CharField(max_length=10, choices=SAGITTAL_CHOICES)
     vertical = models.CharField(max_length=10, choices=VERTICAL_CHOICES)
     transverse = models.CharField(max_length=10, choices=TRANSVERSE_CHOICES)
     midline = models.CharField(max_length=10, choices=MIDLINE_CHOICES)
-    
     annotator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['patient', 'classifier']),
             models.Index(fields=['classifier']),
         ]
-    
+
     def __str__(self):
         return f"Classification {self.id} - {self.get_classifier_display()} - Patient {self.patient.patient_id}"
 
 
-class VoiceCaption(models.Model):
-    PROCESSING_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('processing', 'Processing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-    ]
-    
+class VoiceCaption(VoiceCaptionBase):
     # Modality is dynamic: accept any slug present in common.Modality
     # Keep as CharField to avoid breaking migrations and to allow flexible slugs
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='voice_captions', null=True, blank=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='voice_captions')
     modality = models.CharField(max_length=255, default='ios', help_text='Modality slug (e.g., ios, cbct, or any from common.Modality)')
-    duration = models.FloatField(help_text='Duration of audio recording in seconds')
     text_caption = models.TextField(blank=True, null=True, help_text='Transcribed text from audio')
     original_text_caption = models.TextField(blank=True, null=True, help_text='Original transcription before any edits')
     is_edited = models.BooleanField(default=False, help_text='Whether the transcription has been manually edited')
     edit_history = models.JSONField(default=list, blank=True, help_text='History of edits with timestamps and users')
-    processing_status = models.CharField(max_length=20, choices=PROCESSING_STATUS_CHOICES, default='pending', help_text='Status of speech-to-text processing')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
+    processing_status = models.CharField(max_length=20, choices=VoiceCaptionBase.PROCESSING_STATUS_CHOICES, default='pending', help_text='Status of speech-to-text processing')
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
@@ -566,152 +509,6 @@ class VoiceCaption(models.Model):
             models.Index(fields=['processing_status']),
             models.Index(fields=['user']),
         ]
-    
-    def get_modality_display(self):
-        try:
-            from common.models import Modality as _Modality
-            if not self.modality:
-                return 'Undefined'
-            mod = _Modality.objects.filter(slug=self.modality).first()
-            if mod:
-                # Prefer label, then name, fallback to slug upper
-                return getattr(mod, 'label', '') or getattr(mod, 'name', '') or self.modality.upper()
-            return self.modality.upper()
-        except Exception:
-            # Fallback if common.Modality not available
-            return (self.modality or 'Undefined').upper()
-    
-    def get_display_duration(self):
-        """Return a human-readable duration string"""
-        # For text-only captions (duration = 0), return "Text"
-        if self.duration == 0:
-            return "Text"
-        
-        minutes = int(self.duration // 60)
-        seconds = int(self.duration % 60)
-        if minutes > 0:
-            return f"{minutes}:{seconds:02d}"
-        return f"{seconds}s"
-    
-    def get_quality_status(self):
-        """Return quality status based on duration or text content"""
-        # For text-only captions (duration = 0), always return good quality
-        if self.duration == 0:
-            return {'color': 'success', 'message': 'Text'}
-        
-        if self.duration <= 30:
-            return {'color': 'danger', 'message': 'Short'}
-        elif self.duration <= 45:
-            return {'color': 'warning', 'message': 'Good'}
-        else:
-            return {'color': 'success', 'message': 'Perfect'}
-    
-    def is_processed(self):
-        """Check if speech-to-text processing is complete"""
-        # For text-only captions (duration = 0), they are immediately processed
-        if self.duration == 0:
-            return self.processing_status == 'completed' and self.text_caption
-        
-        return self.processing_status == 'completed' and self.text_caption and self.text_caption != "[Audio processed but no transcription available]"
-    
-    def get_processing_display_text(self):
-        """Get display text based on processing status"""
-        if self.processing_status == 'completed':
-            if self.text_caption and self.text_caption != "[Audio processed but no transcription available]":
-                return self.text_caption
-            else:
-                return "[Audio processed but no transcription available]"
-        elif self.processing_status == 'processing':
-            return "Converting speech to text..."
-        elif self.processing_status == 'failed':
-            return "Processing failed"
-        else:
-            return "Preprocessing audio..."
-    
-    def get_display_text_caption(self):
-        """Get the text caption to display, showing if it's edited"""
-        if self.is_processed():
-            text = self.text_caption
-            if self.is_edited:
-                text += " [edited]"
-            return text
-        return self.get_processing_display_text()
-    
-    def save_original_transcription(self):
-        """Save the current transcription as original if not already set"""
-        if self.text_caption and not self.original_text_caption:
-            self.original_text_caption = self.text_caption
-    
-    def edit_transcription(self, new_text, user):
-        """Edit the transcription and track the change"""
-        if not self.is_processed():
-            raise ValueError("Cannot edit transcription that is not yet processed")
-        
-        # Save original transcription if this is the first edit
-        if not self.original_text_caption:
-            self.original_text_caption = self.text_caption
-        
-        # Add to edit history
-        edit_record = {
-            'timestamp': timezone.now().isoformat(),
-            'user_id': user.id,
-            'username': user.username,
-            'previous_text': self.text_caption,
-            'new_text': new_text
-        }
-        
-        if not self.edit_history:
-            self.edit_history = []
-        
-        self.edit_history.append(edit_record)
-        
-        # Update the transcription
-        self.text_caption = new_text
-        self.is_edited = True
-        self.save()
-    
-    def revert_to_original(self, user):
-        """Revert transcription to the original version"""
-        if not self.original_text_caption:
-            raise ValueError("No original transcription to revert to")
-        
-        # Add revert action to edit history
-        revert_record = {
-            'timestamp': timezone.now().isoformat(),
-            'user_id': user.id,
-            'username': user.username,
-            'action': 'reverted_to_original',
-            'previous_text': self.text_caption,
-            'reverted_text': self.original_text_caption
-        }
-        
-        if not self.edit_history:
-            self.edit_history = []
-        
-        self.edit_history.append(revert_record)
-        
-        # Revert the transcription
-        self.text_caption = self.original_text_caption
-        self.is_edited = False
-        self.save()
-    
-    def get_audio_file(self):
-        """Get audio file from FileRegistry"""
-        try:
-            return self.files.get(file_type='audio_raw')
-        except FileRegistry.DoesNotExist:
-            return None
-    
-    def get_processed_text_file(self):
-        """Get processed text file from FileRegistry"""
-        try:
-            return self.files.get(file_type='audio_processed')
-        except FileRegistry.DoesNotExist:
-            return None
-    
-    def get_pending_jobs(self):
-        """Get pending processing jobs for this voice caption"""
-        return self.processing_jobs.filter(status__in=['pending', 'processing', 'retrying'])
 
 
 ## ProcessingJob moved to common.ProcessingJob
@@ -720,44 +517,19 @@ class VoiceCaption(models.Model):
 ## FileRegistry moved to common.FileRegistry
 
 
-class Export(models.Model):
-    SHARE_MODE_CHOICES = [
-        ('private', 'Private'),
-        ('authenticated', 'Any logged-in user'),
-        ('public', 'Anyone with link'),
-    ]
-
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('processing', 'Processing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-    ]
-    
+class Export(ExportBase):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exports')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    
-    # Query parameters stored as JSON
     query_params = models.JSONField(default=dict, help_text='Stores folder_ids, modality_slugs, and filters')
     query_summary = models.CharField(max_length=500, blank=True, help_text='Human-readable query summary')
-    
-    # Export file information
     file_path = models.CharField(max_length=1000, blank=True, help_text='Path to generated ZIP file')
     file_size = models.BigIntegerField(default=0, help_text='Size of export file in bytes')
     patient_count = models.IntegerField(default=0, help_text='Number of patients in export')
-    
-    # Timing
-    created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True, help_text='When processing started')
     completed_at = models.DateTimeField(null=True, blank=True, help_text='When processing completed')
-    
-    # Error handling
     error_message = models.TextField(blank=True, help_text='Error message if export failed')
-
-    # Sharing
     share_mode = models.CharField(
         max_length=20,
-        choices=SHARE_MODE_CHOICES,
+        choices=ExportBase.SHARE_MODE_CHOICES,
         default='private',
         help_text='Controls who can access the share link',
     )
@@ -769,9 +541,6 @@ class Export(models.Model):
         help_text='Random token used for share link access',
     )
     shared_at = models.DateTimeField(null=True, blank=True, help_text='When sharing was last enabled')
-    expires_at = models.DateTimeField(null=True, blank=True, help_text='Share link expiry; null = never expires')
-
-    # Live progress (during processing)
     progress_message = models.CharField(max_length=255, blank=True, help_text='Current phase or progress text')
     progress_percent = models.IntegerField(null=True, blank=True, help_text='Progress 0-100')
 
@@ -782,40 +551,6 @@ class Export(models.Model):
             models.Index(fields=['status', 'created_at']),
         ]
         db_table = 'maxillo_export'
-    
+
     def __str__(self):
         return f"Export {self.id} - {self.get_status_display()} - {self.user.username} - {self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else 'N/A'}"
-    
-    def mark_processing(self):
-        """Mark export as processing and set started_at timestamp"""
-        self.status = 'processing'
-        self.started_at = timezone.now()
-        self.save()
-    
-    def mark_completed(self, file_path=None, file_size=None):
-        """Mark export as completed and set file information"""
-        self.status = 'completed'
-        self.completed_at = timezone.now()
-        self.progress_message = ''
-        self.progress_percent = None
-        if file_path:
-            self.file_path = file_path
-        if file_size is not None:
-            self.file_size = file_size
-        self.save()
-    
-    def mark_failed(self, error_message=''):
-        """Mark export as failed and set error message"""
-        self.status = 'failed'
-        self.completed_at = timezone.now()
-        self.error_message = error_message
-        self.save()
-
-    def ensure_share_token(self, force_new=False):
-        """Create and persist a share token when needed."""
-        if force_new or not self.share_token:
-            self.share_token = secrets.token_urlsafe(32)
-            self.save(update_fields=['share_token'])
-        return self.share_token
-
-    
