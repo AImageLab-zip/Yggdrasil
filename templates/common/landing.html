@@ -63,11 +63,24 @@
 
     <div class="brand text-center">
         <div class="logo-wrap">
-            <i class="fas fa-tooth"></i>
+            <img src="{% static 'icons/ygg-logo.svg' %}" alt="Yggdrasil world-tree" class="logo-tree">
         </div>
         <h1 class="title" id="landing-title" data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ">Yggdrasil</h1>
         <p class="subtitle">Choose your workspace</p>
+        <p class="name-explain">
+            In Norse myth, <em>Yggdrasil</em> is the world-tree whose branches
+            bind the nine realms into one. Here it binds our medical-imaging
+            domains — maxillofacial, brain, laparoscopy — into a single platform.
+        </p>
     </div>
+
+    {% if demo_url %}
+        <div class="demo-cta text-center">
+            <a href="{{ demo_url }}" class="btn btn-outline-info btn-sm shadow-sm">
+                <i class="fas fa-eye me-1"></i>Explore the public demo — no login
+            </a>
+        </div>
+    {% endif %}
 
     {% if user.is_authenticated and projects %}
         <div class="split-grid container">

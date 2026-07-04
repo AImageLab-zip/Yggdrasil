@@ -1,0 +1,92 @@
+/*
+ * Yggdrasil sitewide theme — typography + global chrome only.
+ *
+ * SCOPE GUARD: this file styles shared chrome (base typography, navbar brand,
+ * headings, footer, generic cards/buttons). It MUST NOT restyle annotation
+ * viewers or patient-detail internals — those keep the UI annotators know.
+ * Do not add selectors targeting image_viewer / intraoral_segmentation /
+ * viewer_grid / patient_detail components here.
+ *
+ * Fonts are self-hosted (GDPR: no Google Fonts CDN). See static/fonts/.
+ */
+
+/* ---- Self-hosted webfonts ---------------------------------------------- */
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('../fonts/inter-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('../fonts/inter-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('../fonts/inter-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Cinzel';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('../fonts/cinzel-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Cinzel';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('../fonts/cinzel-latin-700-normal.woff2') format('woff2');
+}
+
+/* ---- Design tokens (shared with landing.css --tf-* palette) ------------- */
+:root {
+    --ygg-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --ygg-font-display: 'Cinzel', Georgia, 'Times New Roman', serif;
+    --ygg-primary: #0d6efd;
+    --ygg-accent: #20c997;
+}
+
+/* ---- Base typography ---------------------------------------------------- */
+body {
+    font-family: var(--ygg-font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, .h1, .h2, .h3 {
+    font-family: var(--ygg-font-display);
+    letter-spacing: 0.01em;
+}
+
+/* ---- Navbar brand ------------------------------------------------------- */
+.navbar-brand {
+    font-family: var(--ygg-font-display);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+/* ---- Buttons: keep Bootstrap sizing, just the type ---------------------- */
+.btn {
+    font-family: var(--ygg-font-body);
+    font-weight: 500;
+}
+
+/* ---- Footer ------------------------------------------------------------- */
+footer.bg-light {
+    border-top: 1px solid rgba(13, 110, 253, 0.08);
+}
+footer .fa-github {
+    transition: color 150ms ease;
+}
+footer .fa-github:hover {
+    color: var(--ygg-accent);
+}

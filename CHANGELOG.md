@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`static/icons/`, regenerable via `scripts/make_icons.sh`) wired into every
   page. The footer drops the original single-tenant author credit, keeps the
   GitHub link and version, and flags "Yggdrasil 2.0 is out".
+- Self-hosted webfonts (Cinzel for display, Inter for body; OFL, under
+  `static/fonts/`) and a sitewide `theme.css` — no Google Fonts CDN, so no
+  third-party request (GDPR). Annotation viewers are deliberately left
+  unrestyled. The landing page gains a Cinzel title, the world-tree logo, an
+  explanation of the Yggdrasil name, and a demo call-to-action that stays
+  hidden until a `demo_url` is provided (Phase 7).
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start
