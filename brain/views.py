@@ -30,14 +30,15 @@ from common.permissions import (
     user_is_project_admin,
 )
 
-from maxillo.utils.export_processor import ExportProcessor, start_export_processing
-from maxillo.views.export import (
-    _build_shared_download_url,
-    _coerce_bool,
-    _kill_export_processes,
-    _recover_stuck_export,
-    _resolve_content_selection,
+from common.export_processing import (
+    ExportProcessor,
+    start_export_processing,
+    build_shared_download_url as _build_shared_download_url,
+    coerce_bool as _coerce_bool,
     format_file_size,
+    kill_export_processes as _kill_export_processes,
+    recover_stuck_export as _recover_stuck_export,
+    resolve_content_selection as _resolve_content_selection,
 )
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file

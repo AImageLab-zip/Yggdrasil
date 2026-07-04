@@ -20,7 +20,7 @@ Decisions already made with the maintainer:
 | 2 | Automated backup + status dashboard | ✅ done (`release/2.0`) |
 | 3 | Export share expiry | ✅ done (`release/2.0`) |
 | 4 | Admin-driven worker/modality config | ✅ done (`release/2.0`) |
-| 5 | `common/` consolidation | ⬜ next |
+| 5 | `common/` consolidation | 🟡 in progress (PR 5.1 done on `release/2.0`; 5.2 next) |
 | 6 | Branding, landing, favicons, footer | ⬜ |
 | 7 | Public guest demo | ⬜ |
 
@@ -87,7 +87,7 @@ Original design notes: New `ModalityProcessingConfig` (OneToOne → `common.Moda
 ## Phase 5 — common/ consolidation (biggest; requires Phases 1+2)
 
 Abstract base models in `common/`, concrete per-domain subclasses pinning existing `db_table` names — **zero data migration**; NOT shared tables.
-- PR 5.1: promote maxillo private helpers to public `common/uploads.py` + `common/export_processing.py`; update `laparoscopy/file_utils.py:7-11`, `brain/views.py:32-40`, `maxillo/management/commands/run_export.py`. Kills all private cross-imports.
+- PR 5.1 — DONE: promoted maxillo private helpers to public `common/uploads.py` (8 upload helpers: `get_patient`, `domain_for_patient`, `entity_fk_kwargs`, `project_slug_from_patient`, `raw_key_prefix_for`, `processed_key_prefix_for`, `sanitize_relpath`, `upload_uploaded_file_to_storage`) and `common/export_processing.py` (whole engine moved from `maxillo/utils/export_processor.py` — `ExportProcessor`, `start_export_processing`, `build_patient_classification_blob` — plus the 6 shared view helpers `coerce_bool`, `resolve_content_selection`, `build_shared_download_url`, `recover_stuck_export`, `kill_export_processes`, `format_file_size`). `maxillo.file_utils`/`maxillo.views.export` keep back-compat aliases to old private names (minimal internal diff); `laparoscopy/file_utils.py` and `brain/views.py` import the public names from `common`; `run_export.py` imports the engine from `common`. `_domain_models` relative `..models` imports rewritten absolute (`maxillo.models`); `build_shared_download_url` inlines the namespace read (no `common`→maxillo dep). All private cross-imports killed. Verified: `makemigrations --check` clean (no model changes), 160-test suite green (MySQL 8 + Redis 7 Docker), import smoke + per-domain `ExportProcessor._domain_models` resolution. Kept out of scope: brain's own divergent upload helper copy, the public `save_video_to_dataset`/`LaparoscopyExportProcessor` cross-imports, `laparoscopy/export_processor.py`.
 - PR 5.2: `common/domains.py` registry (single `DOMAIN_CHOICES` source); registry-driven `permissions.py` + `job_routing.py`; keep Job/FileRegistry per-domain FK columns, wrap in `get_patient()`/`set_patient()` accessors.
 - PR 5.3: `common/base_models.py` (PatientBase, FolderBase, FolderAccessBase, DatasetBase, TagBase, VoiceCaptionBase, ExportBase incl. expiry, ClassificationBase, ActivePatientManager); diff the three copies first — drift stays on subclasses; keep `related_name`s identical. **Acceptance gate: `makemigrations --check --dry-run` produces nothing.** Rewrite `docs/new-project-type.md`.
 - Ship 5.1 → observe a week → 5.2 → 5.3. Rehearse `migrate --plan` on a prod clone restored from a Phase 2 backup.

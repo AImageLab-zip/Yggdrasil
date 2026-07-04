@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import tarfile
-import tempfile
 import traceback
 import zipfile
 from pathlib import Path
@@ -22,6 +21,16 @@ logger = logging.getLogger(__name__)
 from common.file_access import exists as artifact_exists
 from common.file_access import open_binary
 from common.object_storage import get_object_storage
+from common.uploads import (
+    domain_for_patient as _domain_for_patient,
+    entity_fk_kwargs as _entity_fk_kwargs,
+    get_patient as _get_patient,
+    processed_key_prefix_for as _processed_key_prefix_for,
+    project_slug_from_patient as _project_slug_from_patient,
+    raw_key_prefix_for as _raw_key_prefix_for,
+    sanitize_relpath as _sanitize_relpath,
+    upload_uploaded_file_to_storage as _upload_uploaded_file_to_storage,
+)
 
 
 def _create_job_if_runner_enabled(modality_slug, **kwargs):
@@ -135,41 +144,6 @@ def get_file_type_for_modality(
     return "generic_processed" if is_processed else "generic_raw"
 
 
-def _get_patient(obj):
-    """Resolve a Patient instance from various inputs (Patient, VoiceCaption with patient, legacy scanpair)."""
-    if hasattr(obj, "_meta") and getattr(obj._meta, "model_name", "") == "patient":
-        return obj
-    if hasattr(obj, "patient") and getattr(obj, "patient") is not None:
-        return getattr(obj, "patient")
-    raise ValueError("Cannot resolve Patient from object")
-
-
-def _domain_for_patient(patient) -> str:
-
-    app_label = getattr(getattr(patient, "_meta", None), "app_label", "")
-    if app_label == "laparoscopy":
-        return "laparoscopy"
-    return "maxillo"
-
-
-def _entity_fk_kwargs(patient):
-
-    domain = _domain_for_patient(patient)
-    if domain == "laparoscopy":
-        return {
-            "domain": "laparoscopy",
-            "laparoscopy_patient": patient,
-            "patient": None,
-            "brain_patient": None,
-        }
-    return {
-        "domain": "maxillo",
-        "patient": patient,
-        "brain_patient": None,
-        "laparoscopy_patient": None,
-    }
-
-
 def _entity_filter_kwargs(patient):
 
     domain = _domain_for_patient(patient)
@@ -199,15 +173,6 @@ def _voice_entity_fk_kwargs(voice_caption):
         "brain_voice_caption": None,
         "laparoscopy_voice_caption": None,
     }
-
-
-def _project_slug_from_patient(patient) -> str:
-
-    domain = _domain_for_patient(patient)
-    if domain == "laparoscopy":
-        return "laparoscopy"
-
-    return "maxillo"
 
 
 def _domain_for_job(job) -> str:
@@ -259,45 +224,6 @@ def _job_entity_fk_kwargs(job):
         "brain_voice_caption": None,
         "laparoscopy_voice_caption": None,
     }
-
-
-def _raw_key_prefix_for(patient: Patient, modality_slug: str) -> str:
-    project_slug = _project_slug_from_patient(patient)
-    return f"{project_slug}/raw/{modality_slug}".strip("/")
-
-
-def _processed_key_prefix_for(patient: Patient, modality_slug: str) -> str:
-    project_slug = _project_slug_from_patient(patient)
-    return f"{project_slug}/processed/{modality_slug}".strip("/")
-
-
-def _sanitize_relpath(p: str) -> str:
-    p = (p or "").lstrip("/").replace("\\", "/")
-    parts = [seg for seg in p.split("/") if seg and seg not in {".", ".."}]
-    return "/".join(parts)
-
-
-def _upload_uploaded_file_to_storage(
-    *, key: str, uploaded_file
-) -> tuple[str, int, str]:
-    storage = get_object_storage()
-
-    fd, tmp_path = tempfile.mkstemp(prefix="tf_upload_")
-    os.close(fd)
-    try:
-        hash_sha256 = hashlib.sha256()
-        size = 0
-        with open(tmp_path, "wb+") as destination:
-            for chunk in uploaded_file.chunks():
-                destination.write(chunk)
-                hash_sha256.update(chunk)
-                size += len(chunk)
-
-        storage.upload_file(tmp_path, key=key)
-        return key, size, hash_sha256.hexdigest()
-    finally:
-        with contextlib.suppress(Exception):
-            os.remove(tmp_path)
 
 
 def _resolve_output_path_or_key(out_spec):

@@ -8,14 +8,11 @@ from django.http import JsonResponse, Http404, HttpResponseGone
 from django.views.decorators.http import require_POST, require_http_methods
 from django.db import OperationalError
 from django.db.models import Q, Count, Sum
-from django.urls import reverse
 from django.utils import timezone
 import os
 import json
 import logging
 import time
-import signal
-import subprocess
 
 from common.models import Modality, FileRegistry
 from common.export_share import is_share_expired, resolve_share_expiry
@@ -24,6 +21,14 @@ from common.object_storage import get_object_storage
 from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
 from .domain import get_domain_models, get_namespace
 from .helpers import redirect_with_namespace
+from common.export_processing import (
+    build_shared_download_url as _build_shared_download_url,
+    coerce_bool as _coerce_bool,
+    format_file_size,
+    kill_export_processes as _kill_export_processes,
+    recover_stuck_export as _recover_stuck_export,
+    resolve_content_selection as _resolve_content_selection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,28 +73,6 @@ EXPORT_MODALITY_FILE_TYPES = {
 }
 
 
-def _coerce_bool(value, default=False):
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _resolve_content_selection(data, default_when_missing=True):
-    has_raw_key = "include_raw" in data
-    has_processed_key = "include_processed" in data
-
-    if not has_raw_key and not has_processed_key:
-        return (True, True) if default_when_missing else (False, False)
-
-    include_raw = _coerce_bool(data.get("include_raw"), default=False)
-    include_processed = _coerce_bool(data.get("include_processed"), default=False)
-    return include_raw, include_processed
-
-
 def _file_type_map_for_selection(include_raw, include_processed):
     file_type_map = {}
     for modality_slug, groups in EXPORT_MODALITY_FILE_TYPES.items():
@@ -100,16 +83,6 @@ def _file_type_map_for_selection(include_raw, include_processed):
             file_types.extend(groups.get("processed", []))
         file_type_map[modality_slug] = file_types
     return file_type_map
-
-
-def _build_shared_download_url(request, share_token):
-    """Build absolute shared landing URL for an export token."""
-    return request.build_absolute_uri(
-        reverse(
-            f"{get_namespace(request)}:export_shared_landing",
-            kwargs={"share_token": share_token},
-        )
-    )
 
 
 def _get_export_for_request_or_404(request, export_id):
@@ -179,7 +152,7 @@ def _laparoscopy_export_new(request, ExportModel):
             query_summary=_laparoscopy_export_query_summary(len(folder_ids)),
         )
 
-        from ..utils.export_processor import start_export_processing
+        from common.export_processing import start_export_processing
 
         start_export_processing(export.id, "laparoscopy")
         messages.success(request, f"Export #{export.id} created and processing started.")
@@ -398,7 +371,7 @@ def export_new(request):
         )
 
         # Start background processing
-        from ..utils.export_processor import start_export_processing
+        from common.export_processing import start_export_processing
 
         start_export_processing(export.id, get_namespace(request))
 
@@ -644,52 +617,6 @@ def export_preview(request):
             },
             status=500,
         )
-
-
-def _recover_stuck_export(export):
-    """
-    If export is stuck in 'processing' but a completed ZIP exists in object
-    storage (process died before DB update), mark it as completed.
-    """
-    if export.status != "processing":
-        return export
-    try:
-        storage = get_object_storage()
-
-        if export.file_path and artifact_exists(export.file_path):
-            info = storage.head(export.file_path)
-            size = int(info.content_length or 0)
-            export.mark_completed(file_path=export.file_path, file_size=size)
-            export.refresh_from_db()
-            logger.info(
-                "Recovered stuck export %s: marked completed from key %s",
-                export.id,
-                export.file_path,
-            )
-            return export
-
-        prefix = f"exports/export_{export.id}_"
-        candidates = [
-            key
-            for key in storage.list_keys(prefix)
-            if key.startswith(prefix) and key.endswith(".zip")
-        ]
-        if not candidates:
-            return export
-
-        key = sorted(candidates)[-1]
-        info = storage.head(key)
-        size = int(info.content_length or 0)
-        export.mark_completed(file_path=key, file_size=size)
-        export.refresh_from_db()
-        logger.info(
-            "Recovered stuck export %s: marked completed from key %s",
-            export.id,
-            key,
-        )
-    except Exception as e:
-        logger.warning(f"Could not recover export {export.id}: {e}")
-    return export
 
 
 @login_required
@@ -973,56 +900,6 @@ def export_delete(request, export_id):
     return JsonResponse({"success": True})
 
 
-def _kill_export_processes(export_id):
-    """Best-effort kill of run_export worker process(es) for one export id."""
-    killed_pids = []
-    try:
-        result = subprocess.run(
-            ["pgrep", "-f", f"manage.py run_export {int(export_id)}"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return killed_pids
-
-        for line in (result.stdout or "").splitlines():
-            line = (line or "").strip()
-            if not line:
-                continue
-            try:
-                pid = int(line)
-            except ValueError:
-                continue
-            if pid == os.getpid():
-                continue
-            try:
-                os.kill(pid, signal.SIGTERM)
-                killed_pids.append(pid)
-            except ProcessLookupError:
-                continue
-            except Exception:
-                continue
-    except Exception:
-        return killed_pids
-
-    # Escalate to SIGKILL if still alive after short grace period
-    if killed_pids:
-        time.sleep(0.8)
-        for pid in list(killed_pids):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                continue
-            except Exception:
-                continue
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except Exception:
-                pass
-    return killed_pids
-
-
 @login_required
 @user_passes_test(is_admin)
 @require_POST
@@ -1095,13 +972,3 @@ def export_stop(request, export_id):
     )
 
 
-def format_file_size(size_bytes):
-    """Format file size in human-readable format."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    else:
-        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"

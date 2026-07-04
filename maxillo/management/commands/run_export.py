@@ -7,7 +7,7 @@ from laparoscopy.export_processor import LaparoscopyExportProcessor
 from laparoscopy.models import Export as LaparoscopyExport
 
 from ...models import Export as MaxilloExport
-from ...utils.export_processor import ExportProcessor
+from common.export_processing import ExportProcessor
 
 
 logger = logging.getLogger(__name__)

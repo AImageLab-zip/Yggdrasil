@@ -3,9 +3,11 @@
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from common.file_access import exists as artifact_exists
 from common.file_access import iter_bytes as iter_artifact_bytes
 from common.object_storage import get_object_storage
 from django.conf import settings
+from django.urls import reverse
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -266,7 +269,7 @@ class ExportProcessor:
         if self.domain == "brain":
             from brain.models import Patient, VoiceCaption
         else:
-            from ..models import Patient, VoiceCaption
+            from maxillo.models import Patient, VoiceCaption
         return Patient, VoiceCaption
 
     def _filter_patients_by_folders(self, Patient):
@@ -331,7 +334,7 @@ class ExportProcessor:
         # the stale "bite_classification" entry in MODALITY_TO_FILE_TYPES only
         # covers the pipeline's FileRegistry JSON, not manual classifications).
         if self.filters.get("has_bite_classification") and self.domain != "brain":
-            from ..models import Classification
+            from maxillo.models import Classification
 
             bc_patient_ids = Classification.objects.filter(
                 patient_id__in=patients.values_list("patient_id", flat=True)
@@ -579,7 +582,7 @@ class ExportProcessor:
             # modality_slugs and not backed by any FileRegistry entry for the
             # manual/clinician-corrected value).
             if self.include_bite_classification and self.domain != "brain":
-                from ..models import Classification
+                from maxillo.models import Classification
 
                 classifications = list(
                     Classification.objects.filter(patient=patient).select_related(
@@ -851,7 +854,7 @@ def start_export_processing(export_id, domain="maxillo"):
 
     from brain.models import Export as BrainExport
     from laparoscopy.models import Export as LaparoscopyExport
-    from ..models import Export as MaxilloExport
+    from maxillo.models import Export as MaxilloExport
     try:
         if domain == "laparoscopy":
             export = LaparoscopyExport.objects.filter(id=export_id).first()
@@ -898,3 +901,152 @@ def start_export_processing(export_id, domain="maxillo"):
                 export.mark_failed(str(e))
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Shared export view-layer helpers (promoted from maxillo.views.export, Phase 5.1)
+# Domain-agnostic: they operate on a passed Export instance / request / id.
+# ---------------------------------------------------------------------------
+
+
+def coerce_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_content_selection(data, default_when_missing=True):
+    has_raw_key = "include_raw" in data
+    has_processed_key = "include_processed" in data
+
+    if not has_raw_key and not has_processed_key:
+        return (True, True) if default_when_missing else (False, False)
+
+    include_raw = coerce_bool(data.get("include_raw"), default=False)
+    include_processed = coerce_bool(data.get("include_processed"), default=False)
+    return include_raw, include_processed
+
+
+def build_shared_download_url(request, share_token):
+    """Build absolute shared landing URL for an export token."""
+    namespace = (
+        getattr(request, "resolver_match", None) and request.resolver_match.namespace
+    ) or "maxillo"
+    return request.build_absolute_uri(
+        reverse(
+            f"{namespace}:export_shared_landing",
+            kwargs={"share_token": share_token},
+        )
+    )
+
+
+def recover_stuck_export(export):
+    """
+    If export is stuck in 'processing' but a completed ZIP exists in object
+    storage (process died before DB update), mark it as completed.
+    """
+    if export.status != "processing":
+        return export
+    try:
+        storage = get_object_storage()
+
+        if export.file_path and artifact_exists(export.file_path):
+            info = storage.head(export.file_path)
+            size = int(info.content_length or 0)
+            export.mark_completed(file_path=export.file_path, file_size=size)
+            export.refresh_from_db()
+            logger.info(
+                "Recovered stuck export %s: marked completed from key %s",
+                export.id,
+                export.file_path,
+            )
+            return export
+
+        prefix = f"exports/export_{export.id}_"
+        candidates = [
+            key
+            for key in storage.list_keys(prefix)
+            if key.startswith(prefix) and key.endswith(".zip")
+        ]
+        if not candidates:
+            return export
+
+        key = sorted(candidates)[-1]
+        info = storage.head(key)
+        size = int(info.content_length or 0)
+        export.mark_completed(file_path=key, file_size=size)
+        export.refresh_from_db()
+        logger.info(
+            "Recovered stuck export %s: marked completed from key %s",
+            export.id,
+            key,
+        )
+    except Exception as e:
+        logger.warning(f"Could not recover export {export.id}: {e}")
+    return export
+
+
+def kill_export_processes(export_id):
+    """Best-effort kill of run_export worker process(es) for one export id."""
+    killed_pids = []
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", f"manage.py run_export {int(export_id)}"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return killed_pids
+
+        for line in (result.stdout or "").splitlines():
+            line = (line or "").strip()
+            if not line:
+                continue
+            try:
+                pid = int(line)
+            except ValueError:
+                continue
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed_pids.append(pid)
+            except ProcessLookupError:
+                continue
+            except Exception:
+                continue
+    except Exception:
+        return killed_pids
+
+    # Escalate to SIGKILL if still alive after short grace period
+    if killed_pids:
+        time.sleep(0.8)
+        for pid in list(killed_pids):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            except Exception:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+    return killed_pids
+
+
+def format_file_size(size_bytes):
+    """Format file size in human-readable format."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"

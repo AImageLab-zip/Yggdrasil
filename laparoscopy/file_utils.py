@@ -4,10 +4,10 @@ import logging
 from django.utils import timezone
 
 from common.models import FileRegistry, Job
-from maxillo.file_utils import (
-    _raw_key_prefix_for,
-    _upload_uploaded_file_to_storage,
-    _entity_fk_kwargs,
+from common.uploads import (
+    raw_key_prefix_for,
+    upload_uploaded_file_to_storage,
+    entity_fk_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ def save_video_to_dataset(patient, video_file):
     original_name = video_file.name
     ext = os.path.splitext(original_name)[1].lower() or ".mp4"
     filename = f"video_patient_{patient.patient_id}{ext}"
-    key = f"{_raw_key_prefix_for(patient, 'video')}/{filename}"
-    key, file_size, file_hash = _upload_uploaded_file_to_storage(
+    key = f"{raw_key_prefix_for(patient, 'video')}/{filename}"
+    key, file_size, file_hash = upload_uploaded_file_to_storage(
         key=key, uploaded_file=video_file
     )
 
@@ -40,7 +40,7 @@ def save_video_to_dataset(patient, video_file):
             file_path=key,
             file_size=file_size,
             file_hash=file_hash,
-            **_entity_fk_kwargs(patient),
+            **entity_fk_kwargs(patient),
             modality=modality_fk,
             metadata={
                 "original_filename": original_name,
@@ -56,7 +56,7 @@ def save_video_to_dataset(patient, video_file):
     try:
         job_obj = Job.objects.create(
             modality_slug="video",
-            **_entity_fk_kwargs(patient),
+            **entity_fk_kwargs(patient),
             # input_file_path=key,
             input_files={"input": key},
             status="pending",
