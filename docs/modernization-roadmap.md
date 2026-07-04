@@ -21,7 +21,7 @@ Decisions already made with the maintainer:
 | 3 | Export share expiry | ✅ done (`release/2.0`) |
 | 4 | Admin-driven worker/modality config | ✅ done (`release/2.0`) |
 | 5 | `common/` consolidation | ✅ done (`release/2.0`, PRs 5.1/5.2/5.3) |
-| 6 | Branding, landing, favicons, footer | ⬜ |
+| 6 | Branding, landing, favicons, footer | ✅ done (`release/2.0`, PRs 6.1/6.2) |
 | 7 | Public guest demo | ⬜ |
 
 ## Phase 0 — DONE
@@ -92,8 +92,15 @@ Abstract base models in `common/`, concrete per-domain subclasses pinning existi
 - PR 5.3 — DONE: `common/base_models.py` with `ActivePatientManager` + abstract `VoiceCaptionBase`, `DatasetBase`, `FolderBase`, `FolderAccessBase`, `TagBase`, `ExportBase` (incl. expiry + `mark_*`/`ensure_share_token`), `ClassificationBase` (maxillo+laparoscopy). Diffed the three copies first: only byte-identical fields lifted; per-app drift (`related_name`, `db_table`, `help_text`, `default`) stays overridden on subclasses; all shared **methods/properties** lifted (registry-driven where domain-specific, e.g. `files`/`processing_jobs`). This fixed maxillo's `VoiceCaption` which had lacked the explicit `files`/`processing_jobs`/`__str__` that brain/laparoscopy had — all three now share brain's complete method set. `Patient` intentionally NOT base-extracted (most domain-specific model — divergent fields + helper methods; only its `ActivePatientManager` was shared and is now in common). **Acceptance gate met: `makemigrations --check --dry-run` produces nothing** (zero data migration; `db_table`s pinned, tables untouched). `docs/new-project-type.md` rewritten for the registry + base-model workflow. 160-test suite green.
 - Shipped 5.1 → 5.2 → 5.3 in sequence. **Still owed (needs prod-like env): rehearse `migrate --plan` on a prod clone restored from a Phase 2 backup — 5.x adds no migrations, but confirm the restored 1.9 dump still `migrate`s clean and the suite is green (risk-item-0).**
 
-## Phase 6 — Branding
+## Phase 6 — Branding — DONE
 
+Shipped on `release/2.0` (PRs 6.1 `07aa016`, 6.2 `5fb28d7`).
+- PR 6.1: original hand-drawn Yggdrasil world-tree master `static/icons/ygg-logo.svg` + `favicon.svg`; raster set (`favicon-16/32.png`, `apple-touch-icon.png` 180, `favicon.ico`) derived by `scripts/make_icons.sh` (rsvg/ImageMagick, or cairosvg+Pillow fallback; `git add -f` since `scripts/` is gitignored). `<link>`s wired in `base.html` `<head>`. Footer rewritten: dropped author credit, kept GitHub + `v{{ app_version }}`, added "Yggdrasil 2.0 is out" badge.
+- PR 6.2: self-hosted Cinzel (display) + Inter (body) woff2 under `static/fonts/` (fontsource @5, latin subset, OFL licenses committed — no Google CDN). New sitewide `static/css/theme.css` (loaded in `base.html` after Bootstrap): `@font-face`, base type, navbar-brand/heading display font, footer polish — **scope-guarded away from viewers** (no image_viewer/intraoral/viewer_grid/patient_detail selectors). Landing (`common/landing.html` + `landing.css`): Cinzel title, tree-SVG logo swap, Yggdrasil name-explanation block, runes easter-egg kept.
+
+**Phase 7 hook**: the landing "public demo" CTA is already in `common/landing.html`, gated on a `demo_url` context var (hidden until set). Phase 7 just needs its landing views (`maxillo/views/patient_list.py`, `brain/views.py`, laparoscopy) to pass `demo_url` (e.g. `reverse('demo_index')`).
+
+Original plan:
 - PR 6.1: Yggdrasil world-tree favicon/logo set in `static/icons/` + `<link>`s in `base.html`; footer (`base.html:225`): drop "developed by Luca Lumetti", keep GitHub link, add `v{{ app_version }}` + "Yggdrasil 2.0 is out" note.
 - PR 6.2: self-hosted webfont (GDPR — no Google CDN), `static/css/theme.css` polish **scoped away from annotation viewers** (`static/js/` and patient-detail partials untouched — annotators keep their known UI); expand `templates/common/landing.html` (runes theme exists) with name explanation + domain cards + demo link.
 
