@@ -299,9 +299,10 @@ class TagAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Folder)
 class FolderAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['name', 'parent', 'created_at', 'created_by']
+    list_display = ['name', 'parent', 'is_demo', 'created_at', 'created_by']
+    list_editable = ['is_demo']
     search_fields = ['name']
-    list_filter = ['created_at']
+    list_filter = ['is_demo', 'created_at']
 
 
 @admin.register(Export)

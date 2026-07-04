@@ -30,7 +30,9 @@ class DatasetAdmin(admin.ModelAdmin):
 
 @admin.register(Folder)
 class FolderAdmin(admin.ModelAdmin):
-    list_display = ['name', 'parent', 'created_at', 'created_by']
+    list_display = ['name', 'parent', 'is_demo', 'created_at', 'created_by']
+    list_filter = ['is_demo']
+    list_editable = ['is_demo']
     search_fields = ['name']
 
 

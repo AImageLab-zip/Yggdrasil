@@ -49,6 +49,13 @@ class FolderBase(models.Model):
         'self', on_delete=models.CASCADE, null=True, blank=True, related_name='children'
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    is_demo = models.BooleanField(
+        default=False,
+        help_text=(
+            'Expose this folder (and its patients) in the anonymous public demo '
+            'at /demo/<domain>/. Only anonymized or synthetic studies may be flagged.'
+        ),
+    )
 
     class Meta:
         abstract = True
