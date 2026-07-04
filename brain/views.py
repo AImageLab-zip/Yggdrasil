@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
@@ -187,6 +187,7 @@ def patient_list(request):
         "files",
         "files__modality",
         "jobs",
+        "folders",
     )
     current_project_id = request.session.get("current_project_id")
     if current_project_id and any(field.name == "project" for field in Patient._meta.fields):
@@ -219,12 +220,16 @@ def patient_list(request):
         if project:
             allowed_modalities = list(project.modalities.filter(is_active=True))
 
+    per_page = int(request.GET.get("per_page", 20))
+    page_obj = Paginator(patients, per_page).get_page(request.GET.get("page"))
+
     patients_with_status = []
     is_admin = user_is_project_admin(request.user, "brain")
-    for patient in patients:
+    for patient in page_obj.object_list:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
         patient_jobs = list(patient.jobs.all()) if hasattr(patient, "jobs") else []
+        patient_folders = list(patient.folders.all())
         files_by_modality = {}
         for file_obj in patient_files:
             if file_obj.modality and file_obj.modality.slug:
@@ -261,23 +266,27 @@ def patient_list(request):
             "voice_caption_count": len(voice_captions),
             "voice_annotators": list({vc.user.username for vc in voice_captions}),
             "tags": patient.tag_names(),
-            "folder": patient.folders.first(),
+            "folder": patient_folders[0] if patient_folders else None,
             "available_modalities": [m.slug for m in patient.modalities.all()],
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
-            "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())),
+            "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient_folders)),
         })
 
-    per_page = int(request.GET.get("per_page", 20))
-    page_obj = Paginator(patients_with_status, per_page).get_page(request.GET.get("page"))
+    page_obj.object_list = patients_with_status
     folders = filter_folders_for_user(request.user, Folder.objects.filter(parent__isnull=True).order_by("name"), "brain")
+    folder_counts = {
+        row["folders"]: row["count"]
+        for row in patients_for_folder_counts.values("folders").annotate(count=Count("id"))
+        if row["folders"] is not None
+    }
     context = {
         "page_obj": page_obj,
         "current_project_id": current_project_id,
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,
-        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folders=folder).count()} for folder in folders],
+        "folders": [{"folder": folder, "patient_count": folder_counts.get(folder.id, 0)} for folder in folders],
         "all_tags": Tag.objects.all().order_by("name"),
         "per_page": per_page,
         "user_profile": request.user.profile,
