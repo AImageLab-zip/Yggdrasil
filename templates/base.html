@@ -24,44 +24,17 @@
     
     <script src="https://unpkg.com/fflate@0.8.2"></script>
     <script src="{% static 'js/nifti-reader.js' %}"></script>
-    <!-- Yggdrasil theme (self-hosted fonts + global chrome) -->
+    <!-- Yggdrasil design system (tokens + self-hosted fonts + global chrome) -->
+    <link href="{% static 'css/tokens.css' %}" rel="stylesheet">
     <link href="{% static 'css/theme.css' %}" rel="stylesheet">
-    <style>
-        .form-control, .form-select {
-            margin-top: 0.25rem;
-        }
-        
-        /* Logout button styling */
-        .dropdown-item.p-0 .btn-link {
-            color: inherit;
-            font-weight: inherit;
-        }
-        
-        .dropdown-item.p-0 .btn-link:hover {
-            background-color: #f8f9fa;
-            color: inherit;
-        }
-        
-        .dropdown-item.p-0 {
-            overflow: hidden;
-        }
-
-        .navbar-dark .navbar-nav .nav-link,
-        .navbar-dark .navbar-nav .nav-link.dropdown-toggle,
-        .navbar-dark .navbar-nav .nav-link:hover,
-        .navbar-dark .navbar-nav .nav-link:focus,
-        .navbar-dark .navbar-nav .nav-link.active {
-            color: #fff;
-            opacity: 1;
-        }
-    </style>
+    <link href="{% static 'css/app-pages.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     {% firstof request.resolver_match.namespace 'maxillo' as ns %}
     {% block navbar %}
     <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-expand-lg navbar-dark ygg-navbar">
         <div class="container">
             <div class="d-flex align-items-center text-white">
                 {% if user.is_authenticated %}
@@ -105,7 +78,7 @@
                 {% else %}
                     <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
                 {% endif %}
-                <a class="navbar-brand ms-1" href="{% url ns|add:':patient_list' %}">{{ current_project_name|default:'Yggdrasil' }}</a>
+                <a class="navbar-brand ms-1" href="{% url ns|add:':patient_list' %}"><img src="{% static 'icons/ygg-logo.svg' %}" alt="" class="brand-mark me-1">{{ current_project_name|default:'Yggdrasil' }}</a>
             </div>
             
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -229,9 +202,9 @@
 
     {% block footer %}
     <!-- Footer -->
-    <footer class="bg-light mt-5 py-4">
+    <footer class="ygg-footer mt-5 py-4">
         <div class="container text-center">
-            <p class="mb-0">&copy; 2026 Yggdrasil <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-dark ms-2" aria-label="GitHub repository"><i class="fa-brands fa-github"></i></a> <span class="text-muted ms-2 small">v{{ app_version }}</span> <span class="badge bg-success-subtle text-success-emphasis ms-2">Yggdrasil 2.0 is out</span></p>
+            <p class="mb-0">&copy; 2026 Yggdrasil <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="ms-2" aria-label="GitHub repository"><i class="fa-brands fa-github"></i></a> <span class="text-muted ms-2 small">v{{ app_version }}</span> <span class="badge bg-success-subtle text-success-emphasis ms-2">Yggdrasil 2.0 is out</span></p>
         </div>
     </footer>
     {% endblock %}

@@ -1,13 +1,16 @@
 /*
  * Yggdrasil sitewide theme — typography + global chrome only.
  *
- * SCOPE GUARD: this file styles shared chrome (base typography, navbar brand,
+ * SCOPE GUARD: this file styles shared chrome (base typography, navbar,
  * headings, footer, generic cards/buttons). It MUST NOT restyle annotation
  * viewers or patient-detail internals — those keep the UI annotators know.
  * Do not add selectors targeting image_viewer / intraoral_segmentation /
- * viewer_grid / patient_detail components here.
+ * viewer_grid / patient_detail components here. Chromatic overrides only:
+ * never change sizing, spacing or display of Bootstrap components, because
+ * viewer pages inherit this file.
  *
- * Fonts are self-hosted (GDPR: no Google Fonts CDN). See static/fonts/.
+ * Tokens live in tokens.css (loaded first). Fonts are self-hosted
+ * (GDPR: no Google Fonts CDN). See static/fonts/.
  */
 
 /* ---- Self-hosted webfonts ---------------------------------------------- */
@@ -47,17 +50,11 @@
     src: url('../fonts/cinzel-latin-700-normal.woff2') format('woff2');
 }
 
-/* ---- Design tokens (shared with landing.css --tf-* palette) ------------- */
-:root {
-    --ygg-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    --ygg-font-display: 'Cinzel', Georgia, 'Times New Roman', serif;
-    --ygg-primary: #0d6efd;
-    --ygg-accent: #20c997;
-}
-
 /* ---- Base typography ---------------------------------------------------- */
 body {
     font-family: var(--ygg-font-body);
+    background-color: var(--ygg-surface-alt);
+    color: var(--ygg-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -67,26 +64,107 @@ h1, h2, h3, .h1, .h2, .h3 {
     letter-spacing: 0.01em;
 }
 
-/* ---- Navbar brand ------------------------------------------------------- */
-.navbar-brand {
-    font-family: var(--ygg-font-display);
-    font-weight: 700;
-    letter-spacing: 0.04em;
+main a:not(.btn):not(.nav-link):not(.dropdown-item):not(.badge) {
+    color: var(--ygg-link);
 }
 
-/* ---- Buttons: keep Bootstrap sizing, just the type ---------------------- */
+.text-muted { color: var(--ygg-text-muted) !important; }
+.badge { font-weight: 500; }
+.uniform-btn { min-width: 90px; height: 32px; line-height: 18px; }
+
+/* ---- Bootstrap chromatic overrides (colors only, never geometry) -------- */
 .btn {
     font-family: var(--ygg-font-body);
     font-weight: 500;
 }
+.btn-primary {
+    --bs-btn-bg: var(--ygg-navy-600);
+    --bs-btn-border-color: var(--ygg-navy-600);
+    --bs-btn-hover-bg: var(--ygg-navy-500);
+    --bs-btn-hover-border-color: var(--ygg-navy-500);
+    --bs-btn-active-bg: var(--ygg-navy-500);
+    --bs-btn-active-border-color: var(--ygg-navy-500);
+    --bs-btn-disabled-bg: var(--ygg-navy-600);
+    --bs-btn-disabled-border-color: var(--ygg-navy-600);
+}
+.btn-outline-primary {
+    --bs-btn-color: var(--ygg-navy-600);
+    --bs-btn-border-color: var(--ygg-navy-600);
+    --bs-btn-hover-bg: var(--ygg-navy-600);
+    --bs-btn-hover-border-color: var(--ygg-navy-600);
+    --bs-btn-active-bg: var(--ygg-navy-600);
+    --bs-btn-active-border-color: var(--ygg-navy-600);
+}
+.card {
+    --bs-card-border-color: var(--ygg-border);
+}
 
-/* ---- Footer ------------------------------------------------------------- */
-footer.bg-light {
-    border-top: 1px solid rgba(13, 110, 253, 0.08);
+/* Form spacing kept from the pre-2.0 inline base style */
+.form-control, .form-select {
+    margin-top: 0.25rem;
 }
-footer .fa-github {
-    transition: color 150ms ease;
+
+/* ---- Navbar (.ygg-navbar) ------------------------------------------------ */
+.ygg-navbar {
+    background: linear-gradient(180deg, var(--ygg-ink-800), var(--ygg-ink-700));
+    border-bottom: 1px solid rgba(201, 162, 75, 0.25);
 }
-footer .fa-github:hover {
-    color: var(--ygg-accent);
+.ygg-navbar .navbar-brand {
+    font-family: var(--ygg-font-display);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--ygg-gold-200);
 }
+.ygg-navbar .navbar-brand:hover,
+.ygg-navbar .navbar-brand:focus {
+    color: var(--ygg-gold-400);
+}
+.ygg-navbar .brand-mark {
+    height: 24px;
+    width: auto;
+    display: inline-block;
+    vertical-align: text-bottom;
+}
+.ygg-navbar .navbar-nav .nav-link,
+.ygg-navbar .navbar-nav .nav-link.dropdown-toggle,
+.ygg-navbar .navbar-nav .nav-link:focus {
+    color: #fff;
+    opacity: 1;
+    border-bottom: 2px solid transparent;
+}
+.ygg-navbar .navbar-nav .nav-link:hover,
+.ygg-navbar .navbar-nav .nav-link.active {
+    color: var(--ygg-gold-200);
+    border-bottom-color: var(--ygg-gold-500);
+}
+
+/* Logout button inside the user dropdown */
+.dropdown-item.p-0 { overflow: hidden; }
+.dropdown-item.p-0 .btn-link {
+    color: inherit;
+    font-weight: inherit;
+}
+.dropdown-item.p-0 .btn-link:hover {
+    background-color: var(--ygg-surface-alt);
+    color: inherit;
+}
+
+/* ---- Footer (.ygg-footer) ------------------------------------------------ */
+.ygg-footer {
+    background: var(--ygg-surface);
+    border-top: 1px solid var(--ygg-border);
+    position: relative;
+}
+.ygg-footer::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 2px;
+    background: var(--ygg-gold-500);
+}
+.ygg-footer a { color: var(--ygg-text); }
+.ygg-footer .fa-github { transition: color 150ms ease; }
+.ygg-footer .fa-github:hover { color: var(--ygg-gold-600); }
