@@ -12,6 +12,8 @@ import redis
 from django.conf import settings
 from django.utils import timezone
 
+from common.domains import DOMAINS
+
 logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "presence:user:"
@@ -20,7 +22,7 @@ _SYNC_KEY_PREFIX = "presence:dbsync:"
 # Bounds write volume while keeping the timeline accurate to within this window.
 _SESSION_SYNC_INTERVAL_SECONDS = 30
 
-_PROJECT_SLUGS = {"maxillo", "brain", "laparoscopy"}
+_PROJECT_SLUGS = set(DOMAINS)
 
 _client = None
 

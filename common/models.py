@@ -1,11 +1,57 @@
-"""
-DOMAIN_CHOICES i srepeated multiple times across many models, might be the case to generalize it into some king of global variable?
+"""Shared cross-domain models (Job, ProcessingJob, FileRegistry, Project, ...).
+
+DOMAIN_CHOICES and the per-domain FK field map now live in common.domains
+(Phase 5.2) — single source of truth instead of the copies that used to be
+duplicated across the models below.
 """
 import uuid
 
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils.text import slugify
+
+from common.domains import (
+	DOMAIN_CHOICES,
+	DOMAIN_FK_FIELDS,
+	fk_fields_for,
+	normalize_domain,
+)
+
+
+class DomainFKAccessorMixin:
+	"""Registry-driven access to the per-domain patient / voice_caption FKs.
+
+	Job, ProcessingJob and FileRegistry each carry three parallel patient FK
+	columns (maxillo/brain/laparoscopy) plus three voice_caption FKs. These
+	accessors wrap that fan-out so callers use ``obj.get_patient()`` /
+	``obj.set_patient(p)`` instead of branching on ``obj.domain`` by hand.
+	Methods only — no fields — so they add nothing to the migration state.
+	"""
+
+	def get_patient(self):
+		patient_fk, _ = fk_fields_for(self.domain)
+		return getattr(self, patient_fk, None)
+
+	def get_voice_caption(self):
+		_, voice_fk = fk_fields_for(self.domain)
+		return getattr(self, voice_fk, None)
+
+	def set_patient(self, patient):
+		domain = normalize_domain(
+			getattr(getattr(patient, "_meta", None), "app_label", self.domain)
+		)
+		self.domain = domain
+		for slug, (patient_fk, _voice_fk) in DOMAIN_FK_FIELDS.items():
+			setattr(self, patient_fk, patient if slug == domain else None)
+
+	def set_voice_caption(self, voice_caption):
+		patient = getattr(voice_caption, "patient", None)
+		domain = normalize_domain(
+			getattr(getattr(patient, "_meta", None), "app_label", self.domain)
+		)
+		self.domain = domain
+		for slug, (_patient_fk, voice_fk) in DOMAIN_FK_FIELDS.items():
+			setattr(self, voice_fk, voice_caption if slug == domain else None)
 
 
 class Project(models.Model):
@@ -223,13 +269,7 @@ class Invitation(models.Model):
 		db_table = 'maxillo_invitation'
 
 
-class Job(models.Model):
-	DOMAIN_CHOICES = [
-		('maxillo', 'Maxillo'),
-		('brain', 'Brain'),
-		('laparoscopy', 'Laparoscopy'),
-	]
-
+class Job(DomainFKAccessorMixin, models.Model):
 	STATUS_CHOICES = [
 		('pending', 'Pending'),
 		('dependency', 'Waiting for Dependencies'),
@@ -365,13 +405,7 @@ class Job(models.Model):
 			return self.completed_at - self.started_at
 		return None
 
-class ProcessingJob(models.Model):
-	DOMAIN_CHOICES = [
-		('maxillo', 'Maxillo'),
-		('brain', 'Brain'),
-		('laparoscopy', 'Laparoscopy'),
-	]
-
+class ProcessingJob(DomainFKAccessorMixin, models.Model):
 	JOB_TYPE_CHOICES = [
 		('cbct', 'CBCT Processing'),
 		('ios', 'IOS Processing'),
@@ -518,13 +552,7 @@ class ProcessingJob(models.Model):
 		return None
 
 
-class FileRegistry(models.Model):
-	DOMAIN_CHOICES = [
-		('maxillo', 'Maxillo'),
-		('brain', 'Brain'),
-		('laparoscopy', 'Laparoscopy'),
-	]
-
+class FileRegistry(DomainFKAccessorMixin, models.Model):
 	FILE_TYPE_CHOICES = [
 		('cbct_raw', 'CBCT Raw'),
 		('cbct_processed', 'CBCT Processed'),

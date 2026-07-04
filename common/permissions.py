@@ -2,17 +2,18 @@
 
 from django.apps import apps
 
+from common.domains import normalize_domain
 from common.models import Project, ProjectAccess
 
 
 def _namespace(request_or_namespace):
     if isinstance(request_or_namespace, str):
-        return request_or_namespace if request_or_namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
+        return normalize_domain(request_or_namespace)
     namespace = (
         getattr(request_or_namespace, "resolver_match", None)
         and request_or_namespace.resolver_match.namespace
-    ) or "maxillo"
-    return namespace if namespace in {"maxillo", "brain", "laparoscopy"} else "maxillo"
+    )
+    return normalize_domain(namespace)
 
 
 def _folder_access_model(namespace):

@@ -3,6 +3,8 @@ from typing import Any, Optional
 
 from django.conf import settings
 
+from common.domains import fk_fields_for, normalize_domain
+
 _QUEUE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -17,49 +19,33 @@ def _sanitize_queue_name(name: Optional[str], *, default: str) -> str:
 
 def _project_slug_for_job(job: Any) -> Optional[str]:
     try:
-        domain = getattr(job, "domain", "")
+        domain = normalize_domain(getattr(job, "domain", ""))
 
-        if domain == "brain":
-            patient = getattr(job, "brain_patient", None)
-            if patient is None:
-                voice_caption = getattr(job, "brain_voice_caption", None)
-                patient = (
-                    getattr(voice_caption, "patient", None)
-                    if voice_caption is not None
-                    else None
-                )
-            return "brain" if patient is not None else None
+        # Resolve the patient via the registry-driven FK field names (falls back
+        # to the voice-caption's patient). Uses getattr rather than the Job
+        # accessor methods so it also works on lightweight/duck-typed objects.
+        patient_fk, voice_fk = fk_fields_for(domain)
+        patient = getattr(job, patient_fk, None)
+        if patient is None:
+            voice_caption = getattr(job, voice_fk, None)
+            patient = (
+                getattr(voice_caption, "patient", None)
+                if voice_caption is not None
+                else None
+            )
 
-        if domain == "laparoscopy":
-            patient = getattr(job, "laparoscopy_patient", None)
-            if patient is None:
-                voice_caption = getattr(job, "laparoscopy_voice_caption", None)
-                patient = (
-                    getattr(voice_caption, "patient", None)
-                    if voice_caption is not None
-                    else None
-                )
-            return "laparoscopy" if patient is not None else None
+        if patient is None:
+            return None
+
+        # maxillo jobs route by the patient's project slug; other domains route
+        # by the domain name itself (historical behavior preserved).
         if domain == "maxillo":
-            patient = getattr(job, "patient", None)
-            if patient is None:
-                voice_caption = getattr(job, "voice_caption", None)
-                patient = (
-                    getattr(voice_caption, "patient", None)
-                    if voice_caption is not None
-                    else None
-                )
-
-            if patient is not None:
-                project = getattr(patient, "project", None)
-                slug = getattr(project, "slug", None) if project is not None else None
-                if slug:
-                    return str(slug)
-                return "maxillo"
-            
+            project = getattr(patient, "project", None)
+            slug = getattr(project, "slug", None) if project is not None else None
+            return str(slug) if slug else "maxillo"
+        return domain
     except Exception:
         return None
-    return None
 
 
 def is_runner_enabled_for_modality(modality_slug: Optional[str]) -> bool:

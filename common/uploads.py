@@ -33,20 +33,18 @@ def domain_for_patient(patient) -> str:
 
 
 def entity_fk_kwargs(patient):
-    domain = domain_for_patient(patient)
-    if domain == "laparoscopy":
-        return {
-            "domain": "laparoscopy",
-            "laparoscopy_patient": patient,
-            "patient": None,
-            "brain_patient": None,
-        }
-    return {
-        "domain": "maxillo",
-        "patient": patient,
-        "brain_patient": None,
-        "laparoscopy_patient": None,
-    }
+    """Patient-FK kwargs for FileRegistry/Job creation, keyed by the registry.
+
+    Returns ``{"domain": ..., "<patient_fk>": patient, <others>: None}`` so a
+    single call fills exactly one of the parallel patient FK columns.
+    """
+    from common.domains import DOMAIN_FK_FIELDS, normalize_domain
+
+    domain = normalize_domain(domain_for_patient(patient))
+    kwargs = {"domain": domain}
+    for slug, (patient_fk, _voice_fk) in DOMAIN_FK_FIELDS.items():
+        kwargs[patient_fk] = patient if slug == domain else None
+    return kwargs
 
 
 def project_slug_from_patient(patient) -> str:
