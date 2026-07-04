@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # Restore a full MySQL dump (as produced by scripts/backup_prod.sh) into the
-# running Docker db service. This is the FULL-database counterpart to
-# import_prod_db.sh (which only replays a 4-table subset for dev seeding).
+# running Docker db service.
 #
 # Use this for the v1.9 -> 2.0 server migration: restore the 1.9 dump into a
 # fresh, EMPTY 2.0 database, THEN run `manage.py migrate` so the additive 2.0

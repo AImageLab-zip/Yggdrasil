@@ -76,8 +76,7 @@ empty DB before the restore.
 
 ## Step 3 — Full restore of the 1.9 dump
 
-Use the full-database restore script (the sibling `import_prod_db.sh` only replays a
-4-table subset and is **not** for this):
+Use the full-database restore script:
 
 ```bash
 ./scripts/restore_prod.sh ygg_1.9_YYYYMMDD_HHMMSS.sql.gz
