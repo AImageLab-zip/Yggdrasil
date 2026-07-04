@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 from functools import wraps
@@ -39,7 +40,7 @@ def _runner_auth_required(view_func):
             return JsonResponse(
                 {"error": "Runner API tokens are not configured"}, status=503
             )
-        if not token or token not in allowed:
+        if not token or not any(hmac.compare_digest(token, t) for t in allowed):
             return JsonResponse({"error": "Unauthorized"}, status=401)
         return view_func(request, *args, **kwargs)
 

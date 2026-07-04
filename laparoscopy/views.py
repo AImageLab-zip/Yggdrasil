@@ -11,7 +11,6 @@ from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from laparoscopy.models import (
@@ -688,7 +687,6 @@ def region_annotation_detail(request, annotation_id):
 # ─── Magic Tool worker proxy ──────────────────────────────────────────────────
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def worker_session_ready(request):
     profile = _get_profile(request)
@@ -762,7 +760,6 @@ def worker_session_ready(request):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def worker_session_prompt(request):
     profile = _get_profile(request)

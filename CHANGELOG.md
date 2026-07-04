@@ -64,6 +64,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`AUTO_MIGRATE=0` to opt out, `RUN_DEV_SERVER=1` for the dev server).
 
 ### Security
+- Patient-viewer and activity-stats pages now inject server data via Django's
+  `json_script` filter instead of `|safe` JSON interpolation, removing a
+  script-breakout XSS vector. The rendered `<script type="application/json">`
+  elements keep their ids, so viewer JavaScript is unchanged.
+- Removed `csrf_exempt` from all session-authenticated state-changing views
+  (classification updates, patient tags, laparoscopy Magic Tool worker
+  proxies, and the external project API). **Breaking for external API
+  clients**: POSTs to `/api/<project>/upload/` and `/api/<project>/patients/`
+  must now send the `csrftoken` cookie value in an `X-CSRFToken` header
+  (standard `requests.Session` flow); unauthenticated POSTs without a token
+  answer 403 instead of 401. The token-authenticated runner API under
+  `/api/runner/...` is unchanged.
+- Runner bearer-token comparison now uses `hmac.compare_digest` (constant
+  time); same request/response contract.
 - Brain processing API was fully anonymous: `serve_file` let anyone fetch any
   brain file by id, and `get_file_registry`/`get_job_status`/the job list
   leaked file paths, patient ids and job state. These now require login (file

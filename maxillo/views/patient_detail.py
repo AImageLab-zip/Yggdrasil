@@ -253,10 +253,6 @@ def patient_detail(request, patient_id):
         if patient_modalities:
             default_modality_slug = patient_modalities[0]['slug']
 
-    # JSON-serializable fields for template
-    import json as _json
-    patient_modalities_json = _json.dumps(patient_modalities)
-    default_modality_json = _json.dumps(default_modality_slug)
 
     # Organize patient files for file management section
     patient_files = {'raw': [], 'processed': [], 'other': []}
@@ -379,8 +375,25 @@ def patient_detail(request, patient_id):
     except Exception as e:
         logger.warning(f"Error building modality_files: {e}")
 
-    # JSON-serialize modality_files for template
-    modality_files_json = _json.dumps(modality_files)
+    # Structured payloads rendered via |json_script (XSS-safe, no |safe needed)
+    django_data = {
+        'canEdit': bool(can_modify),
+        'scanId': patient.patient_id,
+        'hasIOS': bool(getattr(patient, 'has_ios_scans', False)),
+        'hasCBCT': bool(has_cbct),
+        'isCBCTProcessed': bool(getattr(patient, 'is_cbct_processed', False)),
+        'modalities': patient_modalities,
+        'defaultModality': default_modality_slug,
+    }
+    viewer_grid_data = {
+        'scanId': patient.patient_id,
+        'projectNamespace': (request.resolver_match.namespace if request.resolver_match else None) or 'maxillo',
+        'modalityFiles': modality_files,
+        'fixedMode': True,
+        'enableDragDrop': False,
+        'enableContextMenu': True,
+        'allowClearWindow': False,
+    }
 
     context = {
         'patient': patient,
@@ -394,14 +407,13 @@ def patient_detail(request, patient_id):
         'can_modify_segmentation': can_modify,
         'patient_modalities': patient_modalities,
         'default_modality_slug': default_modality_slug,
-        'patient_modalities_json': patient_modalities_json,
-        'default_modality_json': default_modality_json,
+        'django_data': django_data,
         'patient_files': patient_files,
         'voice_captions': voice_captions,
         'is_admin_user': is_admin_user,
         'can_create_caption': can_create_caption,
         'modality_files': modality_files,
-        'modality_files_json': modality_files_json,
+        'viewer_grid_data': viewer_grid_data,
     }
     # Allowed modalities for current project (to conditionally show upload controls)
     try:

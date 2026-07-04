@@ -7,7 +7,6 @@ from django.db import connection
 from django.utils.text import slugify
 from django.utils import timezone
 
-import json
 from datetime import timedelta
 
 from . import presence
@@ -228,7 +227,7 @@ def user_activity_stats(request):
         "project_choices": [(slug, label) for slug, label in _PROJECT_LABELS.items() if slug],
         "view": view,
         "selected_user_id": int(selected_user_id) if selected_user_id else None,
-        "timeline_json": json.dumps(timeline),
+        "timeline": timeline,
     }
     return render(request, "common/user_activity_stats.html", context)
 

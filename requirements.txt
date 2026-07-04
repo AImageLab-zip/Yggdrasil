@@ -1,7 +1,7 @@
 asgiref==3.9.1
 boto3==1.39.9
 celery[redis]==5.6.0
-Django==5.2.4
+Django==5.2.15
 django-cors-headers==4.7.0
 gunicorn==23.0.0
 mysqlclient==2.2.7
@@ -10,5 +10,5 @@ numpy==2.3.2
 pillow==11.3.0
 python-decouple==3.8
 sqlparse==0.5.3
-trimesh==4.7.1
+trimesh==4.12.2
 tqdm==4.66.4

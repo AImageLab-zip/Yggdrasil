@@ -1,6 +1,5 @@
 """Project-based API endpoints."""
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Prefetch
 from django.apps import apps
@@ -44,7 +43,6 @@ def _upload_form_class(project_slug):
     from ..forms import PatientUploadForm
     return PatientUploadForm
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def project_upload_api(request, project_slug):
     """
@@ -279,7 +277,6 @@ def project_upload_api(request, project_slug):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_project_folders(request, project_slug):
     """
@@ -334,7 +331,6 @@ def get_project_folders(request, project_slug):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def project_patients_handler(request, project_slug):
     """
     Handler for /<project_slug>/api/patients/
@@ -349,7 +345,6 @@ def project_patients_handler(request, project_slug):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_project_patients_and_modalities(request, project_slug):
     """
@@ -417,7 +412,6 @@ def get_project_patients_and_modalities(request, project_slug):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_patient_files(request, project_slug, patient_id):
     """
@@ -494,7 +488,6 @@ def get_patient_files(request, project_slug, patient_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def get_multiple_patients_files(request, project_slug):
     """

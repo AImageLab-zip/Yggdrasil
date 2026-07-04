@@ -1,17 +1,7 @@
 {% load static %}
 <link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
 
-<script id="viewerGridData" type="application/json">
-{
-    "scanId": {{ patient.patient_id }},
-    "projectNamespace": "{% firstof request.resolver_match.namespace 'maxillo' %}",
-    "modalityFiles": {{ modality_files_json|safe }},
-    "fixedMode": true,
-    "enableDragDrop": false,
-    "enableContextMenu": true,
-    "allowClearWindow": false
-}
-</script>
+{{ viewer_grid_data|json_script:"viewerGridData" }}
 <div class="container-fluid">
 
     <div class="row">

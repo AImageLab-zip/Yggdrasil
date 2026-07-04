@@ -2,14 +2,7 @@
 <link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
 
 <!-- Django data for JavaScript -->
-<script id="viewerGridData" type="application/json">
-{
-    "scanId": {{ patient.patient_id }},
-    "projectNamespace": "{% firstof request.resolver_match.namespace 'brain' %}",
-    "modalityFiles": {{ modality_files_json|safe }},
-    "segmentationFile": {{ segmentation_file_json|safe }}
-}
-</script>
+{{ viewer_grid_data|json_script:"viewerGridData" }}
 
 <div class="container-fluid">
 

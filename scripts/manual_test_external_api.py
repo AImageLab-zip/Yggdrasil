@@ -68,24 +68,26 @@ def main():
     print(f"Base URL: {BASE_URL}")
     print(f"Project Slug: {PROJECT_SLUG}")
     
-    # Test 1: Test upload endpoint (expect authentication error)
-    test_endpoint(f"/api/{PROJECT_SLUG}/upload/", method="POST", data={}, expected_status=401)
-    
+    # NOTE (2.0): POST endpoints are CSRF-protected since the csrf_exempt
+    # removal. Session-based clients must first GET a page to obtain the
+    # csrftoken cookie and send it back in the X-CSRFToken header
+    # (standard requests.Session flow). Without a token, POSTs are rejected
+    # with 403 by CsrfViewMiddleware before reaching the view.
+
+    # Test 1: Upload endpoint without CSRF token (rejected by CSRF middleware)
+    test_endpoint(f"/api/{PROJECT_SLUG}/upload/", method="POST", data={}, expected_status=403)
+
     # Test 2: Get project patients and modalities (this might return 404 if no project with this slug)
     test_endpoint(f"/api/{PROJECT_SLUG}/patients/", expected_status=404)  # Expecting 404 if no project
-    
+
     # Test 3: Get patient files (this might return 404 if no patient with ID 1)
     test_endpoint(f"/api/{PROJECT_SLUG}/patients/1/files/", expected_status=404)  # Expecting 404 if no patient
-    
-    # Test 4: Bulk patient files endpoint with empty list
-    test_endpoint(f"/api/{PROJECT_SLUG}/patients/", method="POST", data={"patient_ids": []}, expected_status=400)
-    
-    # Test 5: Bulk patient files endpoint with non-existent patients
-    test_endpoint(f"/api/{PROJECT_SLUG}/patients/", method="POST", data={"patient_ids": [999, 998, 997]}, expected_status=404)
-    
-    # Test 6: Bulk patient files endpoint with too many patients
+
+    # Tests 4-6: Bulk patient files POSTs without CSRF token (rejected by CSRF middleware)
+    test_endpoint(f"/api/{PROJECT_SLUG}/patients/", method="POST", data={"patient_ids": []}, expected_status=403)
+    test_endpoint(f"/api/{PROJECT_SLUG}/patients/", method="POST", data={"patient_ids": [999, 998, 997]}, expected_status=403)
     large_list = list(range(1, 102))  # 101 patient IDs
-    test_endpoint(f"/api/{PROJECT_SLUG}/patients/", method="POST", data={"patient_ids": large_list}, expected_status=400)
+    test_endpoint(f"/api/{PROJECT_SLUG}/patients/", method="POST", data={"patient_ids": large_list}, expected_status=403)
     
     # Test 7: Test with a real project slug that might exist
     test_endpoint("/api/maxillo/patients/", expected_status=404)  # Try with 'maxillo' project slug

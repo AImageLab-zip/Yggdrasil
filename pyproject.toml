@@ -9,7 +9,26 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Permissive baseline on purpose: syntax errors and undefined names only.
+# Permissive baseline on purpose: syntax errors and undefined names only,
+# plus the bandit-derived security rules ("S").
 # The codebase mixes tabs/spaces and predates any formatter — no style
 # enforcement here. Widening this ruleset is a separate, deliberate PR.
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F63", "F7", "F82", "S"]
+# S110/S112 (try-except-pass/continue) are a pervasive legacy pattern here,
+# not a security signal; auditing them is style work, not release work.
+ignore = ["S110", "S112"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use asserts and throwaway credentials by design.
+"**/tests*.py" = ["S101", "S105", "S106"]
+# CLI-only admin command; db/table names come from argv + a fixed allowlist,
+# never from web input.
+"common/management/commands/import_legacy_prod.py" = ["S608"]
+# subprocess/urlopen with arguments built from settings and job records,
+# never from request data. No shell=True anywhere.
+"common/tasks.py" = ["S603", "S607"]
+"common/export_processing.py" = ["S603", "S607"]
+"laparoscopy/export_processor.py" = ["S603"]
+# Magic Tool worker proxy: target URL comes from settings (WORKER_*_URL),
+# not from the request.
+"laparoscopy/views.py" = ["S310"]

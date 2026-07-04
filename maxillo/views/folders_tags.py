@@ -3,7 +3,6 @@ from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST, require_http_methods
 import json
 import logging
@@ -169,7 +168,6 @@ def move_patients_to_folder(request):
 
 @login_required
 @require_POST
-@csrf_exempt
 def add_patient_tag(request, patient_id):
     """Add a tag to a scan; creates tag if it doesn't exist."""
     domain_models = get_domain_models(request)
@@ -195,7 +193,6 @@ def add_patient_tag(request, patient_id):
 
 @login_required
 @require_POST
-@csrf_exempt
 def remove_patient_tag(request, patient_id):
     """Remove a tag from a scan by tag name or id."""
     domain_models = get_domain_models(request)

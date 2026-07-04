@@ -125,6 +125,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+{{ timeline|json_script:"timeline-data" }}
 <script>
 (function () {
 	function formatDuration(totalSeconds) {
@@ -138,7 +139,7 @@
 		el.textContent = formatDuration(parseFloat(el.dataset.seconds));
 	});
 
-	const timeline = {{ timeline_json|safe }};
+	const timeline = JSON.parse(document.getElementById('timeline-data').textContent);
 	const mode = "{{ view|default:'single' }}";
 	const canvas = document.getElementById('timelineChart');
 	if (!canvas || !timeline.length) return;

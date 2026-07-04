@@ -63,7 +63,7 @@
             var self = this;
             fetch('/laparoscopy/api/worker/session-ready/', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this._jsonHeaders(),
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     patientId: String(this.patientId),
@@ -276,7 +276,7 @@
 
             fetch('/laparoscopy/api/worker/session-prompt/', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this._jsonHeaders(),
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     patientId:       this.patientId,

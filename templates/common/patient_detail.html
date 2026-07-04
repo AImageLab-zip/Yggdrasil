@@ -21,17 +21,7 @@
 
 {% block extra_js %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-<script id="django-data" type="application/json">
-{
-    "canEdit": {{ can_modify_segmentation|yesno:"true,false" }},
-    "scanId": {{ patient.patient_id }},
-    "hasIOS": {{ patient.has_ios_scans|yesno:"true,false" }},
-    "hasCBCT": {{ has_cbct|yesno:"true,false" }},
-    "isCBCTProcessed": {{ patient.is_cbct_processed|yesno:"true,false" }},
-    "modalities": {{ patient_modalities_json|safe }},
-    "defaultModality": {{ default_modality_json|safe }}
-}
-</script>
+{{ django_data|json_script:"django-data" }}
 {# Core volume rendering #}
 <script src="{% static 'js/volume_renderer.js' %}"></script>
 
