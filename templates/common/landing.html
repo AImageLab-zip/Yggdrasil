@@ -15,7 +15,7 @@
     <div class="user-fab">
         {% if user.is_authenticated %}
             <div class="user-chip dropdown">
-                <a class="btn btn-light btn-sm dropdown-toggle shadow-sm" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <a class="btn ygg-chip btn-sm dropdown-toggle shadow-sm" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="fas fa-user-circle me-1"></i>{{ user.username }}
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end">
@@ -51,10 +51,10 @@
             </div>
         {% else %}
             <div class="auth-actions">
-                <a href="{% url 'login' %}" class="btn btn-primary btn-sm shadow-sm me-2">
+                <a href="{% url 'login' %}" class="btn ygg-btn-gold btn-sm shadow-sm me-2">
                     <i class="fas fa-sign-in-alt me-1"></i>Login
                 </a>
-                <a href="{% url 'register' %}" class="btn btn-outline-light btn-sm shadow-sm">
+                <a href="{% url 'register' %}" class="btn ygg-btn-gold-outline btn-sm shadow-sm">
                     <i class="fas fa-user-plus me-1"></i>Register
                 </a>
             </div>
@@ -76,7 +76,7 @@
 
     {% if demo_url %}
         <div class="demo-cta text-center">
-            <a href="{{ demo_url }}" class="btn btn-outline-info btn-sm shadow-sm">
+            <a href="{{ demo_url }}" class="btn ygg-btn-gold-outline btn-sm shadow-sm">
                 <i class="fas fa-eye me-1"></i>Explore the public demo — no login
             </a>
         </div>
@@ -92,6 +92,8 @@
                                 <i class="fas fa-tooth"></i>
                             {% elif project.slug == 'brain' %}
                                 <i class="fas fa-brain"></i>
+                            {% elif project.slug == 'laparoscopy' %}
+                                <i class="fas fa-video"></i>
                             {% else %}
                                 <i class="fas {{ project.icon|default:'fa-folder' }}"></i>
                             {% endif %}
@@ -120,19 +122,17 @@
         </div>
     {% else %}
         <div class="container text-center py-5">
-            <div class="card shadow-lg" style="max-width: 500px; margin: 0 auto; background: rgba(255, 255, 255, 0.95);">
-                <div class="card-body p-5">
-                    <i class="fas fa-lock fa-3x text-primary mb-3"></i>
-                    <h3 class="mb-3">Authentication Required</h3>
-                    <p class="text-muted mb-4">Please log in to access Yggdrasil projects.</p>
-                    <div class="d-grid gap-2">
-                        <a href="{% url 'login' %}" class="btn btn-primary btn-lg">
-                            <i class="fas fa-sign-in-alt me-2"></i>Login
-                        </a>
-                        <a href="{% url 'register' %}" class="btn btn-outline-primary">
-                            <i class="fas fa-user-plus me-2"></i>Register
-                        </a>
-                    </div>
+            <div class="auth-panel">
+                <i class="fas fa-lock fa-3x mb-3"></i>
+                <h3 class="mb-3">Authentication Required</h3>
+                <p class="auth-panel-note mb-4">Please log in to access Yggdrasil projects.</p>
+                <div class="d-grid gap-2">
+                    <a href="{% url 'login' %}" class="btn ygg-btn-gold btn-lg">
+                        <i class="fas fa-sign-in-alt me-2"></i>Login
+                    </a>
+                    <a href="{% url 'register' %}" class="btn ygg-btn-gold-outline">
+                        <i class="fas fa-user-plus me-2"></i>Register
+                    </a>
                 </div>
             </div>
         </div>

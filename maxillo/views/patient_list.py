@@ -9,6 +9,7 @@ from django.db.models import Q
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import render_with_fallback
 from common.demo import landing_demo_url
+from common.domains import order_projects_for_landing
 from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
@@ -41,12 +42,12 @@ def home(request):
         
         # Admins can see all projects
         if request.user.is_staff:
-            projects = all_projects.order_by('name')
+            projects = order_projects_for_landing(all_projects)
         else:
             accessible_project_ids = ProjectAccess.objects.filter(
                 user=request.user
             ).values_list('project_id', flat=True)
-            projects = all_projects.filter(id__in=accessible_project_ids).order_by('name')
+            projects = order_projects_for_landing(all_projects.filter(id__in=accessible_project_ids))
 
         current_project_id = request.session.get('current_project_id')
         current_project_name = None

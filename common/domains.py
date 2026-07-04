@@ -35,3 +35,17 @@ def normalize_domain(value):
 def fk_fields_for(domain):
     """Return ``(patient_fk, voice_caption_fk)`` for ``domain`` (default-safe)."""
     return DOMAIN_FK_FIELDS.get(normalize_domain(domain), DOMAIN_FK_FIELDS[DEFAULT_DOMAIN])
+
+
+def order_projects_for_landing(queryset):
+    """Order a Project queryset in the canonical landing order.
+
+    Known domains follow DOMAIN_CHOICES order (maxillo, brain, laparoscopy);
+    any future project sorts after them, alphabetically.
+    """
+    from django.db.models import Case, IntegerField, Value, When
+
+    whens = [When(slug=slug, then=Value(i)) for i, (slug, _) in enumerate(DOMAIN_CHOICES)]
+    return queryset.annotate(
+        _landing_rank=Case(*whens, default=Value(len(DOMAIN_CHOICES)), output_field=IntegerField())
+    ).order_by("_landing_rank", "name")
