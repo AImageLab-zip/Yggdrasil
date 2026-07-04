@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (DB, object storage, backup freshness — warns when the newest successful
   backup is older than 26h) and unauthenticated `/healthz` (200/503, no
   details).
+- Export share links can now expire: nullable `expires_at` on all three
+  Export models (null = never, so pre-2.0 links are unaffected). New and
+  updated shares default to 30 days; the share UI offers 7/30/90 days or
+  never, where "never" is allowed only for staff/project admins. Expired
+  links answer 410 Gone on both the landing page and the download.
 
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start

@@ -12,10 +12,11 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse, Http404, HttpResponseGone
 from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
+from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
@@ -999,14 +1000,16 @@ def _brain_shared_export_availability(share_token):
     """Resolve a brain export by share token and whether it's downloadable."""
     export = Export.objects.filter(share_token=share_token).first()
     if not export:
-        return None, False
+        return None, False, "invalid"
     if export.share_mode == "private":
-        return export, False
+        return export, False, "private"
+    if is_share_expired(export):
+        return export, False, "expired"
     if export.status != "completed":
-        return export, False
+        return export, False, "not_completed"
     if not export.file_path or not artifact_exists(export.file_path):
-        return export, False
-    return export, True
+        return export, False, "missing_file"
+    return export, True, ""
 
 
 @login_required
@@ -1275,28 +1278,47 @@ def export_share_update(request, export_id):
     if share_mode == "private":
         export.share_token = None
         export.shared_at = None
-        export.save(update_fields=["share_mode", "share_token", "shared_at"])
-        return JsonResponse(
-            {"success": True, "share_mode": export.share_mode, "share_url": None}
+        export.expires_at = None
+        export.save(
+            update_fields=["share_mode", "share_token", "shared_at", "expires_at"]
         )
+        return JsonResponse(
+            {
+                "success": True,
+                "share_mode": export.share_mode,
+                "share_url": None,
+                "expires_at": None,
+            }
+        )
+
+    expires_at, expiry_error = resolve_share_expiry(
+        data.get("expires_in_days"),
+        current=export.expires_at,
+        can_set_never=request.user.is_staff
+        or user_is_project_admin(request.user, "brain"),
+    )
+    if expiry_error:
+        return JsonResponse({"success": False, "error": expiry_error}, status=400)
 
     if regenerate or not export.share_token:
         export.ensure_share_token(force_new=regenerate)
     export.shared_at = timezone.now()
-    export.save(update_fields=["share_mode", "shared_at"])
+    export.expires_at = expires_at
+    export.save(update_fields=["share_mode", "shared_at", "expires_at"])
 
     return JsonResponse(
         {
             "success": True,
             "share_mode": export.share_mode,
             "share_url": _build_shared_download_url(request, export.share_token),
+            "expires_at": export.expires_at.isoformat() if export.expires_at else None,
         }
     )
 
 
 @require_http_methods(["GET"])
 def export_shared_landing(request, share_token):
-    export, is_available = _brain_shared_export_availability(share_token)
+    export, is_available, reason = _brain_shared_export_availability(share_token)
     if (
         export
         and export.share_mode == "authenticated"
@@ -1310,17 +1332,21 @@ def export_shared_landing(request, share_token):
             "ns": "brain",
             "export": export,
             "is_available": is_available,
+            "is_expired": reason == "expired",
             "share_token": share_token,
             "file_size_human": format_file_size(export.file_size)
             if export and export.file_size
             else None,
         },
+        status=410 if reason == "expired" else 200,
     )
 
 
 @require_http_methods(["GET"])
 def export_shared_download(request, share_token):
-    export, is_available = _brain_shared_export_availability(share_token)
+    export, is_available, reason = _brain_shared_export_availability(share_token)
+    if reason == "expired":
+        return HttpResponseGone("This share link has expired.")
     if not export or not is_available:
         raise Http404("Export is not available.")
     if export.share_mode == "authenticated" and not request.user.is_authenticated:

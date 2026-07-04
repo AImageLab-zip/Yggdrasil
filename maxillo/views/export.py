@@ -4,7 +4,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse, Http404, HttpResponseGone
 from django.views.decorators.http import require_POST, require_http_methods
 from django.db import OperationalError
 from django.db.models import Q, Count, Sum
@@ -18,6 +18,7 @@ import signal
 import subprocess
 
 from common.models import Modality, FileRegistry
+from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
 from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
@@ -125,6 +126,9 @@ def _shared_export_availability(request, share_token):
 
     if export.share_mode == "private":
         return export, False, "private"
+
+    if is_share_expired(export):
+        return export, False, "expired"
 
     if export.status != "completed":
         return export, False, "not_completed"
@@ -814,27 +818,40 @@ def export_share_update(request, export_id):
     if share_mode == "private":
         export.share_token = None
         export.shared_at = None
-        update_fields.extend(["share_token", "shared_at"])
+        export.expires_at = None
+        update_fields.extend(["share_token", "shared_at", "expires_at"])
         export.save(update_fields=update_fields)
         return JsonResponse(
             {
                 "success": True,
                 "share_mode": export.share_mode,
                 "share_url": None,
+                "expires_at": None,
             }
         )
+
+    # This endpoint is already gated on staff/project-admin (is_admin).
+    expires_at, expiry_error = resolve_share_expiry(
+        data.get("expires_in_days"),
+        current=export.expires_at,
+        can_set_never=is_admin(request.user),
+    )
+    if expiry_error:
+        return JsonResponse({"success": False, "error": expiry_error}, status=400)
 
     if regenerate or not export.share_token:
         export.ensure_share_token(force_new=regenerate)
 
     export.shared_at = timezone.now()
-    export.save(update_fields=["share_mode", "shared_at"])
+    export.expires_at = expires_at
+    export.save(update_fields=["share_mode", "shared_at", "expires_at"])
 
     return JsonResponse(
         {
             "success": True,
             "share_mode": export.share_mode,
             "share_url": _build_shared_download_url(request, export.share_token),
+            "expires_at": export.expires_at.isoformat() if export.expires_at else None,
         }
     )
 
@@ -842,7 +859,7 @@ def export_share_update(request, export_id):
 @require_http_methods(["GET"])
 def export_shared_landing(request, share_token):
     """Render shared export landing page with availability details."""
-    export, is_available, _reason = _shared_export_availability(request, share_token)
+    export, is_available, reason = _shared_export_availability(request, share_token)
 
     if (
         export
@@ -858,18 +875,23 @@ def export_shared_landing(request, share_token):
             "ns": get_namespace(request),
             "export": export,
             "is_available": is_available,
+            "is_expired": reason == "expired",
             "share_token": share_token,
             "file_size_human": format_file_size(export.file_size)
             if export and export.file_size
             else None,
         },
+        status=410 if reason == "expired" else 200,
     )
 
 
 @require_http_methods(["GET"])
 def export_shared_download(request, share_token):
     """Download export ZIP using a share token."""
-    export, is_available, _reason = _shared_export_availability(request, share_token)
+    export, is_available, reason = _shared_export_availability(request, share_token)
+
+    if reason == "expired":
+        return HttpResponseGone("This share link has expired.")
 
     if not export or not is_available:
         raise Http404("Export is not available.")

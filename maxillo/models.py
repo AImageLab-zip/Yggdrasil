@@ -767,6 +767,7 @@ class Export(models.Model):
         help_text='Random token used for share link access',
     )
     shared_at = models.DateTimeField(null=True, blank=True, help_text='When sharing was last enabled')
+    expires_at = models.DateTimeField(null=True, blank=True, help_text='Share link expiry; null = never expires')
 
     # Live progress (during processing)
     progress_message = models.CharField(max_length=255, blank=True, help_text='Current phase or progress text')

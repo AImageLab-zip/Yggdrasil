@@ -18,8 +18,8 @@ Decisions already made with the maintainer:
 | 0 | Prod hardening + ACL fixes | ✅ done (`release/2.0`, commits `4ee1cc6`, `61a23f0`) |
 | 1 | Versioning, CI, test baseline, dev bootstrap | ✅ done (`release/2.0`, tag `v1.9.0`, commits `5373b93`, `23d72e6`, `e9a60d3` + bootstrap commit) |
 | 2 | Automated backup + status dashboard | ✅ done (`release/2.0`) |
-| 3 | Export share expiry | ⬜ next |
-| 4 | Admin-driven worker/modality config | ⬜ |
+| 3 | Export share expiry | ✅ done (`release/2.0`) |
+| 4 | Admin-driven worker/modality config | ⬜ next |
 | 5 | `common/` consolidation | ⬜ |
 | 6 | Branding, landing, favicons, footer | ⬜ |
 | 7 | Public guest demo | ⬜ |

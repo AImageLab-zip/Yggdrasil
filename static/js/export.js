@@ -267,6 +267,7 @@ function saveShareSettings(exportId) {
     const copyBtn = document.getElementById(`copy-share-btn-${exportId}`);
     const statusEl = document.getElementById(`share-status-${exportId}`);
     const linkInput = document.getElementById(`share-link-${exportId}`);
+    const expirySelect = document.getElementById(`share-expiry-${exportId}`);
     if (!modeSelect) {
         return;
     }
@@ -275,15 +276,18 @@ function saveShareSettings(exportId) {
                      document.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
     const shareUrl = (window.exportShareUpdateUrl || '/maxillo/export/{id}/share/').replace('{id}', exportId);
 
+    const payload = { share_mode: modeSelect.value };
+    if (expirySelect && expirySelect.value) {
+        payload.expires_in_days = expirySelect.value;
+    }
+
     fetch(shareUrl, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': csrftoken,
         },
-        body: JSON.stringify({
-            share_mode: modeSelect.value,
-        }),
+        body: JSON.stringify(payload),
     })
     .then(response => response.json())
     .then(data => {

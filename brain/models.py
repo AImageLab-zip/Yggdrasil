@@ -449,6 +449,7 @@ class Export(models.Model):
     share_mode = models.CharField(max_length=20, choices=SHARE_MODE_CHOICES, default='private')
     share_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
     shared_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True, help_text='Share link expiry; null = never expires')
     progress_message = models.CharField(max_length=255, blank=True)
     progress_percent = models.IntegerField(null=True, blank=True)
 
