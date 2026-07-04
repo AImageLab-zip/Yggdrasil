@@ -213,56 +213,23 @@ def project_upload_api(request, project_slug):
         except Exception as e:
             upload_results['messages'].append(f"Error creating intraoral processing job: {e}")
         
-        # Handle Teleradiography and Panoramic
-        try:
-            teleradiography_file = request.FILES.get('teleradiography')
-            if teleradiography_file:
-                from ..file_utils import save_generic_modality_file
-                fr, job = save_generic_modality_file(patient, 'teleradiography', teleradiography_file)
-                if fr:
-                    upload_results['messages'].append(f"Teleradiography uploaded successfully")
-                if job:
-                    upload_results['jobs'].append({
-                        'id': job.id,
-                        'type': 'teleradiography',
-                        'status': job.status
-                    })
-        except Exception as e:
-            upload_results['messages'].append(f"Error creating teleradiography processing job: {e}")
-        
-        try:
-            panoramic_file = request.FILES.get('panoramic')
-            if panoramic_file:
-                from ..file_utils import save_generic_modality_file
-                fr, job = save_generic_modality_file(patient, 'panoramic', panoramic_file)
-                if fr:
-                    upload_results['messages'].append(f"Panoramic uploaded successfully")
-                if job:
-                    upload_results['jobs'].append({
-                        'id': job.id,
-                        'type': 'panoramic',
-                        'status': job.status
-                    })
-        except Exception as e:
-            upload_results['messages'].append(f"Error creating panoramic processing job: {e}")
-        
-        # Handle Rawzip
-        try:
-            rawzip_file = request.FILES.get('rawzip')
-            if rawzip_file:
-                from ..file_utils import save_generic_modality_file
-                fr, job = save_generic_modality_file(patient, 'rawzip', rawzip_file)
-        
-                if fr:
-                    upload_results['messages'].append(f"Rawzip uploaded successfully")
-                if job:
-                    upload_results['jobs'].append({
-                        'id': job.id,
-                        'type': 'rawzip',
-                        'status': job.status
-                    })
-        except Exception as e:
-            upload_results['messages'].append(f"Error creating rawzip processing job: {e}")
+        # Handle single-file generic modalities (Teleradiography, Panoramic, Rawzip)
+        from ..file_utils import save_generic_modality_file
+        for slug, label in (('teleradiography', 'Teleradiography'), ('panoramic', 'Panoramic'), ('rawzip', 'Rawzip')):
+            try:
+                generic_file = request.FILES.get(slug)
+                if generic_file:
+                    fr, job = save_generic_modality_file(patient, slug, generic_file)
+                    if fr:
+                        upload_results['messages'].append(f"{label} uploaded successfully")
+                    if job:
+                        upload_results['jobs'].append({
+                            'id': job.id,
+                            'type': slug,
+                            'status': job.status
+                        })
+            except Exception as e:
+                upload_results['messages'].append(f"Error creating {slug} processing job: {e}")
         
         # Prepare response data
         patient_data = {

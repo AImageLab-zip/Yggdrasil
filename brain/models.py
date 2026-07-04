@@ -211,6 +211,7 @@ class Patient(models.Model):
 
     def _processing_status(self, modality_slug):
         from common.job_routing import is_runner_enabled_for_modality
+        from common.modality_config import modality_is_blocking
 
         job = self.jobs.filter(modality_slug=modality_slug).order_by('-created_at').first()
         if not is_runner_enabled_for_modality(modality_slug):
@@ -231,7 +232,8 @@ class Patient(models.Model):
         if not job:
             return 'not_uploaded'
         if job.status in ('pending', 'processing', 'retrying'):
-            return 'processing'
+            # Non-blocking modalities don't gate readiness (Phase 4).
+            return 'processing' if modality_is_blocking(modality_slug) else 'processed'
         if job.status == 'failed':
             return 'failed'
         if job.status == 'completed':

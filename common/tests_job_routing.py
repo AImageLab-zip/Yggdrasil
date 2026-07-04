@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from common.job_routing import is_runner_enabled_for_modality, select_runner_queue
+from common.models import Modality, ModalityProcessingConfig
 
 
 def _job(domain="maxillo", modality_slug="demo", **attrs):
@@ -17,7 +18,7 @@ def _job(domain="maxillo", modality_slug="demo", **attrs):
     RUNNER_QUEUE_BY_PROJECT=None,
     RUNNER_QUEUE_BY_MODALITY=None,
 )
-class SelectRunnerQueueTests(SimpleTestCase):
+class SelectRunnerQueueTests(TestCase):
     def test_default_queue_without_settings(self):
         self.assertEqual(select_runner_queue(_job()), "runner")
 
@@ -57,9 +58,25 @@ class SelectRunnerQueueTests(SimpleTestCase):
         job = _job(domain="laparoscopy", laparoscopy_patient=SimpleNamespace())
         self.assertEqual(select_runner_queue(job), "lap-q")
 
+    @override_settings(
+        RUNNER_QUEUE_BY_PROJECT={"maxillo": "project-q"},
+        RUNNER_QUEUE_BY_MODALITY={"demo": "modality-q"},
+    )
+    def test_db_queue_override_beats_all_env(self):
+        modality = Modality.objects.create(slug="demo", name="Demo")
+        ModalityProcessingConfig.objects.create(modality=modality, queue_name="db-q")
+        job = _job(patient=SimpleNamespace(project=SimpleNamespace(slug="maxillo")))
+        self.assertEqual(select_runner_queue(job), "db-q")
+
+    @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "modality-q"})
+    def test_blank_db_queue_falls_back_to_env(self):
+        modality = Modality.objects.create(slug="demo", name="Demo")
+        ModalityProcessingConfig.objects.create(modality=modality, queue_name="")
+        self.assertEqual(select_runner_queue(_job()), "modality-q")
+
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
-class RunnerEnabledForModalityTests(SimpleTestCase):
+class RunnerEnabledForModalityTests(TestCase):
     def test_enabled_when_no_map_configured(self):
         self.assertTrue(is_runner_enabled_for_modality("demo"))
 
@@ -79,3 +96,14 @@ class RunnerEnabledForModalityTests(SimpleTestCase):
     def test_disabled_for_empty_slug_when_map_configured(self):
         self.assertFalse(is_runner_enabled_for_modality(""))
         self.assertFalse(is_runner_enabled_for_modality(None))
+
+    @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
+    def test_db_config_enables_when_env_would_disable(self):
+        modality = Modality.objects.create(slug="demo", name="Demo")
+        ModalityProcessingConfig.objects.create(modality=modality, is_enabled=True)
+        self.assertTrue(is_runner_enabled_for_modality("demo"))
+
+    def test_db_config_disables_when_env_would_enable(self):
+        modality = Modality.objects.create(slug="demo", name="Demo")
+        ModalityProcessingConfig.objects.create(modality=modality, is_enabled=False)
+        self.assertFalse(is_runner_enabled_for_modality("demo"))

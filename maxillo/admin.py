@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Count
 from django.contrib.auth.models import User
 from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
-from common.models import Project, Modality, ProjectAccess, Job, FileRegistry, Invitation
+from common.models import Project, Modality, ModalityProcessingConfig, ProjectAccess, Job, FileRegistry, Invitation
 from .models import Tag, Folder
 
 
@@ -48,6 +48,14 @@ class ProjectAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     filter_horizontal = ['modalities']
 
 
+class ModalityProcessingConfigInline(admin.StackedInline):
+    model = ModalityProcessingConfig
+    can_delete = True
+    filter_horizontal = ['depends_on']
+    readonly_fields = ['updated_at']
+    extra = 0
+
+
 @admin.register(Modality)
 class ModalityAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ['name', 'slug', 'label', 'icon', 'is_active', 'created_at', 'created_by']
@@ -55,6 +63,7 @@ class ModalityAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     search_fields = ['name', 'description', 'slug', 'label', 'icon']
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = []
+    inlines = [ModalityProcessingConfigInline]
 
 
 @admin.register(ProjectAccess)

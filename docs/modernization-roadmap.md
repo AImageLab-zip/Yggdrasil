@@ -19,8 +19,8 @@ Decisions already made with the maintainer:
 | 1 | Versioning, CI, test baseline, dev bootstrap | ✅ done (`release/2.0`, tag `v1.9.0`, commits `5373b93`, `23d72e6`, `e9a60d3` + bootstrap commit) |
 | 2 | Automated backup + status dashboard | ✅ done (`release/2.0`) |
 | 3 | Export share expiry | ✅ done (`release/2.0`) |
-| 4 | Admin-driven worker/modality config | ⬜ next |
-| 5 | `common/` consolidation | ⬜ |
+| 4 | Admin-driven worker/modality config | ✅ done (`release/2.0`) |
+| 5 | `common/` consolidation | ⬜ next |
 | 6 | Branding, landing, favicons, footer | ⬜ |
 | 7 | Public guest demo | ⬜ |
 
@@ -75,9 +75,11 @@ Celery beat + local `maintenance`-queue worker (new compose services sharing the
 - Enforce in `_shared_export_availability` (`maxillo/views/export.py:119`) → 410 page; brain/laparoscopy reuse these helpers — verify all three paths.
 - Share modal + `export_share_update` (:776): presets 7/30/90d, custom, "never" — **"never" server-side allowed only for staff/project-admins**; default 30 days.
 
-## Phase 4 — Admin-driven worker/modality config
+## Phase 4 — Admin-driven worker/modality config — DONE
 
-New `ModalityProcessingConfig` (OneToOne → `common.Modality`); absent row = legacy fallback (zero-risk rollout).
+Shipped on `release/2.0`. New `common.ModalityProcessingConfig` (OneToOne → `common.Modality`), migrations `common/0032` (create) + `0033` (seed). Central accessors in `common/modality_config.py` (`modality_requires_processing`, `modality_is_enabled`, `queue_override_for`, `modality_is_blocking`, `dependent_slugs_of`) — every reader falls back to legacy hardcoded/env behavior when no row exists. Wired into `maxillo/file_utils.py` (requires_processing branch), `common/job_routing.py` (`is_runner_enabled_for_modality` delegates to config; `select_runner_queue` DB `queue_name` beats ALL env), and `_processing_status` in `maxillo/models.py` + `brain/models.py` (`is_blocking` gates the 'processing' display; mirrored edit — unify in Phase 5). PR 4.2: generalized ios→bite via `create_dependent_jobs` + `depends_on` M2M (legacy fallback preserves ios→bite), collapsed the duplicated single-file upload blocks in `maxillo/api_views/projects.py` + `maxillo/views/patient_upload.py`. Admin: editable `ModalityProcessingConfigAdmin` in `common/admin.py` + `StackedInline` on `ModalityAdmin`. Decisions: DB queue wins over all env; `is_blocking` = in-flight job shows 'processing'. Runner HTTP contract untouched. Verified: 160-test suite green (MySQL 8 + Redis 7 Docker), `makemigrations --check` clean, seed rehearsed on pre-existing modalities (7 modalities → 7 configs, panoramic non-processing/non-blocking, ios processing/blocking). **Still owed (needs prod-like env): risk-item-0 rehearsal — restore the actual v1.9.0 mysqldump → migrate 0032/0033 → suite green.**
+
+Original design notes: New `ModalityProcessingConfig` (OneToOne → `common.Modality`); absent row = legacy fallback (zero-risk rollout).
 - Fields: `requires_processing` (replaces hardcoded `no_processing_modalities` at `maxillo/file_utils.py:368`), `queue_name` (DB > `RUNNER_QUEUE_BY_*` env > default in `common/job_routing.py`), `is_blocking` (drives `Patient._processing_status` gating, `maxillo/models.py:262-289` + brain mirror), `depends_on` M2M (feeds existing `Job.dependencies` machinery — see `create_bite_classification_job`), `is_enabled` (absorbs `is_runner_enabled_for_modality`).
 - Data migration seeds rows from the hardcoded list + env JSON + ios→bite dependency ⇒ behavior identical on deploy day.
 - PR 4.2 replaces per-slug upload wiring (`maxillo/api_views/projects.py:220-254`, `maxillo/views/patient_upload.py:113-156`) with a Modality-driven loop. Runner HTTP contract (`maxillo/runner_api_service.py`, `maxillo/api_views/runner.py`) untouched.

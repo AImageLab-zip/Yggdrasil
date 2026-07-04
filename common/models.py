@@ -59,6 +59,40 @@ class Modality(models.Model):
 		super().save(*args, **kwargs)
 
 
+class ModalityProcessingConfig(models.Model):
+	"""Admin-editable per-modality worker/processing config (Phase 4).
+
+	OneToOne to Modality. An absent row means "legacy fallback": readers in
+	common.modality_config fall back to the historical hardcoded/env behavior,
+	so rollout is zero-risk. A data migration seeds one row per existing
+	modality that reproduces current behavior on deploy day.
+	"""
+	modality = models.OneToOneField(
+		Modality, on_delete=models.CASCADE, related_name='processing_config'
+	)
+	# False => an upload's Job is born 'completed' (no runner work), replacing
+	# the hardcoded no_processing_modalities list in maxillo/file_utils.py.
+	requires_processing = models.BooleanField(default=True)
+	# Explicit queue override; when non-blank it wins over ALL env routing.
+	queue_name = models.CharField(max_length=100, blank=True, default='')
+	# When True, an in-flight job for this modality gates patient readiness
+	# (patient shows 'processing'); non-blocking modalities never gate.
+	is_blocking = models.BooleanField(default=True)
+	# Absorbs is_runner_enabled_for_modality: disabled => no Job created / runner off.
+	is_enabled = models.BooleanField(default=True)
+	# Modalities whose completed job this modality depends on (e.g. bite->ios).
+	depends_on = models.ManyToManyField(
+		Modality, blank=True, related_name='dependent_configs'
+	)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ['modality__name']
+
+	def __str__(self):
+		return f"ProcessingConfig({self.modality.slug})"
+
+
 class UserSession(models.Model):
     """
     A reconstructed period of continuous activity for a user, built from

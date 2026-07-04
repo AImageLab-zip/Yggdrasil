@@ -145,37 +145,22 @@ def upload_patient(request):
                 except Exception as e:
                     messages.error(request, f"Error saving IOS: {e}")
 
-            # Handle Teleradiography
-            teleradiography_file = request.FILES.get('teleradiography')
-            if teleradiography_file:
-                try:
-                    modality = Modality.objects.get(slug='teleradiography')
-                    patient.modalities.add(modality)
-                    
-                    from ..file_utils import save_generic_modality_file
-                    fr, job = save_generic_modality_file(patient, 'teleradiography', teleradiography_file)
-                    if fr:
-                        uploaded_modalities.append('Teleradiography')
-                        if job:
-                            processing_job_ids.append(job.id)
-                except Exception as e:
-                    messages.error(request, f"Error saving Teleradiography: {e}")
+            # Handle single-file generic modalities (Teleradiography, Panoramic)
+            from ..file_utils import save_generic_modality_file
+            for slug, label in (('teleradiography', 'Teleradiography'), ('panoramic', 'Panoramic')):
+                generic_file = request.FILES.get(slug)
+                if generic_file:
+                    try:
+                        modality = Modality.objects.get(slug=slug)
+                        patient.modalities.add(modality)
 
-            # Handle Panoramic
-            panoramic_file = request.FILES.get('panoramic')
-            if panoramic_file:
-                try:
-                    modality = Modality.objects.get(slug='panoramic')
-                    patient.modalities.add(modality)
-                    
-                    from ..file_utils import save_generic_modality_file
-                    fr, job = save_generic_modality_file(patient, 'panoramic', panoramic_file)
-                    if fr:
-                        uploaded_modalities.append('Panoramic')
-                        if job:
-                            processing_job_ids.append(job.id)
-                except Exception as e:
-                    messages.error(request, f"Error saving Panoramic: {e}")
+                        fr, job = save_generic_modality_file(patient, slug, generic_file)
+                        if fr:
+                            uploaded_modalities.append(label)
+                            if job:
+                                processing_job_ids.append(job.id)
+                    except Exception as e:
+                        messages.error(request, f"Error saving {label}: {e}")
 
             # Handle Intraoral Photos (multiple files)
             intraoral_photos = request.FILES.getlist('intraoral-photos')

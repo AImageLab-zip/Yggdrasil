@@ -63,16 +63,9 @@ def _project_slug_for_job(job: Any) -> Optional[str]:
 
 
 def is_runner_enabled_for_modality(modality_slug: Optional[str]) -> bool:
-    queue_by_modality = getattr(settings, "RUNNER_QUEUE_BY_MODALITY", None) or {}
-    if not isinstance(queue_by_modality, dict) or not queue_by_modality:
-        return True
-
-    slug = str(modality_slug or "").strip()
-    if not slug:
-        return False
-
-    queue = queue_by_modality.get(slug)
-    return isinstance(queue, str) and bool(queue.strip())
+    # Admin-driven config (Phase 4) with legacy env fallback when no row exists.
+    from common.modality_config import modality_is_enabled
+    return modality_is_enabled(modality_slug)
 
 
 def select_runner_queue(job: Any) -> str:
@@ -80,13 +73,20 @@ def select_runner_queue(job: Any) -> str:
     queue_by_project = getattr(settings, "RUNNER_QUEUE_BY_PROJECT", None) or {}
     queue_by_modality = getattr(settings, "RUNNER_QUEUE_BY_MODALITY", None) or {}
 
+    modality_slug = getattr(job, "modality_slug", None)
+
+    # DB queue override wins over ALL env routing (maintainer decision).
+    from common.modality_config import queue_override_for
+    db_queue = queue_override_for(modality_slug)
+    if db_queue:
+        return _sanitize_queue_name(db_queue, default=default_queue)
+
     project_slug = _project_slug_for_job(job)
     if project_slug and isinstance(queue_by_project, dict):
         q = queue_by_project.get(project_slug)
         if isinstance(q, str) and q.strip():
             return _sanitize_queue_name(q, default=default_queue)
 
-    modality_slug = getattr(job, "modality_slug", None)
     if modality_slug and isinstance(queue_by_modality, dict):
         q = queue_by_modality.get(str(modality_slug))
         if isinstance(q, str) and q.strip():
