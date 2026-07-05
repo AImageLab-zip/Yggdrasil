@@ -96,6 +96,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -195,6 +196,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
+
+# WhiteNoise serves collected static files from gunicorn in production (DEBUG=False),
+# since the external nginx-proxy forwards /static/* straight through to the app.
+# Compressed (not manifest) storage: templates reference assets by literal path, so
+# filenames must stay stable — manifest hashing would 404 those refs.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 
 # File Upload Settings
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB
