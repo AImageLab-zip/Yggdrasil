@@ -30,28 +30,28 @@ docker compose --env-file .env logs -f web
 ## Running Django commands
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py <command>
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py <command>
 ```
 
 Common ones:
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py makemigrations
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py collectstatic --noinput
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py createsuperuser
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py makemigrations
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py collectstatic --noinput
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py createsuperuser
 ```
 
 A shell in the web container:
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX bash
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX bash
 ```
 
 ## Database access
 
 ```bash
-docker exec -it toothfairy4m-db-$DOCKER_SUFFIX mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"
+docker exec -it yggdrasil-db-$DOCKER_SUFFIX mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"
 ```
 
 ## Health check

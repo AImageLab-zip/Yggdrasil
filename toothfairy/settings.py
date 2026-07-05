@@ -145,6 +145,11 @@ DATABASES = {
     }
 }
 
+# FileRegistry.file_path is a unique CharField(max_length=500). MySQL 8 + utf8mb4 caps a
+# unique index at 3072 bytes (768 chars), so 500 is safe; silence the conservative
+# mysql.W003 warning so `migrate --check` stays clean.
+SILENCED_SYSTEM_CHECKS = ["mysql.W003"]
+
 # Validate required database credentials
 if not DATABASES["default"]["NAME"]:
     raise ValueError("DB_NAME environment variable must be set")
