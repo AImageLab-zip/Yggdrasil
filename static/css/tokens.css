@@ -1,30 +1,44 @@
 /*
  * Yggdrasil design tokens — the single source of truth for the 2.0 visual
- * identity. One namespace: --ygg-*. Loaded before theme.css on every page.
+ * identity. One namespace: --ygg-*. Loaded before theme.css / tailwind.css on
+ * every page. Tailwind's theme (tailwind.config.js) maps onto these vars, so
+ * this file is the one place to change the palette.
  *
- * Identity: "evolved Norse" — deep ink/navy atmosphere with gold accents on
- * the landing and public pages; warm, light, parchment-tinted surfaces on
- * the working app pages. Cinzel for display, Inter for everything else.
+ * Identity: the world-tree, read as a clinical instrument. Deep ink/navy
+ * atmosphere on hero/dark surfaces; clean cool-white working surfaces (no
+ * parchment). Green is the primary "life / medical" accent; gold is a sparing
+ * rune highlight, never a field color. IBM Plex Sans for UI, IBM Plex Mono for
+ * technical data (scan IDs, metrics, timestamps).
  */
 :root {
     /* ---- Ink / navy (dark atmosphere) ---- */
-    --ygg-ink-950: #070b16;
-    --ygg-ink-900: #0a0f1f;
-    --ygg-ink-800: #0b1324;
-    --ygg-ink-700: #111a30;
-    --ygg-navy-600: #1b2a4a;
-    --ygg-navy-500: #28407a;
+    --ygg-ink-950: #060a12;
+    --ygg-ink-900: #0a0f1a;
+    --ygg-ink-800: #0e1524;
+    --ygg-ink-700: #152036;
+    --ygg-navy-600: #1c2c48;
+    --ygg-navy-500: #294066;
 
-    /* ---- Gold (brand accent) ---- */
+    /* ---- Green (primary — life / medical) ---- */
+    --ygg-green-700: #0a5f4c;
+    --ygg-green-600: #0e7c66;
+    --ygg-green-500: #14a38b;
+    --ygg-green-400: #35c3a6;
+    --ygg-green-300: #7bdcc7;
+    --ygg-green-100: #d6f3ec;
+
+    /* ---- Gold (sparing rune accent) ---- */
     --ygg-gold-600: #a8842f;
     --ygg-gold-500: #c9a24b;
     --ygg-gold-400: #dcb968;
     --ygg-gold-200: #f0e2bd;
 
-    /* ---- Light surfaces (app pages) ---- */
+    /* ---- Light surfaces (app pages) — cool, clean, no parchment ---- */
     --ygg-surface: #ffffff;
-    --ygg-surface-alt: #f7f5f0;
-    --ygg-border: #e5e1d6;
+    --ygg-surface-alt: #f4f6f8;
+    --ygg-surface-sunken: #eef1f5;
+    --ygg-border: #e3e8ee;
+    --ygg-border-strong: #cdd5e0;
     --ygg-text: #1c2233;
     --ygg-text-muted: #5c6577;
 
@@ -35,32 +49,41 @@
     /* ---- Per-project accents ---- */
     --ygg-maxillo: #5b8def;
     --ygg-maxillo-grad: linear-gradient(135deg, #3f6fd1, #7aa5ff);
-    --ygg-brain: #3fc39b;
-    --ygg-brain-grad: linear-gradient(135deg, #2aa583, #72e3c2);
+    --ygg-brain: #14a38b;
+    --ygg-brain-grad: linear-gradient(135deg, #0e7c66, #35c3a6);
     --ygg-laparoscopy: #e0785f;
     --ygg-laparoscopy-grad: linear-gradient(135deg, #c85a42, #f09a80);
 
     /* ---- Semantic aliases (what components consume) ---- */
-    --ygg-primary: var(--ygg-navy-600);
-    --ygg-primary-hover: var(--ygg-navy-500);
+    --ygg-primary: var(--ygg-green-600);
+    --ygg-primary-hover: var(--ygg-green-700);
+    --ygg-primary-soft: var(--ygg-green-100);
     --ygg-accent: var(--ygg-gold-500);
-    --ygg-link: #2f57b8;
+    --ygg-link: var(--ygg-green-700);
+
+    /* ---- Status ---- */
+    --ygg-ok: #0e7c66;
+    --ygg-warn: #b7791f;
+    --ygg-danger: #c0392b;
 
     /* ---- Typography ---- */
-    --ygg-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    --ygg-font-display: 'Cinzel', Georgia, 'Times New Roman', serif;
-    --ygg-fs-hero: clamp(2.4rem, 5vw, 3.6rem);
+    --ygg-font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --ygg-font-display: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --ygg-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+    --ygg-fs-hero: clamp(2.4rem, 5vw, 3.8rem);
     --ygg-fs-h1: 1.9rem;
     --ygg-fs-h2: 1.5rem;
     --ygg-fs-h3: 1.25rem;
     --ygg-fs-body: 1rem;
     --ygg-fs-small: 0.875rem;
-    --ygg-tracking-display: 0.05em;
+    --ygg-tracking-display: -0.01em;
+    --ygg-tracking-mono: 0.02em;
 
     /* ---- Shape / elevation ---- */
     --ygg-radius-sm: 8px;
     --ygg-radius-md: 12px;
     --ygg-radius-lg: 16px;
     --ygg-shadow-card: 0 10px 30px rgba(10, 15, 31, 0.25);
-    --ygg-shadow-card-light: 0 4px 16px rgba(28, 34, 51, 0.08);
+    --ygg-shadow-card-light: 0 1px 2px rgba(28, 34, 51, 0.06), 0 4px 16px rgba(28, 34, 51, 0.06);
+    --ygg-shadow-pop: 0 8px 28px rgba(14, 21, 36, 0.14);
 }

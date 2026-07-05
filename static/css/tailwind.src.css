@@ -1,0 +1,212 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+ * Base — global element defaults for the 2.0 design system.
+ * tokens.css (loaded before this file) provides all --ygg-* values.
+ * ========================================================================= */
+@layer base {
+  body {
+    @apply bg-surface-alt text-content font-sans antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display font-semibold text-content;
+    letter-spacing: var(--ygg-tracking-display);
+  }
+  a {
+    color: var(--ygg-link);
+  }
+
+  /* Data / technical text — IBM Plex Mono. */
+  .mono {
+    font-family: var(--ygg-font-mono);
+    letter-spacing: var(--ygg-tracking-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ygg-green-500);
+    outline-offset: 2px;
+  }
+}
+
+/* ============================================================================
+ * Components — reusable chrome primitives, referenced by class in templates.
+ * ========================================================================= */
+@layer components {
+  /* ---- Buttons ---- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2
+           text-sm font-medium leading-none no-underline transition-colors
+           focus-visible:outline-2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-hover;
+  }
+  .btn-secondary {
+    @apply bg-surface text-content border border-line-strong hover:bg-surface-sunken;
+  }
+  .btn-ghost {
+    @apply text-content-muted hover:bg-surface-sunken hover:text-content;
+  }
+  .btn-danger {
+    @apply bg-danger text-white hover:brightness-95;
+  }
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+
+  /* ---- Cards ---- */
+  .card-ygg {
+    @apply bg-surface border border-line rounded-lg shadow-card;
+  }
+  .card-ygg-body { @apply p-5; }
+
+  /* ---- Badges / pills ---- */
+  .badge-ygg {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
+           text-xs font-medium;
+  }
+  .badge-ok { @apply bg-green-100 text-green-700; }
+  .badge-warn { @apply bg-amber-100 text-amber-800; }
+  .badge-danger { @apply bg-red-100 text-red-700; }
+  .badge-neutral { @apply bg-surface-sunken text-content-muted; }
+  .badge-gold { @apply bg-gold-200 text-gold-600; }
+
+  /* ---- Forms ---- */
+  .form-label { @apply block text-sm font-medium text-content mb-1.5; }
+  .form-input {
+    @apply w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-content
+           placeholder:text-content-muted focus:border-primary focus:outline-none
+           focus:ring-2 focus:ring-green-300;
+  }
+  textarea.form-input { @apply min-h-24; }
+  .form-help { @apply text-xs text-content-muted mt-1; }
+  .form-error { @apply text-sm text-danger mt-1; }
+  .form-field { @apply mb-4; }
+
+  /* Style Django-rendered form widgets inside .ygg-form without editing the form */
+  .ygg-form input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]),
+  .ygg-form select,
+  .ygg-form textarea { @apply form-input; }
+  .ygg-form > .field, .ygg-form .form-field { @apply mb-4; }
+
+  /* ---- Tables ---- */
+  .table-ygg { @apply w-full text-sm text-left border-collapse; }
+  .table-ygg thead th {
+    @apply text-xs uppercase tracking-wide text-content-muted font-medium
+           border-b border-line px-3 py-2 whitespace-nowrap;
+  }
+  .table-ygg tbody td { @apply px-3 py-2.5 border-b border-line align-middle; }
+  .table-ygg tbody tr:hover { @apply bg-surface-sunken; }
+
+  /* ---- Alerts ---- */
+  .alert-ygg { @apply flex items-start gap-2 rounded-md border px-4 py-3 text-sm; }
+  .alert-info { @apply bg-green-100 border-green-300 text-green-700; }
+  .alert-warning { @apply bg-amber-50 border-amber-200 text-amber-800; }
+  .alert-danger { @apply bg-red-50 border-red-200 text-red-700; }
+
+  /* ---- Auth card (login / register / logged out) ---- */
+  .auth-wrap { @apply max-w-md mx-auto my-12 md:my-16 px-4; }
+  .auth-card { @apply bg-surface border border-line rounded-lg shadow-card p-8; }
+  .auth-rule { @apply w-12 h-0.5 bg-gold-500 border-0 rounded mx-auto my-4; }
+
+  /* ---- Page header (shared app-page heading block) ---- */
+  .page-header {
+    @apply flex flex-wrap items-center justify-between gap-3 mb-6;
+  }
+  .page-title {
+    @apply flex items-center gap-2 text-2xl font-display font-semibold text-content;
+  }
+
+  /* ---- Stat tile ---- */
+  .stat-tile {
+    @apply bg-surface border border-line rounded-lg p-4 text-center;
+  }
+  .stat-value {
+    @apply text-2xl font-semibold text-content mono;
+  }
+  .stat-label {
+    @apply text-xs uppercase tracking-wide text-content-muted mt-1;
+  }
+
+  /* ---- Top navigation (chrome) ---- */
+  .ygg-nav {
+    @apply sticky top-0 z-40 bg-ink-900 text-content-ondark border-b border-white/5;
+  }
+  .ygg-nav-inner {
+    @apply mx-auto max-w-content flex items-center gap-1 px-4 h-14;
+  }
+  .ygg-nav-link {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm no-underline
+           text-content-ondarkmuted hover:text-white hover:bg-white/5 transition-colors;
+  }
+  .ygg-nav-link.is-active {
+    @apply text-white bg-white/10;
+  }
+  .ygg-brand {
+    @apply inline-flex items-center gap-1.5 font-display font-semibold no-underline
+           text-white text-lg tracking-tight;
+  }
+  .ygg-brand .brand-accent { color: var(--ygg-green-400); }
+
+  /* ---- Brand lockup (monogram + wordmark), see partials/wordmark.html ---- */
+  .ygg-lockup { @apply inline-flex items-center gap-2; }
+  .ygg-lockup__word {
+    @apply font-display font-semibold tracking-tight leading-none;
+  }
+  .ygg-lockup--light .ygg-lockup__word { @apply text-white; }
+  .ygg-lockup--ink .ygg-lockup__word { color: var(--ygg-text); }
+  .ygg-lockup--sm .ygg-lockup__mark { height: 26px; width: 26px; }
+  .ygg-lockup--sm .ygg-lockup__word { @apply text-lg; }
+  .ygg-lockup--lg .ygg-lockup__mark { height: 40px; width: 40px; }
+  .ygg-lockup--lg .ygg-lockup__word { @apply text-2xl; }
+
+  /* ---- Toasts (see static/js/notifications.js — no Bootstrap) ---- */
+  .ygg-toast-container {
+    @apply fixed top-4 right-4 z-[2000] flex flex-col gap-2 max-w-[92vw] w-80;
+  }
+  .ygg-toast {
+    @apply flex items-start gap-3 rounded-md border border-line bg-surface
+           shadow-pop px-3.5 py-3 text-sm text-content;
+    animation: ygg-toast-in 160ms ease-out;
+  }
+  .ygg-toast.is-leaving { opacity: 0; transform: translateY(-6px); transition: all 150ms ease; }
+  .ygg-toast__icon { margin-top: 1px; }
+  .ygg-toast--success .ygg-toast__icon { color: var(--ygg-ok); }
+  .ygg-toast--danger  .ygg-toast__icon { color: var(--ygg-danger); }
+  .ygg-toast--warning .ygg-toast__icon { color: var(--ygg-warn); }
+  .ygg-toast--info    .ygg-toast__icon { color: var(--ygg-green-600); }
+  .ygg-toast__body { @apply flex-1 min-w-0; }
+  .ygg-toast__title { @apply font-semibold; }
+  .ygg-toast__msg { @apply text-content-muted break-words; }
+  .ygg-toast__close { @apply text-content-muted hover:text-content leading-none text-lg -mt-0.5; }
+  @keyframes ygg-toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .ygg-toast { animation: none; } }
+
+  /* Dropdown menu (vanilla-JS toggled, see static/js/nav.js) */
+  .ygg-menu {
+    @apply absolute right-0 mt-1 min-w-[12rem] rounded-md border border-line
+           bg-surface text-content shadow-pop py-1 z-50;
+  }
+  .ygg-menu-item {
+    @apply flex items-center gap-2 w-full px-3 py-2 text-sm text-left no-underline
+           text-content hover:bg-surface-sunken;
+  }
+}
+
+/* ============================================================================
+ * Lucide sprite icon sizing — plain CSS (kept outside @layer base, which was
+ * dropping the base .ygg-icon rule). Placed after utilities so it is stable.
+ * ========================================================================= */
+.ygg-icon {
+  width: 1.15em;
+  height: 1.15em;
+  display: inline-block;
+  vertical-align: -0.15em;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+}
+.ygg-icon-sm { width: 1em; height: 1em; }
+.ygg-icon-lg { width: 1.5em; height: 1.5em; }
+.ygg-icon-xl { width: 2rem; height: 2rem; }

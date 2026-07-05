@@ -1,0 +1,11 @@
+{% load static %}
+{% comment %}
+Yggdrasil brand lockup: the ink+green monogram + typographic wordmark.
+Params (optional):
+  variant  "light" (default, white text for dark chrome) | "ink" (dark text)
+  size     "sm" (default) | "lg"
+{% endcomment %}
+<span class="ygg-lockup ygg-lockup--{{ variant|default:'light' }} ygg-lockup--{{ size|default:'sm' }}">
+  <img src="{% static 'icons/favicon.svg' %}" alt="" class="ygg-lockup__mark" width="28" height="28">
+  <span class="ygg-lockup__word">Yggdrasil</span>
+</span>

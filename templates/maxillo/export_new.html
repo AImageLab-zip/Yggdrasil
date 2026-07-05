@@ -3,6 +3,8 @@
 
 {% block title %}New Export - Yggdrasil{% endblock %}
 
+{% block extra_css %}{% include 'common/partials/legacy_head.html' %}{% endblock %}
+
 {% block content %}
 <div class="container mt-4">
     <!-- Back Button -->
@@ -223,6 +225,7 @@
 </div>
 
 {% block extra_js %}
+{% include 'common/partials/legacy_scripts.html' %}
 <script>
     // Set URLs for JavaScript
     window.exportPreviewUrl = '{% url ns|default:"maxillo"|add:":export_preview" %}';

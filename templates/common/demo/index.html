@@ -1,32 +1,25 @@
 {% extends 'common/demo/demo_base.html' %}
-{% load static %}
+{% load icons %}
 
 {% block title %}Public demo - Yggdrasil{% endblock %}
 
 {% block demo_content %}
-<div class="text-center mb-4">
-    <img src="{% static 'icons/ygg-logo.svg' %}" alt="Yggdrasil" width="72" height="72" class="mb-2">
-    <h1 class="h3">Explore Yggdrasil</h1>
-    <p class="text-muted">
-        A read-only look at curated, anonymized studies across our medical-imaging
-        domains. No account needed.
-    </p>
+<div class="text-center mb-8">
+    <div class="flex justify-center mb-3">{% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}</div>
+    <h1 class="text-2xl">Explore Yggdrasil</h1>
+    <p class="text-content-muted mt-2 max-w-xl mx-auto">A read-only look at curated, anonymized studies across our medical-imaging domains. No account needed.</p>
 </div>
 
 {% if domains %}
-<div class="row g-3 justify-content-center">
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-4xl mx-auto">
     {% for d in domains %}
-    <div class="col-12 col-md-4">
-        <a class="card h-100 text-decoration-none shadow-sm" href="{% url 'demo:domain' d.slug %}">
-            <div class="card-body">
-                <h2 class="h5 card-title">{{ d.label }}</h2>
-                <p class="card-text text-muted mb-0">{{ d.patient_count }} demo stud{{ d.patient_count|pluralize:"y,ies" }}</p>
-            </div>
-        </a>
-    </div>
+    <a class="card-ygg card-ygg-body hover:shadow-pop transition-shadow no-underline" href="{% url 'demo:domain' d.slug %}">
+        <h2 class="text-lg font-semibold text-content">{{ d.label }}</h2>
+        <p class="text-content-muted mt-1 mb-0">{{ d.patient_count }} demo stud{{ d.patient_count|pluralize:"y,ies" }}</p>
+    </a>
     {% endfor %}
 </div>
 {% else %}
-<div class="alert alert-info text-center">No demo studies are published yet.</div>
+<div class="alert-ygg alert-info max-w-lg mx-auto justify-center">No demo studies are published yet.</div>
 {% endif %}
 {% endblock %}

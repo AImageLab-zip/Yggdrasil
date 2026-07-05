@@ -1,137 +1,95 @@
+/*
+ * Yggdrasil toast notifications — self-contained (no Bootstrap).
+ * Public API (unchanged): window.appNotify(type, message, options)
+ *   type:    'success' | 'danger' | 'warning' | 'info' (aliases: error/warn/ok)
+ *   options: { autohide?: bool (default true), delay?: ms (default 4500) }
+ * Styling lives in the Tailwind layer (.ygg-toast*); icons come from the
+ * Lucide sprite at window.YGG_SPRITE.
+ */
 (function () {
     'use strict';
 
     function normalizeType(type) {
         const value = String(type || 'info').toLowerCase();
-        if (value === 'error') {
-            return 'danger';
-        }
-        if (value === 'warn') {
-            return 'warning';
-        }
-        if (value === 'ok') {
-            return 'success';
-        }
+        if (value === 'error') return 'danger';
+        if (value === 'warn') return 'warning';
+        if (value === 'ok') return 'success';
+        if (['success', 'danger', 'warning', 'info'].indexOf(value) === -1) return 'info';
         return value;
     }
 
     function toastTitle(type) {
-        if (type === 'success') return 'Success';
-        if (type === 'danger') return 'Error';
-        if (type === 'warning') return 'Warning';
-        return 'Info';
+        return { success: 'Success', danger: 'Error', warning: 'Warning', info: 'Info' }[type] || 'Info';
     }
 
     function toastIcon(type) {
-        if (type === 'success') return 'fa-check-circle text-success';
-        if (type === 'danger') return 'fa-circle-exclamation text-danger';
-        if (type === 'warning') return 'fa-triangle-exclamation text-warning';
-        return 'fa-circle-info text-primary';
+        return { success: 'circle-check', danger: 'circle-alert', warning: 'triangle-alert', info: 'info' }[type] || 'info';
     }
 
-    function ensureToastContainer() {
-        let container = document.getElementById('globalToastContainer');
-        if (container) {
-            return container;
+    function ensureContainer() {
+        let container = document.getElementById('yggToastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'yggToastContainer';
+            container.className = 'ygg-toast-container';
+            document.body.appendChild(container);
         }
-
-        container = document.createElement('div');
-        container.id = 'globalToastContainer';
-        container.className = 'toast-container position-fixed top-0 end-0 p-3';
-        container.style.zIndex = '2000';
-        document.body.appendChild(container);
         return container;
     }
 
-    function fallbackAlert(type, message) {
-        const alertBox = document.createElement('div');
-        alertBox.className = `alert alert-${type} alert-dismissible fade show`;
-        alertBox.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 2000; min-width: 280px;';
-        alertBox.setAttribute('role', 'alert');
-
-        const text = document.createElement('span');
-        text.textContent = String(message || '');
-        alertBox.appendChild(text);
-
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'btn-close';
-        closeBtn.setAttribute('data-bs-dismiss', 'alert');
-        closeBtn.setAttribute('aria-label', 'Close');
-        alertBox.appendChild(closeBtn);
-
-        document.body.appendChild(alertBox);
-
-        setTimeout(function () {
-            alertBox.classList.remove('show');
-            setTimeout(function () {
-                if (alertBox.parentNode) {
-                    alertBox.remove();
-                }
-            }, 150);
-        }, 4500);
+    function dismiss(toast) {
+        if (!toast || toast.classList.contains('is-leaving')) return;
+        toast.classList.add('is-leaving');
+        setTimeout(function () { if (toast.parentNode) toast.remove(); }, 160);
     }
 
     function appNotify(type, message, options) {
-        const normalizedType = normalizeType(type);
+        const t = normalizeType(type);
         const text = String(message || '').trim();
+        if (!text) return;
         const settings = options || {};
+        const sprite = window.YGG_SPRITE || '/static/icons/lucide-sprite.svg';
 
-        if (!text) {
-            return;
-        }
-
-        if (!window.bootstrap || typeof window.bootstrap.Toast === 'undefined') {
-            fallbackAlert(normalizedType, text);
-            return;
-        }
-
-        const container = ensureToastContainer();
+        const container = ensureContainer();
         const toast = document.createElement('div');
-        toast.className = 'toast';
+        toast.className = 'ygg-toast ygg-toast--' + t;
         toast.setAttribute('role', 'alert');
-        toast.setAttribute('aria-live', 'assertive');
-        toast.setAttribute('aria-atomic', 'true');
+        toast.setAttribute('aria-live', t === 'danger' ? 'assertive' : 'polite');
 
-        const header = document.createElement('div');
-        header.className = 'toast-header';
-
-        const icon = document.createElement('i');
-        icon.className = `fas ${toastIcon(normalizedType)} me-2`;
-        header.appendChild(icon);
-
-        const title = document.createElement('strong');
-        title.className = 'me-auto';
-        title.textContent = toastTitle(normalizedType);
-        header.appendChild(title);
-
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'btn-close';
-        closeBtn.setAttribute('data-bs-dismiss', 'toast');
-        closeBtn.setAttribute('aria-label', 'Close');
-        header.appendChild(closeBtn);
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('class', 'ygg-icon ygg-toast__icon');
+        svg.setAttribute('aria-hidden', 'true');
+        const use = document.createElementNS(svgNS, 'use');
+        use.setAttribute('href', sprite + '#lc-' + toastIcon(t));
+        svg.appendChild(use);
 
         const body = document.createElement('div');
-        body.className = 'toast-body';
-        body.textContent = text;
+        body.className = 'ygg-toast__body';
+        const title = document.createElement('div');
+        title.className = 'ygg-toast__title';
+        title.textContent = toastTitle(t);
+        const msg = document.createElement('div');
+        msg.className = 'ygg-toast__msg';
+        msg.textContent = text;
+        body.appendChild(title);
+        body.appendChild(msg);
 
-        toast.appendChild(header);
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'ygg-toast__close';
+        close.setAttribute('aria-label', 'Close');
+        close.innerHTML = '&times;';
+        close.addEventListener('click', function () { dismiss(toast); });
+
+        toast.appendChild(svg);
         toast.appendChild(body);
+        toast.appendChild(close);
         container.appendChild(toast);
 
-        const instance = new window.bootstrap.Toast(toast, {
-            autohide: settings.autohide !== false,
-            delay: settings.delay || 4500
-        });
-
-        toast.addEventListener('hidden.bs.toast', function () {
-            if (toast.parentNode) {
-                toast.remove();
-            }
-        });
-
-        instance.show();
+        if (settings.autohide !== false) {
+            setTimeout(function () { dismiss(toast); }, settings.delay || 4500);
+        }
     }
 
     window.appNotify = appNotify;

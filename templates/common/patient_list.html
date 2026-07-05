@@ -3,7 +3,10 @@
 
 {% block title %}Scans - Yggdrasil{% endblock %}
 
+{% block main_class %}container-fluid mt-4{% endblock %}
+
 {% block extra_css %}
+{% include 'common/partials/legacy_head.html' %}
 <link rel="stylesheet" href="{% static 'css/patient_list.css' %}">
 {% endblock %}
 
@@ -12,6 +15,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{% include 'common/partials/legacy_scripts.html' %}
 <script src="{% static 'js/patient_list.js' %}"></script>
 {% endblock %}
 

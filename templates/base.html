@@ -1,4 +1,5 @@
 {% load static %}
+{% load icons %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,177 +14,106 @@
     <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
     <link rel="shortcut icon" href="{% static 'icons/favicon.ico' %}">
 
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <!-- Three.js for 3D viewer -->
+    <!-- Viewer runtime globals (loaded on every page so patient-detail viewers
+         find THREE / fflate / nifti already present before their init) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js"></script>
-    
     <script src="https://unpkg.com/fflate@0.8.2"></script>
     <script src="{% static 'js/nifti-reader.js' %}"></script>
-    <!-- Yggdrasil design system (tokens + self-hosted fonts + global chrome) -->
+
+    <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> self-hosted fonts -->
     <link href="{% static 'css/tokens.css' %}" rel="stylesheet">
+    <link href="{% static 'css/tailwind.css' %}" rel="stylesheet">
     <link href="{% static 'css/theme.css' %}" rel="stylesheet">
-    <link href="{% static 'css/app-pages.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     {% firstof request.resolver_match.namespace 'maxillo' as ns %}
     {% block navbar %}
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark ygg-navbar">
-        <div class="container">
-            <div class="d-flex align-items-center text-white">
-                {% if user.is_authenticated %}
-                    {% if user.is_staff %}
-                        {% if all_projects %}
-                            <div class="dropdown me-2">
-                                <a class="nav-link p-0 text-white" href="#" id="projectDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Select project">
-                                    <i class="fas {{ current_project_icon|default:'fa-tooth' }}"></i>
-                                </a>
-                                <ul class="dropdown-menu dropdown-menu-start" aria-labelledby="projectDropdown">
-                                    {% for p in all_projects %}
-                                        {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-                                        <li>
-                                            {% if p.slug == 'maxillo' %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url 'maxillo_home' %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% elif p.slug == 'brain' %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url 'brain_home' %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% elif p.slug == 'laparoscopy' %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url 'laparoscopy_home' %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% else %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url ns|add:':select_project' p.id %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% endif %}
-                                        </li>
-                                    {% endfor %}
-                                </ul>
-                            </div>
-                        {% else %}
-                            <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
-                        {% endif %}
-                    {% else %}
-                        <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
-                    {% endif %}
-                {% else %}
-                    <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
+    <nav class="ygg-nav">
+        <div class="ygg-nav-inner">
+            <!-- Brand + project switcher -->
+            <div class="flex items-center gap-2 shrink-0">
+                {% if user.is_authenticated and user.is_staff and all_projects %}
+                    <div class="relative" data-dropdown>
+                        <button type="button" class="ygg-nav-link" data-dropdown-toggle aria-expanded="false" aria-label="Switch project">
+                            {% icon current_project_icon|default:'tooth' 'ygg-icon-lg' %}
+                            {% icon 'chevron-down' 'ygg-icon-sm opacity-60' %}
+                        </button>
+                        <div class="ygg-menu" data-dropdown-menu hidden>
+                            {% for p in all_projects %}
+                                {% if p.slug == 'maxillo' %}
+                                    <a class="ygg-menu-item {% if p.id == current_project_id %}font-semibold text-primary{% endif %}" href="{% url 'maxillo_home' %}">{% icon p.icon|default:'tooth' %}<span>{{ p.name }}</span></a>
+                                {% elif p.slug == 'brain' %}
+                                    <a class="ygg-menu-item {% if p.id == current_project_id %}font-semibold text-primary{% endif %}" href="{% url 'brain_home' %}">{% icon p.icon|default:'brain' %}<span>{{ p.name }}</span></a>
+                                {% elif p.slug == 'laparoscopy' %}
+                                    <a class="ygg-menu-item {% if p.id == current_project_id %}font-semibold text-primary{% endif %}" href="{% url 'laparoscopy_home' %}">{% icon p.icon|default:'video' %}<span>{{ p.name }}</span></a>
+                                {% else %}
+                                    <a class="ygg-menu-item {% if p.id == current_project_id %}font-semibold text-primary{% endif %}" href="{% url ns|add:':select_project' p.id %}">{% icon p.icon|default:'tooth' %}<span>{{ p.name }}</span></a>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
                 {% endif %}
-                <a class="navbar-brand ms-1" href="{% url ns|add:':patient_list' %}"><img src="{% static 'icons/ygg-logo.svg' %}" alt="" class="brand-mark me-1">{{ current_project_name|default:'Yggdrasil' }}</a>
+                <a class="ygg-brand shrink-0" href="{% if user.is_authenticated %}{% url ns|add:':patient_list' %}{% else %}/{% endif %}">
+                    {% include 'common/partials/wordmark.html' %}
+                </a>
+                {% if current_project_name %}
+                    <span class="hidden xl:inline shrink-0 whitespace-nowrap mono text-xs text-content-ondarkmuted border-l border-white/15 pl-2">{{ current_project_name }}</span>
+                {% endif %}
             </div>
-            
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    {% if user.is_authenticated %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{% url ns|add:':patient_list' %}">
-                                <i class="fas fa-list me-1"></i>Scans
-                            </a>
-                        </li>
-                        {% if user.profile.can_upload_scans %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url ns|add:':upload_patient' %}">
-                                    <i class="fas fa-upload me-1"></i>Upload
-                                </a>
-                            </li>
-                        {% endif %}
-                        {% if user.is_staff or user.profile.is_admin %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url ns|add:':export_list' %}">
-                                    <i class="fas fa-download me-1"></i>Export
-                                </a>
-                            </li>
-                        {% endif %}
-                        {% if user.is_staff %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url 'online_users_dashboard' %}">
-                                    <i class="fas fa-circle-dot me-1"></i>Live Users
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url 'user_activity_stats' %}">
-                                    <i class="fas fa-chart-line me-1"></i>User Activity
-                                </a>
-                            </li>
-                        {% endif %}
-                        {% if user.is_staff or user.profile.is_admin %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url 'admin:index' %}">
-                                    <i class="fas fa-cog me-1"></i>Admin
-                                </a>
-                            </li>
-                        {% endif %}
-                    {% endif %}
-                </ul>
-                
-                <ul class="navbar-nav">
-                    {% if user.is_authenticated %}
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
-                                <i class="fas fa-user me-1"></i>{{ user.username }}
-                                {% if current_project_role_display %}
-                                    <span class="badge bg-secondary ms-1">{{ current_project_role_display }}</span>
-                                {% endif %}
-                            </a>
-                            <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" href="{% url ns|add:':user_profile' %}">
-                                        <i class="fas fa-user me-1"></i>Profile
-                                    </a>
-                                </li>
-                                {% if user.is_staff %}
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li>
-                                        <a class="dropdown-item" href="{% url 'invitation_list' %}">
-                                            <i class="fas fa-envelope me-1"></i>Manage Invitations
-                                        </a>
-                                    </li>
-                                {% endif %}
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <form method="post" action="{% url 'logout' %}" class="dropdown-item p-0">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-link text-decoration-none px-3 py-2 w-100 text-start">
-                                            <i class="fas fa-sign-out-alt me-1"></i>Logout
-                                        </button>
-                                    </form>
-                                </li>
-                            </ul>
-                        </li>
-                    {% else %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{% url 'login' %}">
-                                <i class="fas fa-sign-in-alt me-1"></i>Login
-                            </a>
-                        </li>
-                    {% endif %}
-                </ul>
+
+            <!-- Desktop nav -->
+            <div class="hidden lg:flex items-center gap-1 ml-2">
+                {% include 'common/partials/nav_links.html' %}
             </div>
+
+            <!-- Right: user menu / login -->
+            <div class="ml-auto flex items-center gap-1">
+                {% if user.is_authenticated %}
+                    <div class="relative" data-dropdown>
+                        <button type="button" class="ygg-nav-link" data-dropdown-toggle aria-expanded="false">
+                            {% icon 'user' %}<span class="hidden sm:inline">{{ user.username }}</span>
+                            {% if current_project_role_display %}<span class="badge-ygg badge-neutral hidden md:inline-flex">{{ current_project_role_display }}</span>{% endif %}
+                            {% icon 'chevron-down' 'ygg-icon-sm opacity-60' %}
+                        </button>
+                        <div class="ygg-menu" data-dropdown-menu hidden>
+                            <a class="ygg-menu-item" href="{% url ns|add:':user_profile' %}">{% icon 'user' %}<span>Profile</span></a>
+                            {% if user.is_staff %}
+                                <a class="ygg-menu-item" href="{% url 'admin_control_panel' %}">{% icon 'layout-dashboard' %}<span>Control Panel</span></a>
+                                <a class="ygg-menu-item" href="{% url 'invitation_list' %}">{% icon 'envelope' %}<span>Manage Invitations</span></a>
+                            {% endif %}
+                            <div class="border-t border-line my-1"></div>
+                            <form method="post" action="{% url 'logout' %}">
+                                {% csrf_token %}
+                                <button type="submit" class="ygg-menu-item w-full text-danger">{% icon 'sign-out-alt' %}<span>Logout</span></button>
+                            </form>
+                        </div>
+                    </div>
+                {% else %}
+                    <a class="ygg-nav-link" href="{% url 'login' %}">{% icon 'sign-in-alt' %}<span>Login</span></a>
+                {% endif %}
+
+                <!-- Mobile toggle -->
+                {% if user.is_authenticated %}
+                    <button type="button" class="ygg-nav-link lg:hidden" data-mobile-toggle aria-expanded="false" aria-label="Menu">{% icon 'menu' 'ygg-icon-lg' %}</button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Mobile nav panel -->
+        <div class="lg:hidden border-t border-white/5 px-3 py-2 flex flex-col gap-1" data-mobile-nav hidden>
+            {% include 'common/partials/nav_links.html' %}
         </div>
     </nav>
     {% endblock %}
 
     {% block messages %}
-    <!-- Messages -->
     {% if messages %}
         <script>
             document.addEventListener('DOMContentLoaded', function () {
-                if (typeof window.appNotify !== 'function') {
-                    return;
-                }
+                if (typeof window.appNotify !== 'function') { return; }
                 {% for message in messages %}
                     window.appNotify(
                         '{% if "error" in message.tags %}danger{% elif "warning" in message.tags %}warning{% elif "success" in message.tags %}success{% else %}info{% endif %}',
@@ -195,41 +125,31 @@
     {% endif %}
     {% endblock %}
 
-    <!-- Main Content -->
-    <main class="container-fluid mt-4">
+    <main class="{% block main_class %}mx-auto max-w-content px-4 mt-6{% endblock %}">
         {% block content %}{% endblock %}
     </main>
 
     {% block footer %}
-    <!-- Footer -->
-    <footer class="ygg-footer mt-5 py-4">
-        <div class="container text-center">
-            <p class="mb-0">&copy; 2026 Yggdrasil <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="ms-2" aria-label="GitHub repository"><i class="fa-brands fa-github"></i></a> <span class="text-muted ms-2 small">v{{ app_version }}</span> <span class="badge bg-success-subtle text-success-emphasis ms-2">Yggdrasil 2.0 is out</span></p>
+    <footer class="ygg-footer relative mt-16 border-t border-line bg-surface">
+        <span class="absolute left-1/2 -translate-x-1/2 -top-px h-0.5 w-28 bg-gold-500"></span>
+        <div class="mx-auto max-w-content px-4 py-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-content-muted">
+            <span>&copy; 2026 Yggdrasil</span>
+            <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-content-muted hover:text-content" aria-label="GitHub repository">{% icon 'github' %}</a>
+            <span class="mono text-xs">v{{ app_version }}</span>
+            <span class="badge-ygg badge-ok">Yggdrasil 2.0</span>
         </div>
     </footer>
     {% endblock %}
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/nav.js' %}"></script>
     <script src="{% static 'js/notifications.js' %}"></script>
     {% block extra_js %}{% endblock %}
     <script>
-        (function(){
-            try {
-                window.projectNamespace = "{% firstof request.resolver_match.namespace 'maxillo' %}";
-            } catch (e) {
-                window.projectNamespace = 'maxillo';
-            }
+        (function () {
+            try { window.projectNamespace = "{% firstof request.resolver_match.namespace 'maxillo' %}"; }
+            catch (e) { window.projectNamespace = 'maxillo'; }
+            window.YGG_SPRITE = "{% static 'icons/lucide-sprite.svg' %}";
         })();
-        // Enable Bootstrap tooltips globally
-        document.addEventListener('DOMContentLoaded', function () {
-            if (window.bootstrap && document.querySelector('[data-bs-toggle="tooltip"]')) {
-                const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-                tooltipTriggerList.forEach(function (tooltipTriggerEl) {
-                    new window.bootstrap.Tooltip(tooltipTriggerEl)
-                })
-            }
-        });
     </script>
 </body>
-</html> 
+</html>

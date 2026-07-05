@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse
 from django.shortcuts import render
@@ -121,12 +122,18 @@ def admin_control_panel(request):
             }
         )
 
+    # MySQL backup status (reuses the status-page helpers).
+    from .models import SystemCheck
+
     context = {
         "system_health": system_health,
         "job_counts": job_counts,
         "pending_by_modality": pending_by_modality,
         "user_count": user_count,
         "project_user_list": project_user_list,
+        "backup": _backup_health(),
+        "backup_inventory": _backup_inventory(),
+        "recent_backups": SystemCheck.objects.filter(name="database_backup")[:8],
     }
     return render(request, "common/admin_control_panel.html", context)
 
@@ -263,6 +270,46 @@ def _backup_health():
         "message": f"Last successful backup at {latest_ok.ran_at:%Y-%m-%d %H:%M} UTC",
         "latest": latest,
     }
+
+
+def _backup_inventory():
+    """Count / size / newest of the MySQL backups retained in object storage.
+
+    Mirrors the object-storage health check pattern; enumerates keys under
+    settings.BACKUP_KEY_PREFIX so the admin panel can show how many backups are
+    kept and when the most recent landed.
+    """
+    prefix = getattr(settings, "BACKUP_KEY_PREFIX", "backups/mysql/")
+    inventory = {
+        "available": False,
+        "count": 0,
+        "total_bytes": 0,
+        "latest": None,
+        "prefix": prefix,
+        "keep_daily": getattr(settings, "BACKUP_KEEP_DAILY", None),
+        "keep_weekly": getattr(settings, "BACKUP_KEEP_WEEKLY", None),
+    }
+    try:
+        storage = get_object_storage()
+        paginator = storage._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(
+            Bucket=storage.bucket, Prefix=storage.normalize_key(prefix)
+        ):
+            for obj in page.get("Contents", []) or []:
+                inventory["count"] += 1
+                inventory["total_bytes"] += obj.get("Size", 0) or 0
+                modified = obj.get("LastModified")
+                latest = inventory["latest"]
+                if latest is None or (modified and modified > latest["modified"]):
+                    inventory["latest"] = {
+                        "key": obj.get("Key"),
+                        "modified": modified,
+                        "size": obj.get("Size", 0) or 0,
+                    }
+        inventory["available"] = True
+    except Exception as exc:  # noqa: BLE001
+        inventory["error"] = str(exc)
+    return inventory
 
 
 @login_required

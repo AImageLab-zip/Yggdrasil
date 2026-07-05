@@ -3,8 +3,11 @@
 
 {% block title %}Patient {{ patient.name }} - Yggdrasil{% endblock %}
 
+{% block main_class %}container-fluid mt-4{% endblock %}
+
 {% block extra_css %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+{% include 'common/partials/legacy_head.html' %}
 <link rel="stylesheet" href="{% static 'css/patient_detail.css' %}">
 <link rel="stylesheet" href="{% static 'css/image_viewer.css' %}">
 {% if ns == 'maxillo' %}
@@ -21,6 +24,8 @@
 
 {% block extra_js %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+{# Legacy layer: Bootstrap JS + tooltips, needed before the viewer scripts. #}
+{% include 'common/partials/legacy_scripts.html' %}
 {{ django_data|json_script:"django-data" }}
 {# Core volume rendering #}
 <script src="{% static 'js/volume_renderer.js' %}"></script>

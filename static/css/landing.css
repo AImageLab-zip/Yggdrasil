@@ -1,298 +1,184 @@
 /*
- * Immersive landing page — dark ink atmosphere with gold accents.
- * Consumes tokens.css (--ygg-*). Landing-only: nothing here reaches
- * app pages or viewers.
+ * Landing page — light, airy hero over three full-screen domain panels.
+ * Identity: the world-tree as a living clinical system. Ink text on cool-white
+ * surfaces, medical-green canopy glow, a single thin gold rune rule. Per-domain
+ * accents carry each panel. Consumes tokens.css; landing-only (never reaches
+ * app pages or viewers).
  */
 
-html, body {
-    height: 100%;
+.landing {
+    scroll-snap-type: y proximity;
 }
 
-.landing-wrapper {
-    min-height: calc(100vh - 3rem);
-    background:
-        radial-gradient(1200px 600px at 10% -10%, rgba(201, 162, 75, 0.07), transparent),
-        radial-gradient(1000px 500px at 110% 110%, rgba(40, 64, 122, 0.12), transparent),
-        linear-gradient(180deg, var(--ygg-ink-800) 0%, var(--ygg-ink-950) 100%);
+/* Floating auth control (top-right) */
+.landing-auth {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 50;
+}
+
+/* ---- Hero -------------------------------------------------------------- */
+.landing-hero {
+    position: relative;
+    min-height: 92vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    position: relative;
+    text-align: center;
+    padding: 4rem 1.25rem 3rem;
     overflow: hidden;
-    color: var(--ygg-text-on-dark);
-    padding: 48px 16px;
+    background:
+        radial-gradient(60rem 32rem at 50% -12%, rgba(20, 163, 139, 0.14), transparent 70%),
+        radial-gradient(48rem 30rem at 50% 120%, rgba(28, 44, 72, 0.06), transparent 70%),
+        var(--ygg-surface-alt);
+    scroll-snap-align: start;
 }
 
-.user-fab {
+/* Faint canopy line-art behind the wordmark */
+.landing-hero__canopy {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    inset: 0;
+    margin: auto;
+    width: min(80rem, 120%);
+    color: var(--ygg-green-500);
+    opacity: 0.10;
+    pointer-events: none;
 }
 
-/* ---- Gold buttons / chip -------------------------------------------------- */
-.ygg-btn-gold {
-    background: var(--ygg-gold-500);
-    border: 1px solid var(--ygg-gold-500);
-    color: var(--ygg-ink-900);
-    font-weight: 600;
-}
-.ygg-btn-gold:hover,
-.ygg-btn-gold:focus {
-    background: var(--ygg-gold-400);
-    border-color: var(--ygg-gold-400);
-    color: var(--ygg-ink-900);
-}
-.ygg-btn-gold-outline {
-    background: transparent;
-    border: 1px solid var(--ygg-gold-500);
-    color: var(--ygg-gold-200);
-}
-.ygg-btn-gold-outline:hover,
-.ygg-btn-gold-outline:focus {
-    background: rgba(201, 162, 75, 0.15);
-    border-color: var(--ygg-gold-400);
-    color: var(--ygg-gold-200);
-}
-.ygg-chip {
-    background: rgba(11, 19, 36, 0.7);
-    border: 1px solid rgba(201, 162, 75, 0.45);
-    color: var(--ygg-text-on-dark);
-    backdrop-filter: blur(4px);
-}
-.ygg-chip:hover,
-.ygg-chip:focus,
-.ygg-chip.show {
-    background: rgba(17, 26, 48, 0.85);
-    border-color: var(--ygg-gold-400);
-    color: var(--ygg-gold-200);
-}
+.landing-hero__inner { position: relative; max-width: 46rem; }
 
-/* ---- Brand ---------------------------------------------------------------- */
-.brand {
-    margin-bottom: 24px;
-}
+.landing-hero__mark { width: 60px; height: 60px; margin: 0 auto 1.25rem; display: block; }
 
-.logo-wrap {
-    width: 84px;
-    height: 84px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(201, 162, 75, 0.35);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(4px);
-}
-
-.logo-tree {
-    width: 56px;
-    height: 56px;
-    display: block;
-}
-
-.title {
-    margin: 16px 0 4px;
+.landing-title {
     font-family: var(--ygg-font-display);
     font-weight: 700;
     font-size: var(--ygg-fs-hero);
-    letter-spacing: 0.08em;
-    color: var(--ygg-text-on-dark);
-}
-
-.subtitle {
-    color: var(--ygg-text-on-dark-muted);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--ygg-text);
     margin: 0;
 }
+.landing-title .accent { color: var(--ygg-green-600); }
 
-.name-explain {
-    max-width: 560px;
-    margin: 14px auto 0;
-    color: var(--ygg-text-on-dark-muted);
-    font-size: 0.95rem;
-    line-height: 1.6;
-}
-
-.name-explain em {
-    color: var(--ygg-gold-200);
-    font-style: italic;
-}
-
-.demo-cta {
-    margin: 4px auto 20px;
-}
-
-/* ---- Rune variant of the title (gold embers) ------------------------------ */
-.title--runes {
-    position: relative;
-    display: block;
-    width: fit-content;
-    margin: 16px auto 4px;
-    padding: 4px 10px;
-    color: var(--ygg-gold-200);
-    letter-spacing: 0.18em;
-    text-shadow: none;
-    animation: rune-flicker 3.8s infinite steps(1, end);
-}
-
-.title--runes::before {
-    content: "";
-    position: absolute;
-    inset: -18px;
-    pointer-events: none;
-    background:
-        radial-gradient(circle at 12% 38%, rgba(240, 226, 189, 0.9) 0 1px, transparent 2px),
-        radial-gradient(circle at 24% 76%, rgba(220, 185, 104, 0.72) 0 1px, transparent 2px),
-        radial-gradient(circle at 66% 22%, rgba(201, 162, 75, 0.78) 0 1px, transparent 2px),
-        radial-gradient(circle at 84% 64%, rgba(240, 226, 189, 0.74) 0 1px, transparent 2px),
-        radial-gradient(circle at 46% 88%, rgba(220, 185, 104, 0.64) 0 1px, transparent 2px);
-    filter: blur(0.4px);
-    opacity: 0.72;
-    animation: rune-sparks 2.2s infinite linear;
-}
-
-@keyframes rune-flicker {
-    0%, 9%, 13%, 47%, 51%, 77%, 100% { opacity: 1; }
-    10%, 50% { opacity: 0.84; }
-    12%, 78% { opacity: 0.94; }
-}
-
-@keyframes rune-sparks {
-    0% { opacity: 0.24; transform: translate3d(-6px, 8px, 0) scale(0.98); }
-    35% { opacity: 0.86; transform: translate3d(5px, -5px, 0) scale(1.02); }
-    70% { opacity: 0.46; transform: translate3d(10px, -12px, 0) scale(1); }
-    100% { opacity: 0.2; transform: translate3d(16px, -20px, 0) scale(0.96); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .title--runes,
-    .title--runes::before {
-        animation: none;
-    }
-}
-
-/* ---- Project cards: dark glass, per-project accent ------------------------ */
-.split-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    max-width: 1200px;
-    margin: 24px auto 12px;
-    justify-content: center;
-    align-items: stretch;
-}
-
-.app-card {
-    position: relative;
-    border-radius: var(--ygg-radius-lg);
-    overflow: hidden;
-    text-decoration: none;
-    transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    box-shadow: var(--ygg-shadow-card);
-    flex: 1 1 300px;
-    min-width: 280px;
-    max-width: 400px;
-}
-
-/* Per-project accent bar across the top */
-.app-card::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
+/* thin gold rune rule */
+.landing-rule {
+    width: 4.5rem;
+    height: 2px;
+    margin: 1.25rem auto;
     background: var(--ygg-gold-500);
-    z-index: 1;
-}
-.app-card--maxillo::before { background: var(--ygg-maxillo-grad); }
-.app-card--brain::before { background: var(--ygg-brain-grad); }
-.app-card--laparoscopy::before { background: var(--ygg-laparoscopy-grad); }
-
-.app-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4);
-}
-.app-card--maxillo:hover { border-color: var(--ygg-maxillo); }
-.app-card--brain:hover { border-color: var(--ygg-brain); }
-.app-card--laparoscopy:hover { border-color: var(--ygg-laparoscopy); }
-
-.app-card .card-inner {
     position: relative;
-    z-index: 1;
-    padding: 36px 28px;
-    color: var(--ygg-text-on-dark);
 }
+.landing-tagline {
+    font-family: var(--ygg-font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    color: var(--ygg-green-700);
+    margin: 0 0 1rem;
+}
+.landing-lede {
+    color: var(--ygg-text-muted);
+    line-height: 1.65;
+    max-width: 38rem;
+    margin: 0 auto 1.75rem;
+}
+.landing-lede em { color: var(--ygg-text); font-style: normal; font-weight: 600; }
 
-.icon-wrap {
-    width: 56px;
-    height: 56px;
-    border-radius: var(--ygg-radius-md);
-    background: rgba(255, 255, 255, 0.08);
+.landing-scrollcue {
+    position: absolute;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--ygg-text-muted);
+    animation: landing-bob 2.4s ease-in-out infinite;
+}
+@keyframes landing-bob { 0%,100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, 6px); } }
+
+/* ---- Domain panels ----------------------------------------------------- */
+.domain {
+    position: relative;
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    gap: 2rem;
+    padding: 5rem clamp(1.25rem, 6vw, 6rem);
+    scroll-snap-align: start;
+    --accent: var(--ygg-green-600);
+    --accent-grad: var(--ygg-brain-grad);
+}
+.domain--maxillo { --accent: var(--ygg-maxillo); --accent-grad: var(--ygg-maxillo-grad);
+    background: linear-gradient(120deg, rgba(91,141,239,0.06), transparent 60%), var(--ygg-surface); }
+.domain--brain { --accent: var(--ygg-brain); --accent-grad: var(--ygg-brain-grad);
+    background: linear-gradient(120deg, rgba(20,163,139,0.07), transparent 60%), var(--ygg-surface-alt); }
+.domain--laparoscopy { --accent: var(--ygg-laparoscopy); --accent-grad: var(--ygg-laparoscopy-grad);
+    background: linear-gradient(120deg, rgba(224,120,95,0.06), transparent 60%), var(--ygg-surface); }
+
+/* Alternate the visual to the other side on the middle panel */
+.domain--flip .domain__art { order: -1; }
+
+.domain__code {
+    font-family: var(--ygg-font-mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    color: var(--accent);
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    margin-bottom: 12px;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
 }
-
-.icon-wrap i { font-size: 24px; color: var(--ygg-gold-200); }
-.app-card--maxillo .icon-wrap i { color: var(--ygg-maxillo); }
-.app-card--brain .icon-wrap i { color: var(--ygg-brain); }
-.app-card--laparoscopy .icon-wrap i { color: var(--ygg-laparoscopy); }
-
-.app-title {
-    margin: 0 0 6px;
+.domain__code::before {
+    content: "";
+    width: 1.75rem; height: 2px; background: var(--accent);
+}
+.domain__title {
     font-family: var(--ygg-font-display);
+    font-weight: 700;
+    font-size: clamp(2rem, 4vw, 3rem);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--ygg-text);
+    margin: 0 0 0.9rem;
+}
+.domain__desc { color: var(--ygg-text-muted); line-height: 1.65; max-width: 34rem; margin: 0 0 1.25rem; }
+.domain__modalities {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1.75rem;
+    font-family: var(--ygg-font-mono); font-size: 0.72rem;
+}
+.domain__mod {
+    padding: 0.2rem 0.6rem; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    letter-spacing: 0.04em;
+}
+.domain__cta {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.7rem 1.2rem; border-radius: var(--ygg-radius-md);
+    background: var(--accent); color: #fff; font-weight: 600; text-decoration: none;
+    transition: filter 150ms ease, transform 150ms ease;
+}
+.domain__cta:hover { filter: brightness(0.94); transform: translateY(-1px); color: #fff; }
+
+/* The bespoke line-art motif per domain */
+.domain__art {
+    display: flex; align-items: center; justify-content: center;
+}
+.domain__art svg { width: min(28rem, 100%); height: auto; color: var(--accent); }
+
+/* logged-in continue banner + no-access notice */
+.landing-note {
+    max-width: 40rem; margin: 3rem auto; padding: 1.5rem;
+    border: 1px solid var(--ygg-border); border-radius: var(--ygg-radius-lg);
+    background: var(--ygg-surface); text-align: center;
 }
 
-.app-desc {
-    margin: 0 0 18px;
-    color: var(--ygg-text-on-dark-muted);
+@media (max-width: 860px) {
+    .domain { grid-template-columns: 1fr; text-align: left; min-height: auto; padding: 4rem 1.5rem; }
+    .domain--flip .domain__art { order: 0; }
+    .domain__art { margin-top: 2rem; }
+    .domain__art svg { width: 15rem; }
 }
-
-.action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    color: var(--ygg-ink-900);
-    background: var(--ygg-gold-500);
-    padding: 8px 14px;
-    border-radius: 999px;
-    transition: background 150ms ease;
-}
-.app-card:hover .action-btn {
-    background: var(--ygg-gold-400);
-}
-
-.continue-cta { margin-top: 12px; }
-
-/* ---- Anonymous auth panel (dark glass) ------------------------------------ */
-.auth-panel {
-    max-width: 420px;
-    margin: 0 auto;
-    padding: 3rem 2.5rem;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(201, 162, 75, 0.3);
-    border-radius: var(--ygg-radius-lg);
-    box-shadow: var(--ygg-shadow-card);
-    color: var(--ygg-text-on-dark);
-    backdrop-filter: blur(4px);
-}
-.auth-panel .fa-lock { color: var(--ygg-gold-500); }
-.auth-panel h3 { font-family: var(--ygg-font-display); }
-.auth-panel-note { color: var(--ygg-text-on-dark-muted); }
-
-@media (max-width: 768px) {
-    .split-grid {
-        flex-direction: column;
-        align-items: center;
-    }
-
-    .app-card {
-        max-width: 100%;
-        width: 100%;
-    }
-}
+@media (prefers-reduced-motion: reduce) { .landing-scrollcue { animation: none; } }

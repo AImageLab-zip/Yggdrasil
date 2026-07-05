@@ -1,25 +1,21 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load icons %}
 
 {% block navbar %}
-<nav class="navbar navbar-dark ygg-navbar">
-    <div class="container">
-        <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'demo:index' %}">
-            <img src="{% static 'icons/favicon.svg' %}" alt="" width="28" height="28">
-            Yggdrasil
+<nav class="ygg-nav">
+    <div class="ygg-nav-inner">
+        <a class="ygg-brand" href="{% url 'demo:index' %}">
+            {% include 'common/partials/wordmark.html' %}
         </a>
-        <div class="d-flex align-items-center gap-2">
-            <span class="badge ygg-badge-gold">Public demo · read-only</span>
-            <a class="btn btn-light btn-sm" href="{% url 'login' %}">
-                <i class="fas fa-sign-in-alt me-1"></i>Log in
-            </a>
+        <div class="ml-auto flex items-center gap-3">
+            <span class="badge-ygg badge-gold">Public demo · read-only</span>
+            <a class="btn btn-secondary btn-sm" href="{% url 'login' %}">{% icon 'sign-in-alt' %}<span>Log in</span></a>
         </div>
     </div>
 </nav>
 {% endblock %}
 
 {% block content %}
-<div class="container py-4">
-    {% block demo_content %}{% endblock %}
-</div>
+{% block demo_content %}{% endblock %}
 {% endblock %}

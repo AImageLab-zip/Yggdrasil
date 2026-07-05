@@ -1,51 +1,38 @@
 {% extends 'base.html' %}
+{% load icons %}
 
 {% block title %}Login - Yggdrasil{% endblock %}
 
 {% block content %}
-{% load static %}
-<div class="container">
-    <div class="ygg-auth-wrap">
-        <div class="ygg-auth-card">
-                <img src="{% static 'icons/ygg-logo.svg' %}" alt="Yggdrasil" class="brand-mark">
-                <h2>Login</h2>
-                <hr class="ygg-gold-rule">
-                <div>
-                    <form method="post">
-                        {% csrf_token %}
-                        <div class="mb-3">
-                            <label for="{{ form.username.id_for_label }}" class="form-label">Username</label>
-                            <input type="text" class="form-control" name="username" id="{{ form.username.id_for_label }}" required>
-                            {% if form.username.errors %}
-                                <div class="text-danger">{{ form.username.errors }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="{{ form.password.id_for_label }}" class="form-label">Password</label>
-                            <input type="password" class="form-control" name="password" id="{{ form.password.id_for_label }}" required>
-                            {% if form.password.errors %}
-                                <div class="text-danger">{{ form.password.errors }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        {% if form.non_field_errors %}
-                            <div class="alert alert-danger">
-                                {{ form.non_field_errors }}
-                            </div>
-                        {% endif %}
-                        
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-sign-in-alt me-2"></i>Login
-                            </button>
-                        </div>
-                    </form>
-                </div>
-                <div class="text-center mt-3">
-                    <small>Don't have an account? <a href="{% url 'register' %}">Register here</a></small>
-                </div>
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="flex justify-center mb-1">
+            {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
         </div>
+        <h1 class="text-center text-xl">Sign in</h1>
+        <hr class="auth-rule">
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="form-field">
+                <label for="{{ form.username.id_for_label }}" class="form-label">Username</label>
+                <input type="text" class="form-input" name="username" id="{{ form.username.id_for_label }}" required autofocus>
+                {% if form.username.errors %}<div class="form-error">{{ form.username.errors }}</div>{% endif %}
+            </div>
+            <div class="form-field">
+                <label for="{{ form.password.id_for_label }}" class="form-label">Password</label>
+                <input type="password" class="form-input" name="password" id="{{ form.password.id_for_label }}" required>
+                {% if form.password.errors %}<div class="form-error">{{ form.password.errors }}</div>{% endif %}
+            </div>
+            {% if form.non_field_errors %}
+                <div class="alert-ygg alert-danger mb-4">{% icon 'circle-alert' %}<div>{{ form.non_field_errors }}</div></div>
+            {% endif %}
+            <button type="submit" class="btn btn-primary w-full">{% icon 'sign-in-alt' %}<span>Sign in</span></button>
+        </form>
+
+        <p class="text-center text-sm text-content-muted mt-5">
+            Don't have an account? <a href="{% url 'register' %}" class="font-medium">Register here</a>
+        </p>
     </div>
 </div>
 {% endblock %}

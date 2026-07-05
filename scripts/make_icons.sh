@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Regenerate the raster favicon set from the SVG masters in static/icons/.
-# Source of truth: static/icons/favicon.svg (favicon squares) and
-# static/icons/ygg-logo.svg (apple-touch, transparent tree).
+# Regenerate the raster favicon set from the SVG master in static/icons/.
+# Source of truth: static/icons/favicon.svg (the ink+green monogram square),
+# used for the favicon PNGs, the .ico, and the apple-touch icon.
 #
 # Prefers rsvg-convert or ImageMagick if installed; otherwise falls back to a
 # Python (cairosvg + Pillow) pipeline. Outputs are committed to the repo, so this
@@ -11,7 +11,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ICONS=static/icons
 FAVICON_SVG="$ICONS/favicon.svg"
-LOGO_SVG="$ICONS/ygg-logo.svg"
 
 render() { # <svg> <size> <out.png>
   local svg="$1" size="$2" out="$3"

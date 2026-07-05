@@ -1,223 +1,137 @@
 {% extends 'base.html' %}
+{% load icons %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
 
-{% block title %}Admin Control Panel{% endblock %}
-
-{% block navbar %}
-<nav class="navbar navbar-expand-lg navbar-dark ygg-navbar">
-	<div class="container">
-		<span class="navbar-brand mb-0 h1"><i class="fas fa-heartbeat me-2"></i>System Health</span>
-	</div>
-</nav>
-{% endblock %}
-
-{% block extra_css %}
-<style>
-	.health-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-		gap: 0.75rem;
-	}
-
-	.health-card {
-		border: 1px solid var(--ygg-border);
-		border-radius: 10px;
-		padding: 0.65rem 0.8rem;
-		background: var(--ygg-surface);
-	}
-
-	.health-label {
-		font-size: 0.72rem;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--ygg-text-muted);
-		margin-bottom: 0.2rem;
-	}
-
-	.health-value {
-		font-weight: 700;
-		font-size: 0.95rem;
-		line-height: 1.15;
-	}
-
-	.health-meta {
-		font-size: 0.78rem;
-		color: var(--ygg-text-muted);
-		margin-top: 0.2rem;
-	}
-
-	.health-pills {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-		margin-top: 0.35rem;
-	}
-
-	.health-pill {
-		font-size: 0.72rem;
-		padding: 0.16rem 0.42rem;
-		border-radius: 999px;
-		font-weight: 600;
-		background: var(--ygg-surface-alt);
-		color: var(--ygg-navy-600);
-	}
-</style>
-{% endblock %}
+{% block title %}Control Panel - Yggdrasil{% endblock %}
 
 {% block content %}
-{% firstof request.resolver_match.namespace 'maxillo' as ns %}
-<div class="container">
-	<div class="d-flex justify-content-between align-items-center mb-4">
-		<h1><i class="fas fa-tachometer-alt me-2"></i>Admin Control Panel</h1>
-		<div>
-			<a href="{% url 'online_users_dashboard' %}" class="btn btn-outline-primary me-2">
-				<i class="fas fa-circle-dot me-2"></i>Live Users
-			</a>
-			<a href="{% url 'user_activity_stats' %}" class="btn btn-outline-primary me-2">
-				<i class="fas fa-chart-line me-2"></i>User Activity
-			</a>
-			<a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
-				<i class="fas fa-arrow-left me-2"></i>Back to Scans
-			</a>
-		</div>
-	</div>
+<div class="page-header">
+    <h1 class="page-title">{% icon 'layout-dashboard' %}<span>Control Panel</span></h1>
+    <div class="flex gap-2">
+        <a href="{% url 'online_users_dashboard' %}" class="btn btn-secondary btn-sm">{% icon 'circle-dot' %}<span>Live Users</span></a>
+        <a href="{% url 'user_activity_stats' %}" class="btn btn-secondary btn-sm">{% icon 'chart-line' %}<span>User Activity</span></a>
+        <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary btn-sm">{% icon 'arrow-left' %}<span>Back to Scans</span></a>
+    </div>
+</div>
 
-	<div class="card mb-4">
-		<div class="card-body py-3">
-			<div class="d-flex justify-content-between align-items-center mb-2">
-				<h5 class="card-title mb-0">System Health</h5>
-				<small class="text-muted">{{ system_health.checked_at|date:"Y-m-d H:i:s" }} UTC</small>
-			</div>
-			<div class="health-grid">
-				<div class="health-card">
-					<div class="health-label">Object Storage</div>
-					<div class="health-value">
-						{% if system_health.object_storage.status == 'up' %}
-							<span class="badge text-bg-success">{{ system_health.object_storage.label }}</span>
-						{% else %}
-							<span class="badge text-bg-danger">{{ system_health.object_storage.label }}</span>
-						{% endif %}
-					</div>
-					<div class="health-meta">{{ system_health.object_storage.message }}</div>
-				</div>
+<!-- System health -->
+<div class="card-ygg card-ygg-body mb-6">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="flex items-center gap-2 font-semibold">{% icon 'heartbeat' %}<span>System health</span></h2>
+        <span class="mono text-xs text-content-muted">{{ system_health.checked_at|date:"Y-m-d H:i:s" }} UTC</span>
+    </div>
+    <div class="grid gap-4 sm:grid-cols-3">
+        <!-- Object storage -->
+        <div class="border border-line rounded-md p-4">
+            <div class="stat-label flex items-center gap-1">{% icon 'server' 'ygg-icon-sm' %}<span>Object storage</span></div>
+            <div class="mt-2"><span class="badge-ygg {% if system_health.object_storage.status == 'up' %}badge-ok{% else %}badge-danger{% endif %}">{{ system_health.object_storage.label }}</span></div>
+            <p class="text-sm text-content-muted mt-2 mb-0">{{ system_health.object_storage.message }}</p>
+        </div>
+        <!-- Database -->
+        <div class="border border-line rounded-md p-4">
+            <div class="stat-label flex items-center gap-1">{% icon 'database' 'ygg-icon-sm' %}<span>Database</span></div>
+            <div class="mt-2"><span class="badge-ygg {% if system_health.database.status == 'up' %}badge-ok{% else %}badge-danger{% endif %}">{% if system_health.database.status == 'up' %}Up{% else %}Down{% endif %}</span></div>
+            <p class="text-sm text-content-muted mt-2 mb-0">{{ system_health.database.message }}</p>
+        </div>
+        <!-- MySQL backup -->
+        <div class="border border-line rounded-md p-4">
+            <div class="stat-label flex items-center gap-1">{% icon 'save' 'ygg-icon-sm' %}<span>MySQL backup</span></div>
+            <div class="mt-2"><span class="badge-ygg {% if backup.status == 'ok' %}badge-ok{% elif backup.status == 'warn' %}badge-warn{% else %}badge-danger{% endif %}">{{ backup.status|upper }}</span></div>
+            <p class="text-sm text-content-muted mt-2 mb-0">{{ backup.message }}</p>
+        </div>
+    </div>
+</div>
 
-				<div class="health-card">
-					<div class="health-label">Database</div>
-					<div class="health-value">
-						{% if system_health.database.status == 'up' %}
-							<span class="badge text-bg-success">Up</span>
-						{% else %}
-							<span class="badge text-bg-danger">Down</span>
-						{% endif %}
-					</div>
-					<div class="health-meta">{{ system_health.database.message }}</div>
-				</div>
-			</div>
-		</div>
-	</div>
+<!-- Backup detail -->
+<div class="card-ygg card-ygg-body mb-6">
+    <h2 class="flex items-center gap-2 font-semibold mb-4">{% icon 'database' %}<span>Database backups</span></h2>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-5">
+        <div class="stat-tile">
+            <div class="stat-value">{% if backup_inventory.available %}{{ backup_inventory.count }}{% else %}—{% endif %}</div>
+            <div class="stat-label">Backups retained</div>
+        </div>
+        <div class="stat-tile">
+            <div class="stat-value">{% if backup_inventory.available %}{{ backup_inventory.total_bytes|filesizeformat }}{% else %}—{% endif %}</div>
+            <div class="stat-label">Total size</div>
+        </div>
+        <div class="stat-tile">
+            <div class="stat-value text-base">{% if backup_inventory.latest %}{{ backup_inventory.latest.modified|date:"Y-m-d H:i" }}{% else %}None{% endif %}</div>
+            <div class="stat-label">Latest backup (UTC)</div>
+        </div>
+        <div class="stat-tile">
+            <div class="stat-value text-base">{{ backup_inventory.keep_daily|default:"—" }} / {{ backup_inventory.keep_weekly|default:"—" }}</div>
+            <div class="stat-label">Retention daily / weekly</div>
+        </div>
+    </div>
 
-	<div class="row g-4">
-		<div class="col-12">
-			<div class="card h-100">
-				<div class="card-body">
-					<h5 class="card-title">Jobs</h5>
-					<div class="row text-center">
-						<div class="col-6 col-sm-3 mb-3">
-							<div class="border rounded py-3">
-								<div class="fs-4">{{ job_counts.total|default:0 }}</div>
-								<div class="text-muted">Total</div>
-							</div>
-						</div>
-						<div class="col-6 col-sm-3 mb-3">
-							<div class="border rounded py-3">
-								<div class="fs-4">{{ job_counts.pending|default:0 }}</div>
-								<div class="text-muted">Pending</div>
-							</div>
-						</div>
-						<div class="col-6 col-sm-3 mb-3">
-							<div class="border rounded py-3">
-								<div class="fs-4">{{ job_counts.processing|default:0 }}</div>
-								<div class="text-muted">Processing</div>
-							</div>
-						</div>
-						<div class="col-6 col-sm-3 mb-3">
-							<div class="border rounded py-3">
-								<div class="fs-4">{{ job_counts.completed|default:0 }}</div>
-								<div class="text-muted">Completed</div>
-							</div>
-						</div>
-						<div class="col-6 col-sm-3 mb-3">
-							<div class="border rounded py-3">
-								<div class="fs-4">{{ job_counts.failed|default:0 }}</div>
-								<div class="text-muted">Failed</div>
-							</div>
-						</div>
-					</div>
+    <div class="text-sm text-content-muted mb-4">
+        Location: <code class="mono text-xs">{{ backup_inventory.prefix }}</code> in object storage.
+        {% if not backup_inventory.available %}<span class="text-danger">Could not read bucket: {{ backup_inventory.error }}</span>{% endif %}
+    </div>
 
-					<hr>
-					<h6 class="mt-3">Pending by Modality</h6>
-					{% if pending_by_modality %}
-						<ul class="list-unstyled mb-0">
-						{% for m in pending_by_modality %}
-							<li class="d-flex justify-content-between py-1 border-bottom">
-								<span>{{ m.name }} <small class="text-muted">({{ m.slug }})</small></span>
-								<span class="fw-semibold">{{ m.pending }}</span>
-							</li>
-						{% endfor %}
-						</ul>
-					{% else %}
-						<div class="text-muted">No modalities found.</div>
-					{% endif %}
-				</div>
-			</div>
-		</div>
-	</div>
+    <h3 class="text-sm font-semibold text-content-muted uppercase tracking-wide mb-2">Recent backup runs</h3>
+    {% if recent_backups %}
+    <div class="overflow-x-auto"><table class="table-ygg">
+        <thead><tr><th>Status</th><th>Ran at (UTC)</th><th>Duration</th><th>Size</th><th>Key</th></tr></thead>
+        <tbody>
+            {% for c in recent_backups %}
+            <tr>
+                <td><span class="badge-ygg {% if c.status == 'ok' %}badge-ok{% elif c.status == 'warn' %}badge-warn{% else %}badge-danger{% endif %}">{{ c.get_status_display }}</span></td>
+                <td class="mono text-xs whitespace-nowrap">{{ c.ran_at|date:"Y-m-d H:i:s" }}</td>
+                <td class="mono text-xs">{% if c.duration_ms is not None %}{{ c.duration_ms }} ms{% else %}-{% endif %}</td>
+                <td class="mono text-xs">{% if c.details.compressed_bytes %}{{ c.details.compressed_bytes|filesizeformat }}{% else %}-{% endif %}</td>
+                <td class="mono text-xs text-content-muted truncate max-w-xs">{{ c.details.key|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}
+    <p class="text-content-muted mb-0">No backup runs recorded yet.</p>
+    {% endif %}
+</div>
 
-	<div class="row g-4 mt-1">
-		<div class="col-12 col-md-6">
-			<div class="card h-100">
-				<div class="card-body">
-					<h5 class="card-title">Users</h5>
-					<p class="mb-0"><strong>Registered Users:</strong> {{ user_count }}</p>
-				</div>
-			</div>
-		</div>
-		<div class="col-12 col-md-6">
-			<div class="card h-100">
-				<div class="card-body">
-					<h5 class="card-title">Users per Project</h5>
-					{% if project_user_list %}
-						<div class="table-responsive">
-							<table class="table table-sm align-middle mb-0">
-								<thead>
-									<tr>
-										<th>Project</th>
-										<th class="text-end">Users</th>
-										<th>Usernames</th>
-									</tr>
-								</thead>
-								<tbody>
-								{% for p in project_user_list %}
-									<tr>
-										<td>{{ p.project_name }}</td>
-										<td class="text-end">{{ p.num_users }}</td>
-										<td>
-											{% if p.usernames %}
-												<code>{{ p.usernames|join:', ' }}</code>
-											{% else %}
-												<span class="text-muted">-</span>
-											{% endif %}
-										</td>
-									</tr>
-								{% endfor %}
-								</tbody>
-							</table>
-						</div>
-					{% else %}
-						<div class="alert alert-info mb-0">No projects found.</div>
-					{% endif %}
-				</div>
-			</div>
-		</div>
-	</div>
+<!-- Jobs -->
+<div class="card-ygg card-ygg-body mb-6">
+    <h2 class="font-semibold mb-4">Jobs</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+        <div class="stat-tile"><div class="stat-value">{{ job_counts.total|default:0 }}</div><div class="stat-label">Total</div></div>
+        <div class="stat-tile"><div class="stat-value">{{ job_counts.pending|default:0 }}</div><div class="stat-label">Pending</div></div>
+        <div class="stat-tile"><div class="stat-value">{{ job_counts.processing|default:0 }}</div><div class="stat-label">Processing</div></div>
+        <div class="stat-tile"><div class="stat-value">{{ job_counts.completed|default:0 }}</div><div class="stat-label">Completed</div></div>
+        <div class="stat-tile"><div class="stat-value">{{ job_counts.failed|default:0 }}</div><div class="stat-label">Failed</div></div>
+    </div>
+    <h3 class="text-sm font-semibold text-content-muted uppercase tracking-wide mb-2">Pending by modality</h3>
+    {% if pending_by_modality %}
+    <ul class="divide-y divide-line">
+        {% for m in pending_by_modality %}
+        <li class="flex justify-between py-1.5 text-sm"><span>{{ m.name }} <span class="mono text-xs text-content-muted">({{ m.slug }})</span></span><span class="font-semibold mono">{{ m.pending }}</span></li>
+        {% endfor %}
+    </ul>
+    {% else %}<p class="text-content-muted mb-0">No modalities found.</p>{% endif %}
+</div>
+
+<!-- Users -->
+<div class="grid gap-6 lg:grid-cols-2">
+    <div class="card-ygg card-ygg-body">
+        <h2 class="font-semibold mb-3">Users</h2>
+        <p class="mb-0">Registered users: <strong class="mono">{{ user_count }}</strong></p>
+    </div>
+    <div class="card-ygg card-ygg-body">
+        <h2 class="font-semibold mb-3">Users per project</h2>
+        {% if project_user_list %}
+        <div class="overflow-x-auto"><table class="table-ygg">
+            <thead><tr><th>Project</th><th class="text-right">Users</th><th>Usernames</th></tr></thead>
+            <tbody>
+                {% for p in project_user_list %}
+                <tr>
+                    <td>{{ p.project_name }}</td>
+                    <td class="text-right mono">{{ p.num_users }}</td>
+                    <td>{% if p.usernames %}<code class="mono text-xs">{{ p.usernames|join:', ' }}</code>{% else %}<span class="text-content-muted">-</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<div class="alert-ygg alert-info">No projects found.</div>{% endif %}
+    </div>
 </div>
 {% endblock %}

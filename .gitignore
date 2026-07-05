@@ -216,3 +216,4 @@ CLAUDE.md
 # ONNX Models
 static/vendor/transformers/models/
 static/vendor/transformers/onnxruntime*/
+scripts/.bin/

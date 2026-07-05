@@ -1,176 +1,84 @@
 /*
- * Yggdrasil sitewide theme — typography + global chrome only.
+ * Yggdrasil sitewide theme — self-hosted fonts + Bootstrap chromatic overrides.
  *
- * SCOPE GUARD: this file styles shared chrome (base typography, navbar,
- * headings, footer, generic cards/buttons). It MUST NOT restyle annotation
- * viewers or patient-detail internals — those keep the UI annotators know.
- * Do not add selectors targeting image_viewer / intraoral_segmentation /
- * viewer_grid / patient_detail components here. Chromatic overrides only:
- * never change sizing, spacing or display of Bootstrap components, because
- * viewer pages inherit this file.
+ * SCOPE GUARD: global chrome (navbar/footer/typography) now lives in the
+ * Tailwind layer (tailwind.css / tailwind.src.css). This file keeps only:
+ *   1. @font-face for the self-hosted IBM Plex families (GDPR: no CDN fonts).
+ *   2. COLOR-ONLY overrides for Bootstrap components, which are loaded ONLY on
+ *      the patient list / patient detail viewer pages (scoped legacy layer).
+ * It MUST NOT restyle annotation viewers or change sizing/spacing/display of
+ * Bootstrap components — viewer pages inherit this file.
  *
- * Tokens live in tokens.css (loaded first). Fonts are self-hosted
- * (GDPR: no Google Fonts CDN). See static/fonts/.
+ * Tokens live in tokens.css (loaded first).
  */
 
-/* ---- Self-hosted webfonts ---------------------------------------------- */
+/* ---- Self-hosted webfonts (IBM Plex Sans + Mono) ----------------------- */
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('../fonts/inter-latin-400-normal.woff2') format('woff2');
+    font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 400; font-display: swap;
+    src: url('../fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 500;
-    font-display: swap;
-    src: url('../fonts/inter-latin-500-normal.woff2') format('woff2');
+    font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 500; font-display: swap;
+    src: url('../fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('../fonts/inter-latin-600-normal.woff2') format('woff2');
+    font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 600; font-display: swap;
+    src: url('../fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Cinzel';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('../fonts/cinzel-latin-600-normal.woff2') format('woff2');
+    font-family: 'IBM Plex Sans';
+    font-style: normal; font-weight: 700; font-display: swap;
+    src: url('../fonts/ibm-plex-sans-latin-700-normal.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Cinzel';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('../fonts/cinzel-latin-700-normal.woff2') format('woff2');
+    font-family: 'IBM Plex Mono';
+    font-style: normal; font-weight: 400; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal; font-weight: 500; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal; font-weight: 600; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
 }
 
-/* ---- Base typography ---------------------------------------------------- */
-body {
-    font-family: var(--ygg-font-body);
-    background-color: var(--ygg-surface-alt);
-    color: var(--ygg-text);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+/* ==========================================================================
+ * Bootstrap chromatic overrides — ONLY affect pages that load Bootstrap
+ * (patient list / patient detail). Colors only, never geometry.
+ * ======================================================================== */
+.btn { font-family: var(--ygg-font-body); font-weight: 500; }
+.btn-primary {
+    --bs-btn-bg: var(--ygg-green-600);
+    --bs-btn-border-color: var(--ygg-green-600);
+    --bs-btn-hover-bg: var(--ygg-green-700);
+    --bs-btn-hover-border-color: var(--ygg-green-700);
+    --bs-btn-active-bg: var(--ygg-green-700);
+    --bs-btn-active-border-color: var(--ygg-green-700);
+    --bs-btn-disabled-bg: var(--ygg-green-600);
+    --bs-btn-disabled-border-color: var(--ygg-green-600);
 }
-
-h1, h2, h3, .h1, .h2, .h3 {
-    font-family: var(--ygg-font-display);
-    letter-spacing: 0.01em;
+.btn-outline-primary {
+    --bs-btn-color: var(--ygg-green-700);
+    --bs-btn-border-color: var(--ygg-green-600);
+    --bs-btn-hover-bg: var(--ygg-green-600);
+    --bs-btn-hover-border-color: var(--ygg-green-600);
+    --bs-btn-active-bg: var(--ygg-green-700);
+    --bs-btn-active-border-color: var(--ygg-green-700);
 }
-
-main a:not(.btn):not(.nav-link):not(.dropdown-item):not(.badge) {
-    color: var(--ygg-link);
-}
-
+.card { --bs-card-border-color: var(--ygg-border); }
 .text-muted { color: var(--ygg-text-muted) !important; }
 .badge { font-weight: 500; }
 .uniform-btn { min-width: 90px; height: 32px; line-height: 18px; }
+.form-control, .form-select { margin-top: 0.25rem; }
 
-/* ---- Bootstrap chromatic overrides (colors only, never geometry) -------- */
-.btn {
-    font-family: var(--ygg-font-body);
-    font-weight: 500;
-}
-.btn-primary {
-    --bs-btn-bg: var(--ygg-navy-600);
-    --bs-btn-border-color: var(--ygg-navy-600);
-    --bs-btn-hover-bg: var(--ygg-navy-500);
-    --bs-btn-hover-border-color: var(--ygg-navy-500);
-    --bs-btn-active-bg: var(--ygg-navy-500);
-    --bs-btn-active-border-color: var(--ygg-navy-500);
-    --bs-btn-disabled-bg: var(--ygg-navy-600);
-    --bs-btn-disabled-border-color: var(--ygg-navy-600);
-}
-.btn-outline-primary {
-    --bs-btn-color: var(--ygg-navy-600);
-    --bs-btn-border-color: var(--ygg-navy-600);
-    --bs-btn-hover-bg: var(--ygg-navy-600);
-    --bs-btn-hover-border-color: var(--ygg-navy-600);
-    --bs-btn-active-bg: var(--ygg-navy-600);
-    --bs-btn-active-border-color: var(--ygg-navy-600);
-}
-.card {
-    --bs-card-border-color: var(--ygg-border);
-}
-
-/* Form spacing kept from the pre-2.0 inline base style */
-.form-control, .form-select {
-    margin-top: 0.25rem;
-}
-
-/* ---- Navbar (.ygg-navbar) ------------------------------------------------ */
-.ygg-navbar {
-    background: linear-gradient(180deg, var(--ygg-ink-800), var(--ygg-ink-700));
-    border-bottom: 1px solid rgba(201, 162, 75, 0.25);
-}
-.ygg-navbar .navbar-brand {
-    font-family: var(--ygg-font-display);
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: var(--ygg-gold-200);
-}
-.ygg-navbar .navbar-brand:hover,
-.ygg-navbar .navbar-brand:focus {
-    color: var(--ygg-gold-400);
-}
-.ygg-navbar .brand-mark {
-    height: 24px;
-    width: auto;
-    display: inline-block;
-    vertical-align: text-bottom;
-}
-.ygg-navbar .navbar-nav .nav-link,
-.ygg-navbar .navbar-nav .nav-link.dropdown-toggle,
-.ygg-navbar .navbar-nav .nav-link:focus {
-    color: #fff;
-    opacity: 1;
-    border-bottom: 2px solid transparent;
-}
-.ygg-navbar .navbar-nav .nav-link:hover,
-.ygg-navbar .navbar-nav .nav-link.active {
-    color: var(--ygg-gold-200);
-    border-bottom-color: var(--ygg-gold-500);
-}
-
-/* Logout button inside the user dropdown */
+/* Logout button inside the user dropdown (Bootstrap dropdown pages) */
 .dropdown-item.p-0 { overflow: hidden; }
-.dropdown-item.p-0 .btn-link {
-    color: inherit;
-    font-weight: inherit;
-}
-.dropdown-item.p-0 .btn-link:hover {
-    background-color: var(--ygg-surface-alt);
-    color: inherit;
-}
-
-/* Gold badge (public-demo marker etc.) */
-.ygg-badge-gold {
-    background: var(--ygg-gold-500);
-    color: var(--ygg-ink-900);
-}
-
-/* ---- Footer (.ygg-footer) ------------------------------------------------ */
-.ygg-footer {
-    background: var(--ygg-surface);
-    border-top: 1px solid var(--ygg-border);
-    position: relative;
-}
-.ygg-footer::before {
-    content: "";
-    position: absolute;
-    top: -1px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 120px;
-    height: 2px;
-    background: var(--ygg-gold-500);
-}
-.ygg-footer a { color: var(--ygg-text); }
-.ygg-footer .fa-github { transition: color 150ms ease; }
-.ygg-footer .fa-github:hover { color: var(--ygg-gold-600); }
+.dropdown-item.p-0 .btn-link { color: inherit; font-weight: inherit; }
+.dropdown-item.p-0 .btn-link:hover { background-color: var(--ygg-surface-alt); color: inherit; }
