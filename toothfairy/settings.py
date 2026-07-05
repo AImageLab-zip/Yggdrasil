@@ -96,6 +96,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -145,6 +146,11 @@ DATABASES = {
     }
 }
 
+# FileRegistry.file_path is a unique CharField(max_length=500). MySQL 8 + utf8mb4 caps a
+# unique index at 3072 bytes (768 chars), so 500 is safe; silence the conservative
+# mysql.W003 warning so `migrate --check` stays clean.
+SILENCED_SYSTEM_CHECKS = ["mysql.W003"]
+
 # Validate required database credentials
 if not DATABASES["default"]["NAME"]:
     raise ValueError("DB_NAME environment variable must be set")
@@ -190,6 +196,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
+
+# WhiteNoise serves collected static files from gunicorn in production (DEBUG=False),
+# since the external nginx-proxy forwards /static/* straight through to the app.
+# Compressed (not manifest) storage: templates reference assets by literal path, so
+# filenames must stay stable — manifest hashing would 404 those refs.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 
 # File Upload Settings
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB

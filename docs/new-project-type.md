@@ -13,7 +13,7 @@ Pick a short lowercase slug, e.g. `endo`. It becomes the Django app label, the `
 ## 2. Create the app
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py startapp endo
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py startapp endo
 ```
 
 Give it the same shape as `brain/`/`laparoscopy/`:
@@ -56,8 +56,8 @@ This is the one piece that still needs a shared-table edit — the `Job`, `Proce
 Then:
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py makemigrations
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py makemigrations
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate
 ```
 
 ## 5. Write the modality bootstrap command
@@ -71,7 +71,7 @@ Copy `laparoscopy/management/commands/setup_laparoscopy_modalities.py` (or the `
 Run it after migrating (see [docs/setup.md](setup.md)):
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py setup_endo_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_endo_modalities
 ```
 
 Optionally add a `ModalityProcessingConfig` row per modality (Phase 4) if you need non-default worker/queue/blocking behavior; absent rows fall back to legacy defaults.

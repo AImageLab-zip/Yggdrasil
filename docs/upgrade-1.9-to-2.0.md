@@ -30,7 +30,17 @@ This is the path frozen by tag `v1.9.0` (commit `52d1557`) and risk item #0 in
   cut). A completed [setup.md](setup.md) `.env` — same `MYSQL_DATABASE` name is fine;
   secrets (`SECRET_KEY`, DB/Redis passwords, `RUNNER_API_TOKENS`) can be new.
 
-Throughout, `$DOCKER_SUFFIX` is the value from your 2.0 `.env` (e.g. `prod`).
+Throughout, `$DOCKER_SUFFIX` is the value from your 2.0 `.env` (e.g. `prod`). The
+`docker exec` / `docker compose` commands below interpolate it (and `UID`/`GID`) from
+your shell, so export them **once per session** before you start — otherwise container
+names resolve to `yggdrasil-web-` (→ `No such container`) and compose warns
+`UID variable is not set`:
+
+```bash
+export DOCKER_SUFFIX=prod           # match DOCKER_SUFFIX in your .env
+export UID="$(id -u)" GID="$(id -g)"
+# If your user isn't in the `docker` group, prefix docker commands with sudo.
+```
 
 ---
 
@@ -96,13 +106,13 @@ sees the restored `django_migrations` and applies only the migrations added afte
 ```bash
 docker compose --env-file .env up -d --build   # web entrypoint runs migrate --noinput
 # or, with AUTO_MIGRATE=0, run it explicitly:
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate
 ```
 
 Confirm the plan is additive-only if you want to eyeball it first:
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate --plan
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate --plan
 ```
 
 ## Step 5 — Carry over object storage
@@ -125,9 +135,9 @@ Modality registration is idempotent — re-run so any modality rows added in 2.0
 (see [setup.md](setup.md) step 6):
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py create_maxillo_modalities
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py setup_brain_modalities
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py create_maxillo_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_brain_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
 ```
 
 Then the two behaviour-change follow-ups from the roadmap risk register:
@@ -151,15 +161,22 @@ host; 3–4 need the app serving and a runner; 5 is the tag.
 
 ### 1. Risk-item-0 rehearsal (release blocker)
 
-Prove a real 1.9 dump migrates clean and the suite passes on top of it. This is
-Steps 1→4 above against a **scratch** stack, then:
+Prove a real 1.9 dump migrates clean on top of a restored database. This is
+Steps 1→4 above against a **scratch** stack, then confirm no migrations are pending:
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate --check   # no pending
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py test              # full suite green
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate --check   # no pending
 ```
 
 You do not need object storage for this rehearsal — it exercises schema + ORM only.
+
+> **Do not run `manage.py test` against this stack.** The prod/app DB user is scoped to
+> the one application database and lacks `CREATE` privilege for the `test_*` database
+> Django builds, so the suite fails with `(1044, "Access denied ... to database
+> 'test_yggdrasil'")`. Run the full suite via the dev/CI path, which is already
+> configured with a root DB user: `docker compose -f docker-compose.dev.yml run --rm web
+> python manage.py test` (or let CI run it). "Full suite green" is a CI gate, not a
+> prod-container step.
 
 ### 2. Backup restore test (Phase 2)
 
@@ -167,11 +184,15 @@ Prove the automated backup path round-trips: produce a dump with the 2.0 tooling
 then restore it into a throwaway DB.
 
 ```bash
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py backup_now   # writes to object storage
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py backup_now   # writes to object storage
 ./scripts/backup_prod.sh ./backups                                            # or a local dump
 # restore into a scratch stack and confirm it loads:
 FORCE=1 ./scripts/restore_prod.sh ./backups/prod_backup_*.sql.gz
 ```
+
+`backup_prod.sh` ends with a schema sanity check that confirms the dump holds the core
+2.0 tables — it prints `Core schema check passed.` on a healthy 2.0 backup (it does
+**not** warn about absent legacy `scans_*` tables; those were renamed in 2.0).
 
 Also check `/status/` (staff-only) shows the backup freshness check green (it WARNs
 when the newest successful backup is older than 26h), and `/healthz` returns 200.
@@ -182,7 +203,7 @@ The suite runs under the dev server; confirm a **large** export download streams
 correctly under gunicorn (the production server). With the stack up
 (`RUN_DEV_SERVER` unset, so gunicorn is serving), trigger an export of a big patient
 in the UI and download the share link — confirm the full file arrives, not truncated,
-and memory stays flat (`docker stats toothfairy4m-web-$DOCKER_SUFFIX` during the
+and memory stays flat (`docker stats yggdrasil-web-$DOCKER_SUFFIX` during the
 download).
 
 ### 4. Real-runner callback (Phase 0 / risk #1)

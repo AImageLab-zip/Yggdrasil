@@ -12,11 +12,11 @@ First-time setup for running Yggdrasil locally with Docker Compose.
 Two infrastructure pieces sit outside the Django app's own code and are easy to overlook:
 
 - **Redis** — started as the `redis` service in [docker-compose.yml](../docker-compose.yml) (so `docker compose up` brings it up for you), but it isn't just an internal cache: it's the Celery broker that external distributed runners connect to directly to pick up and report on jobs (see [docs/runners.md](runners.md)). If you change `REDIS_PASSWORD` or `REDIS_EXTERNAL_PORT`, runner nodes need the matching values too.
-- **Garage** (or any S3-compatible object store, e.g. MinIO) — **not** part of `docker-compose.yml` at all. It's a fully external service that must already be running and reachable from the `toothfairy4m-web-$DOCKER_SUFFIX` container at `OBJECT_STORAGE_ENDPOINT_URL` (`.env.example` defaults to `http://garage:3900`). Make sure that container can actually resolve/reach the `garage` host — either join the same Docker network Garage is on, or point `OBJECT_STORAGE_ENDPOINT_URL` at a routable address — otherwise uploads/exports will fail with object storage errors (check `/api/processing/health/`, see [docs/running.md](running.md)).
+- **Garage** (or any S3-compatible object store, e.g. MinIO) — **not** part of `docker-compose.yml` at all. It's a fully external service that must already be running and reachable from the `yggdrasil-web-$DOCKER_SUFFIX` container at `OBJECT_STORAGE_ENDPOINT_URL` (`.env.example` defaults to `http://garage:3900`). Make sure that container can actually resolve/reach the `garage` host — either join the same Docker network Garage is on, or point `OBJECT_STORAGE_ENDPOINT_URL` at a routable address — otherwise uploads/exports will fail with object storage errors (check `/api/processing/health/`, see [docs/running.md](running.md)).
 
 ## 1. Pick a `DOCKER_SUFFIX`
 
-Every container, network, and project name in [docker-compose.yml](../docker-compose.yml) is suffixed with `$DOCKER_SUFFIX`, e.g. `toothfairy4m-web-$DOCKER_SUFFIX`, `app-net-$DOCKER_SUFFIX`. This lets multiple stacks (your dev instance, a teammate's, production) run on the same host without colliding.
+Every container, network, and project name in [docker-compose.yml](../docker-compose.yml) is suffixed with `$DOCKER_SUFFIX`, e.g. `yggdrasil-web-$DOCKER_SUFFIX`, `app-net-$DOCKER_SUFFIX`. This lets multiple stacks (your dev instance, a teammate's, production) run on the same host without colliding.
 
 Pick something unique to you, e.g. `dev-yourname`, or `prod` for the production deployment.
 
@@ -67,7 +67,7 @@ This builds the web image, then starts `web` (Django), `db` (MySQL), and `redis`
 
 ```bash
 export DOCKER_SUFFIX=YOUR-DOCKER-SUFFIX
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py migrate
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate
 ```
 
 The container serves the app with gunicorn (`GUNICORN_WORKERS`, `GUNICORN_TIMEOUT` tunable via `.env`). For local development with auto-reload, set `RUN_DEV_SERVER=1` to use Django's dev server instead.
@@ -78,13 +78,13 @@ Each project app ships a management command that creates its `Project` row and r
 
 ```bash
 # Maxillo: CBCT, IOS, intraoral photos, teleradiography, panoramic, raw zip
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py create_maxillo_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py create_maxillo_modalities
 
 # Brain: reuses the same Patient/Modality model under its own project namespace
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py setup_brain_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_brain_modalities
 
 # Laparoscopy: video modality
-docker exec -it toothfairy4m-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
 ```
 
 These are idempotent (`get_or_create` + update) — safe to re-run after upgrades that add/change modalities.
