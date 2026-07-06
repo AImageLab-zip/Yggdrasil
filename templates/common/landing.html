@@ -41,8 +41,11 @@
 
 <!-- Masthead -->
 <header class="landing-top">
-    <h1 class="landing-title">Ygg<span class="accent">drasil</span></h1>
-    <p class="landing-tagline">One tree · every realm</p>
+    <div class="landing-lockup">
+        <img class="landing-tree" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+        <h1 class="landing-title" id="landing-title" data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ">Ygg<span class="accent">drasil</span></h1>
+    </div>
+    <p class="landing-tagline">Taking its name from the cosmic tree of Norse mythology, YGGDRASIL represents a unified platform that connects diverse research fields, datasets, users, and workflows</p>
     {% if user.is_authenticated and not projects %}
         <p class="landing-notice">{% icon 'lock' %} You don't have access to any project yet. Contact an administrator if you believe this is an error.</p>
     {% endif %}
@@ -53,7 +56,7 @@
     <!-- Maxillofacial -->
     <a class="domain domain--maxillo" href="{% if user.is_authenticated %}/maxillo/{% else %}{% url 'login' %}{% endif %}">
         <span class="domain__code">Maxillo · dental &amp; cranio-facial</span>
-        <h2 class="domain__title">Maxillofacial imaging</h2>
+        <h2 class="domain__title">Maxillofacial Imaging</h2>
         <p class="domain__desc">Cone-beam CT, intraoral 3D scans, panoramic and teleradiographic views — reviewed side by side, with intraoral segmentation and bite analysis.</p>
         <div class="domain__art">
             <svg viewBox="0 0 320 240" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -74,7 +77,7 @@
     <!-- Neuro-oncology -->
     <a class="domain domain--brain" href="{% if user.is_authenticated %}/brain/{% else %}{% url 'login' %}{% endif %}">
         <span class="domain__code">Neuro · tumor MRI</span>
-        <h2 class="domain__title">Neuro-oncology MRI</h2>
+        <h2 class="domain__title">Neuro-Oncology MRI</h2>
         <p class="domain__desc">Multiparametric brain-tumor MRI — T1, T1c, T2 and FLAIR — in a synchronized four-window grid alongside model segmentations and structured reports.</p>
         <div class="domain__art">
             <svg viewBox="0 0 320 240" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -95,7 +98,7 @@
     <!-- Laparoscopy -->
     <a class="domain domain--laparoscopy" href="{% if user.is_authenticated %}/laparoscopy/{% else %}{% url 'login' %}{% endif %}">
         <span class="domain__code">Laparo · surgical video</span>
-        <h2 class="domain__title">Surgical video review</h2>
+        <h2 class="domain__title">Surgical Video Review</h2>
         <p class="domain__desc">Laparoscopic procedure video with frame-accurate scrubbing and a canvas annotation layer — mark instruments, anatomy and events second by second.</p>
         <div class="domain__art">
             <svg viewBox="0 0 320 240" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -119,4 +122,18 @@
     </a>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var title = document.getElementById('landing-title');
+    if (!title || Math.random() < 0.5) {
+        return;
+    }
+    title.textContent = title.dataset.runes;
+    title.classList.add('title--runes');
+    title.setAttribute('aria-label', title.dataset.title);
+});
+</script>
 {% endblock %}

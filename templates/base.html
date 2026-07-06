@@ -7,8 +7,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Yggdrasil{% endblock %}</title>
 
-    <!-- Favicon (plain 'Y' glyph, SVG) -->
+    <!-- Favicon (Yggdrasil tree) -->
+    <link rel="icon" href="{% static 'icons/favicon.ico' %}" sizes="any">
     <link rel="icon" href="{% static 'icons/favicon.svg' %}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
+    <link rel="manifest" href="{% static 'icons/site.webmanifest' %}">
 
     <!-- Viewer runtime globals (loaded on every page so patient-detail viewers
          find THREE / fflate / nifti already present before their init) -->
@@ -29,8 +32,12 @@
     {% block navbar %}
     <nav class="ygg-nav">
         <div class="ygg-nav-inner">
-            <!-- Brand + project switcher -->
+            <!-- Brand (tree + wordmark) + project switcher -->
             <div class="flex items-center gap-2 shrink-0">
+                <a class="ygg-brand shrink-0" href="/">
+                    <img class="ygg-brand-logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+                    {% include 'common/partials/wordmark.html' %}
+                </a>
                 {% if user.is_authenticated and user.is_staff and all_projects %}
                     <div class="relative" data-dropdown>
                         <button type="button" class="ygg-nav-link" data-dropdown-toggle aria-expanded="false" aria-label="Switch project">
@@ -52,9 +59,6 @@
                         </div>
                     </div>
                 {% endif %}
-                <a class="ygg-brand shrink-0" href="{% if user.is_authenticated %}{% url ns|add:':patient_list' %}{% else %}/{% endif %}">
-                    {% include 'common/partials/wordmark.html' %}
-                </a>
             </div>
 
             <!-- Desktop nav -->
@@ -122,14 +126,46 @@
     </main>
 
     {% block footer %}
-    <footer class="ygg-footer relative mt-16 border-t border-line bg-surface">
+    <footer class="ygg-footer relative border-t border-line bg-surface" data-footer>
         <span class="absolute left-1/2 -translate-x-1/2 -top-px h-0.5 w-28 bg-gold-500"></span>
-        <div class="mx-auto max-w-content px-4 py-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-content-muted">
-            <span>&copy; 2026 Yggdrasil</span>
-            <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-content-muted hover:text-content" aria-label="GitHub repository">{% icon 'github' %}</a>
-            <span class="mono text-xs">v{{ app_version }}</span>
-            <span class="badge-ygg badge-ok">Yggdrasil 2.0</span>
+        <div class="px-4 py-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 text-sm text-content-muted">
+            <!-- Left: powered by AImageLab + AI note -->
+            <div class="flex flex-col gap-1">
+                <a href="https://ditto.ing.unimore.it/" target="_blank" rel="noopener" class="inline-flex items-center gap-2 text-content-muted hover:text-content" aria-label="Powered by AImageLab">
+                    <span>Powered by</span>
+                    <img class="footer-aimagelab" src="{% static 'icons/aimagelab-logo.svg' %}" alt="AImageLab">
+                </a>
+                <span class="footer-ai-note">Crafted with AI assistance</span>
+            </div>
+            <!-- Right: version / links -->
+            <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                <span>&copy; 2026 Yggdrasil</span>
+                <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-content-muted hover:text-content" aria-label="GitHub repository">{% icon 'github' %}</a>
+                <span class="mono text-xs">v{{ app_version }}</span>
+                <span class="badge-ygg badge-ok">Yggdrasil 2.0</span>
+            </div>
         </div>
+        <script>
+            (function () {
+                var note = document.querySelector('.footer-ai-note');
+                if (!note) { return; }
+                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    note.classList.add('is-visible');
+                    return;
+                }
+                var footer = document.querySelector('[data-footer]');
+                if (!('IntersectionObserver' in window) || !footer) {
+                    note.classList.add('is-visible');
+                    return;
+                }
+                var io = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (e) {
+                        if (e.isIntersecting) { note.classList.add('is-visible'); }
+                    });
+                }, { threshold: 0.9 });
+                io.observe(footer);
+            })();
+        </script>
     </footer>
     {% endblock %}
 

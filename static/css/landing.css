@@ -29,6 +29,17 @@
     text-align: center;
     padding: 1.75rem 1.25rem 1.25rem;
 }
+.landing-lockup {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+}
+.landing-tree {
+    height: clamp(2.4rem, 6vw, 3.9rem);
+    width: auto;
+    display: block;
+}
 .landing-title {
     font-family: var(--ygg-font-display);
     font-weight: 700;
@@ -40,12 +51,53 @@
 }
 .landing-title .accent { color: var(--ygg-green-600); }
 .landing-tagline {
-    font-family: var(--ygg-font-mono);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    font-size: 0.8rem;
-    color: var(--ygg-green-700);
-    margin: 0.6rem 0 0;
+    font-family: var(--ygg-font-body);
+    letter-spacing: 0.01em;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--ygg-text-muted);
+    max-width: 46rem;
+    margin: 0.9rem auto 0;
+}
+
+/* ---- Norse-rune reveal (restored from v1.9; ~50% of loads) ------------- */
+#landing-title.title--runes {
+    position: relative;
+    display: inline-block;
+    letter-spacing: 0.18em;
+    color: var(--ygg-green-600);
+    text-shadow: 0 0 18px rgba(120, 200, 160, 0.35);
+    animation: rune-flicker 3.8s infinite steps(1, end);
+}
+#landing-title.title--runes::before {
+    content: "";
+    position: absolute;
+    inset: -18px;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 12% 38%, rgba(226, 252, 255, 0.9) 0 1px, transparent 2px),
+        radial-gradient(circle at 24% 76%, rgba(204, 242, 255, 0.72) 0 1px, transparent 2px),
+        radial-gradient(circle at 66% 22%, rgba(176, 223, 255, 0.78) 0 1px, transparent 2px),
+        radial-gradient(circle at 84% 64%, rgba(244, 255, 255, 0.74) 0 1px, transparent 2px),
+        radial-gradient(circle at 46% 88%, rgba(190, 232, 255, 0.64) 0 1px, transparent 2px);
+    filter: blur(0.4px);
+    opacity: 0.72;
+    animation: rune-sparks 2.2s infinite linear;
+}
+@keyframes rune-flicker {
+    0%, 9%, 13%, 47%, 51%, 77%, 100% { opacity: 1; }
+    10%, 50% { opacity: 0.84; }
+    12%, 78% { opacity: 0.94; }
+}
+@keyframes rune-sparks {
+    0% { opacity: 0.24; transform: translate3d(-6px, 8px, 0) scale(0.98); }
+    35% { opacity: 0.86; transform: translate3d(5px, -5px, 0) scale(1.02); }
+    70% { opacity: 0.46; transform: translate3d(10px, -12px, 0) scale(1); }
+    100% { opacity: 0.2; transform: translate3d(16px, -20px, 0) scale(0.96); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #landing-title.title--runes,
+    #landing-title.title--runes::before { animation: none; }
 }
 .landing-notice {
     display: inline-flex;
