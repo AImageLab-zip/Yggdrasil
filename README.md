@@ -42,11 +42,25 @@ Live instance: [https://yggdrasil.ing.unimore.it](https://yggdrasil.ing.unimore.
 - [docs/runners.md](docs/runners.md) — distributed Celery runners and the runner callback API
 - [docs/admin-tasks.md](docs/admin-tasks.md) — one-off ops scripts (superuser, DB import)
 - [docs/new-project-type.md](docs/new-project-type.md) — adding a new project app (like Maxillo, Brain, or Laparoscopy)
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute: Docker quickstart, tests, CI, migrations, branch conventions
 
 Notes:
 
 - Django accepts either `DB_NAME/DB_USER/DB_PASSWORD` or the `MYSQL_*` variables.
 - Object storage is S3-compatible (Garage/MinIO) via `OBJECT_STORAGE_*`.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, which covers:
+
+- **Quickstart (Docker only)** — spin up the stack and start developing
+- **Running tests** — how to run the suite locally
+- **CI** — the pipeline and self-hosted runner setup
+- **Versioning and releases** — release/tag conventions
+- **Database migrations — additive only** — migrations after `v1.9.0` must be strictly additive so a v1.9 dump can restore onto a fresh 2.0 database
+- **Branch conventions** — how branches are named and merged
+
+Please open an issue or pull request against the `release/2.0` branch.
 
 ## Contact
 

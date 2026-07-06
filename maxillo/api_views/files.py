@@ -129,6 +129,16 @@ def serve_file(request, file_id):
                 )
                 return JsonResponse({"error": "Permission denied"}, status=403)
 
+        # Security backstop: a raw input that is discarded, or blocked until its
+        # processing completes, must never be served even via a direct URL.
+        from common.modality_config import raw_file_hidden
+
+        if raw_file_hidden(file_obj):
+            logger.warning(
+                f"User {request.user.id} blocked from raw file {file_id} (discard/blocking gate)"
+            )
+            return JsonResponse({"error": "File not found"}, status=404)
+
         # Determine content type
         content_type, _ = mimetypes.guess_type(resolved_file_path)
         if not content_type:

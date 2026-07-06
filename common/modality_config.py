@@ -99,3 +99,82 @@ def modality_is_blocking(modality_slug):
     if step is not None:
         return step.is_blocking
     return modality_requires_processing(modality_slug)
+
+
+def modality_discard_raw(modality_slug):
+    """Whether this modality's raw input files are hidden as a security screen.
+
+    True only when a step row exists and has ``discard_raw`` set; absent a step
+    row we stay permissive (legacy behavior)."""
+    step = get_step(modality_slug)
+    if step is not None:
+        return bool(step.discard_raw)
+    return False
+
+
+def _modality_slug_for_file(file_obj):
+    """Best-effort modality slug for a FileRegistry row.
+
+    Resolves via the modality FK, then a ``modality_slug`` in metadata, then the
+    ``{slug}_raw`` file_type prefix. Returns '' when nothing resolves.
+    """
+    modality = getattr(file_obj, "modality", None)
+    if modality is not None and getattr(modality, "slug", ""):
+        return str(modality.slug).strip()
+    metadata = getattr(file_obj, "metadata", None)
+    if isinstance(metadata, dict) and metadata.get("modality_slug"):
+        return str(metadata["modality_slug"]).strip()
+    file_type = str(getattr(file_obj, "file_type", "") or "")
+    if file_type.endswith("_raw"):
+        return file_type[: -len("_raw")]
+    return ""
+
+
+def _file_is_raw(file_obj):
+    file_type = str(getattr(file_obj, "file_type", "") or "")
+    return file_type.endswith("_raw") or file_type == "rgb_image"
+
+
+def _processed_exists_for(file_obj, slug):
+    """Whether a ``{slug}_processed`` file exists for the same owning patient."""
+    if not slug:
+        return False
+    from common.models import FileRegistry
+    owner_fields = ("patient", "brain_patient", "laparoscopy_patient")
+    filters = {}
+    for field in owner_fields:
+        owner = getattr(file_obj, f"{field}_id", None)
+        if owner:
+            filters[field] = owner
+            break
+    if not filters:
+        return False
+    try:
+        return FileRegistry.objects.filter(
+            file_type=f"{slug}_processed", **filters
+        ).exists()
+    except DatabaseError:
+        return False
+
+
+def raw_file_hidden(file_obj):
+    """Whether a raw FileRegistry row must NOT be listed or served.
+
+    Central gate shared by the file listing, the per-modality data endpoints and
+    the serve_file backstop. Only raw inputs are affected:
+      - ``discard_raw`` on the modality's step  -> always hidden.
+      - ``is_blocking`` on the step AND no ``{slug}_processed`` file yet -> hidden
+        until processing produces a processed output.
+    Non-raw files, and modalities without a step row, are never hidden here.
+    """
+    if not _file_is_raw(file_obj):
+        return False
+    slug = _modality_slug_for_file(file_obj)
+    step = get_step(slug)
+    if step is None:
+        return False
+    if step.discard_raw:
+        return True
+    if step.is_blocking and not _processed_exists_for(file_obj, slug):
+        return True
+    return False

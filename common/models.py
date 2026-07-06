@@ -128,23 +128,32 @@ class ProcessingStep(models.Model):
 	slug = models.SlugField(max_length=60, unique=True)
 	# Explicit queue override; when non-blank it wins over ALL env routing.
 	queue_name = models.CharField(max_length=100, blank=True, default='')
-	# Steps that must complete before this one runs; their outputs become this
-	# step's input. Self-referential DAG (may span modalities, e.g. bite->ios).
+	# Steps whose output feeds this step's input. Declaring one here is what
+	# establishes the dependency: at upload time create_step_jobs wires a
+	# Job.dependencies edge so this step waits for each input to complete, and
+	# Job._pull_dependency_outputs merges each input's outputs into this step's
+	# input_files. Self-referential DAG (may span modalities, e.g. bite->ios).
 	depends_on = models.ManyToManyField(
-		'self', symmetrical=False, blank=True, related_name='dependents'
+		'self', symmetrical=False, blank=True, related_name='dependents',
+		verbose_name='Inputs',
+		help_text="Steps whose output feeds this step's input. Declaring an "
+		"input automatically makes this step wait for it to complete.",
 	)
 	# Disabled steps create no runner Job (absorbs requires_processing + the old
 	# per-modality is_enabled kill switch).
 	is_enabled = models.BooleanField(default=True)
-	# When True, an in-flight job for this step gates patient readiness
-	# (patient shows 'processing'); non-blocking steps never gate.
+	# When True, an in-flight job for this step gates patient readiness (patient
+	# shows 'processing') AND its modality's raw input files stay hidden/
+	# un-downloadable until processing produces a *_processed file.
 	is_blocking = models.BooleanField(default=True)
-	# Lower runs earlier / shown first within a modality.
-	order = models.IntegerField(default=0)
+	# When True, this modality's raw input files are never listed or served in
+	# the patient file view (a security screen). The files still exist in MySQL
+	# and object storage — only visibility/download is blocked.
+	discard_raw = models.BooleanField(default=False)
 	updated_at = models.DateTimeField(auto_now=True)
 
 	class Meta:
-		ordering = ['modality__name', 'order', 'slug']
+		ordering = ['modality__name', 'slug']
 
 	def __str__(self):
 		return f"{self.modality.slug}:{self.slug}"

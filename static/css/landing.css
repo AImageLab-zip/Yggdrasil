@@ -85,11 +85,11 @@
     transition: filter 160ms ease;
 }
 .domain--maxillo { --accent: var(--ygg-maxillo);
-    background: linear-gradient(160deg, rgba(91,141,239,0.16), transparent 60%), var(--ygg-surface); }
+    background: linear-gradient(160deg, rgba(91,141,239,0.14), transparent 60%), var(--ygg-surface-alt); }
 .domain--brain { --accent: var(--ygg-brain);
-    background: linear-gradient(160deg, rgba(20,163,139,0.09), transparent 55%), var(--ygg-surface-alt); }
+    background: linear-gradient(160deg, rgba(20,163,139,0.14), transparent 60%), var(--ygg-surface-alt); }
 .domain--laparoscopy { --accent: var(--ygg-laparoscopy);
-    background: linear-gradient(160deg, rgba(224,120,95,0.16), transparent 60%), var(--ygg-surface); }
+    background: linear-gradient(160deg, rgba(224,120,95,0.14), transparent 60%), var(--ygg-surface-alt); }
 
 /* accent top border grows on hover; whole card lifts */
 .domain::before {

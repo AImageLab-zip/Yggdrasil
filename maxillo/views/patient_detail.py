@@ -320,6 +320,11 @@ def patient_detail(request, patient_id):
             # Categorize files dynamically based on file_type
             # Check for raw files (contains _raw or is rgb_image)
             if '_raw' in file_obj.file_type or file_obj.file_type == 'rgb_image':
+                # Security gate: hide raw inputs that are discarded, or blocked
+                # until processing produces a processed output.
+                from common.modality_config import raw_file_hidden
+                if raw_file_hidden(file_obj):
+                    continue
                 patient_files['raw'].append(file_data)
             # Check for processed files (contains _processed or is bite_classification)
             elif '_processed' in file_obj.file_type or file_obj.file_type == 'bite_classification':

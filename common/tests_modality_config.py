@@ -74,6 +74,75 @@ class ModalityConfigAccessorTests(TestCase):
         _step(m, is_blocking=False)
         self.assertFalse(mc.modality_is_blocking("ios"))
 
+    def test_discard_raw_defaults_false_without_step(self):
+        self.assertFalse(mc.modality_discard_raw("panoramic"))
+
+    def test_discard_raw_step_value(self):
+        m = _modality("panoramic")
+        step = _step(m, discard_raw=False)
+        self.assertFalse(mc.modality_discard_raw("panoramic"))
+        step.discard_raw = True
+        step.save()
+        self.assertTrue(mc.modality_discard_raw("panoramic"))
+
+
+@override_settings(RUNNER_QUEUE_BY_MODALITY=None)
+class RawFileHiddenTests(TestCase):
+    """raw_file_hidden gates raw inputs by discard_raw / blocking-until-processed."""
+
+    def _raw(self, patient, file_type="panoramic_raw", path="p/raw.png"):
+        from common.models import FileRegistry
+        return FileRegistry.objects.create(
+            file_type=file_type, file_path=path, file_size=1, file_hash="h",
+            patient=patient,
+        )
+
+    def _processed(self, patient, file_type="panoramic_processed", path="p/proc.png"):
+        from common.models import FileRegistry
+        return FileRegistry.objects.create(
+            file_type=file_type, file_path=path, file_size=1, file_hash="h",
+            patient=patient,
+        )
+
+    def test_no_step_never_hidden(self):
+        from maxillo.models import Patient
+        patient = Patient.objects.create()
+        self.assertFalse(mc.raw_file_hidden(self._raw(patient)))
+
+    def test_non_raw_file_never_hidden(self):
+        m = _modality("panoramic")
+        _step(m, discard_raw=True, is_blocking=True)
+        from maxillo.models import Patient
+        patient = Patient.objects.create()
+        self.assertFalse(mc.raw_file_hidden(self._processed(patient)))
+
+    def test_discard_raw_hides_even_when_processed_exists(self):
+        m = _modality("panoramic")
+        _step(m, discard_raw=True)
+        from maxillo.models import Patient
+        patient = Patient.objects.create()
+        self._processed(patient)
+        self.assertTrue(mc.raw_file_hidden(self._raw(patient)))
+
+    def test_blocking_hides_raw_until_processed_exists(self):
+        m = _modality("panoramic")
+        _step(m, is_blocking=True, discard_raw=False)
+        from maxillo.models import Patient
+        patient = Patient.objects.create()
+        raw = self._raw(patient)
+        # No processed output yet -> blocked/hidden.
+        self.assertTrue(mc.raw_file_hidden(raw))
+        # Processed output present -> gate lifts.
+        self._processed(patient)
+        self.assertFalse(mc.raw_file_hidden(raw))
+
+    def test_nonblocking_non_discard_shows_raw(self):
+        m = _modality("panoramic")
+        _step(m, is_blocking=False, discard_raw=False)
+        from maxillo.models import Patient
+        patient = Patient.objects.create()
+        self.assertFalse(mc.raw_file_hidden(self._raw(patient)))
+
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
 class CreateStepJobsTests(TestCase):

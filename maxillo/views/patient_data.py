@@ -385,6 +385,13 @@ def patient_panoramic_data(request, patient_id):
                 .first()
             )
 
+        # Security gate: never serve a raw input that is discarded or blocked
+        # until processing completes.
+        from common.modality_config import raw_file_hidden, modality_discard_raw
+
+        if panoramic_file and raw_file_hidden(panoramic_file):
+            panoramic_file = None
+
         if panoramic_file and artifact_exists(panoramic_file.file_path):
             source_file_id = (
                 (panoramic_file.metadata or {}).get("source_file_id")
@@ -392,12 +399,14 @@ def patient_panoramic_data(request, patient_id):
                 else None
             )
             source_file_id = source_file_id or panoramic_file.id
+            # The RGB editor consumes raw_url; withhold it when the raw is discarded.
+            expose_raw = not modality_discard_raw("panoramic")
             if request.GET.get("meta") == "1":
                 return JsonResponse(
                     {
                         "url": _serve_file_url(request, panoramic_file.id),
                         "source_file_id": source_file_id,
-                        "raw_url": _serve_file_url(request, source_file_id),
+                        "raw_url": _serve_file_url(request, source_file_id) if expose_raw else None,
                         "is_processed": panoramic_file.file_type.endswith("_processed"),
                     }
                 )
@@ -561,6 +570,13 @@ def patient_teleradiography_data(request, patient_id):
                 .first()
             )
 
+        # Security gate: never serve a raw input that is discarded or blocked
+        # until processing completes.
+        from common.modality_config import raw_file_hidden, modality_discard_raw
+
+        if teleradiography_file and raw_file_hidden(teleradiography_file):
+            teleradiography_file = None
+
         if not teleradiography_file:
             return JsonResponse(
                 {"error": "Teleradiography image not found"}, status=404
@@ -572,12 +588,13 @@ def patient_teleradiography_data(request, patient_id):
             else None
         )
         source_file_id = source_file_id or teleradiography_file.id
+        expose_raw = not modality_discard_raw("teleradiography")
         if request.GET.get("meta") == "1":
             return JsonResponse(
                 {
                     "url": _serve_file_url(request, teleradiography_file.id),
                     "source_file_id": source_file_id,
-                    "raw_url": _serve_file_url(request, source_file_id),
+                    "raw_url": _serve_file_url(request, source_file_id) if expose_raw else None,
                     "is_processed": teleradiography_file.file_type.endswith("_processed"),
                 }
             )
