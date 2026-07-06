@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
-from common.models import Modality, ModalityProcessingConfig
+from common.models import Modality, ProcessingStep
 from common import modality_config as mc
 
 
@@ -10,104 +10,97 @@ def _modality(slug, name=None):
     return Modality.objects.create(slug=slug, name=name or slug.upper())
 
 
+def _step(modality, slug=None, **kwargs):
+    """Create a ProcessingStep. Defaults to the modality's *root* step
+    (slug == modality slug)."""
+    return ProcessingStep.objects.create(
+        modality=modality,
+        name=kwargs.pop("name", slug or modality.slug),
+        slug=slug or modality.slug,
+        **kwargs,
+    )
+
+
 class ModalityConfigAccessorTests(TestCase):
     # Neutralize any local .env env-routing so fallbacks are deterministic.
     @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
-    def test_requires_processing_legacy_fallback_when_no_row(self):
+    def test_requires_processing_legacy_fallback_when_no_step(self):
         self.assertFalse(mc.modality_requires_processing("panoramic"))
         self.assertFalse(mc.modality_requires_processing("teleradiography"))
         self.assertFalse(mc.modality_requires_processing("rawzip"))
         self.assertTrue(mc.modality_requires_processing("ios"))
 
-    def test_requires_processing_row_overrides_legacy(self):
+    def test_requires_processing_step_overrides_legacy(self):
         m = _modality("panoramic")
-        ModalityProcessingConfig.objects.create(modality=m, requires_processing=True)
+        _step(m, is_enabled=True)
         self.assertTrue(mc.modality_requires_processing("panoramic"))
 
         m2 = _modality("ios")
-        ModalityProcessingConfig.objects.create(modality=m2, requires_processing=False)
+        _step(m2, is_enabled=False)
         self.assertFalse(mc.modality_requires_processing("ios"))
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_is_enabled_env_fallback_when_no_row(self):
+    def test_is_enabled_env_fallback_when_no_step(self):
         # env map present but slug absent => disabled (legacy behavior)
         self.assertFalse(mc.modality_is_enabled("demo"))
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_is_enabled_row_overrides_env(self):
+    def test_is_enabled_step_overrides_env(self):
         m = _modality("demo")
-        ModalityProcessingConfig.objects.create(modality=m, is_enabled=True)
-        # env would disable (slug absent), but the DB row enables it
+        _step(m, is_enabled=True)
+        # env would disable (slug absent), but the enabled step wins
         self.assertTrue(mc.modality_is_enabled("demo"))
 
         m2 = _modality("demo2")
-        ModalityProcessingConfig.objects.create(modality=m2, is_enabled=False)
+        _step(m2, is_enabled=False)
         self.assertFalse(mc.modality_is_enabled("demo2"))
 
     def test_queue_override_for(self):
         self.assertIsNone(mc.queue_override_for("demo"))
         m = _modality("demo")
-        cfg = ModalityProcessingConfig.objects.create(modality=m, queue_name="")
+        step = _step(m, queue_name="")
         self.assertIsNone(mc.queue_override_for("demo"))
-        cfg.queue_name = "special-q"
-        cfg.save()
+        step.queue_name = "special-q"
+        step.save()
         self.assertEqual(mc.queue_override_for("demo"), "special-q")
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
-    def test_is_blocking_defaults_to_requires_processing_when_no_row(self):
+    def test_is_blocking_defaults_to_requires_processing_when_no_step(self):
         self.assertTrue(mc.modality_is_blocking("ios"))
         self.assertFalse(mc.modality_is_blocking("panoramic"))
 
-    def test_is_blocking_row_value(self):
+    def test_is_blocking_step_value(self):
         m = _modality("ios")
-        ModalityProcessingConfig.objects.create(modality=m, is_blocking=False)
+        _step(m, is_blocking=False)
         self.assertFalse(mc.modality_is_blocking("ios"))
 
 
-class DependentSlugsTests(TestCase):
-    def test_config_driven_dependency(self):
-        ios = _modality("ios")
-        bite = _modality("bite_classification", "Bite")
-        cfg = ModalityProcessingConfig.objects.create(modality=bite, is_enabled=True)
-        cfg.depends_on.add(ios)
-        self.assertEqual(mc.dependent_slugs_of("ios"), ["bite_classification"])
-
-    def test_legacy_fallback_when_no_rows(self):
-        _modality("ios")
-        _modality("bite_classification", "Bite")
-        # No config rows at all => legacy ios->bite dependency applies.
-        self.assertEqual(mc.dependent_slugs_of("ios"), ["bite_classification"])
-
-    def test_admin_cleared_dependency_respected(self):
-        _modality("ios")
-        bite = _modality("bite_classification", "Bite")
-        # bite has a config row but no depends_on => admin intentionally cleared it.
-        ModalityProcessingConfig.objects.create(modality=bite, is_enabled=True)
-        self.assertEqual(mc.dependent_slugs_of("ios"), [])
-
-    def test_disabled_dependent_excluded(self):
-        ios = _modality("ios")
-        bite = _modality("bite_classification", "Bite")
-        cfg = ModalityProcessingConfig.objects.create(modality=bite, is_enabled=False)
-        cfg.depends_on.add(ios)
-        self.assertEqual(mc.dependent_slugs_of("ios"), [])
-
-
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
-class CreateDependentJobsTests(TestCase):
-    """The generalized replacement for the hardcoded ios -> bite wiring."""
+class CreateStepJobsTests(TestCase):
+    """create_step_jobs spawns the downstream ProcessingStep pipeline, including
+    cross-modality dependents (the generalized ios -> bite wiring)."""
 
-    def test_legacy_ios_creates_bite_dependency(self):
+    def _ios_bite(self):
+        ios = _modality("ios")
+        bite = _modality("bite_classification", "Bite")
+        ios_step = _step(ios)   # root ios
+        bite_step = _step(bite)  # root bite (slug == 'bite_classification')
+        bite_step.depends_on.add(ios_step)
+        return ios_step, bite_step
+
+    @patch("common.signals.celery_app.send_task")
+    def test_ios_source_job_spawns_bite_dependency(self, _send):
         from common.models import Job
         from maxillo.models import Patient
-        from maxillo.file_utils import create_dependent_jobs
+        from common.uploads import create_step_jobs
 
+        self._ios_bite()
         patient = Patient.objects.create()
         # In-flight (not completed) so the dependent stays in 'dependency' status.
         ios_job = Job.objects.create(
             modality_slug="ios", status="processing", patient=patient, domain="maxillo"
         )
-        created = create_dependent_jobs(patient, ios_job, "ios")
+        created = create_step_jobs(ios_job)
         self.assertEqual([j.modality_slug for j in created], ["bite_classification"])
         bite = created[0]
         self.assertEqual(bite.status, "dependency")
@@ -115,11 +108,43 @@ class CreateDependentJobsTests(TestCase):
         self.assertIn(ios_job, bite.dependencies.all())
 
     def test_no_source_job_creates_nothing(self):
-        from maxillo.models import Patient
-        from maxillo.file_utils import create_dependent_jobs
+        from common.uploads import create_step_jobs
 
+        self.assertEqual(create_step_jobs(None), [])
+
+    @patch("common.signals.celery_app.send_task")
+    def test_modality_without_steps_creates_nothing(self, _send):
+        from common.models import Job
+        from maxillo.models import Patient
+        from common.uploads import create_step_jobs
+
+        _modality("ios")  # no steps declared
         patient = Patient.objects.create()
-        self.assertEqual(create_dependent_jobs(patient, None, "ios"), [])
+        ios_job = Job.objects.create(
+            modality_slug="ios", status="processing", patient=patient, domain="maxillo"
+        )
+        self.assertEqual(create_step_jobs(ios_job), [])
+
+    @patch("common.signals.celery_app.send_task")
+    def test_dependency_output_flows_into_dependent_input(self, _send):
+        """The core new capability: a completed prerequisite's output_files
+        become the dependent step's input_files when it unblocks."""
+        from common.models import Job
+        from maxillo.models import Patient
+        from common.uploads import create_step_jobs
+
+        self._ios_bite()
+        patient = Patient.objects.create()
+        ios_job = Job.objects.create(
+            modality_slug="ios", status="pending", patient=patient, domain="maxillo"
+        )
+        (bite,) = create_step_jobs(ios_job)
+        self.assertEqual(bite.status, "dependency")
+
+        ios_job.mark_completed({"aligned": "path/to/aligned.obj"})
+        bite.refresh_from_db()
+        self.assertEqual(bite.status, "pending")
+        self.assertEqual(bite.input_files.get("ios"), {"aligned": "path/to/aligned.obj"})
 
 
 # send_task is mocked so pending-job creation doesn't hit a real broker.
@@ -144,24 +169,20 @@ class ProcessingStatusBlockingTests(TestCase):
 
     def test_maxillo_blocking_vs_nonblocking(self, _send_task):
         m = _modality("demo")
-        cfg = ModalityProcessingConfig.objects.create(
-            modality=m, is_enabled=True, is_blocking=True
-        )
+        step = _step(m, is_enabled=True, is_blocking=True)
         patient = self._maxillo_patient_with_job("demo")
         self.assertEqual(patient._processing_status("demo"), "processing")
 
-        cfg.is_blocking = False
-        cfg.save()
+        step.is_blocking = False
+        step.save()
         self.assertEqual(patient._processing_status("demo"), "processed")
 
     def test_brain_blocking_vs_nonblocking(self, _send_task):
         m = _modality("demo")
-        cfg = ModalityProcessingConfig.objects.create(
-            modality=m, is_enabled=True, is_blocking=True
-        )
+        step = _step(m, is_enabled=True, is_blocking=True)
         patient = self._brain_patient_with_job("demo")
         self.assertEqual(patient._processing_status("demo"), "processing")
 
-        cfg.is_blocking = False
-        cfg.save()
+        step.is_blocking = False
+        step.save()
         self.assertEqual(patient._processing_status("demo"), "processed")

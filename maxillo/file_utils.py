@@ -9,8 +9,9 @@ import zipfile
 from pathlib import Path
 
 from common.job_routing import is_runner_enabled_for_modality
-from common.modality_config import dependent_slugs_of, modality_requires_processing
+from common.modality_config import modality_requires_processing
 from common.models import FileRegistry, Job
+from common.uploads import create_step_jobs
 from django.db import transaction
 from django.utils import timezone
 
@@ -39,39 +40,13 @@ def _create_job_if_runner_enabled(modality_slug, **kwargs):
             "Not creating Job for disabled modality '%s'", modality_slug
         )
         return None
-    return Job.objects.create(modality_slug=modality_slug, **kwargs)
-
-
-def create_dependent_jobs(patient, source_job, source_slug):
-    """Create stage-2 jobs that depend on a just-created source job (Phase 4).
-
-    Generalizes the historical ios -> bite_classification wiring: for every
-    modality whose ModalityProcessingConfig.depends_on includes ``source_slug``
-    (with legacy fallback to the hardcoded ios->bite dependency), create a fresh
-    job in 'dependency' status wired to ``source_job``. Always creates a fresh
-    job — reusing completed jobs can leave status transitions stale and skip
-    execution.
-    """
-    created = []
-    if not source_job:
-        return created
-    for dep_slug in dependent_slugs_of(source_slug):
-        if not is_runner_enabled_for_modality(dep_slug):
-            continue
-        dep_job = Job.objects.create(
-            modality_slug=dep_slug,
-            status="dependency",
-            **_entity_fk_kwargs(patient),
-            input_files={},
-            priority=source_job.priority,
-        )
-        dep_job.add_dependency(source_job)
-        logger.info(
-            "Created dependent job #%s (%s) depending on %s job #%s",
-            dep_job.id, dep_slug, source_slug, source_job.id,
-        )
-        created.append(dep_job)
-    return created
+    job = Job.objects.create(modality_slug=modality_slug, **kwargs)
+    # A pending source job triggers its modality's downstream step pipeline
+    # (and any cross-modality dependents, e.g. ios -> bite_classification).
+    # No-op when the modality declares no ProcessingStep pipeline.
+    if job.status == "pending":
+        create_step_jobs(job)
+    return job
 
 
 def get_file_type_for_modality(
@@ -698,13 +673,16 @@ def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):
             input_files=input_files,
         )
 
-        # Create config-driven stage-2 dependent jobs (legacy: ios -> bite).
-        # Always creates fresh jobs for every new IOS upload.
-        dependent_jobs = create_dependent_jobs(patient, processing_job, "ios")
-        bite_classification_job = next(
-            (j for j in dependent_jobs if j.modality_slug == "bite_classification"),
-            None,
-        )
+        # Stage-2 dependent jobs (e.g. ios -> bite_classification) are spawned by
+        # the step pipeline inside _create_job_if_runner_enabled; surface the
+        # bite job for the caller's response payload.
+        bite_classification_job = None
+        if processing_job:
+            bite_classification_job = (
+                patient.jobs.filter(modality_slug="bite_classification")
+                .order_by("-created_at")
+                .first()
+            )
 
     return {
         "files": saved_files,

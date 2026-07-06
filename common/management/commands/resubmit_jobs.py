@@ -60,7 +60,7 @@ class Command(BaseCommand):
         if not is_runner_enabled_for_modality(slug):
             self.stdout.write(self.style.WARNING(
                 f"Modality '{slug}' is disabled for runners; jobs would not be "
-                f"enqueued. Enable it first (ModalityProcessingConfig) or expect no-ops."
+                f"enqueued. Enable its ProcessingStep first or expect no-ops."
             ))
 
         Patient = apps.get_model(domain, "Patient")

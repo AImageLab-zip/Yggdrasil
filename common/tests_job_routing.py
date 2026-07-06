@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from django.test import TestCase, override_settings
 
 from common.job_routing import is_runner_enabled_for_modality, select_runner_queue
-from common.models import Modality, ModalityProcessingConfig
+from common.models import Modality, ProcessingStep
 
 
 def _job(domain="maxillo", modality_slug="demo", **attrs):
@@ -64,14 +64,14 @@ class SelectRunnerQueueTests(TestCase):
     )
     def test_db_queue_override_beats_all_env(self):
         modality = Modality.objects.create(slug="demo", name="Demo")
-        ModalityProcessingConfig.objects.create(modality=modality, queue_name="db-q")
+        ProcessingStep.objects.create(modality=modality, name="demo", slug="demo", queue_name="db-q")
         job = _job(patient=SimpleNamespace(project=SimpleNamespace(slug="maxillo")))
         self.assertEqual(select_runner_queue(job), "db-q")
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "modality-q"})
     def test_blank_db_queue_falls_back_to_env(self):
         modality = Modality.objects.create(slug="demo", name="Demo")
-        ModalityProcessingConfig.objects.create(modality=modality, queue_name="")
+        ProcessingStep.objects.create(modality=modality, name="demo", slug="demo", queue_name="")
         self.assertEqual(select_runner_queue(_job()), "modality-q")
 
 
@@ -100,10 +100,10 @@ class RunnerEnabledForModalityTests(TestCase):
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
     def test_db_config_enables_when_env_would_disable(self):
         modality = Modality.objects.create(slug="demo", name="Demo")
-        ModalityProcessingConfig.objects.create(modality=modality, is_enabled=True)
+        ProcessingStep.objects.create(modality=modality, name="demo", slug="demo", is_enabled=True)
         self.assertTrue(is_runner_enabled_for_modality("demo"))
 
     def test_db_config_disables_when_env_would_enable(self):
         modality = Modality.objects.create(slug="demo", name="Demo")
-        ModalityProcessingConfig.objects.create(modality=modality, is_enabled=False)
+        ProcessingStep.objects.create(modality=modality, name="demo", slug="demo", is_enabled=False)
         self.assertFalse(is_runner_enabled_for_modality("demo"))

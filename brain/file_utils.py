@@ -96,5 +96,9 @@ def save_brain_modality_file(patient, modality_slug, uploaded_file):
         job.started_at = job.started_at or timezone.now()
         job.completed_at = timezone.now()
         job.save(update_fields=["started_at", "completed_at"])
+    elif job and job.status == "pending":
+        # Spawn the modality's downstream step pipeline, if any is declared.
+        from common.uploads import create_step_jobs
+        create_step_jobs(job)
 
     return file_registry, job

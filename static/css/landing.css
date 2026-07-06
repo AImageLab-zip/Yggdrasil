@@ -85,11 +85,11 @@
     transition: filter 160ms ease;
 }
 .domain--maxillo { --accent: var(--ygg-maxillo);
-    background: linear-gradient(160deg, rgba(91,141,239,0.08), transparent 55%), var(--ygg-surface); }
+    background: linear-gradient(160deg, rgba(91,141,239,0.16), transparent 60%), var(--ygg-surface); }
 .domain--brain { --accent: var(--ygg-brain);
     background: linear-gradient(160deg, rgba(20,163,139,0.09), transparent 55%), var(--ygg-surface-alt); }
 .domain--laparoscopy { --accent: var(--ygg-laparoscopy);
-    background: linear-gradient(160deg, rgba(224,120,95,0.08), transparent 55%), var(--ygg-surface); }
+    background: linear-gradient(160deg, rgba(224,120,95,0.16), transparent 60%), var(--ygg-surface); }
 
 /* accent top border grows on hover; whole card lifts */
 .domain::before {
@@ -164,6 +164,35 @@
 }
 .domain:hover .domain__cta { gap: 0.75rem; }
 
+/* ---- Public-demo CTA (only rendered when demo content is published) ---- */
+.landing-demo {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: center;
+    padding: 0.9rem 1.25rem 1.1rem;
+    background: var(--ygg-surface-alt);
+}
+.landing-demo-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.1rem;
+    border: 1px solid var(--ygg-border-strong);
+    border-radius: 999px;
+    background: var(--ygg-surface);
+    color: var(--ygg-text-muted);
+    font-family: var(--ygg-font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    transition: color 160ms ease, border-color 160ms ease, gap 160ms ease;
+}
+.landing-demo-cta:hover {
+    color: var(--ygg-green-700);
+    border-color: var(--ygg-green-600);
+    gap: 0.75rem;
+}
+
 /* ---- Mobile: stack and allow scroll ------------------------------------ */
 @media (max-width: 860px) {
     .landing { height: auto; min-height: 100vh; overflow: visible; }
@@ -172,5 +201,5 @@
     .domain__art { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .domain, .domain::before, .domain__cta { transition: none; }
+    .domain, .domain::before, .domain__cta, .landing-demo-cta { transition: none; }
 }

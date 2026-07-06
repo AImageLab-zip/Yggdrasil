@@ -49,6 +49,81 @@ def entity_fk_kwargs(patient):
     return kwargs
 
 
+def create_step_jobs(source_job):
+    """Spawn the downstream ProcessingStep pipeline for a just-created source job.
+
+    The ``source_job`` stands in for its modality's *root* step (the step whose
+    slug equals ``source_job.modality_slug``). Every enabled step reachable from
+    that root via ``depends_on`` edges — including steps of *other* modalities
+    that depend on it (e.g. bite_classification -> ios) — is created as a fresh
+    ``dependency``-status Job wired to its prerequisites' jobs. Their inputs are
+    filled from the prerequisites' outputs when they unblock
+    (Job._pull_dependency_outputs).
+
+    No-op (returns ``[]``) when the modality declares no matching root step, so
+    modalities without a pipeline keep their historical single-job behavior.
+    Domain-agnostic: reads the source job's own entity FKs.
+    """
+    from common.models import Job, ProcessingStep
+
+    created = []
+    if not source_job:
+        return created
+    modality_slug = str(getattr(source_job, "modality_slug", "") or "").strip()
+    if not modality_slug:
+        return created
+
+    try:
+        root_step = ProcessingStep.objects.filter(
+            slug=modality_slug, is_enabled=True
+        ).first()
+        if root_step is None:
+            return created
+        all_steps = list(
+            ProcessingStep.objects.filter(is_enabled=True).prefetch_related("depends_on")
+        )
+    except Exception:
+        # Table not migrated yet, or a transient DB error: fall back to the
+        # historical single-job behavior rather than break the upload.
+        return created
+
+    patient = source_job.get_patient()
+    if patient is None:
+        return created
+    entity_kwargs = entity_fk_kwargs(patient)
+    priority = getattr(source_job, "priority", 0) or 0
+
+    # The source job already satisfies the root step. Grow the set of created
+    # step-jobs to a fixpoint over the DAG: a step is instantiated once every
+    # one of its prerequisites is represented by a job (rooted at source_job).
+    job_by_step = {root_step.id: source_job}
+    progressed = True
+    while progressed:
+        progressed = False
+        for step in all_steps:
+            if step.id in job_by_step:
+                continue
+            deps = list(step.depends_on.all())
+            if not deps:
+                continue  # a root step of some other modality; not triggered here
+            if not all(d.id in job_by_step for d in deps):
+                continue
+            job = Job.objects.create(
+                step=step,
+                modality_slug=step.slug,
+                status="dependency",
+                input_files={},
+                priority=priority,
+                **entity_kwargs,
+            )
+            for d in deps:
+                job.add_dependency(job_by_step[d.id])
+            job_by_step[step.id] = job
+            created.append(job)
+            progressed = True
+    return created
+
+
 def project_slug_from_patient(patient) -> str:
     domain = domain_for_patient(patient)
     if domain == "laparoscopy":

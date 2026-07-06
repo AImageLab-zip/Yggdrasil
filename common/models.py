@@ -105,38 +105,54 @@ class Modality(models.Model):
 		super().save(*args, **kwargs)
 
 
-class ModalityProcessingConfig(models.Model):
-	"""Admin-editable per-modality worker/processing config (Phase 4).
+class ProcessingStep(models.Model):
+	"""Admin-declared processing step (one runner job) for a modality (Phase 4).
 
-	OneToOne to Modality. An absent row means "legacy fallback": readers in
-	common.modality_config fall back to the historical hardcoded/env behavior,
-	so rollout is zero-risk. A data migration seeds one row per existing
-	modality that reproduces current behavior on deploy day.
+	A modality can have several steps forming a DAG: a step may declare
+	prerequisite steps that must complete before it runs, and it receives their
+	outputs as its input (see Job._pull_dependency_outputs). This replaces the
+	single-flag ModalityProcessingConfig — a modality "needs processing" iff it
+	has at least one enabled step, folding the old ``requires_processing`` and
+	``is_enabled`` into one flag.
+
+	``slug`` is the runner routing key carried on Job.modality_slug, so it is
+	globally unique. The step whose slug equals its modality's slug is that
+	modality's *root* step: an upload's source Job stands in for it, and every
+	other step is wired (directly or transitively) downstream of a root.
 	"""
-	modality = models.OneToOneField(
-		Modality, on_delete=models.CASCADE, related_name='processing_config'
+	modality = models.ForeignKey(
+		Modality, on_delete=models.CASCADE, related_name='steps'
 	)
-	# False => an upload's Job is born 'completed' (no runner work), replacing
-	# the hardcoded no_processing_modalities list in maxillo/file_utils.py.
-	requires_processing = models.BooleanField(default=True)
+	name = models.CharField(max_length=100)
+	# Runner routing key (e.g. 'ios', 'ios_orientation'); globally unique.
+	slug = models.SlugField(max_length=60, unique=True)
 	# Explicit queue override; when non-blank it wins over ALL env routing.
 	queue_name = models.CharField(max_length=100, blank=True, default='')
-	# When True, an in-flight job for this modality gates patient readiness
-	# (patient shows 'processing'); non-blocking modalities never gate.
-	is_blocking = models.BooleanField(default=True)
-	# Absorbs is_runner_enabled_for_modality: disabled => no Job created / runner off.
-	is_enabled = models.BooleanField(default=True)
-	# Modalities whose completed job this modality depends on (e.g. bite->ios).
+	# Steps that must complete before this one runs; their outputs become this
+	# step's input. Self-referential DAG (may span modalities, e.g. bite->ios).
 	depends_on = models.ManyToManyField(
-		Modality, blank=True, related_name='dependent_configs'
+		'self', symmetrical=False, blank=True, related_name='dependents'
 	)
+	# Disabled steps create no runner Job (absorbs requires_processing + the old
+	# per-modality is_enabled kill switch).
+	is_enabled = models.BooleanField(default=True)
+	# When True, an in-flight job for this step gates patient readiness
+	# (patient shows 'processing'); non-blocking steps never gate.
+	is_blocking = models.BooleanField(default=True)
+	# Lower runs earlier / shown first within a modality.
+	order = models.IntegerField(default=0)
 	updated_at = models.DateTimeField(auto_now=True)
 
 	class Meta:
-		ordering = ['modality__name']
+		ordering = ['modality__name', 'order', 'slug']
 
 	def __str__(self):
-		return f"ProcessingConfig({self.modality.slug})"
+		return f"{self.modality.slug}:{self.slug}"
+
+	def save(self, *args, **kwargs):
+		if not self.slug:
+			self.slug = slugify(self.name)
+		super().save(*args, **kwargs)
 
 
 class UserSession(models.Model):
@@ -280,6 +296,9 @@ class Job(DomainFKAccessorMixin, models.Model):
 	]
 
 	modality_slug = models.CharField(max_length=60, help_text='Slug for modality (e.g., cbct, ios, audio, bite_classification)')
+	# Pipeline step this job runs, when declared in admin. Null for legacy jobs
+	# and jobs whose modality has no ProcessingStep rows.
+	step = models.ForeignKey('common.ProcessingStep', on_delete=models.SET_NULL, null=True, blank=True, related_name='jobs')
 	status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
 	priority = models.IntegerField(default=0, help_text='Higher values = higher priority')
 	dependencies = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='dependent_jobs', help_text='Jobs that must complete before this job can start')
@@ -380,8 +399,25 @@ class Job(DomainFKAccessorMixin, models.Model):
 			return True
 		return all(dep.status == 'completed' for dep in self.dependencies.all())
 
+	def _pull_dependency_outputs(self):
+		"""Merge each completed dependency's output_files into this job's
+		input_files, keyed by the dependency's routing slug, so a step consumes
+		its prerequisites' outputs. Mutates input_files in place (the caller
+		saves); returns True if anything was added."""
+		merged = dict(self.input_files or {})
+		changed = False
+		for dep in self.dependencies.all():
+			if dep.status == 'completed' and dep.output_files:
+				merged[dep.modality_slug or f'job_{dep.id}'] = dep.output_files
+				changed = True
+		if changed:
+			self.input_files = merged
+		return changed
+
 	def update_status_based_on_dependencies(self):
 		if self.status == 'dependency' and self.check_dependencies():
+			# Feed prerequisites' outputs in as this job's input before it runs.
+			self._pull_dependency_outputs()
 			self.status = 'pending'
 			self.save()
 			return True

@@ -88,4 +88,9 @@ def save_video_to_dataset(patient, video_file):
     except Exception as e:
         logger.error(f"Failed to create Job for video: {e}")
 
+    if job_obj and job_obj.status == "pending":
+        # Spawn the modality's downstream step pipeline, if any is declared.
+        from common.uploads import create_step_jobs
+        create_step_jobs(job_obj)
+
     return fr, job_obj

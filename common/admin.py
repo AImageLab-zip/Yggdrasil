@@ -1,15 +1,17 @@
 from django.contrib import admin
 
-from common.models import ModalityProcessingConfig, SystemCheck
+from common.models import ProcessingStep, SystemCheck
 
 
-@admin.register(ModalityProcessingConfig)
-class ModalityProcessingConfigAdmin(admin.ModelAdmin):
-    list_display = ("modality", "requires_processing", "queue_name", "is_blocking", "is_enabled", "updated_at")
-    list_filter = ("requires_processing", "is_blocking", "is_enabled")
-    search_fields = ("modality__name", "modality__slug", "queue_name")
+@admin.register(ProcessingStep)
+class ProcessingStepAdmin(admin.ModelAdmin):
+    list_display = ("modality", "name", "slug", "queue_name", "is_enabled", "is_blocking", "order", "updated_at")
+    list_filter = ("is_enabled", "is_blocking", "modality")
+    list_editable = ("is_enabled", "queue_name", "order")
+    search_fields = ("name", "slug", "modality__name", "modality__slug", "queue_name")
     autocomplete_fields = ("modality",)
     filter_horizontal = ("depends_on",)
+    prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("updated_at",)
 
 

@@ -111,4 +111,12 @@
         <span class="domain__cta">{% if user.is_authenticated %}Open workspace{% else %}Sign in to open{% endif %} {% icon 'arrow-right' %}</span>
     </a>
 </div>
+
+{% if demo_url %}
+<div class="landing-demo">
+    <a class="landing-demo-cta" href="{{ demo_url }}">
+        {% icon 'eye' %} Explore the public demo — no account needed {% icon 'arrow-right' %}
+    </a>
+</div>
+{% endif %}
 {% endblock %}

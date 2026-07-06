@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Count
 from django.contrib.auth.models import User
 from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
-from common.models import Project, Modality, ModalityProcessingConfig, ProjectAccess, Job, FileRegistry, Invitation
+from common.models import Project, Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation
 from .models import Tag, Folder
 
 
@@ -48,11 +48,12 @@ class ProjectAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     filter_horizontal = ['modalities']
 
 
-class ModalityProcessingConfigInline(admin.StackedInline):
-    model = ModalityProcessingConfig
+class ProcessingStepInline(admin.TabularInline):
+    model = ProcessingStep
     can_delete = True
     filter_horizontal = ['depends_on']
     readonly_fields = ['updated_at']
+    prepopulated_fields = {"slug": ("name",)}
     extra = 0
 
 
@@ -63,7 +64,7 @@ class ModalityAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     search_fields = ['name', 'description', 'slug', 'label', 'icon']
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = []
-    inlines = [ModalityProcessingConfigInline]
+    inlines = [ProcessingStepInline]
 
 
 @admin.register(ProjectAccess)
@@ -120,7 +121,7 @@ class VoiceCaptionAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['id', 'modality_slug', 'status', 'patient', 'voice_caption', 'priority', 'dependencies_count', 'created_at', 'started_at', 'completed_at', 'retry_count']
+    list_display = ['id', 'modality_slug', 'step', 'status', 'patient', 'voice_caption', 'priority', 'dependencies_count', 'created_at', 'started_at', 'completed_at', 'retry_count']
     list_filter = ['modality_slug', 'status', 'created_at', 'started_at', 'completed_at', 'priority', ('dependencies', admin.EmptyFieldListFilter)]
     search_fields = ['patient__patient_id', 'voice_caption__id', 'worker_id']
     autocomplete_fields = ['dependencies']
@@ -128,7 +129,7 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     
     fieldsets = (
         ('Job Information', {
-            'fields': ('modality_slug', 'status', 'priority', 'patient', 'voice_caption')
+            'fields': ('modality_slug', 'step', 'status', 'priority', 'patient', 'voice_caption')
         }),
         ('Dependencies', {
             'fields': ('dependencies', 'dependencies_list'),
