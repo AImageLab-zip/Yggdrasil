@@ -1,19 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Yggdrasil">
   <rect width="64" height="64" rx="14" fill="#0e1524"/>
-  <g fill="none" stroke="#35c3a6" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M32 42 V26"/>
-    <path d="M32 27 L22 15"/>
-    <path d="M32 27 L42 15"/>
-    <path d="M32 42 L24 51"/>
-    <path d="M32 42 L40 51"/>
-  </g>
-  <g fill="#7bdcc7">
-    <circle cx="22" cy="15" r="3"/>
-    <circle cx="42" cy="15" r="3"/>
-    <circle cx="32" cy="24" r="3.2"/>
-  </g>
-  <g fill="#c9a24b">
-    <circle cx="24" cy="51" r="2.4"/>
-    <circle cx="40" cy="51" r="2.4"/>
+  <g fill="none" stroke="#35c3a6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 18 L32 34 L42 18"/>
+    <path d="M32 34 V48"/>
   </g>
 </svg>

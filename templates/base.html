@@ -7,12 +7,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Yggdrasil{% endblock %}</title>
 
-    <!-- Favicons -->
+    <!-- Favicon (plain 'Y' glyph, SVG) -->
     <link rel="icon" href="{% static 'icons/favicon.svg' %}" type="image/svg+xml">
-    <link rel="icon" href="{% static 'icons/favicon-32.png' %}" sizes="32x32" type="image/png">
-    <link rel="icon" href="{% static 'icons/favicon-16.png' %}" sizes="16x16" type="image/png">
-    <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
-    <link rel="shortcut icon" href="{% static 'icons/favicon.ico' %}">
 
     <!-- Viewer runtime globals (loaded on every page so patient-detail viewers
          find THREE / fflate / nifti already present before their init) -->
@@ -59,9 +55,6 @@
                 <a class="ygg-brand shrink-0" href="{% if user.is_authenticated %}{% url ns|add:':patient_list' %}{% else %}/{% endif %}">
                     {% include 'common/partials/wordmark.html' %}
                 </a>
-                {% if current_project_name %}
-                    <span class="hidden xl:inline shrink-0 whitespace-nowrap mono text-xs text-content-ondarkmuted border-l border-white/15 pl-2">{{ current_project_name }}</span>
-                {% endif %}
             </div>
 
             <!-- Desktop nav -->
@@ -75,7 +68,6 @@
                     <div class="relative" data-dropdown>
                         <button type="button" class="ygg-nav-link" data-dropdown-toggle aria-expanded="false">
                             {% icon 'user' %}<span class="hidden sm:inline">{{ user.username }}</span>
-                            {% if current_project_role_display %}<span class="badge-ygg badge-neutral hidden md:inline-flex">{{ current_project_role_display }}</span>{% endif %}
                             {% icon 'chevron-down' 'ygg-icon-sm opacity-60' %}
                         </button>
                         <div class="ygg-menu" data-dropdown-menu hidden>

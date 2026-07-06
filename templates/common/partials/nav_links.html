@@ -13,12 +13,12 @@ Pass link_class to override styling (defaults to .ygg-nav-link).{% endcomment %}
         <a href="{% url ns|add:':export_list' %}" class="{{ lc }}{% if un == 'export_list' %} is-active{% endif %}">{% icon 'download' %}<span>Export</span></a>
     {% endif %}
     {% if user.is_staff %}
-        <a href="{% url 'online_users_dashboard' %}" class="{{ lc }}{% if un == 'online_users_dashboard' %} is-active{% endif %}">{% icon 'circle-dot' %}<span>Live Users</span></a>
-        <a href="{% url 'user_activity_stats' %}" class="{{ lc }}{% if un == 'user_activity_stats' %} is-active{% endif %}">{% icon 'chart-line' %}<span>User Activity</span></a>
-        <a href="{% url 'admin_control_panel' %}" class="{{ lc }}{% if un == 'admin_control_panel' %} is-active{% endif %}">{% icon 'layout-dashboard' %}<span>Control Panel</span></a>
+        <a href="{% url 'online_users_dashboard' %}" class="{{ lc }}{% if un == 'online_users_dashboard' %} is-active{% endif %}" title="Live Users" aria-label="Live Users">{% icon 'circle-dot' %}</a>
+        <a href="{% url 'user_activity_stats' %}" class="{{ lc }}{% if un == 'user_activity_stats' %} is-active{% endif %}" title="User Activity" aria-label="User Activity">{% icon 'chart-line' %}</a>
+        <a href="{% url 'admin_control_panel' %}" class="{{ lc }}{% if un == 'admin_control_panel' %} is-active{% endif %}" title="Control Panel" aria-label="Control Panel">{% icon 'layout-dashboard' %}</a>
     {% endif %}
     {% if user.is_staff or user.profile.is_admin %}
-        <a href="{% url 'admin:index' %}" class="{{ lc }}">{% icon 'cog' %}<span>Django Admin</span></a>
+        <a href="{% url 'admin:index' %}" class="{{ lc }}" title="Django Admin" aria-label="Django Admin">{% icon 'cog' %}</a>
     {% endif %}
 {% endif %}
 {% endwith %}

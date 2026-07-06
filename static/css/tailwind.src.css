@@ -149,16 +149,14 @@
   }
   .ygg-brand .brand-accent { color: var(--ygg-green-400); }
 
-  /* ---- Brand lockup (monogram + wordmark), see partials/wordmark.html ---- */
+  /* ---- Brand lockup (wordmark), see partials/wordmark.html ---- */
   .ygg-lockup { @apply inline-flex items-center gap-2; }
   .ygg-lockup__word {
     @apply font-display font-semibold tracking-tight leading-none;
   }
   .ygg-lockup--light .ygg-lockup__word { @apply text-white; }
   .ygg-lockup--ink .ygg-lockup__word { color: var(--ygg-text); }
-  .ygg-lockup--sm .ygg-lockup__mark { height: 26px; width: 26px; }
   .ygg-lockup--sm .ygg-lockup__word { @apply text-lg; }
-  .ygg-lockup--lg .ygg-lockup__mark { height: 40px; width: 40px; }
   .ygg-lockup--lg .ygg-lockup__word { @apply text-2xl; }
 
   /* ---- Toasts (see static/js/notifications.js — no Bootstrap) ---- */

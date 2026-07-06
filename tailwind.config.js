@@ -12,6 +12,10 @@ module.exports = {
     './*/templates/**/*.html',
     './static/js/nav.js',
   ],
+  // `.collapse` is a Bootstrap component class used across legacy templates.
+  // Tailwind would otherwise emit a `.collapse{visibility:collapse}` utility
+  // that overrides Bootstrap's collapse panels and hides them. Block it.
+  blocklist: ['collapse'],
   theme: {
     extend: {
       colors: {

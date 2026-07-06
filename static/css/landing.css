@@ -1,13 +1,18 @@
 /*
- * Landing page — light, airy hero over three full-screen domain panels.
- * Identity: the world-tree as a living clinical system. Ink text on cool-white
- * surfaces, medical-green canopy glow, a single thin gold rune rule. Per-domain
- * accents carry each panel. Consumes tokens.css; landing-only (never reaches
- * app pages or viewers).
+ * Landing page — a single non-scrolling viewport: a minimal "Yggdrasil"
+ * masthead above three full-height domain-chooser columns (Maxillo, Brain,
+ * Laparoscopy). Each column is one big clickable card carrying its own accent.
+ * Consumes tokens.css; landing-only (never reaches app pages or viewers).
+ * Below 860px the columns stack and the page is allowed to scroll.
  */
 
 .landing {
-    scroll-snap-type: y proximity;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--ygg-surface-alt);
 }
 
 /* Floating auth control (top-right) */
@@ -18,135 +23,132 @@
     z-index: 50;
 }
 
-/* ---- Hero -------------------------------------------------------------- */
-.landing-hero {
-    position: relative;
-    min-height: 92vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+/* ---- Masthead ---------------------------------------------------------- */
+.landing-top {
+    flex: 0 0 auto;
     text-align: center;
-    padding: 4rem 1.25rem 3rem;
-    overflow: hidden;
-    background:
-        radial-gradient(60rem 32rem at 50% -12%, rgba(20, 163, 139, 0.14), transparent 70%),
-        radial-gradient(48rem 30rem at 50% 120%, rgba(28, 44, 72, 0.06), transparent 70%),
-        var(--ygg-surface-alt);
-    scroll-snap-align: start;
+    padding: 1.75rem 1.25rem 1.25rem;
 }
-
-/* Faint canopy line-art behind the wordmark */
-.landing-hero__canopy {
-    position: absolute;
-    inset: 0;
-    margin: auto;
-    width: min(80rem, 120%);
-    color: var(--ygg-green-500);
-    opacity: 0.10;
-    pointer-events: none;
-}
-
-.landing-hero__inner { position: relative; max-width: 46rem; }
-
-.landing-hero__mark { width: 60px; height: 60px; margin: 0 auto 1.25rem; display: block; }
-
 .landing-title {
     font-family: var(--ygg-font-display);
     font-weight: 700;
-    font-size: var(--ygg-fs-hero);
+    font-size: clamp(2rem, 5vw, 3.25rem);
     letter-spacing: -0.02em;
     line-height: 1;
     color: var(--ygg-text);
     margin: 0;
 }
 .landing-title .accent { color: var(--ygg-green-600); }
-
-/* thin gold rune rule */
-.landing-rule {
-    width: 4.5rem;
-    height: 2px;
-    margin: 1.25rem auto;
-    background: var(--ygg-gold-500);
-    position: relative;
-}
 .landing-tagline {
     font-family: var(--ygg-font-mono);
     letter-spacing: 0.14em;
     text-transform: uppercase;
     font-size: 0.8rem;
     color: var(--ygg-green-700);
-    margin: 0 0 1rem;
+    margin: 0.6rem 0 0;
 }
-.landing-lede {
+.landing-notice {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1rem auto 0;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    background: var(--ygg-surface);
     color: var(--ygg-text-muted);
-    line-height: 1.65;
-    max-width: 38rem;
-    margin: 0 auto 1.75rem;
+    font-size: 0.9rem;
 }
-.landing-lede em { color: var(--ygg-text); font-style: normal; font-weight: 600; }
 
-.landing-scrollcue {
-    position: absolute;
-    bottom: 1.25rem;
-    left: 50%;
-    transform: translateX(-50%);
-    color: var(--ygg-text-muted);
-    animation: landing-bob 2.4s ease-in-out infinite;
+/* ---- Three-domain chooser ---------------------------------------------- */
+.domains {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--ygg-border);
 }
-@keyframes landing-bob { 0%,100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, 6px); } }
 
-/* ---- Domain panels ----------------------------------------------------- */
 .domain {
     position: relative;
-    min-height: 100vh;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: center;
-    gap: 2rem;
-    padding: 5rem clamp(1.25rem, 6vw, 6rem);
-    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: clamp(1.5rem, 3vw, 3rem);
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
     --accent: var(--ygg-green-600);
-    --accent-grad: var(--ygg-brain-grad);
+    transition: filter 160ms ease;
 }
-.domain--maxillo { --accent: var(--ygg-maxillo); --accent-grad: var(--ygg-maxillo-grad);
-    background: linear-gradient(120deg, rgba(91,141,239,0.06), transparent 60%), var(--ygg-surface); }
-.domain--brain { --accent: var(--ygg-brain); --accent-grad: var(--ygg-brain-grad);
-    background: linear-gradient(120deg, rgba(20,163,139,0.07), transparent 60%), var(--ygg-surface-alt); }
-.domain--laparoscopy { --accent: var(--ygg-laparoscopy); --accent-grad: var(--ygg-laparoscopy-grad);
-    background: linear-gradient(120deg, rgba(224,120,95,0.06), transparent 60%), var(--ygg-surface); }
+.domain--maxillo { --accent: var(--ygg-maxillo);
+    background: linear-gradient(160deg, rgba(91,141,239,0.08), transparent 55%), var(--ygg-surface); }
+.domain--brain { --accent: var(--ygg-brain);
+    background: linear-gradient(160deg, rgba(20,163,139,0.09), transparent 55%), var(--ygg-surface-alt); }
+.domain--laparoscopy { --accent: var(--ygg-laparoscopy);
+    background: linear-gradient(160deg, rgba(224,120,95,0.08), transparent 55%), var(--ygg-surface); }
 
-/* Alternate the visual to the other side on the middle panel */
-.domain--flip .domain__art { order: -1; }
+/* accent top border grows on hover; whole card lifts */
+.domain::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 200ms ease;
+}
+.domain:hover { filter: brightness(0.985); }
+.domain:hover::before { transform: scaleX(1); }
+.domain:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
 
 .domain__code {
     font-family: var(--ygg-font-mono);
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: var(--accent);
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 1rem;
 }
-.domain__code::before {
-    content: "";
-    width: 1.75rem; height: 2px; background: var(--accent);
-}
+.domain__code::before { content: ""; width: 1.5rem; height: 2px; background: var(--accent); }
 .domain__title {
     font-family: var(--ygg-font-display);
     font-weight: 700;
-    font-size: clamp(2rem, 4vw, 3rem);
+    font-size: clamp(1.5rem, 2.4vw, 2.25rem);
     letter-spacing: -0.02em;
-    line-height: 1.05;
+    line-height: 1.1;
     color: var(--ygg-text);
-    margin: 0 0 0.9rem;
+    margin: 0;
 }
-.domain__desc { color: var(--ygg-text-muted); line-height: 1.65; max-width: 34rem; margin: 0 0 1.25rem; }
+.domain__desc {
+    color: var(--ygg-text-muted);
+    line-height: 1.6;
+    max-width: 30rem;
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+/* line-art motif — flexes down when vertical room is tight */
+.domain__art {
+    flex: 0 1 auto;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0;
+}
+.domain__art svg { width: min(16rem, 80%); max-height: 100%; height: auto; color: var(--accent); }
+
 .domain__modalities {
-    display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1.75rem;
-    font-family: var(--ygg-font-mono); font-size: 0.72rem;
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+    font-family: var(--ygg-font-mono); font-size: 0.68rem;
 }
 .domain__mod {
     padding: 0.2rem 0.6rem; border-radius: 999px;
@@ -156,29 +158,19 @@
 }
 .domain__cta {
     display: inline-flex; align-items: center; gap: 0.5rem;
-    padding: 0.7rem 1.2rem; border-radius: var(--ygg-radius-md);
-    background: var(--accent); color: #fff; font-weight: 600; text-decoration: none;
-    transition: filter 150ms ease, transform 150ms ease;
+    margin-top: 0.25rem;
+    font-weight: 600;
+    color: var(--accent);
 }
-.domain__cta:hover { filter: brightness(0.94); transform: translateY(-1px); color: #fff; }
+.domain:hover .domain__cta { gap: 0.75rem; }
 
-/* The bespoke line-art motif per domain */
-.domain__art {
-    display: flex; align-items: center; justify-content: center;
-}
-.domain__art svg { width: min(28rem, 100%); height: auto; color: var(--accent); }
-
-/* logged-in continue banner + no-access notice */
-.landing-note {
-    max-width: 40rem; margin: 3rem auto; padding: 1.5rem;
-    border: 1px solid var(--ygg-border); border-radius: var(--ygg-radius-lg);
-    background: var(--ygg-surface); text-align: center;
-}
-
+/* ---- Mobile: stack and allow scroll ------------------------------------ */
 @media (max-width: 860px) {
-    .domain { grid-template-columns: 1fr; text-align: left; min-height: auto; padding: 4rem 1.5rem; }
-    .domain--flip .domain__art { order: 0; }
-    .domain__art { margin-top: 2rem; }
-    .domain__art svg { width: 15rem; }
+    .landing { height: auto; min-height: 100vh; overflow: visible; }
+    .domains { grid-template-columns: 1fr; }
+    .domain { padding: 2.5rem 1.5rem; }
+    .domain__art { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .landing-scrollcue { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+    .domain, .domain::before, .domain__cta { transition: none; }
+}
