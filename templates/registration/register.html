@@ -1,14 +1,12 @@
 {% extends 'base.html' %}
 {% load icons %}
-{% load static %}
 
 {% block title %}Register - Yggdrasil{% endblock %}
 
 {% block content %}
 <div class="auth-wrap">
     <div class="auth-card">
-        <div class="flex items-center justify-center gap-2 mb-1">
-            <img class="h-9 w-auto" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+        <div class="flex justify-center mb-1">
             {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
         </div>
         <h1 class="text-center text-xl">Create your account</h1>
