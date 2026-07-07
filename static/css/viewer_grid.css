@@ -309,6 +309,34 @@
     background: #0b5ed7;
 }
 
+/* Flip Button */
+.flip-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.flip-btn:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.flip-btn.flip-active {
+    background: #0d6efd;
+}
+
+.flip-btn.flip-active:hover {
+    background: #0b5ed7;
+}
+
 /* Free Scroll Button */
 .free-scroll-btn {
     width: 28px;
@@ -385,6 +413,97 @@
 
 .crosshair-toggle-btn.crosshair-hidden:hover {
     background: #bb2d3b;
+}
+
+/* Windowing (brightness/contrast) Control */
+.windowing-control {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.windowing-toggle-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.windowing-toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.windowing-toggle-btn.windowing-active {
+    background: #0d6efd;
+}
+
+.windowing-panel {
+    margin-top: 6px;
+    background: rgba(0, 0, 0, 0.78);
+    border-radius: 6px;
+    padding: 8px 10px;
+    width: 160px;
+}
+
+.windowing-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.windowing-row:last-of-type {
+    margin-bottom: 8px;
+}
+
+.windowing-row-label {
+    color: #fff;
+    font-size: 11px;
+    width: 26px;
+    flex-shrink: 0;
+}
+
+.windowing-row input[type="range"] {
+    flex: 1;
+    min-width: 0;
+    accent-color: #0d6efd;
+}
+
+.windowing-value {
+    color: #fff;
+    font-size: 11px;
+    font-family: monospace;
+    width: 26px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.windowing-reset-btn {
+    width: 100%;
+    border: none;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 11px;
+    padding: 3px 0;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.windowing-reset-btn:hover {
+    background: rgba(255, 255, 255, 0.24);
 }
 
 /* Slice Counter */

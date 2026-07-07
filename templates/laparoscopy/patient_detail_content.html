@@ -18,6 +18,9 @@
                     {% if patient.name %}{{ patient.name }}{% else %}Patient {{ patient.patient_id }}{% endif %}
                 </h4>
                 <div class="d-flex gap-2 align-items-center flex-wrap">
+                    <button id="laparoscopy-tour-btn" class="btn btn-sm btn-outline-info d-none" type="button">
+                        <i class="fas fa-route me-1"></i>Start tutorial
+                    </button>
                     <button id="annotation-toggle-btn" class="btn btn-sm btn-outline-warning d-none">
                         <i class="fas fa-draw-polygon me-1"></i>Enter Annotation Mode
                     </button>
@@ -378,6 +381,7 @@
 <script src="{% static 'js/laparoscopy/laparoscopy_annotator_worker.js' %}"></script>
 <script src="{% static 'js/laparoscopy/laparoscopy_annotator_magic.js' %}"></script>
 <script src="{% static 'js/laparoscopy/laparoscopy_annotator.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_tutorial.js' %}"></script>
 
 <script>
 (function () {
@@ -393,6 +397,7 @@
     var quadrantTypesPanel = document.getElementById('quadrant-types-panel');
     var regionPanel = document.getElementById('region-types-panel');
     var magicPanel = document.getElementById('magic-toolbox-panel');
+    var tourBtn = document.getElementById('laparoscopy-tour-btn');
 
     placeholder.remove();
 
@@ -624,6 +629,8 @@
             if (annotator.currentTool === 'point') annotator._setTool(annotator._lastNonPointTool || 'brush');
             if (subsampledPreviewVideo) subsampledPreviewVideo.style.display = 'none';
         };
+
+        if (tourBtn) tourBtn.classList.remove('d-none');
     }
 
     if (video.readyState >= 1) {

@@ -66,6 +66,207 @@ const ViewerGrid = (function() {
         3: false
     };
 
+    // Flip state - tracks per-window, per-orientation flip toggle.
+    // Axial: rotated 180 degrees (left-right + top-bottom mirror).
+    // Coronal: left-right mirror (radiological convention toggle).
+    // Sagittal: anterior-posterior mirror (nose-left toggle).
+    function makeDefaultFlipState() {
+        return { axial: false, sagittal: false, coronal: false };
+    }
+    const flipStates = {
+        0: makeDefaultFlipState(),
+        1: makeDefaultFlipState(),
+        2: makeDefaultFlipState(),
+        3: makeDefaultFlipState()
+    };
+
+    // True only when the window's axial view is flipped (needs a manual
+    // top-bottom CSS mirror since NiiVue has no native anterior-posterior
+    // flip for the axial plane). Coronal/sagittal flips are done natively
+    // by NiiVue and never require pixel-coordinate correction.
+    function isAxialVerticallyFlipped(windowIndex) {
+        const state = windowStates[windowIndex];
+        const flip = flipStates[windowIndex];
+        return !!(state && flip && state.currentOrientation === 'axial' && flip.axial);
+    }
+
+    function flipCanvasY(windowIndex, viewer, y) {
+        if (!isAxialVerticallyFlipped(windowIndex) || !viewer || !viewer.nv || !viewer.nv.gl) {
+            return y;
+        }
+        return viewer.nv.gl.canvas.height - y;
+    }
+
+    // Applies (or clears) the flip for a window's current orientation.
+    // Coronal/sagittal use NiiVue's own flip options so label text and
+    // click/pan/zoom math stay correct automatically. Axial combines the
+    // native left-right flip with a manual top-bottom CSS mirror plus a
+    // custom label overlay (native orientation text would render
+    // mirrored/upside-down under a CSS transform).
+    function applyFlipState(windowIndex, viewer, windowEl) {
+        if (!viewer || !viewer.nv) {
+            return;
+        }
+        const orientation = windowStates[windowIndex].currentOrientation;
+        const flip = flipStates[windowIndex];
+        const canvas = windowEl ? windowEl.querySelector('.niivue-canvas') : null;
+
+        if (orientation === 'sagittal') {
+            viewer.nv.opts.sagittalNoseLeft = !!flip.sagittal;
+            viewer.nv.opts.isOrientationTextVisible = true;
+            if (canvas) canvas.style.transform = '';
+            removeCustomOrientationLabels(windowEl);
+            viewer.nv.drawScene();
+        } else if (orientation === 'coronal') {
+            viewer.nv.setRadiologicalConvention(!!flip.coronal);
+            viewer.nv.opts.isOrientationTextVisible = true;
+            if (canvas) canvas.style.transform = '';
+            removeCustomOrientationLabels(windowEl);
+        } else {
+            // Axial
+            viewer.nv.setRadiologicalConvention(!!flip.axial);
+            const flipped = !!flip.axial;
+            viewer.nv.opts.isOrientationTextVisible = !flipped;
+            if (canvas) canvas.style.transform = flipped ? 'scaleY(-1)' : '';
+            if (flipped) {
+                renderCustomOrientationLabels(windowEl, { top: 'P', bottom: 'A', left: 'R', right: 'L' });
+            } else {
+                removeCustomOrientationLabels(windowEl);
+            }
+        }
+
+        updateFlipButtonUI(windowEl, orientation, flip);
+    }
+
+    function updateFlipButtonUI(windowEl, orientation, flip) {
+        if (!windowEl) return;
+        const btn = windowEl.querySelector('.flip-btn');
+        if (!btn) return;
+        const flipped = !!flip[orientation];
+        btn.classList.toggle('flip-active', flipped);
+        btn.title = flipped ? 'Un-flip image' : 'Flip image';
+    }
+
+    function removeCustomOrientationLabels(windowEl) {
+        if (!windowEl) return;
+        const container = windowEl.querySelector('.custom-orientation-labels');
+        if (container) container.remove();
+    }
+
+    function renderCustomOrientationLabels(windowEl, labels) {
+        if (!windowEl) return;
+        removeCustomOrientationLabels(windowEl);
+        const viewerContainer = windowEl.querySelector('.niivue-viewer-container');
+        if (!viewerContainer) return;
+
+        const container = document.createElement('div');
+        container.className = 'custom-orientation-labels';
+        container.style.cssText = 'position: absolute; inset: 0; pointer-events: none; z-index: 5;';
+
+        const positions = {
+            top: 'position: absolute; top: 4px; left: 50%; transform: translateX(-50%);',
+            bottom: 'position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);',
+            left: 'position: absolute; left: 4px; top: 50%; transform: translateY(-50%);',
+            right: 'position: absolute; right: 4px; top: 50%; transform: translateY(-50%);'
+        };
+
+        Object.keys(labels).forEach(key => {
+            const el = document.createElement('div');
+            el.className = `orientation-label orientation-label-${key}`;
+            el.style.cssText = `${positions[key]} color: #fff; font: bold 14px sans-serif; text-shadow: 0 0 3px #000, 0 0 3px #000;`;
+            el.textContent = labels[key];
+            container.appendChild(el);
+        });
+
+        viewerContainer.appendChild(container);
+    }
+
+    // Wires up the per-window brightness/contrast (windowing) panel: a
+    // toggle button that reveals two range sliders (display min/max as
+    // percent of the volume's data range) plus a reset button. Slider drags
+    // are rAF-throttled so rapid input doesn't flood NiiVue with GPU updates.
+    function attachWindowingControls(windowIndex, viewer, windowEl) {
+        const toggleBtn = windowEl.querySelector('.windowing-toggle-btn');
+        const panel = windowEl.querySelector('.windowing-panel');
+        const minRange = windowEl.querySelector('.windowing-min-range');
+        const maxRange = windowEl.querySelector('.windowing-max-range');
+        const minLabel = windowEl.querySelector('.windowing-min-value');
+        const maxLabel = windowEl.querySelector('.windowing-max-value');
+        const resetBtn = windowEl.querySelector('.windowing-reset-btn');
+
+        if (!toggleBtn || !panel || !minRange || !maxRange || !resetBtn) {
+            return;
+        }
+
+        // Initialize sliders from the volume's actual current windowing
+        // (NiiVue applies its own default cal_min/cal_max on load).
+        const initial = viewer.getWindowing();
+        const initMin = Math.round(initial.percentMin);
+        const initMax = Math.round(initial.percentMax);
+        minRange.value = String(initMin);
+        maxRange.value = String(initMax);
+        minLabel.textContent = String(initMin);
+        maxLabel.textContent = String(initMax);
+
+        toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = panel.style.display !== 'none';
+            panel.style.display = isOpen ? 'none' : 'block';
+            toggleBtn.classList.toggle('windowing-active', !isOpen);
+        });
+
+        // Prevent drag/click on the panel from reaching the NiiVue canvas.
+        panel.addEventListener('click', (e) => e.stopPropagation());
+        panel.addEventListener('mousedown', (e) => e.stopPropagation());
+        panel.addEventListener('wheel', (e) => e.stopPropagation());
+
+        let rafId = null;
+        let pendingMin = null;
+        let pendingMax = null;
+
+        const scheduleApply = (minVal, maxVal) => {
+            pendingMin = minVal;
+            pendingMax = maxVal;
+            if (rafId) {
+                return;
+            }
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                if (pendingMin !== null && pendingMax !== null && viewer.isReady()) {
+                    viewer.setWindowing(pendingMin, pendingMax);
+                }
+            });
+        };
+
+        const applyWindowing = () => {
+            let minVal = parseInt(minRange.value, 10);
+            let maxVal = parseInt(maxRange.value, 10);
+
+            if (minVal > maxVal) {
+                maxVal = minVal;
+                maxRange.value = String(maxVal);
+            }
+
+            minLabel.textContent = String(minVal);
+            maxLabel.textContent = String(maxVal);
+            scheduleApply(minVal, maxVal);
+        };
+
+        minRange.addEventListener('input', applyWindowing);
+        maxRange.addEventListener('input', applyWindowing);
+
+        resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            minRange.value = String(initMin);
+            maxRange.value = String(initMax);
+            minLabel.textContent = String(initMin);
+            maxLabel.textContent = String(initMax);
+            if (viewer.isReady()) {
+                viewer.setWindowing(initMin, initMax);
+            }
+        });
+    }
+
     // rAF-throttled synchronization state — coalesces multiple crosshair
     // updates per frame into a single sync pass using drawScene() instead
     // of the heavier updateGLVolume().
@@ -416,24 +617,23 @@ const ViewerGrid = (function() {
         return viewer.nv.sliceTypeCoronal;
     }
 
-    function getCanvasPixelPosition(event, canvas, viewer) {
+    function getCanvasPixelPosition(event, canvas, viewer, windowIndex) {
         if (!canvas || !viewer || !viewer.nv) {
             return null;
         }
         const rect = canvas.getBoundingClientRect();
         const dpr = (viewer.nv.uiData && viewer.nv.uiData.dpr) ? viewer.nv.uiData.dpr : (window.devicePixelRatio || 1);
-        return [
-            (event.clientX - rect.left) * dpr,
-            (event.clientY - rect.top) * dpr
-        ];
+        const x = (event.clientX - rect.left) * dpr;
+        const y = (event.clientY - rect.top) * dpr;
+        return [x, flipCanvasY(windowIndex, viewer, y)];
     }
 
-    function getWorldMMAtEvent(event, canvas, viewer) {
+    function getWorldMMAtEvent(event, canvas, viewer, windowIndex) {
         if (!viewer || !viewer.nv) {
             return null;
         }
 
-        const pixelPosition = getCanvasPixelPosition(event, canvas, viewer);
+        const pixelPosition = getCanvasPixelPosition(event, canvas, viewer, windowIndex);
         if (!pixelPosition) {
             return null;
         }
@@ -464,7 +664,7 @@ const ViewerGrid = (function() {
             return null;
         }
 
-        return [canvasPosition.pos[0], canvasPosition.pos[1]];
+        return [canvasPosition.pos[0], flipCanvasY(windowIndex, viewer, canvasPosition.pos[1])];
     }
 
     function isPrimaryUnmodifiedClick(event) {
@@ -478,7 +678,7 @@ const ViewerGrid = (function() {
                     return false;
                 }
 
-                const pixelPosition = getCanvasPixelPosition(event, canvas, viewer);
+                const pixelPosition = getCanvasPixelPosition(event, canvas, viewer, windowIndex);
                 if (!pixelPosition) {
                     return false;
                 }
@@ -617,8 +817,8 @@ const ViewerGrid = (function() {
         return {
             id: measurement.id,
             distanceMM: measurement.distanceMM,
-            startPx: [startCanvas.pos[0], startCanvas.pos[1]],
-            endPx: [endCanvas.pos[0], endCanvas.pos[1]]
+            startPx: [startCanvas.pos[0], flipCanvasY(windowIndex, viewer, startCanvas.pos[1])],
+            endPx: [endCanvas.pos[0], flipCanvasY(windowIndex, viewer, endCanvas.pos[1])]
         };
     }
 
@@ -712,7 +912,7 @@ const ViewerGrid = (function() {
             return;
         }
 
-        const position = getCanvasPixelPosition(event, canvas, viewer);
+        const position = getCanvasPixelPosition(event, canvas, viewer, windowIndex);
         if (!position) {
             return;
         }
@@ -1148,6 +1348,7 @@ const ViewerGrid = (function() {
             niivueInstance: null,
             currentOrientation: 'axial'
         };
+        flipStates[windowIndex] = makeDefaultFlipState();
 
         // Create viewer container structure with canvas and orientation menu
         const canvasId = `niivue-canvas-${windowIndex}`;
@@ -1164,6 +1365,9 @@ const ViewerGrid = (function() {
                     <button class="orientation-btn active" data-orientation="axial">A</button>
                     <button class="orientation-btn" data-orientation="sagittal">S</button>
                     <button class="orientation-btn" data-orientation="coronal">C</button>
+                    <button class="flip-btn" title="Flip image">
+                        <i class="fas fa-arrows-alt-h"></i>
+                    </button>
                     <button class="free-scroll-btn" title="Toggle free scroll">
                         <i class="fas fa-link"></i>
                     </button>
@@ -1173,6 +1377,24 @@ const ViewerGrid = (function() {
                     <button class="crosshair-toggle-btn" title="Toggle crosshair">
                         <i class="fas fa-crosshairs"></i>
                     </button>
+                </div>
+                <div class="windowing-control">
+                    <button class="windowing-toggle-btn" title="Adjust brightness/contrast">
+                        <i class="fas fa-adjust"></i>
+                    </button>
+                    <div class="windowing-panel" style="display: none;">
+                        <div class="windowing-row">
+                            <span class="windowing-row-label">Min</span>
+                            <input type="range" class="windowing-min-range" min="0" max="100" step="1" value="0">
+                            <span class="windowing-value windowing-min-value">0</span>
+                        </div>
+                        <div class="windowing-row">
+                            <span class="windowing-row-label">Max</span>
+                            <input type="range" class="windowing-max-range" min="0" max="100" step="1" value="100">
+                            <span class="windowing-value windowing-max-value">100</span>
+                        </div>
+                        <button class="windowing-reset-btn">Reset</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -1327,6 +1549,10 @@ const ViewerGrid = (function() {
                     btn.classList.add('active');
                     windowStates[windowIndex].currentOrientation = orientation;
 
+                    // Apply this orientation's saved flip state (labels, native
+                    // flip opts, and axial CSS mirror)
+                    applyFlipState(windowIndex, viewer, windowEl);
+
                     // Update synchronization group
                     updateOrientationGroup(windowIndex, orientation);
 
@@ -1347,6 +1573,18 @@ const ViewerGrid = (function() {
                     renderMeasurementOverlayForWindow(windowIndex);
                 });
             });
+
+            // Attach Flip button handler
+            const flipBtn = windowEl.querySelector('.flip-btn');
+            if (flipBtn) {
+                flipBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const orientation = windowStates[windowIndex].currentOrientation;
+                    flipStates[windowIndex][orientation] = !flipStates[windowIndex][orientation];
+                    applyFlipState(windowIndex, viewer, windowEl);
+                    renderMeasurementOverlayForWindow(windowIndex);
+                });
+            }
 
             // Attach Free Scroll button handler
             const freeScrollBtn = windowEl.querySelector('.free-scroll-btn');
@@ -1410,6 +1648,9 @@ const ViewerGrid = (function() {
                     }
                 });
             }
+
+            // Attach Windowing (brightness/contrast) controls
+            attachWindowingControls(windowIndex, viewer, windowEl);
 
             // Custom scroll/zoom/pan handlers on canvas.
             // Use capture phase so we intercept before NiiVue's own handlers.
@@ -1482,12 +1723,12 @@ const ViewerGrid = (function() {
                         const zoomFactor = primaryDelta > 0 ? 0.9 : 1.1;
                         const newZoom = Math.max(1, Math.min(5, currentZoom * zoomFactor));
 
-                        const beforeMM = getWorldMMAtEvent(e, canvas, viewer);
+                        const beforeMM = getWorldMMAtEvent(e, canvas, viewer, windowIndex);
                         nv.scene.pan2Dxyzmm = [pan[0], pan[1], pan[2], newZoom];
                         nv.drawScene();
 
                         if (beforeMM) {
-                            const mousePx = getCanvasPixelPosition(e, canvas, viewer);
+                            const mousePx = getCanvasPixelPosition(e, canvas, viewer, windowIndex);
                             const anchorPx = projectMMToCanvas(windowIndex, viewer, beforeMM);
                             if (mousePx && anchorPx && typeof nv.dragForPanZoom === 'function' && nv.uiData) {
                                 const basePan = [
@@ -1567,7 +1808,7 @@ const ViewerGrid = (function() {
 
                 canvas.addEventListener('mousedown', (e) => {
                     if (e.ctrlKey && e.button === 0) {
-                        const startPx = getCanvasPixelPosition(e, canvas, viewer);
+                        const startPx = getCanvasPixelPosition(e, canvas, viewer, windowIndex);
                         if (!startPx || !viewer.nv) {
                             return;
                         }
@@ -1597,7 +1838,7 @@ const ViewerGrid = (function() {
                         return;
                     }
 
-                    const currentPx = getCanvasPixelPosition(e, canvas, viewer);
+                    const currentPx = getCanvasPixelPosition(e, canvas, viewer, windowIndex);
                     if (!currentPx) {
                         return;
                     }
@@ -1978,6 +2219,7 @@ const ViewerGrid = (function() {
             niivueInstance: null,
             currentOrientation: 'axial'
         };
+        flipStates[windowIndex] = makeDefaultFlipState();
 
         updateWindowUI(windowIndex);
         renderMeasurementOverlays();
@@ -2001,6 +2243,7 @@ const ViewerGrid = (function() {
             menuBtns.forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.orientation === orientation);
             });
+            applyFlipState(windowIndex, viewer, windowEl);
         }
 
         const counter = windowEl ? windowEl.querySelector('.slice-counter') : null;
