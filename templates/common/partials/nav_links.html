@@ -6,19 +6,19 @@ Pass link_class to override styling (defaults to .ygg-nav-link).{% endcomment %}
 {% with un=request.resolver_match.url_name lc=link_class|default:'ygg-nav-link' %}
 {% if user.is_authenticated %}
     <a href="{% url ns|add:':patient_list' %}" class="{{ lc }}{% if un == 'patient_list' %} is-active{% endif %}">{% icon 'list' %}<span>Scans</span></a>
-    {% if user.profile.can_upload_scans %}
+    {% if user.profile.can_upload_scans and not is_demo_guest %}
         <a href="{% url ns|add:':upload_patient' %}" class="{{ lc }}{% if un == 'upload_patient' %} is-active{% endif %}">{% icon 'upload' %}<span>Upload</span></a>
     {% endif %}
     {% if user.is_staff or user.profile.is_admin %}
         <a href="{% url ns|add:':export_list' %}" class="{{ lc }}{% if un == 'export_list' %} is-active{% endif %}">{% icon 'download' %}<span>Export</span></a>
     {% endif %}
     {% if user.is_staff %}
-        <a href="{% url 'online_users_dashboard' %}" class="{{ lc }}{% if un == 'online_users_dashboard' %} is-active{% endif %}" title="Live Users" aria-label="Live Users">{% icon 'circle-dot' %}</a>
-        <a href="{% url 'user_activity_stats' %}" class="{{ lc }}{% if un == 'user_activity_stats' %} is-active{% endif %}" title="User Activity" aria-label="User Activity">{% icon 'chart-line' %}</a>
-        <a href="{% url 'admin_control_panel' %}" class="{{ lc }}{% if un == 'admin_control_panel' %} is-active{% endif %}" title="Control Panel" aria-label="Control Panel">{% icon 'layout-dashboard' %}</a>
+        <a href="{% url 'online_users_dashboard' %}" class="{{ lc }}{% if un == 'online_users_dashboard' %} is-active{% endif %}">{% icon 'circle-dot' %}<span>Live Users</span></a>
+        <a href="{% url 'user_activity_stats' %}" class="{{ lc }}{% if un == 'user_activity_stats' %} is-active{% endif %}">{% icon 'chart-line' %}<span>User Activity</span></a>
+        <a href="{% url 'admin_control_panel' %}" class="{{ lc }}{% if un == 'admin_control_panel' %} is-active{% endif %}">{% icon 'layout-dashboard' %}<span>Control Panel</span></a>
     {% endif %}
     {% if user.is_staff or user.profile.is_admin %}
-        <a href="{% url 'admin:index' %}" class="{{ lc }}" title="Django Admin" aria-label="Django Admin">{% icon 'cog' %}</a>
+        <a href="{% url 'admin:index' %}" class="{{ lc }}">{% icon 'cog' %}<span>Django Admin</span></a>
     {% endif %}
 {% endif %}
 {% endwith %}

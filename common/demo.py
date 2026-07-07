@@ -1,30 +1,31 @@
-"""Anonymous public guest demo (Phase 7).
+"""Public guest demo (Phase 7).
 
-A read-only, no-login window onto *curated* folders — those an admin has
-flagged ``is_demo=True`` (see ``common.base_models.FolderBase``). Everything
-here is deliberately self-contained: it never touches the authenticated app
-views or their ``@login_required`` file endpoints, and it never widens access
-to anything outside a demo folder. The only data it can reach is a patient
-that lives in an ``is_demo`` folder, and only via GET/HEAD.
+Guests explore the *real* portal — the same interactive viewer logged-in users
+see — but strictly read-only and scoped to *curated* folders an admin flagged
+``is_demo=True`` (see ``common.base_models.FolderBase``). Rather than a bespoke
+UI, ``demo_index`` logs the visitor in as a shared low-privilege guest user and
+redirects into the real app; the existing ``@login_required`` views then work
+unchanged, with access narrowed by ``common.permissions`` (guest reads only
+``is_demo`` folders) and writes blocked by ``DemoGuestReadOnlyMiddleware``.
 
 Security invariants (keep these true):
-  * Every queryset is rooted at ``is_demo=True`` folders.
-  * A patient is reachable only if ``patient_in_demo(patient, domain)``.
-  * A file is streamed only if its patient satisfies the same check.
-  * No write path exists; the guard rejects non-GET/HEAD and rate-limits by IP.
+  * The guest holds a ``standard`` ProjectAccess and no FolderAccess, so
+    ``user_can_read_folder`` grants it only ``is_demo`` folders.
+  * The guest role must never be ``admin`` (that would bypass is_demo scoping).
+  * Every write is a non-safe HTTP method and is rejected for the guest by the
+    read-only middleware (logout excepted).
 """
 
 import functools
-import mimetypes
 
 from django.apps import apps
+from django.conf import settings
+from django.contrib.auth import get_user_model, login
 from django.core.cache import cache
-from django.http import Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.http import Http404, HttpResponse, HttpResponseNotAllowed
+from django.shortcuts import redirect
 
-from .domains import DOMAINS, fk_fields_for
-from .file_access import streaming_response
-from .models import FileRegistry
+from .domains import DOMAINS
 
 # Per-IP fixed-window throttle. Uses the default cache (LocMemCache unless a
 # shared cache is configured — good enough to blunt scraping; not a hard quota
@@ -68,6 +69,15 @@ def demo_guard(view):
         return view(request, *args, **kwargs)
 
     return wrapper
+
+
+def is_demo_guest(user):
+    """True iff ``user`` is the shared read-only public-demo guest account."""
+    return bool(
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and user.get_username() == getattr(settings, "DEMO_GUEST_USERNAME", None)
+    )
 
 
 # --- querysets ------------------------------------------------------------
@@ -137,98 +147,24 @@ def landing_demo_url():
 
 # --- views ----------------------------------------------------------------
 
-@demo_guard
 def demo_index(request):
-    domains = []
-    for slug in _domains_with_demos():
-        domains.append({
-            "slug": slug,
-            "label": slug.capitalize(),
-            "patient_count": demo_patients(slug).count(),
-        })
-    return render(request, "common/demo/index.html", {
-        "demo_mode": True,
-        "domains": domains,
-    })
+    """Public entry point. Logs the visitor in as the shared read-only guest
+    user, then redirects into the real portal at the first demo-enabled domain.
+    GET/HEAD only; keeps the per-IP throttle to blunt session-spam."""
+    if request.method not in ("GET", "HEAD"):
+        return HttpResponseNotAllowed(["GET", "HEAD"])
+    if not _rate_ok(request):
+        return HttpResponse("Too many requests", status=429)
 
+    domains = _domains_with_demos()
+    if not domains:
+        raise Http404("No demo content is available")
 
-@demo_guard
-def demo_domain_list(request, domain):
-    if domain not in DOMAINS or not demo_folders(domain).exists():
-        raise Http404("No demo for this domain")
-    patients = demo_patients(domain).order_by("-uploaded_at")[:200]
-    return render(request, "common/demo/list.html", {
-        "demo_mode": True,
-        "domain": domain,
-        "domain_label": domain.capitalize(),
-        "patients": patients,
-    })
-
-
-@demo_guard
-def demo_patient_detail(request, domain, pk):
-    if domain not in DOMAINS:
-        raise Http404("Unknown domain")
-    patient = get_object_or_404(demo_patients(domain), pk=pk)
-    fk = fk_fields_for(domain)[0]
-    files = (
-        FileRegistry.objects.filter(**{fk: patient})
-        .order_by("file_type", "id")
-    )
-    file_rows = []
-    for f in files:
-        ct, _ = mimetypes.guess_type(f.file_path or "")
-        file_rows.append({
-            "id": f.id,
-            "file_type": f.get_file_type_display() if hasattr(f, "get_file_type_display") else f.file_type,
-            "content_type": ct or "application/octet-stream",
-            "is_image": bool(ct and ct.startswith("image/")),
-            "is_video": bool(ct and ct.startswith("video/")),
-            "size": f.file_size or 0,
-        })
-    return render(request, "common/demo/detail.html", {
-        "demo_mode": True,
-        "domain": domain,
-        "domain_label": domain.capitalize(),
-        "patient": patient,
-        "files": file_rows,
-    })
-
-
-@demo_guard
-def demo_serve_file(request, domain, file_id):
-    """Stream a single FileRegistry entry, but only if its patient is in a
-    demo folder of ``domain``. Read-only, inline."""
-    if domain not in DOMAINS:
-        raise Http404("Unknown domain")
+    User = get_user_model()
     try:
-        file_obj = FileRegistry.objects.get(id=file_id)
-    except FileRegistry.DoesNotExist:
-        raise Http404("File not found")
+        guest = User.objects.get(username=settings.DEMO_GUEST_USERNAME)
+    except User.DoesNotExist:
+        raise Http404("Demo is not available")
 
-    # Resolve the patient via the URL domain's FK (not file_obj.domain, which is
-    # legacy/untrusted) so a file can only be reached through its own domain.
-    patient = getattr(file_obj, fk_fields_for(domain)[0], None)
-    if not patient_in_demo(patient, domain):
-        # Do not leak existence — same answer as a missing file.
-        raise Http404("File not found")
-
-    path = file_obj.file_path
-    if not path:
-        raise Http404("File not found")
-
-    content_type, _ = mimetypes.guess_type(path)
-    content_type = content_type or "application/octet-stream"
-    filename = str(path).split("/")[-1] or f"file_{file_obj.id}"
-
-    resp = streaming_response(
-        path_or_key=path,
-        content_type=content_type,
-        filename=filename,
-        as_attachment=False,
-    )
-    if content_type.startswith(("video/", "audio/")):
-        resp["Accept-Ranges"] = "bytes"
-        if file_obj.file_size:
-            resp["Content-Length"] = str(file_obj.file_size)
-    return resp
+    login(request, guest, backend="django.contrib.auth.backends.ModelBackend")
+    return redirect(f"/{domains[0]}/")

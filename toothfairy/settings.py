@@ -106,6 +106,7 @@ MIDDLEWARE = [
     "toothfairy.middleware.RequestLoggingMiddleware",
     "toothfairy.middleware.ProjectSessionMiddleware",
     "toothfairy.middleware.ActiveProfileMiddleware",
+    "toothfairy.middleware.DemoGuestReadOnlyMiddleware",
     "toothfairy.middleware.PresenceMiddleware",
 ]
 
@@ -245,6 +246,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
+
+# Shared read-only "guest" account the public demo auto-logs-in as. It holds a
+# standard ProjectAccess on every project but no FolderAccess, so it can only
+# read is_demo folders (see common.permissions) and can never write (see
+# toothfairy.middleware.DemoGuestReadOnlyMiddleware).
+DEMO_GUEST_USERNAME = config("DEMO_GUEST_USERNAME", default="guest")
 
 # Email settings
 EMAIL_BACKEND = config("EMAIL_BACKEND")

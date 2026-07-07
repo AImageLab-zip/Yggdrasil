@@ -5,6 +5,7 @@ from common import presence
 from common.models import Project, ProjectAccess
 from django.utils.deprecation import MiddlewareMixin
 import traceback
+from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,34 @@ class ActiveProfileMiddleware(MiddlewareMixin):
             return redirect('/')
 
         return None
+
+
+class DemoGuestReadOnlyMiddleware(MiddlewareMixin):
+    """Hard read-only backstop for the shared public-demo guest user.
+
+    The guest holds a standard ProjectAccess so the real @login_required views
+    work, but it must NEVER mutate anything. Every write path is a non-safe HTTP
+    method, so we reject all of them for the guest here — before any view runs —
+    regardless of what per-view permission checks would decide. Logging out (a
+    POST) is the one allowed exception. Runs after ActiveProfileMiddleware so
+    request.user is populated.
+    """
+
+    SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+    def process_request(self, request):
+        if request.method in self.SAFE_METHODS:
+            return None
+        from common.demo import is_demo_guest
+        if not is_demo_guest(getattr(request, "user", None)):
+            return None
+        from django.urls import NoReverseMatch, reverse
+        try:
+            if request.path == reverse("logout"):
+                return None
+        except NoReverseMatch:
+            pass
+        return HttpResponseForbidden("This is a read-only public demo.")
 
 
 class PresenceMiddleware(MiddlewareMixin):

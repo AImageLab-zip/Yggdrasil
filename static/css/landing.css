@@ -6,6 +6,9 @@
  * Below 860px the columns stack and the page is allowed to scroll.
  */
 
+/* Landing has no footer, so drop the reserved footer space theme.css adds. */
+body { padding-bottom: 0; }
+
 .landing {
     height: 100vh;
     height: 100dvh;
@@ -36,14 +39,14 @@
     gap: 0.6rem;
 }
 .landing-tree {
-    height: clamp(2.4rem, 6vw, 3.9rem);
+    height: clamp(4.8rem, 12vw, 7.8rem);
     width: auto;
     display: block;
 }
 .landing-title {
     font-family: var(--ygg-font-display);
     font-weight: 700;
-    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-size: clamp(4rem, 10vw, 6.5rem);
     letter-spacing: -0.02em;
     line-height: 1;
     color: var(--ygg-text);
@@ -53,11 +56,11 @@
 .landing-tagline {
     font-family: var(--ygg-font-body);
     letter-spacing: 0.01em;
-    font-size: 0.95rem;
+    font-size: clamp(1.25rem, 2.4vw, 1.9rem);
     line-height: 1.5;
     color: var(--ygg-text-muted);
-    max-width: 46rem;
-    margin: 0.9rem auto 0;
+    max-width: 60rem;
+    margin: 1rem auto 0;
 }
 
 /* ---- Norse-rune reveal (restored from v1.9; ~50% of loads) ------------- */
@@ -128,8 +131,8 @@
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
-    gap: 0.75rem;
-    padding: clamp(1.5rem, 3vw, 3rem);
+    gap: 0.5rem;
+    padding: clamp(1rem, 2vw, 1.75rem);
     overflow: hidden;
     text-decoration: none;
     color: inherit;
@@ -172,7 +175,7 @@
 .domain__title {
     font-family: var(--ygg-font-display);
     font-weight: 700;
-    font-size: clamp(1.5rem, 2.4vw, 2.25rem);
+    font-size: clamp(1.15rem, 1.8vw, 1.6rem);
     letter-spacing: -0.02em;
     line-height: 1.1;
     color: var(--ygg-text);
@@ -180,10 +183,10 @@
 }
 .domain__desc {
     color: var(--ygg-text-muted);
-    line-height: 1.6;
+    line-height: 1.5;
     max-width: 30rem;
     margin: 0;
-    font-size: 0.95rem;
+    font-size: 0.82rem;
 }
 
 /* line-art motif — flexes down when vertical room is tight */
@@ -196,7 +199,7 @@
     justify-content: center;
     padding: 0.5rem 0;
 }
-.domain__art svg { width: min(16rem, 80%); max-height: 100%; height: auto; color: var(--accent); }
+.domain__art svg { width: min(11rem, 70%); max-height: 100%; height: auto; color: var(--accent); }
 
 .domain__modalities {
     display: flex; flex-wrap: wrap; gap: 0.4rem;

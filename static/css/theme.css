@@ -88,9 +88,18 @@
  * Plain CSS (loaded after tailwind.css, so these override compiled utilities).
  * ======================================================================== */
 
-/* Sticky footer: body is a column, main grows to fill, footer sinks to bottom. */
-body { min-height: 100vh; display: flex; flex-direction: column; }
-main { flex: 1 0 auto; }
+/* Fixed footer: pinned to the viewport bottom at all times; body reserves room
+ * so content is never hidden behind it. (Landing blanks the footer + is its own
+ * 100vh overflow-hidden viewport, so it's unaffected.) */
+:root { --ygg-footer-h: 4rem; }
+body { min-height: 100vh; padding-bottom: var(--ygg-footer-h); }
+.ygg-footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+}
 
 /* Full-width navbar: brand flush-left, profile flush-right (drop max-width). */
 .ygg-nav-inner { max-width: none; }
@@ -99,17 +108,4 @@ main { flex: 1 0 auto; }
 .ygg-brand-logo { height: 1.6rem; width: auto; display: block; }
 
 /* Footer: AImageLab credit logo. */
-.footer-aimagelab { height: 1.15rem; width: auto; display: block; }
-
-/* Footer AI-usage disclaimer — fades in when the footer scrolls into view. */
-.footer-ai-note {
-    display: block;
-    font-size: 0.7rem;
-    line-height: 1.2;
-    opacity: 0;
-    transition: opacity 0.4s ease;
-}
-.footer-ai-note.is-visible { opacity: 0.6; }
-@media (prefers-reduced-motion: reduce) {
-    .footer-ai-note { transition: none; }
-}
+.footer-aimagelab { height: 1.15rem; width: auto; display: inline-block; }

@@ -51,12 +51,19 @@ def get_user_folder_role(user, folder):
 
 
 def user_can_read_folder(user, folder, project_or_app_context=None):
+    from common.demo import is_demo_guest
+    if is_demo_guest(user):
+        # The public-demo guest can read a folder iff it is flagged is_demo.
+        return bool(folder and getattr(folder, "is_demo", False))
     if user_is_project_admin(user, project_or_app_context or folder._meta.app_label):
         return True
     return get_user_folder_role(user, folder) in {"standard", "annotator", "project_manager"}
 
 
 def user_can_write_annotations(user, folder, project_or_app_context=None):
+    from common.demo import is_demo_guest
+    if is_demo_guest(user):
+        return False
     if user_is_project_admin(user, project_or_app_context or folder._meta.app_label):
         return True
     return get_user_folder_role(user, folder) in {"annotator", "project_manager"}
@@ -83,6 +90,9 @@ def user_can_manage_folder_access(user, folder):
 
 
 def user_can_create_export(user, folder, project_or_app_context=None):
+    from common.demo import is_demo_guest
+    if is_demo_guest(user):
+        return False
     if user_is_project_admin(user, project_or_app_context or folder._meta.app_label):
         return True
     return get_user_folder_role(user, folder) == "project_manager"
@@ -131,6 +141,9 @@ def user_can_delete_caption(user, caption):
 
 
 def filter_folders_for_user(user, folders_qs, app_label):
+    from common.demo import is_demo_guest
+    if is_demo_guest(user):
+        return folders_qs.filter(is_demo=True)
     if user_is_project_admin(user, app_label):
         return folders_qs
     FolderAccess = _folder_access_model(app_label)
@@ -139,6 +152,10 @@ def filter_folders_for_user(user, folders_qs, app_label):
 
 
 def filter_patients_for_user(user, patients_qs, app_label):
+    from common.demo import demo_patients, is_demo_guest
+    if is_demo_guest(user):
+        patient_ids = list(demo_patients(app_label).values_list("pk", flat=True))
+        return patients_qs.filter(pk__in=patient_ids)
     if user_is_project_admin(user, app_label):
         return patients_qs
     FolderAccess = _folder_access_model(app_label)

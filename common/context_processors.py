@@ -4,7 +4,11 @@ from common.models import Project, ProjectAccess
 
 
 def app_meta(request):
-    return {'app_version': getattr(settings, 'APP_VERSION', '')}
+    from common.demo import is_demo_guest
+    return {
+        'app_version': getattr(settings, 'APP_VERSION', ''),
+        'is_demo_guest': is_demo_guest(getattr(request, 'user', None)),
+    }
 
 
 def current_project(request):
