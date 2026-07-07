@@ -1,14 +1,13 @@
-name: yggdrasil-$DOCKER_SUFFIX
+name: yggdrasil-${DOCKER_SUFFIX}
 
 services:
     web:
         build: .
-        container_name: yggdrasil-web-$DOCKER_SUFFIX
-        volumes:
-            - .:/app
+        container_name: yggdrasil-web-${DOCKER_SUFFIX}
+        working_dir: /app
         command: /app/entrypoint.sh
         ports:
-            - "$WEB_EXTERNAL_PORT:8000"
+            - "${WEB_EXTERNAL_PORT}:8000"
         depends_on:
             db:
                 condition: service_healthy
@@ -19,71 +18,77 @@ services:
             VIRTUAL_PORT: ${VIRTUAL_PORT:-8000}
             LETSENCRYPT_HOST: ${LETSENCRYPT_HOST:-${VIRTUAL_HOST:-${DOMAIN:-}}}
             LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
-            DB_HOST: yggdrasil-db-$DOCKER_SUFFIX
-
+            DB_HOST: yggdrasil-db-${DOCKER_SUFFIX}
+            PYTHONPATH: /app
         env_file:
             - .env
-        user: "$UID:$GID"
         restart: unless-stopped
+        volumes:
+            - app_logs:/app/logs
+            - app_staticfiles:/app/staticfiles
+            - app_media:/app/media
+            - app_processing:/tmp/processing
         networks:
             - app-net
             - proxy-net
 
-    # Maintenance: celery beat scheduler + local worker for the maintenance
-    # queue (daily DB backups). MAINTENANCE_QUEUE must never overlap
-    # RUNNER_DEFAULT_QUEUE / RUNNER_QUEUE_BY_* - settings.py enforces this.
     beat:
         build: .
-        container_name: yggdrasil-beat-$DOCKER_SUFFIX
-        volumes:
-            - .:/app
-        command: celery -A yggdrasil beat --loglevel=info --schedule /tmp/celerybeat-schedule
-        environment:
-            DB_HOST: yggdrasil-db-$DOCKER_SUFFIX
-        env_file:
-            - .env
-        user: "$UID:$GID"
+        container_name: yggdrasil-beat-${DOCKER_SUFFIX}
+        working_dir: /app
+        command: python -m celery -A toothfairy.celery:app beat --loglevel=info --schedule /tmp/celerybeat-schedule
         depends_on:
             db:
                 condition: service_healthy
             redis:
                 condition: service_started
+        environment:
+            DB_HOST: yggdrasil-db-${DOCKER_SUFFIX}
+            PYTHONPATH: /app
+        env_file:
+            - .env
         restart: unless-stopped
+        volumes:
+            - app_logs:/app/logs
+            - celery_beat_schedule:/tmp
         networks:
             - app-net
 
     maintenance-worker:
         build: .
-        container_name: yggdrasil-maintenance-$DOCKER_SUFFIX
-        volumes:
-            - .:/app
-        command: celery -A yggdrasil worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
-        environment:
-            DB_HOST: yggdrasil-db-$DOCKER_SUFFIX
-        env_file:
-            - .env
-        user: "$UID:$GID"
+        container_name: yggdrasil-maintenance-${DOCKER_SUFFIX}
+        working_dir: /app
+        command: python -m celery -A toothfairy.celery:app worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
         depends_on:
             db:
                 condition: service_healthy
             redis:
                 condition: service_started
+        environment:
+            DB_HOST: yggdrasil-db-${DOCKER_SUFFIX}
+            PYTHONPATH: /app
+        env_file:
+            - .env
         restart: unless-stopped
+        volumes:
+            - app_logs:/app/logs
+            - app_backups:/app/backups
+            - app_processing:/tmp/processing
         networks:
             - app-net
 
     db:
         image: mysql:8.0
-        container_name: yggdrasil-db-$DOCKER_SUFFIX
+        container_name: yggdrasil-db-${DOCKER_SUFFIX}
         environment:
-            MYSQL_DATABASE: $MYSQL_DATABASE
-            MYSQL_USER: $MYSQL_USER
-            MYSQL_PASSWORD: $MYSQL_PASSWORD
-            MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
+            MYSQL_DATABASE: ${MYSQL_DATABASE}
+            MYSQL_USER: ${MYSQL_USER}
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
         volumes:
             - mysql_data:/var/lib/mysql
         ports:
-            - "$DB_EXTERNAL_PORT:3306"
+            - "${DB_EXTERNAL_PORT}:3306"
         healthcheck:
             test:
                 [
@@ -94,7 +99,7 @@ services:
                     "localhost",
                     "-u",
                     "root",
-                    "-p$MYSQL_ROOT_PASSWORD",
+                    "-p${MYSQL_ROOT_PASSWORD}",
                 ]
             timeout: 20s
             retries: 10
@@ -106,16 +111,22 @@ services:
 
     redis:
         image: redis:7-alpine
-        container_name: yggdrasil-redis-$DOCKER_SUFFIX
+        container_name: yggdrasil-redis-${DOCKER_SUFFIX}
         command: redis-server --requirepass ${REDIS_PASSWORD}
-        restart: unless-stopped
         ports:
-            - "$REDIS_EXTERNAL_PORT:6379"
+            - "${REDIS_EXTERNAL_PORT}:6379"
+        restart: unless-stopped
         networks:
             - app-net
 
 volumes:
     mysql_data:
+    app_logs:
+    app_staticfiles:
+    app_media:
+    app_backups:
+    app_processing:
+    celery_beat_schedule:
 
 networks:
     proxy-net:
