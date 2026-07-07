@@ -41,11 +41,11 @@
 
 <!-- Masthead -->
 <header class="landing-top">
-    <div class="landing-lockup">
+    <div class="landing-lockup" tabindex="0" aria-describedby="landing-tagline">
         <img class="landing-tree" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
         <h1 class="landing-title" id="landing-title" data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ">Ygg<span class="accent">drasil</span></h1>
+        <span class="landing-tagline" id="landing-tagline" role="tooltip">Taking its name from the cosmic tree of Norse mythology, YGGDRASIL represents a unified platform that connects diverse research fields, datasets, users, and workflows</span>
     </div>
-    <p class="landing-tagline">Taking its name from the cosmic tree of Norse mythology, YGGDRASIL represents a unified platform that connects diverse research fields, datasets, users, and workflows</p>
     {% if user.is_authenticated and not projects %}
         <p class="landing-notice">{% icon 'lock' %} You don't have access to any project yet. Contact an administrator if you believe this is an error.</p>
     {% endif %}

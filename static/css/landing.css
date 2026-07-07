@@ -33,10 +33,12 @@ body { padding-bottom: 0; }
     padding: 1.75rem 1.25rem 1.25rem;
 }
 .landing-lockup {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.6rem;
+    cursor: default;
 }
 .landing-tree {
     height: clamp(3.2rem, 8vw, 5rem);
@@ -53,14 +55,40 @@ body { padding-bottom: 0; }
     margin: 0;
 }
 .landing-title .accent { color: var(--ygg-green-600); }
+
+/* Tagline: hidden by default, revealed as a tooltip when the title lockup is
+ * hovered or focused. */
 .landing-tagline {
+    position: absolute;
+    top: calc(100% + 0.6rem);
+    left: 50%;
+    transform: translateX(-50%) translateY(-0.25rem);
+    width: max-content;
+    max-width: min(40rem, 90vw);
     font-family: var(--ygg-font-body);
     letter-spacing: 0.01em;
-    font-size: clamp(1.05rem, 1.7vw, 1.35rem);
+    font-size: 0.75rem;
     line-height: 1.5;
+    text-align: center;
     color: var(--ygg-text-muted);
-    max-width: 52rem;
-    margin: 1rem auto 0;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    padding: 0.55rem 0.9rem;
+    box-shadow: var(--ygg-shadow-card, 0 6px 20px rgba(0, 0, 0, 0.12));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease, transform 160ms ease;
+    z-index: 30;
+}
+.landing-lockup:hover .landing-tagline,
+.landing-lockup:focus-visible .landing-tagline,
+.landing-lockup:focus-within .landing-tagline {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+    .landing-tagline { transition: none; }
 }
 
 /* ---- Norse-rune reveal (restored from v1.9; ~50% of loads) ------------- */

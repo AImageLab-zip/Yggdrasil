@@ -91,7 +91,7 @@
 /* Fixed footer: pinned to the viewport bottom at all times; body reserves room
  * so content is never hidden behind it. (Landing blanks the footer + is its own
  * 100vh overflow-hidden viewport, so it's unaffected.) */
-:root { --ygg-footer-h: 4rem; }
+:root { --ygg-footer-h: 3rem; }
 body { min-height: 100vh; padding-bottom: var(--ygg-footer-h); }
 .ygg-footer {
     position: fixed;
@@ -108,4 +108,4 @@ body { min-height: 100vh; padding-bottom: var(--ygg-footer-h); }
 .ygg-brand-logo { height: 1.6rem; width: auto; display: block; }
 
 /* Footer: AImageLab credit logo. */
-.footer-aimagelab { height: 1.15rem; width: auto; display: inline-block; }
+.footer-aimagelab { height: 1.45rem; width: auto; display: inline-block; }
