@@ -573,6 +573,21 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         input_files={"input": key},
     )
 
+    if processing_job and is_runner_enabled_for_modality("cbct_to_panoramic"):
+        panoramic_job = Job.objects.create(
+            modality_slug="cbct_to_panoramic",
+            status="dependency",
+            **_entity_fk_kwargs(patient),
+            input_files={"raw_cbct": key},
+            priority=processing_job.priority,
+        )
+        panoramic_job.add_dependency(processing_job)
+        logger.info(
+            "Created CBCT-to-panoramic job #%s with dependency on CBCT segmentation job #%s",
+            panoramic_job.id,
+            processing_job.id,
+        )
+
     return key, processing_job
 
 
@@ -654,6 +669,21 @@ def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
         **_entity_fk_kwargs(patient),
         input_files={"files": [f.get("path") for f in saved_files if isinstance(f, dict)]},
     )
+
+    if processing_job and is_runner_enabled_for_modality("cbct_to_panoramic"):
+        panoramic_job = Job.objects.create(
+            modality_slug="cbct_to_panoramic",
+            status="dependency",
+            **_entity_fk_kwargs(patient),
+            input_files={"raw_files": [f.get("path") for f in saved_files if isinstance(f, dict)]},
+            priority=processing_job.priority,
+        )
+        panoramic_job.add_dependency(processing_job)
+        logger.info(
+            "Created CBCT-to-panoramic job #%s with dependency on CBCT segmentation job #%s",
+            panoramic_job.id,
+            processing_job.id,
+        )
 
     return base_prefix, processing_job
 
@@ -982,6 +1012,49 @@ def mark_job_completed(job_id, output_files, logs=None):
                 )
             output_files = {"segmentation_nifti": output_files["segmentation_nifti"]}
 
+        if job.modality_slug == "cbct_to_panoramic":
+            panoramic_path = _resolve_output_path_or_key(
+                output_files.get("panoramic_png") or output_files.get("panoramic")
+            )
+            if not panoramic_path or not artifact_exists(panoramic_path):
+                raise ValueError(
+                    "CBCT-to-panoramic completion missing required output_files.panoramic_png"
+                )
+
+        # For CBCT segmentation -> panoramic chaining, update dependent job
+        # inputs before marking segmentation completed. That way dependency
+        # release enqueues the panoramic job with both raw CBCT and segmentation.
+        if job.modality_slug == "cbct" and output_files:
+            try:
+                dependent_panoramic_jobs = job.dependent_jobs.filter(
+                    modality_slug="cbct_to_panoramic"
+                )
+                segmentation_key = _resolve_output_path_or_key(
+                    output_files.get("segmentation_nifti")
+                )
+                for panoramic_job in dependent_panoramic_jobs:
+                    panoramic_inputs = dict(panoramic_job.input_files or {})
+                    original_inputs = job.input_files or {}
+                    if "raw_cbct" not in panoramic_inputs and original_inputs.get("input"):
+                        panoramic_inputs["raw_cbct"] = original_inputs.get("input")
+                    if "raw_files" not in panoramic_inputs and original_inputs.get("files"):
+                        panoramic_inputs["raw_files"] = original_inputs.get("files")
+                    if segmentation_key:
+                        panoramic_inputs["segmentation_nifti"] = segmentation_key
+                    panoramic_job.input_files = panoramic_inputs
+                    panoramic_job.save(update_fields=["input_files"])
+                    logger.info(
+                        "Pre-updated CBCT-to-panoramic job #%s with segmentation output from CBCT job #%s",
+                        panoramic_job.id,
+                        job.id,
+                    )
+            except Exception as e:
+                logger.error(
+                    "Error pre-updating dependent CBCT-to-panoramic jobs: %s",
+                    e,
+                    exc_info=True,
+                )
+
         # For IOS -> bite stage chaining, update dependent job inputs before
         # marking IOS as completed. This avoids enqueueing bite jobs without
         # the oriented IOS artifacts when dependency status flips to pending.
@@ -1086,6 +1159,55 @@ def mark_job_completed(job_id, output_files, logs=None):
                 logger.info(
                     f"CBCT FileRegistry entry created with {len(processed_files)} output files"
                 )
+
+        elif job.modality_slug == "cbct_to_panoramic":
+            logger.info(
+                "CBCT-to-panoramic job completed for patient %s",
+                getattr(job_patient, "patient_id", "unknown"),
+            )
+            panoramic_path = _resolve_output_path_or_key(
+                output_files.get("panoramic_png") or output_files.get("panoramic")
+            )
+            if panoramic_path and artifact_exists(panoramic_path):
+                file_size, file_hash = _size_hash_for_path_or_key(panoramic_path)
+                panoramic_modality = None
+                try:
+                    from common.models import Modality as _Modality
+
+                    panoramic_modality = _Modality.objects.filter(slug="panoramic").first()
+                except Exception:
+                    panoramic_modality = None
+
+                processed_files = {}
+                for output_key, out_spec in output_files.items():
+                    path_or_key = _resolve_output_path_or_key(out_spec)
+                    if path_or_key:
+                        processed_files[str(output_key)] = {
+                            "path": path_or_key,
+                            "type": output_key,
+                        }
+
+                FileRegistry.objects.update_or_create(
+                    file_path=panoramic_path,
+                    defaults={
+                        "file_type": get_file_type_for_modality(
+                            "panoramic", is_processed=True
+                        ),
+                        "file_size": file_size or 0,
+                        "file_hash": file_hash or "object",
+                        "processing_job": job,
+                        **_job_entity_fk_kwargs(job),
+                        "modality": panoramic_modality,
+                        "metadata": {
+                            "processed_at": timezone.now().isoformat(),
+                            "generated_from": "cbct_to_panoramic",
+                            "input_files": job.input_files or {},
+                            "files": processed_files,
+                            "logs": logs if logs else "",
+                        },
+                    },
+                )
+                logger.info("Stored generated panoramic FileRegistry entry")
 
         elif job.modality_slug == "intraoral-photo":
             from .models import IntraoralToothSegmentation
@@ -1438,6 +1560,11 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         if job_voice_caption and job.modality_slug == "audio":
             job_voice_caption.processing_status = "failed"
             job_voice_caption.save()
+        elif job_patient and job.modality_slug == "cbct_to_panoramic":
+            logger.info(
+                "CBCT-to-panoramic job failed for patient %s",
+                getattr(job_patient, "patient_id", "unknown"),
+            )
         elif job_patient and job.modality_slug == "bite_classification":
             logger.info(
                 f"Bite classification job failed for patient {getattr(job_patient, 'patient_id', 'unknown')}"

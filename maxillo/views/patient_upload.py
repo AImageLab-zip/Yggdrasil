@@ -108,11 +108,12 @@ def upload_patient(request):
                 try:
                     modality = Modality.objects.get(slug='cbct')
                     patient.modalities.add(modality)
-                    
+
                     if cbct_file:
-                        from ..file_utils import save_generic_modality_file
-                        fr, job = save_generic_modality_file(patient, 'cbct', cbct_file)
-                        if fr:
+                        from ..file_utils import save_cbct_to_dataset
+
+                        file_path, job = save_cbct_to_dataset(patient, cbct_file)
+                        if file_path:
                             uploaded_modalities.append('CBCT')
                             if job:
                                 processing_job_ids.append(job.id)
