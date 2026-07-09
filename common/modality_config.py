@@ -136,7 +136,12 @@ def _file_is_raw(file_obj):
 
 
 def _processed_exists_for(file_obj, slug):
-    """Whether a ``{slug}_processed`` file exists for the same owning patient."""
+    """Whether a ``{slug}_processed`` file exists for the same owning patient.
+
+    Prefix match (not exact) so this also finds legacy suffixed rows written
+    before the generic write path (e.g. ``ios_processed_upper``/``_lower``)
+    alongside the plain ``{slug}_processed`` rows new completions write.
+    """
     if not slug:
         return False
     from common.models import FileRegistry
@@ -151,7 +156,7 @@ def _processed_exists_for(file_obj, slug):
         return False
     try:
         return FileRegistry.objects.filter(
-            file_type=f"{slug}_processed", **filters
+            file_type__startswith=f"{slug}_processed", **filters
         ).exists()
     except DatabaseError:
         return False

@@ -7,6 +7,7 @@ gunicorn==23.0.0
 mysqlclient==2.2.7
 nibabel==5.2.0
 numpy==2.3.2
+paramiko==3.5.1
 pillow==11.3.0
 python-decouple==3.8
 sqlparse==0.5.3

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yggdrasil-slurm"
+version = "0.1.0"
+description = "Cluster-side object-storage stage helper for Yggdrasil SLURM jobs (pull inputs / push outputs). No credentials stored; reads them from the per-job env."
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.34",
+    "click>=8.1",
+]
+
+[project.scripts]
+ygg-stage = "yggdrasil_slurm.stage:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["yggdrasil_slurm*"]

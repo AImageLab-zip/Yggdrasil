@@ -322,7 +322,7 @@ if not isinstance(RUNNER_QUEUE_BY_MODALITY, dict):
 RUNNER_QUEUE_BY_PROJECT = _json.loads(config("RUNNER_QUEUE_BY_PROJECT", default="{}"))
 if not isinstance(RUNNER_QUEUE_BY_PROJECT, dict):
     RUNNER_QUEUE_BY_PROJECT = {}
-RUNNER_TASK_NAME = config("RUNNER_TASK_NAME", default="toothfairy4m_runner.process_job")
+RUNNER_TASK_NAME = config("RUNNER_TASK_NAME", default="yggdrasil.runner.process_job")
 
 # Maintenance queue: consumed ONLY by the local maintenance worker (compose
 # service), never by external runners. A collision would let runners eat
@@ -378,6 +378,32 @@ def _parse_runner_tokens(raw: str):
 
 
 RUNNER_API_TOKENS = _parse_runner_tokens(config("RUNNER_API_TOKENS", default=""))
+
+# --- Runner worker (Yggdrasil 2.0) -----------------------------------------
+# The web app never uses any of this — these settings are consumed only by the
+# dedicated runner worker (docker-compose 'runner-worker', see common.runner). They
+# live in a separate .env.worker layered over .env so the worker's SSH/cluster config
+# stays out of the web container.
+#
+# SSH into the cluster login node (the worker is the ONLY holder of the key):
+SLURM_SSH_HOST = config("SLURM_SSH_HOST", default="")
+SLURM_SSH_PORT = config("SLURM_SSH_PORT", default=22, cast=int)
+SLURM_SSH_USER = config("SLURM_SSH_USER", default="")
+SLURM_SSH_KEY = config("SLURM_SSH_KEY", default="")  # path to the private key
+# Directory on the cluster holding one subdir per algo, each with a run.sbatch
+# (ProcessingStep.algo_name is resolved against this: ALGO_BASE_DIR/<algo_name>/run.sbatch).
+ALGO_BASE_DIR = config("ALGO_BASE_DIR", default="")
+# Shared-FS base where the worker stages each job's private workdir + creds.env.
+SLURM_STAGE_DIR = config("SLURM_STAGE_DIR", default="")
+# sacct polling cadence and the wall-clock ceiling before a job is declared stuck.
+SLURM_POLL_INTERVAL = config("SLURM_POLL_INTERVAL", default=15, cast=int)
+SLURM_MAX_WALL_SECONDS = config("SLURM_MAX_WALL_SECONDS", default=24 * 3600, cast=int)
+
+# Worker -> web runner API (host-independent boundary):
+RUNNER_API_BASE_URL = config("RUNNER_API_BASE_URL", default="")  # e.g. http://web:8000/api
+RUNNER_API_TOKEN = config("RUNNER_API_TOKEN", default="")  # one of RUNNER_API_TOKENS
+RUNNER_WORKER_ID = config("RUNNER_WORKER_ID", default="slurm-runner")
+
 CELERY_TASK_ROUTES = {
     RUNNER_TASK_NAME: {"queue": RUNNER_DEFAULT_QUEUE},
     "common.tasks.*": {"queue": MAINTENANCE_QUEUE},

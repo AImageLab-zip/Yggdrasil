@@ -29,6 +29,21 @@ def _patient_public_id_for_job(job: Job) -> Optional[int]:
     return getattr(patient, "patient_id", None) or getattr(patient, "id", None)
 
 
+def _step_dispatch_config(job: Job) -> Dict[str, Any]:
+    """Resolve the runner worker's execution knob from the job's ProcessingStep.
+
+    The worker learns which algo dir to sbatch (ALGO_BASE_DIR/<algo_name>/run.sbatch)
+    purely from the claim response, so it needs no ORM/Job.step access. Resolved by
+    step slug (== modality_slug); empty when the modality has no step.
+    """
+    from common.modality_config import get_step
+
+    step = get_step(job.modality_slug)
+    return {
+        "algo_name": getattr(step, "algo_name", "") if step else "",
+    }
+
+
 def _serialize_job_for_runner(job: Job) -> Dict[str, Any]:
     return {
         "id": job.id,
@@ -40,6 +55,7 @@ def _serialize_job_for_runner(job: Job) -> Dict[str, Any]:
         "project_slug": _project_slug_for_job(job),
         "patient_id": _patient_public_id_for_job(job),
         "created_at": job.created_at.isoformat() if job.created_at else None,
+        **_step_dispatch_config(job),
     }
 
 

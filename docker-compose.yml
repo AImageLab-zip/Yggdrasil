@@ -77,6 +77,32 @@ services:
         networks:
             - app-net
 
+    runner-worker:
+        build: .
+        container_name: yggdrasil-runner-${DOCKER_SUFFIX}
+        working_dir: /app
+        # Consumes every runner queue (RUNNER_QUEUES from .env.worker) and drives the
+        # SLURM cluster over SSH. The ONLY service with the SSH key + cluster config.
+        command: python -m celery -A toothfairy.celery:app worker --queues ${RUNNER_QUEUES:-runner_dev} --concurrency ${RUNNER_CONCURRENCY:-4} --loglevel=info
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        environment:
+            DB_HOST: yggdrasil-db-${DOCKER_SUFFIX}
+            PYTHONPATH: /app
+        env_file:
+            - .env
+            - .env.worker
+        restart: unless-stopped
+        volumes:
+            - app_logs:/app/logs
+            # SSH key mounted read-only; path must match SLURM_SSH_KEY in .env.worker.
+            - ${SLURM_SSH_KEY_HOST:-./secrets/slurm_ssh_key}:/run/secrets/slurm_ssh_key:ro
+        networks:
+            - app-net
+
     db:
         image: mysql:8.0
         container_name: yggdrasil-db-${DOCKER_SUFFIX}

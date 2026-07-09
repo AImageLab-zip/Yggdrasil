@@ -1,6 +1,7 @@
 import secrets
 
 from django.db import models
+from django.db.models import Q
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 import os
@@ -201,8 +202,16 @@ class Patient(models.Model):
             # Check for both raw and processed files
             upper_raw = self.files.filter(file_type='ios_raw_upper').exists()
             lower_raw = self.files.filter(file_type='ios_raw_lower').exists()
-            upper_processed = self.files.filter(file_type='ios_processed_upper').exists()
-            lower_processed = self.files.filter(file_type='ios_processed_lower').exists()
+            # Legacy rows are file_type='ios_processed_upper'/'_lower'; new
+            # completions write file_type='ios_processed', subtype='upper'/'lower'.
+            upper_processed = self.files.filter(
+                Q(file_type='ios_processed_upper')
+                | Q(file_type='ios_processed', subtype='upper')
+            ).exists()
+            lower_processed = self.files.filter(
+                Q(file_type='ios_processed_lower')
+                | Q(file_type='ios_processed', subtype='lower')
+            ).exists()
             
             # Return True if we have either raw or processed files for both upper and lower
             return (upper_raw or upper_processed) and (lower_raw or lower_processed)
@@ -291,7 +300,10 @@ class Patient(models.Model):
     def get_processed_files(self):
         """Get all processed files from FileRegistry"""
         return self.files.filter(
-            file_type__in=['cbct_processed', 'ios_processed_upper', 'ios_processed_lower', 'audio_processed']
+            file_type__in=[
+                'cbct_processed', 'ios_processed_upper', 'ios_processed_lower',
+                'ios_processed', 'audio_processed',
+            ]
         )
     
     def get_cbct_raw_file(self):
@@ -323,9 +335,17 @@ class Patient(models.Model):
         return {'upper': upper, 'lower': lower}
     
     def get_ios_processed_files(self):
-        """Get IOS processed files from FileRegistry"""
-        upper = self.files.filter(file_type='ios_processed_upper').order_by('-created_at', '-id').first()
-        lower = self.files.filter(file_type='ios_processed_lower').order_by('-created_at', '-id').first()
+        """Get IOS processed files from FileRegistry.
+
+        Legacy rows are file_type='ios_processed_upper'/'_lower'; new completions
+        write file_type='ios_processed', subtype='upper'/'lower' — both match.
+        """
+        upper = self.files.filter(
+            Q(file_type='ios_processed_upper') | Q(file_type='ios_processed', subtype='upper')
+        ).order_by('-created_at', '-id').first()
+        lower = self.files.filter(
+            Q(file_type='ios_processed_lower') | Q(file_type='ios_processed', subtype='lower')
+        ).order_by('-created_at', '-id').first()
         return {'upper': upper, 'lower': lower}
     
     def has_ios_scans_new(self):
