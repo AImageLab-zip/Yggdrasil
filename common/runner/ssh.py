@@ -25,13 +25,15 @@ class SlurmSSHError(RuntimeError):
 
 class SlurmSSH:
     def __init__(self, *, host, port=22, user=None, key_path=None,
-                 poll_interval=15, max_wall_seconds=24 * 3600, connect_timeout=30):
+                 password=None, poll_interval=15, max_wall_seconds=24 * 3600,
+                 connect_timeout=30):
         if not host:
             raise SlurmSSHError("SLURM_SSH_HOST is not configured")
         self.host = host
         self.port = int(port or 22)
         self.user = user or None
         self.key_path = key_path or None
+        self.password = password or None
         self.poll_interval = int(poll_interval)
         self.max_wall_seconds = int(max_wall_seconds)
         self.connect_timeout = connect_timeout
@@ -44,6 +46,7 @@ class SlurmSSH:
             port=getattr(settings, "SLURM_SSH_PORT", 22),
             user=getattr(settings, "SLURM_SSH_USER", "") or None,
             key_path=getattr(settings, "SLURM_SSH_KEY", "") or None,
+            password=getattr(settings, "SLURM_SSH_PASSWORD", "") or None,
             poll_interval=getattr(settings, "SLURM_POLL_INTERVAL", 15),
             max_wall_seconds=getattr(settings, "SLURM_MAX_WALL_SECONDS", 24 * 3600),
         )
@@ -61,6 +64,7 @@ class SlurmSSH:
             port=self.port,
             username=self.user,
             key_filename=self.key_path,
+            password=self.password,
             timeout=self.connect_timeout,
             allow_agent=True,
             look_for_keys=True,

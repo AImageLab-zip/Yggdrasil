@@ -390,6 +390,7 @@ SLURM_SSH_HOST = config("SLURM_SSH_HOST", default="")
 SLURM_SSH_PORT = config("SLURM_SSH_PORT", default=22, cast=int)
 SLURM_SSH_USER = config("SLURM_SSH_USER", default="")
 SLURM_SSH_KEY = config("SLURM_SSH_KEY", default="")  # path to the private key
+SLURM_SSH_PASSWORD = config("SLURM_SSH_PASSWORD", default="")
 # Directory on the cluster holding one subdir per algo, each with a run.sbatch
 # (ProcessingStep.algo_name is resolved against this: ALGO_BASE_DIR/<algo_name>/run.sbatch).
 ALGO_BASE_DIR = config("ALGO_BASE_DIR", default="")

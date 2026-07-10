@@ -3,6 +3,7 @@
 All mocked — no DB, no SSH, no network — so they run as SimpleTestCase.
 """
 from types import SimpleNamespace
+import sys
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -58,6 +59,35 @@ class SshHelperTests(SimpleTestCase):
         with mock.patch("common.runner.ssh.time.sleep"):
             with self.assertRaises(SlurmSSHError):
                 ssh.poll("900")
+
+    def test_connect_passes_key_and_password(self):
+        client = mock.MagicMock()
+        paramiko = SimpleNamespace(
+            SSHClient=mock.MagicMock(return_value=client),
+            RejectPolicy=mock.MagicMock(return_value="reject-policy"),
+        )
+        ssh = SlurmSSH(
+            host="login.example",
+            port=2222,
+            user="yggdrasil",
+            key_path="/run/secrets/slurm_ssh_key",
+            password="secret",
+        )
+
+        with mock.patch.dict(sys.modules, {"paramiko": paramiko}):
+            with ssh:
+                pass
+
+        client.connect.assert_called_once_with(
+            hostname="login.example",
+            port=2222,
+            username="yggdrasil",
+            key_filename="/run/secrets/slurm_ssh_key",
+            password="secret",
+            timeout=30,
+            allow_agent=True,
+            look_for_keys=True,
+        )
 
 
 class RunHelperTests(SimpleTestCase):
