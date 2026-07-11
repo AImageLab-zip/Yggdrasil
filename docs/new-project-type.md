@@ -33,8 +33,8 @@ Give it the same shape as `brain/`/`laparoscopy/`:
 
 ## 3. Register the app
 
-- `toothfairy/settings.py` — add `"endo"` to `INSTALLED_APPS`.
-- `toothfairy/urls.py` — add `path("endo/", include("endo.urls"))` next to the `brain`/`laparoscopy` lines.
+- `yggdrasil/settings.py` — add `"endo"` to `INSTALLED_APPS`.
+- `yggdrasil/urls.py` — add `path("endo/", include("endo.urls"))` next to the `brain`/`laparoscopy` lines.
 
 ## 4. Register the domain (`common/domains.py` + `common/models.py`)
 

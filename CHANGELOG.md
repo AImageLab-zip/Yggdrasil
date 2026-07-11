@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The web container now serves with gunicorn and runs `migrate` on start
   (`AUTO_MIGRATE=0` to opt out, `RUN_DEV_SERVER=1` for the dev server).
+- The Django/Celery project package and runtime entrypoints are now named
+  `yggdrasil` instead of the pre-2.0 project name; Django app labels and tables
+  are unchanged so the v1.9 dump-restore migration path remains additive-only.
+- The SLURM runner worker is intentionally off `app-net-$DOCKER_SUFFIX` and uses
+  externally routable Redis/API URLs from `.env.worker`.
 
 ### Security
 - Patient-viewer and activity-stats pages now inject server data via Django's

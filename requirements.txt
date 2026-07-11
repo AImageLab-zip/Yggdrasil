@@ -10,6 +10,7 @@ numpy==2.3.2
 paramiko==3.5.1
 pillow==11.3.0
 python-decouple==3.8
+requests==2.32.4
 sqlparse==0.5.3
 trimesh==4.12.2
 tqdm==4.66.4

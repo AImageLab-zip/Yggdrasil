@@ -36,7 +36,7 @@ services:
         build: .
         container_name: yggdrasil-beat-${DOCKER_SUFFIX}
         working_dir: /app
-        command: python -m celery -A toothfairy.celery:app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+        command: python -m celery -A yggdrasil beat --loglevel=info --schedule /tmp/celerybeat-schedule
         depends_on:
             db:
                 condition: service_healthy
@@ -58,7 +58,7 @@ services:
         build: .
         container_name: yggdrasil-maintenance-${DOCKER_SUFFIX}
         working_dir: /app
-        command: python -m celery -A toothfairy.celery:app worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
+        command: python -m celery -A yggdrasil worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
         depends_on:
             db:
                 condition: service_healthy
@@ -83,14 +83,8 @@ services:
         working_dir: /app
         # Consumes every runner queue (RUNNER_QUEUES from .env.worker) and drives the
         # SLURM cluster over SSH. The ONLY service with the SSH key + cluster config.
-        command: python -m celery -A toothfairy.celery:app worker --queues ${RUNNER_QUEUES:-runner_dev} --concurrency ${RUNNER_CONCURRENCY:-4} --loglevel=info
-        depends_on:
-            db:
-                condition: service_healthy
-            redis:
-                condition: service_started
+        command: sh -c 'python -m celery -A yggdrasil worker --queues "$${RUNNER_QUEUES:-runner_prod}" --concurrency "$${RUNNER_CONCURRENCY:-4}" --loglevel=info'
         environment:
-            DB_HOST: yggdrasil-db-${DOCKER_SUFFIX}
             PYTHONPATH: /app
         env_file:
             - .env
@@ -100,8 +94,9 @@ services:
             - app_logs:/app/logs
             # SSH key mounted read-only; path must match SLURM_SSH_KEY in .env.worker.
             - ${SLURM_SSH_KEY_HOST:-./secrets/slurm_ssh_key}:/run/secrets/slurm_ssh_key:ro
-        networks:
-            - app-net
+            # Paramiko rejects unknown hosts; pre-populate with ssh-keyscan for the cluster login node.
+            - ${SLURM_KNOWN_HOSTS_HOST:-./secrets/slurm_known_hosts}:/root/.ssh/known_hosts:ro
+        network_mode: bridge
 
     db:
         image: mysql:8.0
@@ -158,3 +153,5 @@ networks:
     proxy-net:
         external: true
     app-net:
+        name: app-net-${DOCKER_SUFFIX}
+        external: true

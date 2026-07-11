@@ -21,7 +21,7 @@ class JobEnqueueSignalTests(TestCase):
 
     def _task_name(self):
         return getattr(
-            settings, "RUNNER_TASK_NAME", "toothfairy4m_runner.process_job"
+            settings, "RUNNER_TASK_NAME", "yggdrasil.runner.process_job"
         )
 
     def test_pending_job_creation_enqueues_once(self):

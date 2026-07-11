@@ -6,7 +6,7 @@ from django.dispatch import receiver
 
 from common.job_routing import is_runner_enabled_for_modality, select_runner_queue
 from common.models import Job
-from toothfairy.celery import app as celery_app
+from yggdrasil.celery import app as celery_app
 
 logger = logging.getLogger(__name__)
 
