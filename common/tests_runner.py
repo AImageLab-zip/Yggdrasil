@@ -53,6 +53,23 @@ class SshHelperTests(SimpleTestCase):
         with mock.patch("common.runner.ssh.time.sleep"):
             self.assertEqual(ssh.poll("900"), "COMPLETED")
 
+    def test_state_uses_wide_column_and_normalizes_truncation(self):
+        ssh = self._ssh()
+        captured = {}
+
+        def fake_run(cmd, timeout=120):
+            captured["cmd"] = cmd
+            return 0, "CANCELLED+ \n", ""
+
+        ssh.run = fake_run
+        self.assertEqual(ssh._state("900"), "CANCELLED")
+        self.assertIn("State%32", captured["cmd"])
+
+    def test_state_normalizes_accounting_annotation(self):
+        ssh = self._ssh()
+        ssh.run = lambda cmd, timeout=120: (0, "CANCELLED by 0\n", "")
+        self.assertEqual(ssh._state("900"), "CANCELLED")
+
     def test_poll_times_out(self):
         ssh = SlurmSSH(host="d", poll_interval=1, max_wall_seconds=1)
         ssh._state = lambda sid: "RUNNING"

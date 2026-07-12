@@ -127,11 +127,16 @@ class SlurmSSH:
     def _state(self, slurm_id):
         # -X = job allocation only (no steps); -n = no header.
         code, out, _err = self.run(
-            f"sacct -j {shlex.quote(str(slurm_id))} -X -n -o State", timeout=60
+            f"sacct -j {shlex.quote(str(slurm_id))} -X -n -o State%32", timeout=60
         )
         if code != 0 or not out.strip():
             return None  # not yet visible in accounting; treat as still-going
-        return out.strip().splitlines()[0].strip().split()[0]
+        return self._normalize_state(out.strip().splitlines()[0])
+
+    @staticmethod
+    def _normalize_state(state):
+        """Return SLURM's base state, without accounting annotations/truncation."""
+        return state.strip().split()[0].rstrip("+")
 
     def poll(self, slurm_id):
         """Block until the job reaches a terminal state; return that state."""
