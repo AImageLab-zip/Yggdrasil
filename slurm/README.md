@@ -34,7 +34,14 @@ export PATH=/work/yggdrasil_workers/Yggdrasil/.venv/bin:$PATH
 The `uv` executable can live in the shared Yggdrasil venv while `uv run` still uses
 each algorithm project's own environment from that algorithm directory.
 
+Batch scripts should use the runner-provided `YGG_ALGO_DIR` as their algorithm
+directory. Do not derive it from `BASH_SOURCE[0]`: SLURM executes a copied spool
+script such as `/var/lib/slurm/slurmd/job.../slurm_script`, so that points outside
+the deployed algorithm repo.
+
 ## Credentials & config
 **Secrets are NOT stored here or anywhere on the cluster.** The runner worker writes a
 0600 `creds.env` into each job's stage dir with `OBJECT_STORAGE_*`, `YGG_INPUT_KEYS`,
-`YGG_OUTPUT_PREFIX`; the algo's `run.sbatch` sources it and a `trap` deletes it on exit.
+`YGG_OUTPUT_PREFIX`; it also exports `YGG_JOB_ID`, `YGG_STAGE`, `YGG_CREDS`, and
+`YGG_ALGO_DIR` directly to `sbatch`. The algo's `run.sbatch` sources `YGG_CREDS` and
+a `trap` deletes it on exit.

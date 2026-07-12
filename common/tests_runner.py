@@ -196,6 +196,9 @@ class RunJobTests(SimpleTestCase):
         self.assertEqual(
             ssh.sbatch.call_args.kwargs["output_path"], "/stage/logs/job_5-%j.out"
         )
+        self.assertEqual(
+            ssh.sbatch.call_args.kwargs["export"]["YGG_ALGO_DIR"], "/algo/sn"
+        )
         ssh.remove_file.assert_called_once()
         self.assertTrue(
             ssh.sbatch.call_args.kwargs["script_path"].endswith("/sn/run.sbatch")

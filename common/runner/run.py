@@ -132,7 +132,8 @@ def run_job(job_id: int) -> str:
     algo_base = getattr(settings, "ALGO_BASE_DIR", "").rstrip("/")
     stage = f"{stage_base}/job_{job_id}"
     creds_path = f"{stage}/creds.env"
-    script_path = f"{algo_base}/{algo_name}/run.sbatch"
+    algo_dir = f"{algo_base}/{algo_name}"
+    script_path = f"{algo_dir}/run.sbatch"
     log_dir = f"{stage_base}/logs"
     stdout_template = f"{log_dir}/job_{job_id}-%j.out"
     stderr_template = f"{log_dir}/job_{job_id}-%j.err"
@@ -149,6 +150,7 @@ def run_job(job_id: int) -> str:
                     "YGG_JOB_ID": job_id,
                     "YGG_STAGE": stage,
                     "YGG_CREDS": creds_path,
+                    "YGG_ALGO_DIR": algo_dir,
                 },
                 output_path=stdout_template,
                 error_path=stderr_template,
