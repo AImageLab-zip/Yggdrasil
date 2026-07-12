@@ -34,9 +34,13 @@ class SshHelperTests(SimpleTestCase):
         sid = ssh.sbatch(
             script_path="/algo/sn/run.sbatch",
             export={"YGG_JOB_ID": 7},
+            output_path="/stage/job_7/slurm-%j.out",
+            error_path="/stage/job_7/slurm-%j.err",
         )
         self.assertEqual(sid, "900")
         self.assertIn("sbatch --parsable", captured["cmd"])
+        self.assertIn("--output=/stage/job_7/slurm-%j.out", captured["cmd"])
+        self.assertIn("--error=/stage/job_7/slurm-%j.err", captured["cmd"])
         self.assertIn("--export=ALL,YGG_JOB_ID=7", captured["cmd"])
         self.assertIn("/algo/sn/run.sbatch", captured["cmd"])
 
@@ -69,6 +73,22 @@ class SshHelperTests(SimpleTestCase):
         ssh = self._ssh()
         ssh.run = lambda cmd, timeout=120: (0, "CANCELLED by 0\n", "")
         self.assertEqual(ssh._state("900"), "CANCELLED")
+
+    def test_accounting_preserves_full_state(self):
+        ssh = self._ssh()
+        ssh.run = lambda cmd, timeout=120: (
+            0,
+            "CANCELLED by 0|0:0|None|00:00:02|germano|sbatch --parsable /x\n",
+            "",
+        )
+
+        details = ssh.accounting("900")
+
+        self.assertEqual(details["state"], "CANCELLED by 0")
+        self.assertEqual(details["base_state"], "CANCELLED")
+        self.assertEqual(details["exit_code"], "0:0")
+        self.assertEqual(details["node_list"], "germano")
+        self.assertEqual(details["submit_line"], "sbatch --parsable /x")
 
     def test_poll_times_out(self):
         ssh = SlurmSSH(host="d", poll_interval=1, max_wall_seconds=1)
@@ -165,9 +185,10 @@ class RunJobTests(SimpleTestCase):
         self.assertEqual(result, "completed")
         api.complete.assert_called_once()
         api.fail.assert_not_called()
-        # creds file written 0600, then sbatch, then poll
+        # creds file written 0600, then sbatch, then poll, then fallback cleanup
         ssh.sftp_write.assert_called_once()
         ssh.sbatch.assert_called_once()
+        ssh.remove_file.assert_called_once()
         self.assertTrue(
             ssh.sbatch.call_args.kwargs["script_path"].endswith("/sn/run.sbatch")
         )
@@ -179,11 +200,27 @@ class RunJobTests(SimpleTestCase):
             "modality_slug": "ios", "input_files": {},
         }
         ssh = self._patch_ssh(poll_state="FAILED")
+        ssh.accounting.return_value = {
+            "state": "FAILED",
+            "exit_code": "1:0",
+            "reason": "None",
+            "elapsed": "00:00:03",
+            "node_list": "node-a",
+            "submit_line": "sbatch --parsable /algo/sn/run.sbatch",
+        }
+        ssh.read_text_if_exists.side_effect = ["stdout text", "stderr text"]
         with mock.patch.object(run_mod, "JobApiClient", return_value=api), \
              mock.patch.object(run_mod.SlurmSSH, "from_settings", return_value=ssh):
             result = run_mod.run_job(5)
         self.assertEqual(result, "failed:FAILED")
         api.fail.assert_called_once()
+        error = api.fail.call_args.args[1]
+        self.assertIn("SLURM job 900 ended in state FAILED", error)
+        self.assertIn("exit_code: 1:0", error)
+        self.assertIn("node_list: node-a", error)
+        self.assertIn("stdout text", error)
+        self.assertIn("stderr text", error)
+        ssh.remove_file.assert_called_once()
         api.complete.assert_not_called()
 
     def test_missing_script_fails_fast(self):

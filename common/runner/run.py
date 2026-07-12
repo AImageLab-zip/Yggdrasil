@@ -80,6 +80,35 @@ def _collect_output_files(output_prefix):
     return output_files
 
 
+def _format_slurm_failure(slurm_id, state, accounting, stdout_text, stderr_text):
+    display_state = (accounting or {}).get("state") or state
+    lines = [f"SLURM job {slurm_id} ended in state {display_state}"]
+
+    details = []
+    for label, key in (
+        ("exit_code", "exit_code"),
+        ("reason", "reason"),
+        ("elapsed", "elapsed"),
+        ("node_list", "node_list"),
+        ("submit_line", "submit_line"),
+    ):
+        value = (accounting or {}).get(key)
+        if value:
+            details.append(f"{label}: {value}")
+    if details:
+        lines.append("SLURM accounting:")
+        lines.extend(details)
+
+    if stdout_text:
+        lines.append("--- slurm stdout ---")
+        lines.append(stdout_text.rstrip())
+    if stderr_text:
+        lines.append("--- slurm stderr ---")
+        lines.append(stderr_text.rstrip())
+
+    return "\n".join(lines)
+
+
 def run_job(job_id: int) -> str:
     """Entry point for the Celery task. Returns a short status string."""
     api = JobApiClient()
@@ -104,6 +133,8 @@ def run_job(job_id: int) -> str:
     stage = f"{stage_base}/job_{job_id}"
     creds_path = f"{stage}/creds.env"
     script_path = f"{algo_base}/{algo_name}/run.sbatch"
+    stdout_template = f"{stage}/slurm-%j.out"
+    stderr_template = f"{stage}/slurm-%j.err"
 
     try:
         with SlurmSSH.from_settings() as ssh:
@@ -117,16 +148,38 @@ def run_job(job_id: int) -> str:
                     "YGG_STAGE": stage,
                     "YGG_CREDS": creds_path,
                 },
+                output_path=stdout_template,
+                error_path=stderr_template,
             )
             logger.info("Job %s submitted as SLURM %s; waiting", job_id, slurm_id)
             state = ssh.poll(slurm_id)
+            ssh.remove_file(creds_path)
+            accounting = ssh.accounting(slurm_id)
+            stdout_text = ""
+            stderr_text = ""
+            if state != "COMPLETED":
+                stdout_text = ssh.read_text_if_exists(
+                    stdout_template.replace("%j", str(slurm_id))
+                )
+                stderr_text = ssh.read_text_if_exists(
+                    stderr_template.replace("%j", str(slurm_id))
+                )
     except Exception as exc:
         logger.exception("Runner failed for job %s", job_id)
         api.fail(job_id, f"Runner error: {exc}")
         return "failed:runner"
 
     if state != "COMPLETED":
-        api.fail(job_id, f"SLURM job {slurm_id} ended in state {state}")
+        api.fail(
+            job_id,
+            _format_slurm_failure(
+                slurm_id,
+                state,
+                accounting,
+                stdout_text,
+                stderr_text,
+            ),
+        )
         return f"failed:{state}"
 
     output_files = _collect_output_files(output_prefix)

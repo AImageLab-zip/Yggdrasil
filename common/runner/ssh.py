@@ -110,19 +110,69 @@ class SlurmSSH:
             parts.append(f"{k}={shlex.quote(str(v))}")
         return ",".join(parts)
 
-    def sbatch(self, *, script_path, export):
+    def sbatch(self, *, script_path, export, output_path=None, error_path=None):
         """Submit the script; return the SLURM job id (via --parsable).
 
         No resource flags are passed here — partition/gres/time/etc are
         #SBATCH directives baked into each algo's own run.sbatch.
         """
         cmd = ["sbatch", "--parsable"]
+        if output_path:
+            cmd.append(f"--output={shlex.quote(output_path)}")
+        if error_path:
+            cmd.append(f"--error={shlex.quote(error_path)}")
         cmd.append(f"--export={self._export_str(export)}")
         cmd.append(shlex.quote(script_path))
         code, out, err = self.run(" ".join(cmd))
         if code != 0:
             raise SlurmSSHError(f"sbatch failed: {err.strip() or out.strip()}")
         return out.strip().split(";")[0]
+
+    def accounting(self, slurm_id):
+        """Return useful sacct fields for a completed allocation."""
+        fields = (
+            "State%32,ExitCode,Reason%80,Elapsed,NodeList%80,SubmitLine%200"
+        )
+        code, out, _err = self.run(
+            f"sacct -j {shlex.quote(str(slurm_id))} -X -P -n -o {fields}",
+            timeout=60,
+        )
+        if code != 0 or not out.strip():
+            return {}
+
+        parts = out.strip().splitlines()[0].split("|", 5)
+        while len(parts) < 6:
+            parts.append("")
+        state, exit_code, reason, elapsed, node_list, submit_line = parts
+        return {
+            "state": state.strip(),
+            "base_state": self._normalize_state(state),
+            "exit_code": exit_code.strip(),
+            "reason": reason.strip(),
+            "elapsed": elapsed.strip(),
+            "node_list": node_list.strip(),
+            "submit_line": submit_line.strip(),
+        }
+
+    def read_text_if_exists(self, path, max_bytes=12000):
+        """Read a small text file from the cluster, or return empty string."""
+        quoted = shlex.quote(path)
+        code, out, _err = self.run(
+            f"test -f {quoted} && python3 -c "
+            f"'import pathlib, sys; "
+            f"p=pathlib.Path(sys.argv[1]); "
+            f"sys.stdout.buffer.write(p.read_bytes()[-{int(max_bytes)}:])' {quoted}",
+            timeout=60,
+        )
+        if code != 0:
+            return ""
+        return out
+
+    def remove_file(self, path):
+        """Best-effort removal for transient files created by the runner."""
+        code, _out, err = self.run(f"rm -f {shlex.quote(path)}", timeout=60)
+        if code != 0:
+            logger.warning("rm -f %s failed: %s", path, err.strip())
 
     def _state(self, slurm_id):
         # -X = job allocation only (no steps); -n = no header.
