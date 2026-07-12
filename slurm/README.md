@@ -20,10 +20,19 @@ This directory only holds the `ygg-stage` tool itself.
 ## Install (once, on the cluster)
 ```bash
 cd Yggdrasil/slurm
-uv venv && uv pip install -e .        # provides ygg-stage
+/work/yggdrasil_workers/Yggdrasil/.venv/bin/python -m pip install -e .
+/work/yggdrasil_workers/Yggdrasil/.venv/bin/python -m pip install uv
 ```
-Make sure `ygg-stage` is on `PATH` for batch jobs (activate this venv in each
-`algo/*/run.sbatch`, or install into the environment `uv run` uses there).
+This provides both `ygg-stage` and the `uv` executable from the shared Yggdrasil
+venv, outside any user's home directory. Each `algo/*/run.sbatch` should make that
+batch PATH explicit before calling either command:
+
+```bash
+export PATH=/work/yggdrasil_workers/Yggdrasil/.venv/bin:$PATH
+```
+
+The `uv` executable can live in the shared Yggdrasil venv while `uv run` still uses
+each algorithm project's own environment from that algorithm directory.
 
 ## Credentials & config
 **Secrets are NOT stored here or anywhere on the cluster.** The runner worker writes a
