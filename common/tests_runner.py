@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import sys
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from common.runner import run as run_mod
 from common.runner.ssh import SlurmSSH, SlurmSSHError
@@ -34,13 +34,15 @@ class SshHelperTests(SimpleTestCase):
         sid = ssh.sbatch(
             script_path="/algo/sn/run.sbatch",
             export={"YGG_JOB_ID": 7},
-            output_path="/stage/job_7/slurm-%j.out",
-            error_path="/stage/job_7/slurm-%j.err",
+            output_path="/stage/logs/job_7-%j.out",
+            error_path="/stage/logs/job_7-%j.err",
+            work_dir="/stage",
         )
         self.assertEqual(sid, "900")
         self.assertIn("sbatch --parsable", captured["cmd"])
-        self.assertIn("--output=/stage/job_7/slurm-%j.out", captured["cmd"])
-        self.assertIn("--error=/stage/job_7/slurm-%j.err", captured["cmd"])
+        self.assertIn("--output=/stage/logs/job_7-%j.out", captured["cmd"])
+        self.assertIn("--error=/stage/logs/job_7-%j.err", captured["cmd"])
+        self.assertIn("--chdir=/stage", captured["cmd"])
         self.assertIn("--export=ALL,YGG_JOB_ID=7", captured["cmd"])
         self.assertIn("/algo/sn/run.sbatch", captured["cmd"])
 
@@ -178,7 +180,8 @@ class RunJobTests(SimpleTestCase):
             "input_files": {"ios": "maxillo/raw/ios/a.stl"},
         }
         ssh = self._patch_ssh()
-        with mock.patch.object(run_mod, "JobApiClient", return_value=api), \
+        with override_settings(SLURM_STAGE_DIR="/stage", ALGO_BASE_DIR="/algo"), \
+             mock.patch.object(run_mod, "JobApiClient", return_value=api), \
              mock.patch.object(run_mod.SlurmSSH, "from_settings", return_value=ssh), \
              mock.patch.object(run_mod, "_collect_output_files", return_value={"a.stl": "k"}):
             result = run_mod.run_job(5)
@@ -186,8 +189,13 @@ class RunJobTests(SimpleTestCase):
         api.complete.assert_called_once()
         api.fail.assert_not_called()
         # creds file written 0600, then sbatch, then poll, then fallback cleanup
+        ssh.mkdirs.assert_any_call("/stage/logs")
         ssh.sftp_write.assert_called_once()
         ssh.sbatch.assert_called_once()
+        self.assertEqual(ssh.sbatch.call_args.kwargs["work_dir"], "/stage")
+        self.assertEqual(
+            ssh.sbatch.call_args.kwargs["output_path"], "/stage/logs/job_5-%j.out"
+        )
         ssh.remove_file.assert_called_once()
         self.assertTrue(
             ssh.sbatch.call_args.kwargs["script_path"].endswith("/sn/run.sbatch")
@@ -209,7 +217,8 @@ class RunJobTests(SimpleTestCase):
             "submit_line": "sbatch --parsable /algo/sn/run.sbatch",
         }
         ssh.read_text_if_exists.side_effect = ["stdout text", "stderr text"]
-        with mock.patch.object(run_mod, "JobApiClient", return_value=api), \
+        with override_settings(SLURM_STAGE_DIR="/stage", ALGO_BASE_DIR="/algo"), \
+             mock.patch.object(run_mod, "JobApiClient", return_value=api), \
              mock.patch.object(run_mod.SlurmSSH, "from_settings", return_value=ssh):
             result = run_mod.run_job(5)
         self.assertEqual(result, "failed:FAILED")
@@ -220,6 +229,8 @@ class RunJobTests(SimpleTestCase):
         self.assertIn("node_list: node-a", error)
         self.assertIn("stdout text", error)
         self.assertIn("stderr text", error)
+        ssh.read_text_if_exists.assert_any_call("/stage/logs/job_5-900.out")
+        ssh.read_text_if_exists.assert_any_call("/stage/logs/job_5-900.err")
         ssh.remove_file.assert_called_once()
         api.complete.assert_not_called()
 

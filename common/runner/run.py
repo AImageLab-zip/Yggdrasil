@@ -133,11 +133,13 @@ def run_job(job_id: int) -> str:
     stage = f"{stage_base}/job_{job_id}"
     creds_path = f"{stage}/creds.env"
     script_path = f"{algo_base}/{algo_name}/run.sbatch"
-    stdout_template = f"{stage}/slurm-%j.out"
-    stderr_template = f"{stage}/slurm-%j.err"
+    log_dir = f"{stage_base}/logs"
+    stdout_template = f"{log_dir}/job_{job_id}-%j.out"
+    stderr_template = f"{log_dir}/job_{job_id}-%j.err"
 
     try:
         with SlurmSSH.from_settings() as ssh:
+            ssh.mkdirs(log_dir)
             ssh.mkdirs(f"{stage}/in")
             ssh.mkdirs(f"{stage}/out")
             ssh.sftp_write(creds_path, render_creds_env(input_keys, output_prefix))
@@ -150,6 +152,7 @@ def run_job(job_id: int) -> str:
                 },
                 output_path=stdout_template,
                 error_path=stderr_template,
+                work_dir=stage_base,
             )
             logger.info("Job %s submitted as SLURM %s; waiting", job_id, slurm_id)
             state = ssh.poll(slurm_id)

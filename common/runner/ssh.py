@@ -110,7 +110,9 @@ class SlurmSSH:
             parts.append(f"{k}={shlex.quote(str(v))}")
         return ",".join(parts)
 
-    def sbatch(self, *, script_path, export, output_path=None, error_path=None):
+    def sbatch(
+        self, *, script_path, export, output_path=None, error_path=None, work_dir=None
+    ):
         """Submit the script; return the SLURM job id (via --parsable).
 
         No resource flags are passed here — partition/gres/time/etc are
@@ -121,6 +123,8 @@ class SlurmSSH:
             cmd.append(f"--output={shlex.quote(output_path)}")
         if error_path:
             cmd.append(f"--error={shlex.quote(error_path)}")
+        if work_dir:
+            cmd.append(f"--chdir={shlex.quote(work_dir)}")
         cmd.append(f"--export={self._export_str(export)}")
         cmd.append(shlex.quote(script_path))
         code, out, err = self.run(" ".join(cmd))
