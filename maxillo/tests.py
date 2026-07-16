@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase
 from django.test import TestCase
@@ -269,6 +270,8 @@ class PanoramicRerunTests(TestCase):
         )
         request.user = self.user
         request.resolver_match = SimpleNamespace(namespace='maxillo')
+        request.session = {}
+        request._messages = FallbackStorage(request)
 
         response = rerun_processing(request, self.patient.patient_id)
 
