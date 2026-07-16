@@ -174,16 +174,16 @@ class CbctDependencyJobTests(TestCase):
         size_hash,
     ):
         outputs = {
+            'panoramic_zplus40_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus40_mean.png'},
+            'panoramic_zplus40_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus40_raysum.png'},
             'panoramic_zplus20_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus20_mean.png'},
             'panoramic_zplus20_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus20_raysum.png'},
-            'panoramic_zplus10_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus10_mean.png'},
-            'panoramic_zplus10_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus10_raysum.png'},
             'panoramic_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/z0_mean.png'},
             'panoramic_z0_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/z0_raysum.png'},
-            'panoramic_zminus10_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus10_mean.png'},
-            'panoramic_zminus10_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus10_raysum.png'},
             'panoramic_zminus20_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_mean.png'},
             'panoramic_zminus20_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_raysum.png'},
+            'panoramic_zminus40_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus40_mean.png'},
+            'panoramic_zminus40_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus40_raysum.png'},
         }
         job = Job.objects.create(
             modality_slug='cbct_to_panoramic',
