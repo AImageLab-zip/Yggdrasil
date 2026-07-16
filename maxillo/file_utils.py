@@ -18,6 +18,9 @@ from .models import Classification, Patient, VoiceCaption
 
 logger = logging.getLogger(__name__)
 
+
+DEFAULT_PANORAMIC_OUTPUT = "panoramic_zminus20_raysum_png"
+
 from common.file_access import exists as artifact_exists
 from common.file_access import open_binary
 from common.object_storage import get_object_storage
@@ -1163,11 +1166,21 @@ def mark_job_completed(job_id, output_files, logs=None):
                 "CBCT-to-panoramic job completed for patient %s",
                 getattr(job_patient, "patient_id", "unknown"),
             )
-            panoramic_path = _resolve_output_path_or_key(
-                output_files.get("panoramic_png") or output_files.get("panoramic")
-            )
-            if panoramic_path and artifact_exists(panoramic_path):
-                file_size, file_hash = _size_hash_for_path_or_key(panoramic_path)
+            processed_files = {}
+            for output_key, out_spec in output_files.items():
+                path_or_key = _resolve_output_path_or_key(out_spec)
+                if path_or_key and artifact_exists(path_or_key):
+                    processed_files[str(output_key)] = {
+                        "path": path_or_key,
+                        "type": output_key,
+                    }
+
+            if processed_files:
+                primary_output = (
+                    DEFAULT_PANORAMIC_OUTPUT
+                    if DEFAULT_PANORAMIC_OUTPUT in processed_files
+                    else "panoramic_png"
+                )
                 panoramic_modality = None
                 try:
                     from common.models import Modality as _Modality
@@ -1176,36 +1189,31 @@ def mark_job_completed(job_id, output_files, logs=None):
                 except Exception:
                     panoramic_modality = None
 
-                processed_files = {}
-                for output_key, out_spec in output_files.items():
-                    path_or_key = _resolve_output_path_or_key(out_spec)
-                    if path_or_key:
-                        processed_files[str(output_key)] = {
-                            "path": path_or_key,
-                            "type": output_key,
-                        }
-
-                FileRegistry.objects.update_or_create(
-                    file_path=panoramic_path,
-                    defaults={
-                        "file_type": get_file_type_for_modality(
-                            "panoramic", is_processed=True
-                        ),
-                        "file_size": file_size or 0,
-                        "file_hash": file_hash or "object",
-                        "processing_job": job,
-                        **_job_entity_fk_kwargs(job),
-                        "modality": panoramic_modality,
-                        "metadata": {
-                            "processed_at": timezone.now().isoformat(),
-                            "generated_from": "cbct_to_panoramic",
-                            "input_files": job.input_files or {},
-                            "files": processed_files,
-                            "logs": logs if logs else "",
+                for output_key, output in processed_files.items():
+                    file_size, file_hash = _size_hash_for_path_or_key(output["path"])
+                    FileRegistry.objects.update_or_create(
+                        file_path=output["path"],
+                        defaults={
+                            "file_type": get_file_type_for_modality(
+                                "panoramic", is_processed=True
+                            ),
+                            "file_size": file_size or 0,
+                            "file_hash": file_hash or "object",
+                            "processing_job": job,
+                            **_job_entity_fk_kwargs(job),
+                            "modality": panoramic_modality,
+                            "metadata": {
+                                "processed_at": timezone.now().isoformat(),
+                                "generated_from": "cbct_to_panoramic",
+                                "panoramic_output": output_key,
+                                "is_default": output_key == primary_output,
+                                "input_files": job.input_files or {},
+                                "files": processed_files,
+                                "logs": logs if logs else "",
+                            },
                         },
-                    },
-                )
-                logger.info("Stored generated panoramic FileRegistry entry")
+                    )
+                logger.info("Stored %s generated panoramic FileRegistry entries", len(processed_files))
 
         elif job.modality_slug == "intraoral-photo":
             from .models import IntraoralToothSegmentation

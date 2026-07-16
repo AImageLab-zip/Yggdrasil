@@ -8,6 +8,22 @@ window.PanoramicViewer = {
     patientId: null,
     selectedVariant: null,
     variants: [],
+    targets: {
+        standalone: {
+            loadingId: 'panoramicLoading',
+            contentId: 'panoramicContent',
+            errorId: 'panoramicError',
+            imageId: 'panoramicStandaloneImage',
+            title: 'Panoramic'
+        },
+        inline: {
+            loadingId: 'cbctPanoramicLoading',
+            contentId: 'cbctPanoramicContent',
+            errorId: 'cbctPanoramicError',
+            imageId: 'cbctPanoramicImage',
+            title: 'CBCT Panoramic'
+        }
+    },
     
     init: function(patientId) {
         this.patientId = patientId;
@@ -32,26 +48,28 @@ window.PanoramicViewer = {
     },
 
     bindVariantControls: function() {
-        const controls = document.getElementById('panoramicVariantControls');
-        if (!controls || controls.dataset.bound) return;
-        controls.dataset.bound = 'true';
-        controls.addEventListener('click', (event) => {
-            const button = event.target.closest('[data-panoramic-variant]');
-            if (!button || !this.variants.some((variant) => variant.id === button.dataset.panoramicVariant)) return;
-            this.selectedVariant = button.dataset.panoramicVariant;
-            this.updateVariantControls();
-            this.load();
+        document.querySelectorAll('[data-panoramic-variant-controls]').forEach((controls) => {
+            if (controls.dataset.bound) return;
+            controls.dataset.bound = 'true';
+            controls.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-panoramic-variant]');
+                const target = controls.dataset.panoramicTarget;
+                if (!button || !this.targets[target] || !this.variants.some((variant) => variant.id === button.dataset.panoramicVariant)) return;
+                this.selectedVariant = button.dataset.panoramicVariant;
+                this.updateVariantControls();
+                this.loadInto(this.targets[target]);
+            });
         });
     },
 
     updateVariantControls: function() {
-        const controls = document.getElementById('panoramicVariantControls');
-        if (!controls) return;
-        controls.style.display = this.variants.length ? 'inline-flex' : 'none';
-        controls.querySelectorAll('[data-panoramic-variant]').forEach((button) => {
-            const available = this.variants.some((variant) => variant.id === button.dataset.panoramicVariant);
-            button.style.display = available ? '' : 'none';
-            button.classList.toggle('active', available && button.dataset.panoramicVariant === this.selectedVariant);
+        document.querySelectorAll('[data-panoramic-variant-controls]').forEach((controls) => {
+            controls.style.display = this.variants.length ? 'inline-flex' : 'none';
+            controls.querySelectorAll('[data-panoramic-variant]').forEach((button) => {
+                const available = this.variants.some((variant) => variant.id === button.dataset.panoramicVariant);
+                button.style.display = available ? '' : 'none';
+                button.classList.toggle('active', available && button.dataset.panoramicVariant === this.selectedVariant);
+            });
         });
     },
 
@@ -122,23 +140,11 @@ window.PanoramicViewer = {
     },
 
     load: function() {
-        this.loadInto({
-            loadingId: 'panoramicLoading',
-            contentId: 'panoramicContent',
-            errorId: 'panoramicError',
-            imageId: 'panoramicStandaloneImage',
-            title: 'Panoramic'
-        });
+        this.loadInto(this.targets.standalone);
     },
 
     loadInlineForCBCT: function() {
-        this.loadInto({
-            loadingId: 'cbctPanoramicLoading',
-            contentId: 'cbctPanoramicContent',
-            errorId: 'cbctPanoramicError',
-            imageId: 'cbctPanoramicImage',
-            title: 'CBCT Panoramic'
-        });
+        this.loadInto(this.targets.inline);
     },
     
     showFullscreenImage: function() {}

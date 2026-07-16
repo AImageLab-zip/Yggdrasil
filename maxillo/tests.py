@@ -183,12 +183,14 @@ class CbctDependencyJobTests(TestCase):
 
         self.assertTrue(mark_job_completed(job.id, outputs))
 
-        panoramic_file = FileRegistry.objects.get(processing_job=job)
-        self.assertEqual(panoramic_file.file_path, outputs['panoramic_png']['path'])
+        panoramic_files = FileRegistry.objects.filter(processing_job=job)
+        self.assertEqual(panoramic_files.count(), 4)
+        default_file = panoramic_files.get(metadata__is_default=True)
         self.assertEqual(
-            set(panoramic_file.metadata['files']),
-            set(outputs),
+            default_file.file_path,
+            outputs['panoramic_zminus20_raysum_png']['path'],
         )
+        self.assertEqual(set(default_file.metadata['files']), set(outputs))
 
 
 class PanoramicVariantTests(SimpleTestCase):

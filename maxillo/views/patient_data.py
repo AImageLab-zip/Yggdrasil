@@ -32,6 +32,7 @@ PANORAMIC_VARIANTS = {
     "z0_raysum": ("panoramic_z0_raysum_png", "Z+0 Raysum"),
     "zminus20_raysum": ("panoramic_zminus20_raysum_png", "Z-20 Raysum"),
 }
+DEFAULT_PANORAMIC_VARIANT = "zminus20_raysum"
 
 
 def _serve_file_url(request, file_id):
@@ -400,12 +401,30 @@ def patient_panoramic_data(request, patient_id):
     try:
         from common.models import FileRegistry
 
-        # Prefer manually processed panoramic, then raw upload.
-        panoramic_file = (
-            patient.files.filter(file_type="panoramic_processed")
-            .order_by("-created_at", "-id")
-            .first()
+        # Prefer manually processed panoramics, then the default generated variant.
+        processed_files = list(
+            patient.files.filter(file_type="panoramic_processed").order_by("-created_at", "-id")
         )
+        panoramic_file = next(
+            (
+                file
+                for file in processed_files
+                if not isinstance(file.metadata, dict)
+                or file.metadata.get("generated_from") != "cbct_to_panoramic"
+            ),
+            None,
+        )
+        if not panoramic_file:
+            panoramic_file = next(
+                (
+                    file
+                    for file in processed_files
+                    if isinstance(file.metadata, dict) and file.metadata.get("is_default")
+                ),
+                None,
+            )
+        if not panoramic_file and processed_files:
+            panoramic_file = processed_files[0]
         if not panoramic_file:
             panoramic_file = (
                 patient.files.filter(file_type="panoramic_raw")
@@ -431,8 +450,8 @@ def patient_panoramic_data(request, patient_id):
                         status=404,
                     )
                 selected_path = selected["path"]
-            elif "z0_mean" in variants:
-                selected_variant = "z0_mean"
+            elif DEFAULT_PANORAMIC_VARIANT in variants:
+                selected_variant = DEFAULT_PANORAMIC_VARIANT
 
             source_file_id = (
                 (panoramic_file.metadata or {}).get("source_file_id")
