@@ -47,29 +47,66 @@ window.PanoramicViewer = {
         return `${this.getApiUrl()}?${params}`;
     },
 
+    variantId: function(offset, mode) {
+        const z = offset > 0 ? `zplus${offset}` : offset < 0 ? `zminus${Math.abs(offset)}` : 'z0';
+        return `${z}_${mode}`;
+    },
+
+    variantSelection: function(variantId) {
+        const match = /^(zplus(\d+)|zminus(\d+)|z0)_(mean|raysum)$/.exec(variantId || '');
+        if (!match) return null;
+        const offset = match[2] ? Number(match[2]) : match[3] ? -Number(match[3]) : 0;
+        return { offset, mode: match[4] };
+    },
+
+    formatOffset: function(offset) {
+        return offset > 0 ? `+${offset}` : `${offset}`;
+    },
+
+    selectVariant: function(controls, offset, mode) {
+        const target = controls.dataset.panoramicTarget;
+        const variantId = this.variantId(offset, mode);
+        if (!this.targets[target] || !this.variants.some((variant) => variant.id === variantId)) return;
+        this.selectedVariant = variantId;
+        this.updateVariantControls();
+        this.loadInto(this.targets[target]);
+    },
+
     bindVariantControls: function() {
         document.querySelectorAll('[data-panoramic-variant-controls]').forEach((controls) => {
             if (controls.dataset.bound) return;
             controls.dataset.bound = 'true';
             controls.addEventListener('click', (event) => {
-                const button = event.target.closest('[data-panoramic-variant]');
-                const target = controls.dataset.panoramicTarget;
-                if (!button || !this.targets[target] || !this.variants.some((variant) => variant.id === button.dataset.panoramicVariant)) return;
-                this.selectedVariant = button.dataset.panoramicVariant;
-                this.updateVariantControls();
-                this.loadInto(this.targets[target]);
+                const button = event.target.closest('[data-panoramic-mode]');
+                if (!button) return;
+                const slider = controls.querySelector('[data-panoramic-z-slider]');
+                this.selectVariant(controls, Number(slider.value), button.dataset.panoramicMode);
             });
+            const slider = controls.querySelector('[data-panoramic-z-slider]');
+            if (slider) {
+                slider.addEventListener('input', () => {
+                    const label = controls.querySelector('[data-panoramic-z-label]');
+                    if (label) label.textContent = this.formatOffset(Number(slider.value));
+                });
+                slider.addEventListener('change', () => {
+                    const selection = this.variantSelection(this.selectedVariant) || { mode: 'mean' };
+                    this.selectVariant(controls, Number(slider.value), selection.mode);
+                });
+            }
         });
     },
 
     updateVariantControls: function() {
+        const selection = this.variantSelection(this.selectedVariant) || { offset: 0, mode: 'mean' };
         document.querySelectorAll('[data-panoramic-variant-controls]').forEach((controls) => {
             controls.style.display = this.variants.length ? 'inline-flex' : 'none';
-            controls.querySelectorAll('[data-panoramic-variant]').forEach((button) => {
-                const available = this.variants.some((variant) => variant.id === button.dataset.panoramicVariant);
-                button.style.display = available ? '' : 'none';
-                button.classList.toggle('active', available && button.dataset.panoramicVariant === this.selectedVariant);
+            controls.querySelectorAll('[data-panoramic-mode]').forEach((button) => {
+                button.classList.toggle('active', button.dataset.panoramicMode === selection.mode);
             });
+            const slider = controls.querySelector('[data-panoramic-z-slider]');
+            const label = controls.querySelector('[data-panoramic-z-label]');
+            if (slider) slider.value = selection.offset;
+            if (label) label.textContent = this.formatOffset(selection.offset);
         });
     },
 

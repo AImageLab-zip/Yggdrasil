@@ -253,11 +253,15 @@
                                 <i class="fas fa-panorama me-2"></i>Panoramic
                             </div>
                             <div class="px-2 pt-2" data-panoramic-variant-controls data-panoramic-target="inline" role="group" aria-label="Panoramic variant" style="display: none;">
-                                <div class="btn-group">
-                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_mean">Z+0 Mean</button>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_mean">Z-20 Mean</button>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_raysum">Z+0 Raysum</button>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_raysum">Z-20 Raysum</button>
+                                <div class="d-flex align-items-center gap-3 flex-wrap">
+                                    <div class="btn-group" role="group" aria-label="Panoramic projection">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-mode="mean">MIP</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-mode="raysum">X-ray</button>
+                                    </div>
+                                    <label class="d-flex align-items-center gap-2 mb-0 small">
+                                        <span>Z <output data-panoramic-z-label>+0</output></span>
+                                        <input type="range" class="form-range" style="width: 180px;" min="-20" max="20" step="10" value="0" data-panoramic-z-slider>
+                                    </label>
                                 </div>
                             </div>
                             <div class="cbct-inline-panoramic-body">
@@ -343,11 +347,15 @@
                 <!-- panoramic Viewer -->
                 <div id="panoramic-viewer" class="viewer-container" {% if default_modality_slug != 'panoramic' %}style="display: none;"{% endif %}>
                     <div class="mb-2" data-panoramic-variant-controls data-panoramic-target="standalone" role="group" aria-label="Panoramic variant" style="display: none;">
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_mean">Z+0 Mean</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_mean">Z-20 Mean</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_raysum">Z+0 Raysum</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_raysum">Z-20 Raysum</button>
+                        <div class="d-flex align-items-center gap-3 flex-wrap">
+                            <div class="btn-group" role="group" aria-label="Panoramic projection">
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-mode="mean">MIP</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-mode="raysum">X-ray</button>
+                            </div>
+                            <label class="d-flex align-items-center gap-2 mb-0 small">
+                                <span>Z <output data-panoramic-z-label>+0</output></span>
+                                <input type="range" class="form-range" style="width: 220px;" min="-20" max="20" step="10" value="0" data-panoramic-z-slider>
+                            </label>
                         </div>
                     </div>
                     <div class="panoramic-loading" id="panoramicLoading" style="display: none;">

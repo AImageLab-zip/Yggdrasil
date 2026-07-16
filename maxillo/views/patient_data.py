@@ -27,10 +27,16 @@ logger = logging.getLogger(__name__)
 
 
 PANORAMIC_VARIANTS = {
-    "z0_mean": ("panoramic_png", "Z+0 Mean"),
-    "zminus20_mean": ("panoramic_zminus20_mean_png", "Z-20 Mean"),
-    "z0_raysum": ("panoramic_z0_raysum_png", "Z+0 Raysum"),
-    "zminus20_raysum": ("panoramic_zminus20_raysum_png", "Z-20 Raysum"),
+    "zplus20_mean": ("panoramic_zplus20_mean_png", "Z+20 MIP"),
+    "zplus20_raysum": ("panoramic_zplus20_raysum_png", "Z+20 X-ray"),
+    "zplus10_mean": ("panoramic_zplus10_mean_png", "Z+10 MIP"),
+    "zplus10_raysum": ("panoramic_zplus10_raysum_png", "Z+10 X-ray"),
+    "z0_mean": ("panoramic_png", "Z+0 MIP"),
+    "z0_raysum": ("panoramic_z0_raysum_png", "Z+0 X-ray"),
+    "zminus10_mean": ("panoramic_zminus10_mean_png", "Z-10 MIP"),
+    "zminus10_raysum": ("panoramic_zminus10_raysum_png", "Z-10 X-ray"),
+    "zminus20_mean": ("panoramic_zminus20_mean_png", "Z-20 MIP"),
+    "zminus20_raysum": ("panoramic_zminus20_raysum_png", "Z-20 X-ray"),
 }
 DEFAULT_PANORAMIC_VARIANT = "z0_mean"
 

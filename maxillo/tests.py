@@ -174,9 +174,15 @@ class CbctDependencyJobTests(TestCase):
         size_hash,
     ):
         outputs = {
+            'panoramic_zplus20_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus20_mean.png'},
+            'panoramic_zplus20_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus20_raysum.png'},
+            'panoramic_zplus10_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus10_mean.png'},
+            'panoramic_zplus10_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zplus10_raysum.png'},
             'panoramic_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/z0_mean.png'},
-            'panoramic_zminus20_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_mean.png'},
             'panoramic_z0_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/z0_raysum.png'},
+            'panoramic_zminus10_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus10_mean.png'},
+            'panoramic_zminus10_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus10_raysum.png'},
+            'panoramic_zminus20_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_mean.png'},
             'panoramic_zminus20_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_raysum.png'},
         }
         job = Job.objects.create(
@@ -188,7 +194,7 @@ class CbctDependencyJobTests(TestCase):
         self.assertTrue(mark_job_completed(job.id, outputs))
 
         panoramic_files = FileRegistry.objects.filter(processing_job=job)
-        self.assertEqual(panoramic_files.count(), 4)
+        self.assertEqual(panoramic_files.count(), 10)
         default_file = panoramic_files.get(metadata__is_default=True)
         self.assertEqual(default_file.file_path, outputs['panoramic_png']['path'])
         self.assertEqual(set(default_file.metadata['files']), set(outputs))
@@ -211,8 +217,8 @@ class PanoramicVariantTests(SimpleTestCase):
         self.assertEqual(
             variants,
             {
-                'z0_mean': {'path': 'z0_mean.png', 'label': 'Z+0 Mean'},
-                'z0_raysum': {'path': 'z0_raysum.png', 'label': 'Z+0 Raysum'},
+                'z0_mean': {'path': 'z0_mean.png', 'label': 'Z+0 MIP'},
+                'z0_raysum': {'path': 'z0_raysum.png', 'label': 'Z+0 X-ray'},
             },
         )
 
