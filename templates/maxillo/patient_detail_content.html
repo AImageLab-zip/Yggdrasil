@@ -252,6 +252,14 @@
                             <div class="cbct-inline-panoramic-header">
                                 <i class="fas fa-panorama me-2"></i>Panoramic
                             </div>
+                            <div class="px-2 pt-2" data-panoramic-variant-controls data-panoramic-target="inline" role="group" aria-label="Panoramic variant" style="display: none;">
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_mean">Z+0 Mean</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_mean">Z-20 Mean</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_raysum">Z+0 Raysum</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_raysum">Z-20 Raysum</button>
+                                </div>
+                            </div>
                             <div class="cbct-inline-panoramic-body">
                                 <div class="panoramic-loading" id="cbctPanoramicLoading" style="display: none;">
                                     <div class="text-center py-3">
@@ -262,12 +270,6 @@
                                     </div>
                                 </div>
                                 <div class="panoramic-content" id="cbctPanoramicContent" style="display: none;">
-                                    <div class="btn-group mb-2" data-panoramic-variant-controls data-panoramic-target="inline" role="group" aria-label="Panoramic variant" style="display: none;">
-                                        <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_mean">Z+0 Mean</button>
-                                        <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_mean">Z-20 Mean</button>
-                                        <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_raysum">Z+0 Raysum</button>
-                                        <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_raysum">Z-20 Raysum</button>
-                                    </div>
                                     <div class="d-flex align-items-center justify-content-center h-100">
                                         <img id="cbctPanoramicImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="CBCT panoramic image">
                                     </div>
@@ -340,6 +342,14 @@
                 {% if has_panoramic %}
                 <!-- panoramic Viewer -->
                 <div id="panoramic-viewer" class="viewer-container" {% if default_modality_slug != 'panoramic' %}style="display: none;"{% endif %}>
+                    <div class="mb-2" data-panoramic-variant-controls data-panoramic-target="standalone" role="group" aria-label="Panoramic variant" style="display: none;">
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_mean">Z+0 Mean</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_mean">Z-20 Mean</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_raysum">Z+0 Raysum</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_raysum">Z-20 Raysum</button>
+                        </div>
+                    </div>
                     <div class="panoramic-loading" id="panoramicLoading" style="display: none;">
                         <div class="text-center py-4">
                             <div class="spinner-border text-primary" role="status">
@@ -349,12 +359,6 @@
                         </div>
                     </div>
                     <div class="panoramic-content" id="panoramicContent" style="display: none;">
-                        <div class="btn-group mb-2" data-panoramic-variant-controls data-panoramic-target="standalone" role="group" aria-label="Panoramic variant" style="display: none;">
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_mean">Z+0 Mean</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_mean">Z-20 Mean</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="z0_raysum">Z+0 Raysum</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-panoramic-variant="zminus20_raysum">Z-20 Raysum</button>
-                        </div>
                         <div class="d-flex align-items-center justify-content-center h-100">
                             <img id="panoramicStandaloneImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="panoramic image">
                         </div>

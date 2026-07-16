@@ -19,7 +19,7 @@ from .models import Classification, Patient, VoiceCaption
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_PANORAMIC_OUTPUT = "panoramic_zminus20_raysum_png"
+DEFAULT_PANORAMIC_OUTPUT = "panoramic_png"
 
 from common.file_access import exists as artifact_exists
 from common.file_access import open_binary

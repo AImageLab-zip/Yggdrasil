@@ -10,9 +10,47 @@ import json
 import logging
 
 from .domain import get_domain_models, get_namespace
+from common.object_storage import get_object_storage
 from common.permissions import user_can_perform_bulk_operations
 
 logger = logging.getLogger(__name__)
+
+
+PANORAMIC_MODALITY_SLUG = "panoramic"
+PANORAMIC_JOB_SLUG = "cbct_to_panoramic"
+
+
+def _job_slug_for_rerun(modality_slug):
+    if modality_slug == PANORAMIC_MODALITY_SLUG:
+        return PANORAMIC_JOB_SLUG
+    return modality_slug
+
+
+def _clear_generated_panoramics(patient):
+    files = [
+        file
+        for file in patient.files.filter(file_type="panoramic_processed")
+        if isinstance(file.metadata, dict)
+        and file.metadata.get("generated_from") == PANORAMIC_JOB_SLUG
+    ]
+    if not files:
+        return
+
+    storage = get_object_storage()
+    for file in files:
+        storage.delete(file.file_path)
+    patient.files.filter(id__in=[file.id for file in files]).delete()
+
+
+def _reset_job_for_rerun(job):
+    job.status = "pending"
+    job.started_at = None
+    job.completed_at = None
+    job.worker_id = ""
+    job.error_logs = ""
+    job.save()
+    if hasattr(job, "update_status_based_on_dependencies"):
+        job.update_status_based_on_dependencies()
 
 
 @login_required
@@ -57,27 +95,21 @@ def rerun_processing(request, patient_id):
 
             # Try new Job model first
             try:
+                job_slug = _job_slug_for_rerun(modality_slug)
                 job = (
-                    Job.objects.filter(modality_slug=modality_slug, **job_filter)
+                    Job.objects.filter(modality_slug=job_slug, **job_filter)
                     .order_by("-created_at")
                     .first()
                 )
                 if job:
-                    job.status = "pending"
-                    job.started_at = None
-                    job.completed_at = None
-                    job.worker_id = ""
-                    job.error_logs = ""
-                    job.save()
+                    if job_slug == PANORAMIC_JOB_SLUG:
+                        _clear_generated_panoramics(patient)
+                    _reset_job_for_rerun(job)
                     jobs_found = True
-
-                    # Special handling for dependencies
-                    if hasattr(job, "update_status_based_on_dependencies"):
-                        job.update_status_based_on_dependencies()
-
                     updated.append(modality_slug)
             except Exception as e:
                 logger.error(f"Error processing job for modality {modality_slug}: {e}")
+                return JsonResponse({"success": False, "error": str(e)}, status=500)
 
             # Handle special case for audio/voice captions (check via modality metadata)
             from ..modality_helpers import get_modality_by_slug
@@ -206,8 +238,9 @@ def bulk_rerun_processing(request):
             )
 
             for modality_slug in normalized_jobs:
+                job_slug = _job_slug_for_rerun(modality_slug)
                 job = (
-                    Job.objects.filter(modality_slug=modality_slug, **job_filter_base)
+                    Job.objects.filter(modality_slug=job_slug, **job_filter_base)
                     .order_by("-created_at")
                     .first()
                 )
@@ -216,15 +249,9 @@ def bulk_rerun_processing(request):
                     not_found_by_modality[modality_slug] = not_found_by_modality.get(modality_slug, 0) + 1
                     continue
 
-                job.status = "pending"
-                job.started_at = None
-                job.completed_at = None
-                job.worker_id = ""
-                job.error_logs = ""
-                job.save()
-
-                if hasattr(job, "update_status_based_on_dependencies"):
-                    job.update_status_based_on_dependencies()
+                if job_slug == PANORAMIC_JOB_SLUG:
+                    _clear_generated_panoramics(patient)
+                _reset_job_for_rerun(job)
 
                 updated_pairs += 1
                 updated_by_modality[modality_slug] = updated_by_modality.get(modality_slug, 0) + 1

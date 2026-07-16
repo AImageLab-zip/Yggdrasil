@@ -32,7 +32,7 @@ PANORAMIC_VARIANTS = {
     "z0_raysum": ("panoramic_z0_raysum_png", "Z+0 Raysum"),
     "zminus20_raysum": ("panoramic_zminus20_raysum_png", "Z-20 Raysum"),
 }
-DEFAULT_PANORAMIC_VARIANT = "zminus20_raysum"
+DEFAULT_PANORAMIC_VARIANT = "z0_mean"
 
 
 def _serve_file_url(request, file_id):

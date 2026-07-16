@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase
 from django.test import TestCase
 from django.test import override_settings
+from django.test.client import RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 
@@ -14,6 +16,7 @@ from common.models import FileRegistry, Invitation, Job, Modality, Project, Proj
 from .file_utils import mark_job_completed, save_cbct_to_dataset
 from .models import Folder, FolderAccess, Patient
 from .views.auth import _repair_empty_invitation_codes
+from .views.admin import rerun_processing
 from .views.intraoral_segmentation import _normalize_teeth_payload
 from .views.patient_data import _generated_panoramic_variants
 
@@ -186,10 +189,7 @@ class CbctDependencyJobTests(TestCase):
         panoramic_files = FileRegistry.objects.filter(processing_job=job)
         self.assertEqual(panoramic_files.count(), 4)
         default_file = panoramic_files.get(metadata__is_default=True)
-        self.assertEqual(
-            default_file.file_path,
-            outputs['panoramic_zminus20_raysum_png']['path'],
-        )
+        self.assertEqual(default_file.file_path, outputs['panoramic_png']['path'])
         self.assertEqual(set(default_file.metadata['files']), set(outputs))
 
 
@@ -207,7 +207,6 @@ class PanoramicVariantTests(SimpleTestCase):
                 }
             )
         )
-
         self.assertEqual(
             variants,
             {
@@ -216,6 +215,78 @@ class PanoramicVariantTests(SimpleTestCase):
             },
         )
 
+
+class PanoramicRerunTests(TestCase):
+    def setUp(self):
+        self.patient = Patient.objects.create(name='Panoramic Case')
+        self.user = User.objects.create_user(
+            username='panoramic-admin', password='x', is_staff=True,
+        )
+        self.old_job = Job.objects.create(
+            modality_slug='cbct_to_panoramic',
+            status='completed',
+            patient=self.patient,
+        )
+        self.job = Job.objects.create(
+            modality_slug='cbct_to_panoramic',
+            status='completed',
+            patient=self.patient,
+            output_files={'panoramic_png': {'path': 'maxillo/processed/current.png'}},
+        )
+        self.generated_paths = [
+            'maxillo/processed/current.png',
+            'maxillo/processed/old.png',
+        ]
+        for path, job in zip(self.generated_paths, [self.job, self.old_job]):
+            FileRegistry.objects.create(
+                file_type='panoramic_processed',
+                file_path=path,
+                file_size=1,
+                file_hash='hash',
+                patient=self.patient,
+                processing_job=job,
+                metadata={'generated_from': 'cbct_to_panoramic'},
+            )
+        self.manual_file = FileRegistry.objects.create(
+            file_type='panoramic_processed',
+            file_path='maxillo/raw/manual.png',
+            file_size=1,
+            file_hash='manual',
+            patient=self.patient,
+        )
+
+    @patch('common.signals.celery_app.send_task')
+    @patch('maxillo.views.admin.get_object_storage')
+    def test_panorama_rerun_clears_generated_artifacts_and_queues_worker_job(
+        self,
+        storage_factory,
+        send_task,
+    ):
+        request = RequestFactory().post(
+            f'/maxillo/patient/{self.patient.patient_id}/rerun-processing/',
+            data=json.dumps({'jobs': ['panoramic']}),
+            content_type='application/json',
+        )
+        request.user = self.user
+        request.resolver_match = SimpleNamespace(namespace='maxillo')
+
+        response = rerun_processing(request, self.patient.patient_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['updated'], ['panoramic'])
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, 'pending')
+        self.assertEqual(self.job.output_files, {})
+        self.assertFalse(
+            FileRegistry.objects.filter(
+                metadata__generated_from='cbct_to_panoramic',
+            ).exists()
+        )
+        self.assertTrue(FileRegistry.objects.filter(id=self.manual_file.id).exists())
+        self.assertEqual(
+            storage_factory.return_value.delete.call_args_list,
+            [((path,),) for path in self.generated_paths],
+        )
 
 class MaxilloCbctFolderUploadTests(TestCase):
     def setUp(self):
