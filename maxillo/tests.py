@@ -6,13 +6,16 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from common.models import Invitation, Modality, Project, ProjectAccess
+from common.models import FileRegistry, Invitation, Job, Modality, Project, ProjectAccess
+from .file_utils import mark_job_completed, save_cbct_to_dataset
 from .models import Folder, FolderAccess, Patient
 from .views.auth import _repair_empty_invitation_codes
 from .views.intraoral_segmentation import _normalize_teeth_payload
+from .views.patient_data import _generated_panoramic_variants
 
 
 class IntraoralSegmentationNormalizationTests(SimpleTestCase):
@@ -73,6 +76,143 @@ class InvitationCodeTests(TestCase):
 
         invitation = Invitation.objects.get()
         self.assertTrue(invitation.code)
+
+
+class CbctDependencyJobTests(TestCase):
+    def setUp(self):
+        self.project, _ = Project.objects.get_or_create(
+            slug='maxillo',
+            defaults={'name': 'maxillo'},
+        )
+        self.patient = Patient.objects.create(name='CBCT Case')
+
+    @override_settings(
+        RUNNER_QUEUE_BY_MODALITY={
+            'cbct': 'runner_cbct_test',
+            'cbct_to_panoramic': 'runner_cbct_to_panoramic_test',
+        },
+    )
+    @patch('common.signals.celery_app.send_task')
+    @patch('maxillo.file_utils._upload_uploaded_file_to_storage')
+    def test_cbct_upload_creates_segmentation_job_and_dependent_panoramic_job(
+        self,
+        upload_file,
+        send_task,
+    ):
+        upload_file.return_value = (
+            'maxillo/raw/cbct/cbct_patient_1.nii.gz',
+            123,
+            'sha256',
+        )
+        uploaded = SimpleUploadedFile('case.nii.gz', b'nifti', content_type='application/gzip')
+
+        path, job = save_cbct_to_dataset(self.patient, uploaded)
+
+        self.assertEqual(path, 'maxillo/raw/cbct/cbct_patient_1.nii.gz')
+        self.assertEqual(job.modality_slug, 'cbct')
+        panoramic_job = Job.objects.get(modality_slug='cbct_to_panoramic')
+        self.assertEqual(panoramic_job.status, 'dependency')
+        self.assertEqual(panoramic_job.input_files, {'raw_cbct': path})
+        self.assertEqual(list(panoramic_job.dependencies.all()), [job])
+        send_task.assert_called_once()
+
+    @override_settings(
+        RUNNER_QUEUE_BY_MODALITY={
+            'cbct': 'runner_cbct_test',
+            'cbct_to_panoramic': 'runner_cbct_to_panoramic_test',
+        },
+    )
+    @patch('common.signals.celery_app.send_task')
+    @patch('maxillo.file_utils._size_hash_for_path_or_key', return_value=(456, 'etag'))
+    @patch('maxillo.file_utils.artifact_exists', return_value=True)
+    def test_cbct_completion_updates_and_releases_panoramic_job(
+        self,
+        artifact_exists,
+        size_hash,
+        send_task,
+    ):
+        raw_key = 'maxillo/raw/cbct/cbct_patient_1.nii.gz'
+        seg_key = 'maxillo/processed/cbct/job_1/segmentation.nii.gz'
+        cbct_job = Job.objects.create(
+            modality_slug='cbct',
+            status='processing',
+            patient=self.patient,
+            input_files={'input': raw_key},
+        )
+        panoramic_job = Job.objects.create(
+            modality_slug='cbct_to_panoramic',
+            status='dependency',
+            patient=self.patient,
+            input_files={'raw_cbct': raw_key},
+        )
+        panoramic_job.add_dependency(cbct_job)
+
+        self.assertTrue(
+            mark_job_completed(
+                cbct_job.id,
+                {'segmentation_nifti': {'path': seg_key}},
+            )
+        )
+
+        panoramic_job.refresh_from_db()
+        self.assertEqual(panoramic_job.status, 'pending')
+        self.assertEqual(
+            panoramic_job.input_files,
+            {'raw_cbct': raw_key, 'segmentation_nifti': seg_key},
+        )
+        send_task.assert_called_once()
+
+    @patch('maxillo.file_utils._size_hash_for_path_or_key', return_value=(456, 'etag'))
+    @patch('maxillo.file_utils.artifact_exists', return_value=True)
+    def test_panoramic_completion_registers_all_projection_variants(
+        self,
+        artifact_exists,
+        size_hash,
+    ):
+        outputs = {
+            'panoramic_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/z0_mean.png'},
+            'panoramic_zminus20_mean_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_mean.png'},
+            'panoramic_z0_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/z0_raysum.png'},
+            'panoramic_zminus20_raysum_png': {'path': 'maxillo/processed/cbct_to_panoramic/job_1/zminus20_raysum.png'},
+        }
+        job = Job.objects.create(
+            modality_slug='cbct_to_panoramic',
+            status='processing',
+            patient=self.patient,
+        )
+
+        self.assertTrue(mark_job_completed(job.id, outputs))
+
+        panoramic_file = FileRegistry.objects.get(processing_job=job)
+        self.assertEqual(panoramic_file.file_path, outputs['panoramic_png']['path'])
+        self.assertEqual(
+            set(panoramic_file.metadata['files']),
+            set(outputs),
+        )
+
+
+class PanoramicVariantTests(SimpleTestCase):
+    def test_returns_only_known_generated_variants(self):
+        variants = _generated_panoramic_variants(
+            SimpleNamespace(
+                metadata={
+                    'generated_from': 'cbct_to_panoramic',
+                    'files': {
+                        'panoramic_png': {'path': 'z0_mean.png'},
+                        'panoramic_z0_raysum_png': {'path': 'z0_raysum.png'},
+                        'unexpected': {'path': 'ignored.png'},
+                    },
+                }
+            )
+        )
+
+        self.assertEqual(
+            variants,
+            {
+                'z0_mean': {'path': 'z0_mean.png', 'label': 'Z+0 Mean'},
+                'z0_raysum': {'path': 'z0_raysum.png', 'label': 'Z+0 Raysum'},
+            },
+        )
 
 
 class MaxilloCbctFolderUploadTests(TestCase):

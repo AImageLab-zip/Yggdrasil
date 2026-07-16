@@ -466,7 +466,7 @@ def save_generic_modality_folder(patient: Patient, modality_slug: str, folder_fi
 
 def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     """
-    Save CBCT file to object storage and create processing job
+    Save CBCT file to object storage and create segmentation + dependent panoramic jobs.
     Supports multiple formats: DICOM, NIfTI, MetaImage, NRRD
 
     Args:
@@ -474,7 +474,7 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         cbct_file: Django UploadedFile instance
 
     Returns:
-        tuple: (file_path, processing_job)
+        tuple: (file_path, segmentation_job)
     """
     patient = _get_patient(patient_or_legacy)
 
@@ -566,7 +566,6 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         },
     )
 
-    # Create job only when a CBCT worker route is configured.
     processing_job = _create_job_if_runner_enabled(
         "cbct",
         **_entity_fk_kwargs(patient),
@@ -593,14 +592,14 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
 
 def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
     """
-    Save CBCT folder (multiple DICOM files) to object storage and create processing job
+    Save CBCT folder to object storage and create segmentation + dependent panoramic jobs.
 
     Args:
         patient_or_legacy: Patient or legacy object with .patient
         folder_files: List of Django UploadedFile instances from folder
 
     Returns:
-        tuple: (folder_path, processing_job)
+        tuple: (folder_path, segmentation_job)
     """
     from .models import validate_cbct_folder
 
@@ -663,7 +662,6 @@ def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
         },
     )
 
-    # Create job only when a CBCT worker route is configured.
     processing_job = _create_job_if_runner_enabled(
         "cbct",
         **_entity_fk_kwargs(patient),

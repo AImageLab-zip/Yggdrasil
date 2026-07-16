@@ -6,10 +6,15 @@
 window.PanoramicViewer = {
     initialized: false,
     patientId: null,
+    selectedVariant: null,
+    variants: [],
     
     init: function(patientId) {
         this.patientId = patientId;
+        this.selectedVariant = null;
+        this.variants = [];
         this.initialized = true;
+        this.bindVariantControls();
         console.debug('Panoramic Viewer initialized for patient', patientId);
     },
     
@@ -19,7 +24,35 @@ window.PanoramicViewer = {
     },
 
     getMetaUrl: function() {
-        return `${this.getApiUrl()}?meta=1`;
+        const params = new URLSearchParams({ meta: '1' });
+        if (this.selectedVariant && this.variants.length) {
+            params.set('variant', this.selectedVariant);
+        }
+        return `${this.getApiUrl()}?${params}`;
+    },
+
+    bindVariantControls: function() {
+        const controls = document.getElementById('panoramicVariantControls');
+        if (!controls || controls.dataset.bound) return;
+        controls.dataset.bound = 'true';
+        controls.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-panoramic-variant]');
+            if (!button || !this.variants.some((variant) => variant.id === button.dataset.panoramicVariant)) return;
+            this.selectedVariant = button.dataset.panoramicVariant;
+            this.updateVariantControls();
+            this.load();
+        });
+    },
+
+    updateVariantControls: function() {
+        const controls = document.getElementById('panoramicVariantControls');
+        if (!controls) return;
+        controls.style.display = this.variants.length ? 'inline-flex' : 'none';
+        controls.querySelectorAll('[data-panoramic-variant]').forEach((button) => {
+            const available = this.variants.some((variant) => variant.id === button.dataset.panoramicVariant);
+            button.style.display = available ? '' : 'none';
+            button.classList.toggle('active', available && button.dataset.panoramicVariant === this.selectedVariant);
+        });
     },
 
     loadInto: function(config) {
@@ -49,6 +82,9 @@ window.PanoramicViewer = {
                 return response.json();
             })
             .then(data => {
+                this.variants = Array.isArray(data.variants) ? data.variants : [];
+                this.selectedVariant = data.selected_variant || null;
+                this.updateVariantControls();
                 img.addEventListener('load', () => {
                     console.debug('Panoramic image loaded successfully');
                     if (loading) loading.style.display = 'none';
