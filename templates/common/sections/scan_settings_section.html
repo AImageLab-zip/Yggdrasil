@@ -1,27 +1,10 @@
-<!-- Scan Settings Section -->
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#scanSettingsCollapse" aria-expanded="false" aria-controls="scanSettingsCollapse" style="cursor: pointer;">
-        <h6 class="mb-0"><i class="fas fa-cog me-2"></i>Scan Settings</h6>
-        <div class="d-flex align-items-center">
-            <small class="text-muted me-2">Organization</small>
-            <i class="fas fa-chevron-right collapse-indicator"></i>
-        </div>
-    </div>
-
-    <div class="collapse" id="scanSettingsCollapse">
-        <div class="scan-settings-panel">
-            <div class="scan-name-row mb-3">
-                <i class="fas fa-tag text-primary"></i>
-                <small class="text-muted">Scan name:</small>
-                <small class="scan-name-display"><strong>{{ patient.name|default:"Unnamed scan" }}</strong></small>
-                {% if can_modify_segmentation %}
-                    <button class="btn btn-sm btn-outline-secondary btn-edit-name" title="Edit scan name">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                {% endif %}
-            </div>
-
-            {% if can_modify_segmentation %}
+<div class="scan-settings-panel">
+    {# Rename moved to the patient header (patient_header_section.html), which
+       is now the page's only .btn-edit-name / .scan-name-display instance —
+       initNameEditing() in patient_detail.js binds to whichever one exists.
+       The hidden `name` field below still must exist: syncManagementNameField()
+       keeps it in sync after a rename so this form doesn't clobber it on save. #}
+    {% if can_modify_segmentation %}
                 <form method="post" class="scan-management-form">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update_management">
@@ -66,6 +49,4 @@
                     {% endfor %}
                 </div>
             {% endif %}
-        </div>
-    </div>
 </div>

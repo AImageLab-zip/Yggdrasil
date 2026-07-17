@@ -53,6 +53,12 @@
   .btn-danger {
     @apply bg-danger text-white hover:brightness-95;
   }
+  .btn-success {
+    @apply bg-accent2 text-white hover:bg-accent2-hover;
+  }
+  .btn-info {
+    @apply bg-surface text-content border border-line-strong hover:bg-surface-sunken;
+  }
   .btn-sm { @apply px-3 py-1.5 text-xs; }
 
   /* ---- Cards ---- */

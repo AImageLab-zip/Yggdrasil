@@ -161,3 +161,26 @@ body.ygg-modal-open { overflow: hidden; }
     transition: opacity 0.12s ease;
 }
 .ygg-tooltip.show { opacity: 1; }
+
+/* ---- Icon button (small square control, used across patients/patient view) */
+.icon-btn {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text-muted);
+    border: 1px solid var(--ygg-border);
+    cursor: pointer;
+    font-size: 11px;
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s;
+}
+.icon-btn:hover { color: var(--ygg-text); border-color: var(--ygg-border-strong); }
+.icon-btn--danger { color: var(--ygg-danger); }
+.icon-btn--danger:hover { color: var(--ygg-danger); border-color: var(--ygg-danger); }
+.icon-btn--xs { width: 22px; height: 22px; border-radius: 6px; font-size: 9px; }
+.icon-btn.is-disabled { opacity: 0.45; cursor: not-allowed; }

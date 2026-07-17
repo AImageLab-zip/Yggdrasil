@@ -2,478 +2,369 @@
 <link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
 
 {{ viewer_grid_data|json_script:"viewerGridData" }}
-<div class="container-fluid">
+{% include 'common/sections/patient_header_section.html' %}
 
-    <div class="row">
-        <!-- 3D Viewer Column -->
-        <div class="col-lg-8">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <div class="d-flex align-items-center">
-                    <h4 class="me-3"><i class="fas fa-cube me-2"></i>3D Viewer</h4>
-                    <div class="btn-group" role="group" id="modalityToggleGroup">
-                        {# Dynamic modality toggles #}
-                        {% if patient_modalities %}
-                            {% for m in patient_modalities %}
-                                {% if m.slug != 'rawzip' %}
-                                {% with rid='modality_'|add:m.slug %}
-                                <input type="radio" class="btn-check" name="viewerType" id="{{ rid }}" autocomplete="off"
-                                       {% if default_modality_slug == m.slug %}checked{% endif %}>
-                                <label class="btn btn-outline-secondary btn-sm modality-toggle" data-modality="{{ m.slug }}" for="{{ rid }}">
-                                    {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %}
-                                </label>
-                                {% endwith %}
-                                {% endif %}
-                            {% endfor %}
-                        {% else %}
-                            <span class="text-muted small">No modalities configured for this patient</span>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="btn-group" role="group" id="iosControls" {% if not patient.has_ios_scans and patient.has_cbct_scan %}style="display: none;"{% endif %}>
-                    <button type="button" class="btn btn-outline-primary btn-sm" id="resetView">
-                        <i class="fas fa-home me-1"></i>Reset
-                    </button>
-                    <button type="button" class="btn btn-outline-primary btn-sm" id="toggleWireframe">
-                        <i class="fas fa-project-diagram me-1"></i>Wireframe
-                    </button>
-                    <button type="button" class="btn btn-outline-primary btn-sm" id="toggleGrid">
-                        <i class="fas fa-th me-1"></i>Grid
-                    </button>
-                    <div class="btn-group" role="group">
-                        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
-                            Grid Size
-                        </button>
-                        <div class="dropdown-menu">
-                            <button class="dropdown-item" onclick="IOSViewer.updateGridSize(3); document.getElementById('gridSize').value='3';">3x3</button>
-                            <button class="dropdown-item" onclick="IOSViewer.updateGridSize(9); document.getElementById('gridSize').value='9';">9x9</button>
-                            <button class="dropdown-item" onclick="IOSViewer.updateGridSize(15); document.getElementById('gridSize').value='15';">15x15</button>
-                            <button class="dropdown-item" onclick="IOSViewer.updateGridSize(20); document.getElementById('gridSize').value='20';">20x20</button>
-                        </div>
-                        <select id="gridSize" style="display: none;">
-                            <option value="3">3x3</option>
-                            <option value="9" selected>9x9</option>
-                            <option value="15">15x15</option>
-                            <option value="20">20x20</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="btn-group" role="group" id="cbctControls" {% if patient.has_ios_scans %}style="display: none;"{% endif %}>
-                    <button type="button" class="btn btn-outline-primary btn-sm" id="resetCBCTView">
-                        <i class="fas fa-home me-1"></i>Reset
-                    </button>
-                    <div class="btn-group" role="group">
-                        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
-                            Windowing
-                        </button>
-                        <div class="dropdown-menu p-3 windowing-menu" style="min-width: 260px;">
-                            <div class="mb-2">
-                                <label class="form-label-sm mb-1">Min (%) <span id="windowMinValue" class="ms-1">0</span></label>
-                                <input type="range" class="form-range" id="windowMinRange" min="0" max="100" step="1" value="0">
-                            </div>
-                            <div>
-                                <label class="form-label-sm mb-1">Max (%) <span id="windowMaxValue" class="ms-1">100</span></label>
-                                <input type="range" class="form-range" id="windowMaxRange" min="0" max="100" step="1" value="100">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Viewer Help Button -->
-            <div class="d-flex justify-content-end mb-3">
-                <button type="button" class="btn btn-outline-info btn-sm" id="viewerHelpBtn" data-bs-toggle="modal" data-bs-target="#viewerHelpModal">
-                    <i class="fas fa-question-circle me-1"></i>How to use the Viewer
-                </button>
-            </div>
-            
-            <div class="position-relative">
-                <!-- IOS Viewer -->
-                <div id="ios-viewer" class="viewer-container" {% if default_modality_slug and default_modality_slug != 'ios' %}style="display: none;"{% endif %}>
-                    {% if patient.ios_job_status == 'processing' %}
-                        <!-- Processing State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <i class="fas fa-cog fa-spin fa-3x text-primary"></i>
-                                </div>
-                                <h5 class="text-primary mb-2">Processing Scans</h5>
-                                <p class="text-muted">
-                                    Analyzing upper and lower jaw scans...<br>
-                                    <small>This usually takes 1-2 minutes</small>
-                                </p>
-                                <div class="progress mx-auto" style="width: 200px; height: 8px;">
-                                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                                         role="progressbar" style="width: 100%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    {% elif patient.ios_job_status == 'failed' %}
-                        <!-- Error State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <i class="fas fa-exclamation-triangle fa-3x text-danger"></i>
-                                </div>
-                                <h5 class="text-danger mb-2">Processing Failed</h5>
-                                <p class="text-muted">
-                                    Unable to process the uploaded scans.<br>
-                                    <small>Please re-upload the files using the File Management section.</small>
-                                </p>
-                            </div>
-                        </div>
-                    {% elif not patient.has_ios_scans %}
-                        <!-- No Scans State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <i class="fas fa-upload fa-3x text-secondary"></i>
-                                </div>
-                                <h5 class="text-secondary mb-2">No IOS Scans</h5>
-                                <p class="text-muted">
-                                    Upload upper and lower jaw scans to view them here.
-                                </p>
-                            </div>
-                        </div>
-                    {% else %}
-                        <!-- 3D Viewer Canvas (only when processed successfully) -->
-                        <div id="scan-viewer"></div>
-                        <div class="viewer-controls">
-                            <div class="btn-group-vertical">
-                                <button class="btn btn-light btn-sm active" id="showUpper" title="Upper Jaw">
-                                    <i class="fas fa-eye me-1"></i>U
-                                </button>
-                                <button class="btn btn-light btn-sm active" id="showLower" title="Lower Jaw">
-                                    <i class="fas fa-eye me-1"></i>L
-                                </button>
-                                <hr class="my-1" style="border-color: #dee2e6;">
-                                <button class="btn btn-light btn-sm" id="viewRight" title="View from Right">
-                                    <i class="fas fa-arrow-right me-1"></i>R
-                                </button>
-                                <button class="btn btn-light btn-sm" id="viewLeft" title="View from Left">
-                                    <i class="fas fa-arrow-left me-1"></i>L
-                                </button>
-                                <button class="btn btn-light btn-sm" id="viewFront" title="View from Front">
-                                    <i class="fas fa-arrow-up me-1"></i>F
-                                </button>
-                                <hr class="my-1" style="border-color: #dee2e6;">
-                                <button class="btn btn-light btn-sm" id="viewUpper" title="View Upper Scan">
-                                    <i class="fas fa-chevron-up me-1"></i>U
-                                </button>
-                                <button class="btn btn-light btn-sm" id="viewLower" title="View Lower Scan">
-                                    <i class="fas fa-chevron-down me-1"></i>L
-                                </button>
-                            </div>
-                        </div>
-                    {% endif %}
-                </div>
-                
-                <!-- CBCT Viewer -->
-                <div id="cbct-viewer" class="viewer-container" {% if default_modality_slug != 'cbct' %}style="display: none;"{% endif %}>
-                    {% if patient.cbct_job_status == 'failed' %}
-                        <!-- Failed State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <i class="fas fa-exclamation-triangle fa-3x text-danger"></i>
-                                </div>
-                                <h5 class="text-danger mb-2">CBCT Processing Failed</h5>
-                                <p class="text-muted">
-                                    Unable to process the uploaded CBCT scan.<br>
-                                    <small>Please re-upload the file using the File Management section.</small>
-                                </p>
-                            </div>
-                        </div>
-                    {% elif patient.cbct_job_status == 'processing' %}
-                        <!-- Processing State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <div class="spinner-border text-primary" role="status">
-                                        <span class="visually-hidden">Processing...</span>
-                                    </div>
-                                </div>
-                                <h5 class="text-primary mb-2">Processing CBCT Scan</h5>
-                                <p class="text-muted">
-                                    Your CBCT scan is being processed. This may take 1-2 minutes.
-                                </p>
-                            </div>
-                        </div>
-                    {% elif not patient.has_cbct_scan %}
-                        <!-- No CBCT Data State -->
-                        <div class="ios-status-display">
-                            <div class="text-center py-5">
-                                <div class="mb-3">
-                                    <i class="fas fa-cube fa-3x text-secondary"></i>
-                                </div>
-                                <h5 class="text-secondary mb-2">No CBCT Data</h5>
-                                <p class="text-muted">
-                                    Upload CBCT scan to view volumetric data here.
-                                </p>
-                            </div>
-                        </div>
-                    {% else %}
-                        <div class="viewer-grid">
-                            <div class="viewer-window" data-window-index="0">
-                                <div class="drop-hint">
-                                    <i class="fas fa-brain"></i>
-                                    <p>Axial</p>
-                                </div>
-                            </div>
-                            <div class="viewer-window" data-window-index="1">
-                                <div class="drop-hint">
-                                    <i class="fas fa-brain"></i>
-                                    <p>Sagittal</p>
-                                </div>
-                            </div>
-                            <div class="viewer-window" data-window-index="2">
-                                <div class="drop-hint">
-                                    <i class="fas fa-brain"></i>
-                                    <p>Coronal</p>
-                                </div>
-                            </div>
-                            <div class="viewer-window" data-window-index="3">
-                                <div class="drop-hint">
-                                    <i class="fas fa-square"></i>
-                                    <p>Empty</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="cbct-inline-panoramic" id="cbctInlinePanoramic">
-                            <div class="cbct-inline-panoramic-header">
-                                <i class="fas fa-panorama me-2"></i>Panoramic
-                            </div>
-                            <div class="cbct-inline-panoramic-body">
-                                <div class="panoramic-loading" id="cbctPanoramicLoading" style="display: none;">
-                                    <div class="text-center py-3">
-                                        <div class="spinner-border text-primary" role="status">
-                                            <span class="visually-hidden">Loading...</span>
-                                        </div>
-                                        <p class="mt-2 text-muted mb-0">Loading panoramic image...</p>
-                                    </div>
-                                </div>
-                                <div class="panoramic-content" id="cbctPanoramicContent" style="display: none;">
-                                    <div class="d-flex align-items-center justify-content-center h-100">
-                                        <img id="cbctPanoramicImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="CBCT panoramic image">
-                                    </div>
-                                </div>
-                                <div class="panoramic-error" id="cbctPanoramicError" style="display: none;">
-                                    <div class="text-center py-3">
-                                        <div class="mb-2">
-                                            <i class="fas fa-exclamation-triangle fa-2x text-secondary"></i>
-                                        </div>
-                                        <p class="text-muted mb-0">Panoramic image not available.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    {% endif %}
-                </div>
-
-                <!-- Intraoral Photos Viewer -->
-                <div id="intraoral-viewer" class="viewer-container" {% if default_modality_slug != 'intraoral' and default_modality_slug != 'intraoral-photo' %}style="display: none;"{% endif %}>
-                    <div class="intraoral-loading" id="intraoralLoading">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-muted">Loading intraoral photographs...</p>
-                        </div>
-                    </div>
-                    <div class="intraoral-content" id="intraoralContent" style="display: none;">
-                        <div class="row g-3" id="intraoralGrid">
-                            <!-- Photos will be dynamically loaded here -->
-                        </div>
-                    </div>
-                    <div class="intraoral-error" id="intraoralError" style="display: none;">
-                        <div class="text-center py-5">
-                            <div class="mb-3">
-                                <i class="fas fa-exclamation-triangle fa-3x text-secondary"></i>
-                            </div>
-                            <h5 class="text-secondary mb-2">No Intraoral Photos</h5>
-                            <p class="text-muted">Upload intraoral photographs to view them here.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Teleradiography Viewer -->
-                <div id="teleradiography-viewer" class="viewer-container" {% if default_modality_slug != 'teleradiography' %}style="display: none;"{% endif %}>
-                    <div class="teleradiography-loading" id="teleradiographyLoading">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-muted">Loading teleradiography image...</p>
-                        </div>
-                    </div>
-                    <div class="teleradiography-content" id="teleradiographyContent" style="display: none;">
-                        <div class="d-flex align-items-center justify-content-center h-100">
-                            <img id="teleradiographyImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="Teleradiography image">
-                        </div>
-                    </div>
-                    <div class="teleradiography-error" id="teleradiographyError" style="display: none;">
-                        <div class="text-center py-5">
-                            <div class="mb-3">
-                                <i class="fas fa-exclamation-triangle fa-3x text-secondary"></i>
-                            </div>
-                            <h5 class="text-secondary mb-2">No Teleradiography Image</h5>
-                            <p class="text-muted">Upload teleradiography image to view it here.</p>
-                        </div>
-                    </div>
-                </div>
-
-                {% if has_panoramic %}
-                <!-- panoramic Viewer -->
-                <div id="panoramic-viewer" class="viewer-container" {% if default_modality_slug != 'panoramic' %}style="display: none;"{% endif %}>
-                    <div class="panoramic-loading" id="panoramicLoading" style="display: none;">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-muted">Loading panoramic image...</p>
-                        </div>
-                    </div>
-                    <div class="panoramic-content" id="panoramicContent" style="display: none;">
-                        <div class="d-flex align-items-center justify-content-center h-100">
-                            <img id="panoramicStandaloneImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="panoramic image">
-                        </div>
-                    </div>
-                    <div class="panoramic-error" id="panoramicError" style="display: none;">
-                        <div class="text-center py-5">
-                            <div class="mb-3">
-                                <i class="fas fa-exclamation-triangle fa-3x text-secondary"></i>
-                            </div>
-                            <h5 class="text-secondary mb-2">No panoramic Image</h5>
-                            <p class="text-muted">Upload panoramic image to view it here.</p>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-
-                {# Generic placeholders for other modalities (like brain MRI) #}
-                {% if patient_modalities %}
+<div class="patient-view-grid">
+    <!-- 3D Viewer Column -->
+    <div class="patient-view-viewer">
+        <div class="modality-tabs" id="modalityToggleGroup">
+            {# Dynamic modality toggles — restyled as a tab strip via CSS only;
+               the radio/label DOM and ids are unchanged, so
+               patient_detail.js's `change` listener keeps working verbatim. #}
+            {% if patient_modalities %}
                 {% for m in patient_modalities %}
-                {% if m.slug != 'ios' and m.slug != 'cbct' and m.slug != 'intraoral' and m.slug != 'intraoral-photo' and m.slug != 'teleradiography' and m.slug != 'panoramic' and m.slug != 'rawzip' %}
-                <div id="{{ m.slug }}-viewer" class="viewer-container" {% if default_modality_slug != m.slug %}style="display: none;"{% endif %}>
-                    <!-- Reuse CBCT layout without panoramic row -->
-                    <div class="cbct-loading" id="{{ m.slug }}Loading">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-muted">Loading {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %} data...</p>
-                        </div>
+                    {% if m.slug != 'rawzip' %}
+                    {% with rid='modality_'|add:m.slug %}
+                    <input type="radio" class="btn-check" name="viewerType" id="{{ rid }}" autocomplete="off"
+                           {% if default_modality_slug == m.slug %}checked{% endif %}>
+                    <label class="modality-toggle" data-modality="{{ m.slug }}" for="{{ rid }}">
+                        {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %}
+                    </label>
+                    {% endwith %}
+                    {% endif %}
+                {% endfor %}
+            {% else %}
+                <span class="text-muted small">No modalities configured for this patient</span>
+            {% endif %}
+        </div>
+
+        <div class="viewer-toolbar">
+            <div class="viewer-toolbar__group" id="iosControls" {% if not patient.has_ios_scans and patient.has_cbct_scan %}style="display: none;"{% endif %}>
+                <span class="viewer-toolbar__label">View</span>
+                <button type="button" class="icon-btn" id="resetView" title="Reset view"><i class="fas fa-house" aria-hidden="true"></i></button>
+                <button type="button" class="icon-btn" id="toggleWireframe" title="Wireframe"><i class="fas fa-diagram-project" aria-hidden="true"></i></button>
+                <button type="button" class="icon-btn" id="toggleGrid" title="Grid"><i class="fas fa-border-all" aria-hidden="true"></i></button>
+                <div class="ygg-dropdown">
+                    <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Grid size"><i class="fas fa-table-cells" aria-hidden="true"></i></button>
+                    <div class="ygg-dropdown-menu">
+                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(3); document.getElementById('gridSize').value='3';">3x3</button>
+                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(9); document.getElementById('gridSize').value='9';">9x9</button>
+                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(15); document.getElementById('gridSize').value='15';">15x15</button>
+                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(20); document.getElementById('gridSize').value='20';">20x20</button>
                     </div>
-                    <div class="cbct-views" id="{{ m.slug }}Views" style="display: none;">
-                        <div class="row g-2" style="aspect-ratio: 1/1;">
-                            <div class="col-6" style="height: 50%;">
-                                <div class="cbct-view-container">
-                                    <div class="cbct-view-label">Axial</div>
-                                    <div id="{{ m.slug }}_axialView" class="cbct-view"></div>
-                                </div>
-                            </div>
-                            <div class="col-6" style="height: 50%;">
-                                <div class="cbct-view-container">
-                                    <div class="cbct-view-label">Sagittal</div>
-                                    <div id="{{ m.slug }}_sagittalView" class="cbct-view"></div>
-                                </div>
-                            </div>
-                            <div class="col-6" style="height: 50%;">
-                                <div class="cbct-view-container">
-                                    <div class="cbct-view-label">Coronal</div>
-                                    <div id="{{ m.slug }}_coronalView" class="cbct-view"></div>
-                                </div>
-                            </div>
-                            <div class="col-6" style="height: 50%;">
-                                <div class="cbct-view-container">
-                                    <div class="cbct-view-label">3D Volume</div>
-                                    <div id="{{ m.slug }}_volumeView" class="cbct-view"></div>
-                                </div>
-                            </div>
+                    <select id="gridSize" style="display: none;">
+                        <option value="3">3x3</option>
+                        <option value="9" selected>9x9</option>
+                        <option value="15">15x15</option>
+                        <option value="20">20x20</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="viewer-toolbar__divider"></div>
+
+            <div class="viewer-toolbar__group" id="cbctControls" {% if patient.has_ios_scans %}style="display: none;"{% endif %}>
+                <span class="viewer-toolbar__label">Tools</span>
+                <button type="button" class="icon-btn" id="resetCBCTView" title="Reset view"><i class="fas fa-house" aria-hidden="true"></i></button>
+                <div class="ygg-dropdown">
+                    <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Windowing"><i class="fas fa-sliders" aria-hidden="true"></i></button>
+                    <div class="ygg-dropdown-menu" style="min-width: 260px;">
+                        <div class="mb-2 px-2">
+                            <label class="form-label-sm mb-1">Min (%) <span id="windowMinValue" class="ms-1">0</span></label>
+                            <input type="range" class="form-range w-100" id="windowMinRange" min="0" max="100" step="1" value="0">
+                        </div>
+                        <div class="px-2">
+                            <label class="form-label-sm mb-1">Max (%) <span id="windowMaxValue" class="ms-1">100</span></label>
+                            <input type="range" class="form-range w-100" id="windowMaxRange" min="0" max="100" step="1" value="100">
                         </div>
                     </div>
                 </div>
-                {% endif %}
-                {% endfor %}
-                {% endif %}
             </div>
         </div>
-        
-        <!-- Classification Column -->
-        <div class="col-lg-4">
-            {% include 'maxillo/sections/bite_classification_section.html' %}
-            {% if has_intraoral_modality %}
-            {% include 'maxillo/sections/intraoral_segmentation_section.html' %}
+
+        <div class="d-flex justify-content-end mb-2">
+            <button type="button" class="icon-btn" id="viewerHelpBtn" data-ygg-toggle="modal" data-ygg-target="#viewerHelpModal" title="How to use the viewer">
+                <i class="fas fa-circle-question" aria-hidden="true"></i>
+            </button>
+        </div>
+
+        <div class="position-relative">
+            <!-- IOS Viewer -->
+            <div id="ios-viewer" class="viewer-container" {% if default_modality_slug and default_modality_slug != 'ios' %}style="display: none;"{% endif %}>
+                {% if patient.ios_job_status == 'processing' %}
+                    <div class="ios-status-display">
+                        <div class="text-center py-5">
+                            <div class="mb-3"><i class="fas fa-gear fa-spin fa-3x text-primary"></i></div>
+                            <h5 class="text-primary mb-2">Processing Scans</h5>
+                            <p class="text-muted">Analyzing upper and lower jaw scans...<br><small>This usually takes 1-2 minutes</small></p>
+                            <div class="progress mx-auto" style="width: 200px;"><div class="progress-bar" style="width: 100%"></div></div>
+                        </div>
+                    </div>
+                {% elif patient.ios_job_status == 'failed' %}
+                    <div class="ios-status-display">
+                        <div class="text-center py-5">
+                            <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-danger"></i></div>
+                            <h5 class="text-danger mb-2">Processing Failed</h5>
+                            <p class="text-muted">Unable to process the uploaded scans.<br><small>Please re-upload the files using the Files tab.</small></p>
+                        </div>
+                    </div>
+                {% elif not patient.has_ios_scans %}
+                    <div class="ios-status-display">
+                        <div class="text-center py-5">
+                            <div class="mb-3"><i class="fas fa-upload fa-3x text-secondary"></i></div>
+                            <h5 class="text-secondary mb-2">No IOS Scans</h5>
+                            <p class="text-muted">Upload upper and lower jaw scans to view them here.</p>
+                        </div>
+                    </div>
+                {% else %}
+                    <div id="scan-viewer"></div>
+                    <div class="viewer-controls">
+                        <div class="btn-group-vertical">
+                            <button class="btn btn-light btn-sm active" id="showUpper" title="Upper Jaw"><i class="fas fa-eye me-1"></i>U</button>
+                            <button class="btn btn-light btn-sm active" id="showLower" title="Lower Jaw"><i class="fas fa-eye me-1"></i>L</button>
+                            <hr class="my-1" style="border-color: var(--ygg-border);">
+                            <button class="btn btn-light btn-sm" id="viewRight" title="View from Right"><i class="fas fa-arrow-right me-1"></i>R</button>
+                            <button class="btn btn-light btn-sm" id="viewLeft" title="View from Left"><i class="fas fa-arrow-left me-1"></i>L</button>
+                            <button class="btn btn-light btn-sm" id="viewFront" title="View from Front"><i class="fas fa-arrow-up me-1"></i>F</button>
+                            <hr class="my-1" style="border-color: var(--ygg-border);">
+                            <button class="btn btn-light btn-sm" id="viewUpper" title="View Upper Scan"><i class="fas fa-chevron-up me-1"></i>U</button>
+                            <button class="btn btn-light btn-sm" id="viewLower" title="View Lower Scan"><i class="fas fa-chevron-down me-1"></i>L</button>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- CBCT Viewer -->
+            <div id="cbct-viewer" class="viewer-container" {% if default_modality_slug != 'cbct' %}style="display: none;"{% endif %}>
+                {% if patient.cbct_job_status == 'failed' %}
+                    <div class="ios-status-display">
+                        <div class="text-center py-5">
+                            <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-danger"></i></div>
+                            <h5 class="text-danger mb-2">CBCT Processing Failed</h5>
+                            <p class="text-muted">Unable to process the uploaded CBCT scan.<br><small>Please re-upload the file using the Files tab.</small></p>
+                        </div>
+                    </div>
+                {% elif patient.cbct_job_status == 'processing' %}
+                    <div class="ios-status-display">
+                        <div class="text-center py-5">
+                            <div class="mb-3"><div class="spinner-border text-primary" role="status"></div></div>
+                            <h5 class="text-primary mb-2">Processing CBCT Scan</h5>
+                            <p class="text-muted">Your CBCT scan is being processed. This may take 1-2 minutes.</p>
+                        </div>
+                    </div>
+                {% elif not patient.has_cbct_scan %}
+                    <div class="ios-status-display">
+                        <div class="text-center py-5">
+                            <div class="mb-3"><i class="fas fa-cube fa-3x text-secondary"></i></div>
+                            <h5 class="text-secondary mb-2">No CBCT Data</h5>
+                            <p class="text-muted">Upload CBCT scan to view volumetric data here.</p>
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="viewer-grid">
+                        <div class="viewer-window" data-window-index="0"><div class="drop-hint"><i class="fas fa-brain"></i><p>Axial</p></div></div>
+                        <div class="viewer-window" data-window-index="1"><div class="drop-hint"><i class="fas fa-brain"></i><p>Sagittal</p></div></div>
+                        <div class="viewer-window" data-window-index="2"><div class="drop-hint"><i class="fas fa-brain"></i><p>Coronal</p></div></div>
+                        <div class="viewer-window" data-window-index="3"><div class="drop-hint"><i class="fas fa-square"></i><p>Empty</p></div></div>
+                    </div>
+                    <div class="cbct-inline-panoramic" id="cbctInlinePanoramic">
+                        <div class="cbct-inline-panoramic-header"><i class="fas fa-panorama me-2"></i>Panoramic</div>
+                        <div class="cbct-inline-panoramic-body">
+                            <div class="panoramic-loading" id="cbctPanoramicLoading" style="display: none;">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary" role="status"></div>
+                                    <p class="mt-2 text-muted mb-0">Loading panoramic image...</p>
+                                </div>
+                            </div>
+                            <div class="panoramic-content" id="cbctPanoramicContent" style="display: none;">
+                                <div class="d-flex align-items-center justify-content-center h-100">
+                                    <img id="cbctPanoramicImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="CBCT panoramic image">
+                                </div>
+                            </div>
+                            <div class="panoramic-error" id="cbctPanoramicError" style="display: none;">
+                                <div class="text-center py-3">
+                                    <div class="mb-2"><i class="fas fa-triangle-exclamation fa-2x text-secondary"></i></div>
+                                    <p class="text-muted mb-0">Panoramic image not available.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Intraoral Photos Viewer -->
+            <div id="intraoral-viewer" class="viewer-container" {% if default_modality_slug != 'intraoral' and default_modality_slug != 'intraoral-photo' %}style="display: none;"{% endif %}>
+                <div class="intraoral-loading" id="intraoralLoading">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 text-muted">Loading intraoral photographs...</p>
+                    </div>
+                </div>
+                <div class="intraoral-content" id="intraoralContent" style="display: none;">
+                    <div class="row g-3" id="intraoralGrid"></div>
+                </div>
+                <div class="intraoral-error" id="intraoralError" style="display: none;">
+                    <div class="text-center py-5">
+                        <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-secondary"></i></div>
+                        <h5 class="text-secondary mb-2">No Intraoral Photos</h5>
+                        <p class="text-muted">Upload intraoral photographs to view them here.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Teleradiography Viewer -->
+            <div id="teleradiography-viewer" class="viewer-container" {% if default_modality_slug != 'teleradiography' %}style="display: none;"{% endif %}>
+                <div class="teleradiography-loading" id="teleradiographyLoading">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 text-muted">Loading teleradiography image...</p>
+                    </div>
+                </div>
+                <div class="teleradiography-content" id="teleradiographyContent" style="display: none;">
+                    <div class="d-flex align-items-center justify-content-center h-100">
+                        <img id="teleradiographyImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="Teleradiography image">
+                    </div>
+                </div>
+                <div class="teleradiography-error" id="teleradiographyError" style="display: none;">
+                    <div class="text-center py-5">
+                        <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-secondary"></i></div>
+                        <h5 class="text-secondary mb-2">No Teleradiography Image</h5>
+                        <p class="text-muted">Upload teleradiography image to view it here.</p>
+                    </div>
+                </div>
+            </div>
+
+            {% if has_panoramic %}
+            <!-- panoramic Viewer -->
+            <div id="panoramic-viewer" class="viewer-container" {% if default_modality_slug != 'panoramic' %}style="display: none;"{% endif %}>
+                <div class="panoramic-loading" id="panoramicLoading" style="display: none;">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 text-muted">Loading panoramic image...</p>
+                    </div>
+                </div>
+                <div class="panoramic-content" id="panoramicContent" style="display: none;">
+                    <div class="d-flex align-items-center justify-content-center h-100">
+                        <img id="panoramicStandaloneImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="panoramic image">
+                    </div>
+                </div>
+                <div class="panoramic-error" id="panoramicError" style="display: none;">
+                    <div class="text-center py-5">
+                        <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-secondary"></i></div>
+                        <h5 class="text-secondary mb-2">No panoramic Image</h5>
+                        <p class="text-muted">Upload panoramic image to view it here.</p>
+                    </div>
+                </div>
+            </div>
             {% endif %}
-            {% include 'common/sections/vocal_caption_section.html' %}
-            {% include 'common/sections/scan_settings_section.html' %}
-            {% include 'common/sections/nifti_metadata_section.html' %}
-            {% include 'common/sections/file_management_section.html' %}
-            {% include 'common/sections/activity_section.html' %}
+
+            {# Generic placeholders for other modalities (like brain MRI) #}
+            {% if patient_modalities %}
+            {% for m in patient_modalities %}
+            {% if m.slug != 'ios' and m.slug != 'cbct' and m.slug != 'intraoral' and m.slug != 'intraoral-photo' and m.slug != 'teleradiography' and m.slug != 'panoramic' and m.slug != 'rawzip' %}
+            <div id="{{ m.slug }}-viewer" class="viewer-container" {% if default_modality_slug != m.slug %}style="display: none;"{% endif %}>
+                <div class="cbct-loading" id="{{ m.slug }}Loading">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 text-muted">Loading {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %} data...</p>
+                    </div>
+                </div>
+                <div class="cbct-views" id="{{ m.slug }}Views" style="display: none;">
+                    <div class="row g-2" style="aspect-ratio: 1/1;">
+                        <div class="col-6" style="height: 50%;"><div class="cbct-view-container"><div class="cbct-view-label">Axial</div><div id="{{ m.slug }}_axialView" class="cbct-view"></div></div></div>
+                        <div class="col-6" style="height: 50%;"><div class="cbct-view-container"><div class="cbct-view-label">Sagittal</div><div id="{{ m.slug }}_sagittalView" class="cbct-view"></div></div></div>
+                        <div class="col-6" style="height: 50%;"><div class="cbct-view-container"><div class="cbct-view-label">Coronal</div><div id="{{ m.slug }}_coronalView" class="cbct-view"></div></div></div>
+                        <div class="col-6" style="height: 50%;"><div class="cbct-view-container"><div class="cbct-view-label">3D Volume</div><div id="{{ m.slug }}_volumeView" class="cbct-view"></div></div></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        </div>
+
+        <div class="viewer-hint">
+            <span>Left-drag rotate &middot; scroll zoom &middot; right-drag pan</span>
         </div>
     </div>
 
-    <!-- Back Button -->
-    <div class="row mt-3">
-        <div class="col-12">
-            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-            <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
-                <i class="fas fa-arrow-left me-2"></i>Back to Scan List
-            </a>
+    <!-- Tabbed sidebar -->
+    <div class="side-panel">
+        <div class="side-panel__tabs" role="tablist">
+            <button type="button" class="side-tab is-active" data-tab-target="classification">Classification</button>
+            <button type="button" class="side-tab" data-tab-target="captions">Captions</button>
+            <button type="button" class="side-tab" data-tab-target="files">Files</button>
+            {% if patient.has_cbct_scan %}
+            <button type="button" class="side-tab" data-tab-target="metadata">Metadata</button>
+            {% endif %}
+            <button type="button" class="side-tab" data-tab-target="settings">Settings</button>
+            <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
+        </div>
+        <div class="side-panel__body">
+            <div class="side-tab-pane is-active" data-tab-pane="classification">
+                {% include 'maxillo/sections/bite_classification_section.html' %}
+                {% if has_intraoral_modality %}
+                {% include 'maxillo/sections/intraoral_segmentation_section.html' %}
+                {% endif %}
+            </div>
+            <div class="side-tab-pane" data-tab-pane="captions">
+                {% include 'common/sections/vocal_caption_section.html' %}
+            </div>
+            <div class="side-tab-pane" data-tab-pane="files">
+                {% include 'common/sections/file_management_section.html' %}
+            </div>
+            {% if patient.has_cbct_scan %}
+            <div class="side-tab-pane" data-tab-pane="metadata">
+                {% include 'common/sections/nifti_metadata_section.html' %}
+            </div>
+            {% endif %}
+            <div class="side-tab-pane" data-tab-pane="settings">
+                {% include 'common/sections/scan_settings_section.html' %}
+            </div>
+            <div class="side-tab-pane" data-tab-pane="activity">
+                {% include 'common/sections/activity_section.html' %}
+            </div>
         </div>
     </div>
 </div>
+
+<!-- Back Button -->
+<div class="mt-3">
+    {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+    <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Scan List
+    </a>
+</div>
+
 <!-- Saving Indicator -->
 <div class="saving-indicator" id="savingIndicator">
     <i class="fas fa-check me-1"></i>Saved!
- </div>
+</div>
 
 <!-- Viewer Help Modal -->
-<div class="modal fade" id="viewerHelpModal" tabindex="-1" aria-labelledby="viewerHelpModalLabel" aria-hidden="true">
+<div class="modal" id="viewerHelpModal" tabindex="-1" aria-labelledby="viewerHelpModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="viewerHelpModalLabel">
-                    <i class="fas fa-cube me-2"></i>3D Viewer Instructions
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h5 class="modal-title" id="viewerHelpModalLabel"><i class="fas fa-cube me-2"></i>3D Viewer Instructions</h5>
+                <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="row">
-                    <!-- IOS Viewer Instructions -->
                     <div class="col-md-6">
                         <div class="viewer-instructions-card">
                             <div class="card-header bg-primary text-white">
-                                <h6 class="mb-0">
-                                    <i class="fas fa-mobile-alt me-2"></i>IOS Scanner Viewer
-                                </h6>
+                                <h6 class="mb-0"><i class="fas fa-mobile-alt me-2"></i>IOS Scanner Viewer</h6>
                             </div>
                             <div class="card-body">
                                 <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-mouse me-1"></i>Mouse Controls
-                                    </h6>
+                                    <h6 class="text-primary mb-2"><i class="fas fa-arrow-pointer me-1"></i>Mouse Controls</h6>
                                     <ul class="list-unstyled instruction-list">
                                         <li><strong>Left-click + drag:</strong> Rotate the view</li>
                                         <li><strong>Scroll wheel:</strong> Zoom in/out</li>
                                         <li><strong>Right-click + drag:</strong> Pan the view</li>
                                     </ul>
                                 </div>
-                                
                                 <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-eye me-1"></i>Jaw Visibility
-                                    </h6>
+                                    <h6 class="text-primary mb-2"><i class="fas fa-eye me-1"></i>Jaw Visibility</h6>
                                     <ul class="list-unstyled instruction-list">
                                         <li><strong>U button:</strong> Toggle upper jaw visibility</li>
                                         <li><strong>L button:</strong> Toggle lower jaw visibility</li>
                                         <li><strong>Reset button:</strong> Return to default view</li>
                                     </ul>
                                 </div>
-                                
                                 <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-project-diagram me-1"></i>Display Options
-                                    </h6>
+                                    <h6 class="text-primary mb-2"><i class="fas fa-diagram-project me-1"></i>Display Options</h6>
                                     <ul class="list-unstyled instruction-list">
                                         <li><strong>Wireframe:</strong> Toggle wireframe mode for better detail</li>
                                         <li><strong>Solid:</strong> Default shaded view</li>
@@ -482,20 +373,14 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- CBCT Viewer Instructions -->
                     <div class="col-md-6">
                         <div class="viewer-instructions-card">
                             <div class="card-header bg-success text-white">
-                                <h6 class="mb-0">
-                                    <i class="fas fa-cube me-2"></i>CBCT Volume Viewer
-                                </h6>
+                                <h6 class="mb-0"><i class="fas fa-cube me-2"></i>CBCT Volume Viewer</h6>
                             </div>
                             <div class="card-body">
                                 <div class="instruction-group">
-                                    <h6 class="text-success mb-2">
-                                        <i class="fas fa-mouse me-1"></i>Mouse Controls
-                                    </h6>
+                                    <h6 class="text-success mb-2"><i class="fas fa-arrow-pointer me-1"></i>Mouse Controls</h6>
                                     <ul class="list-unstyled instruction-list">
                                         <li><strong>Left-click + drag:</strong> Pan/move the view</li>
                                         <li><strong>Scroll wheel:</strong> Scroll through slices</li>
@@ -504,11 +389,8 @@
                                         <li><strong>Ruler tool:</strong> Click the ruler above the 4-window grid, then click two points (can be on different slices/views). Hover a point or line to see the 3D Euclidean distance in mm.</li>
                                     </ul>
                                 </div>
-                                
                                 <div class="instruction-group">
-                                    <h6 class="text-success mb-2">
-                                        <i class="fas fa-palette me-1"></i>Rendering Options
-                                    </h6>
+                                    <h6 class="text-success mb-2"><i class="fas fa-palette me-1"></i>Rendering Options</h6>
                                     This is still a work in progress and the rendering options are not yet implemented.
                                 </div>
                             </div>
@@ -517,19 +399,19 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-secondary" data-ygg-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
- </div>
+</div>
 
 <!-- Fullscreen Image Modal -->
-<div class="modal fade" id="fullscreenImageModal" tabindex="-1" aria-labelledby="fullscreenImageModalLabel" aria-hidden="true">
+<div class="modal" id="fullscreenImageModal" tabindex="-1" aria-labelledby="fullscreenImageModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content bg-dark">
             <div class="modal-header border-0">
                 <h5 class="modal-title text-white" id="fullscreenImageModalLabel">Image Viewer</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white" data-ygg-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body d-flex align-items-center justify-content-center p-0">
                 <img id="fullscreenImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain;" alt="Fullscreen image">

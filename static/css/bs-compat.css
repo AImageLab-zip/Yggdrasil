@@ -1,0 +1,269 @@
+/*
+ * Bootstrap utility-class compatibility layer.
+ *
+ * Bootstrap's CSS is gone (see ade232b), but several files we are explicitly
+ * NOT allowed to edit still emit Bootstrap class names at runtime: viewer code
+ * (viewer_grid.js, modality_viewers/intraoral.js), the laparoscopy annotator
+ * (static/js/laparoscopy/*.js), and vocal_caption.js (Part 6 — accepted as-is).
+ * Without their CSS, `.d-none` stops hiding things, `.spinner-border` renders
+ * as a bare div, etc. This is the CSS-side counterpart to the `window.bootstrap`
+ * JS shim in ygg-ui.js: same reasoning, same scope limit — only what those
+ * files actually still emit (see the grep in the commit that added this file).
+ *
+ * New/rewritten markup should use the real design system (.ygg-*, .btn-*,
+ * .card-ygg, .badge-ygg) instead of reaching for anything here.
+ */
+
+/* ---- Layout utilities --------------------------------------------------- */
+.d-flex { display: flex; }
+.d-block { display: block; }
+.d-none { display: none !important; }
+.d-inline-block { display: inline-block; }
+
+/* ---- Buttons: outline variants (base .btn/.btn-sm come from tailwind.src.css) */
+.btn-outline-primary {
+    background: transparent;
+    color: var(--ygg-primary);
+    border: 1px solid var(--ygg-primary);
+}
+.btn-outline-primary:hover { background: var(--ygg-accent-soft); }
+.btn-outline-secondary {
+    background: transparent;
+    color: var(--ygg-text-muted);
+    border: 1px solid var(--ygg-border);
+}
+.btn-outline-secondary:hover { background: var(--ygg-surface-2); color: var(--ygg-text); }
+.btn-outline-success {
+    background: transparent;
+    color: var(--ygg-accent2);
+    border: 1px solid var(--ygg-accent2);
+}
+.btn-outline-success:hover { background: var(--ygg-accent2-soft); }
+.btn-outline-danger {
+    background: transparent;
+    color: var(--ygg-danger);
+    border: 1px solid var(--ygg-danger);
+}
+.btn-outline-danger:hover { background: var(--ygg-danger-soft); }
+.btn-outline-info,
+.btn-outline-warning,
+.btn-outline-light {
+    background: transparent;
+    color: var(--ygg-text-muted);
+    border: 1px solid var(--ygg-border);
+}
+.btn-outline-info:hover,
+.btn-outline-warning:hover,
+.btn-outline-light:hover { background: var(--ygg-surface-2); color: var(--ygg-text); }
+
+/* Visually-hidden radio/checkbox driving an adjacent <label> styled as a
+   button (Bootstrap's "btn-check" pattern) — used by the modality tab strip
+   and the voice-caption language toggle. */
+.btn-check {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.btn-check + label { cursor: pointer; }
+
+/* ---- Surfaces ------------------------------------------------------------ */
+.card {
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+}
+.card-body { padding: 1rem; }
+.card-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--ygg-border);
+    font-weight: 600;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.list-group { display: flex; flex-direction: column; }
+.list-group-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--ygg-border);
+}
+.list-group-item:last-child { border-bottom: 0; }
+.list-group-item-success { color: var(--ygg-accent2); }
+
+.dropdown-menu {
+    position: absolute;
+    z-index: 1000;
+    min-width: 180px;
+    padding: 6px;
+    margin-top: 6px;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    box-shadow: var(--ygg-shadow-pop);
+    font-size: 13px;
+}
+.dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ygg-text);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.dropdown-item:hover { background: var(--ygg-surface-2); }
+.dropdown-item.active { background: var(--ygg-accent-soft); color: var(--ygg-primary); }
+
+/* ---- Alerts / progress / spinners ---------------------------------------- */
+.alert {
+    padding: 10px 14px;
+    border-radius: var(--ygg-radius-sm);
+    border: 1px solid transparent;
+    font-size: 13px;
+}
+.alert-success { background: var(--ygg-ok-soft); border-color: var(--ygg-ok); color: var(--ygg-ok); }
+.alert-danger { background: var(--ygg-danger-soft); border-color: var(--ygg-danger); color: var(--ygg-danger); }
+.alert-warning { background: var(--ygg-warn-soft); border-color: var(--ygg-warn); color: var(--ygg-warn); }
+.alert-dismissible { position: relative; padding-right: 32px; }
+
+.progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--ygg-surface-2);
+    overflow: hidden;
+}
+.progress-bar {
+    height: 100%;
+    background: var(--ygg-primary);
+    transition: width 0.2s ease;
+}
+
+.spinner-border {
+    display: inline-block;
+    width: 1.4rem;
+    height: 1.4rem;
+    border: 0.2em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    color: var(--ygg-primary);
+    animation: bs-compat-spin 0.75s linear infinite;
+}
+@keyframes bs-compat-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner-border { animation-duration: 1.5s; }
+}
+
+/* ---- Grid: minimal Bootstrap 12-column flex grid ------------------------
+   Real usage remaining: viewer_grid.js and modality_viewers/intraoral.js
+   (untouchable) generate .row/.col-* classes at runtime for photo grids and
+   layout panels; several not-yet-rewritten templates (Part 5) still use them
+   too. This is Bootstrap's own grid math, just re-implemented directly. */
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+}
+.row > * { padding-left: 0.5rem; padding-right: 0.5rem; }
+.col {
+    flex: 1 0 0%;
+    max-width: 100%;
+}
+
+.col-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-3 { flex: 0 0 auto; width: 25%; }
+.col-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-6 { flex: 0 0 auto; width: 50%; }
+.col-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-9 { flex: 0 0 auto; width: 75%; }
+.col-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-12 { flex: 0 0 auto; width: 100%; }
+/* Gap utilities (g-0..g-5), matching Bootstrap's spacer scale. */
+.g-0 { --bs-gap: 0; row-gap: 0; }
+.g-0 > * { padding-left: calc(0 / 2); padding-right: calc(0 / 2); }
+.g-1 { --bs-gap: 0.25rem; row-gap: 0.25rem; }
+.g-1 > * { padding-left: calc(0.25rem / 2); padding-right: calc(0.25rem / 2); }
+.g-2 { --bs-gap: 0.5rem; row-gap: 0.5rem; }
+.g-2 > * { padding-left: calc(0.5rem / 2); padding-right: calc(0.5rem / 2); }
+.g-3 { --bs-gap: 1rem; row-gap: 1rem; }
+.g-3 > * { padding-left: calc(1rem / 2); padding-right: calc(1rem / 2); }
+.g-4 { --bs-gap: 1.5rem; row-gap: 1.5rem; }
+.g-4 > * { padding-left: calc(1.5rem / 2); padding-right: calc(1.5rem / 2); }
+.g-5 { --bs-gap: 3rem; row-gap: 3rem; }
+.g-5 > * { padding-left: calc(3rem / 2); padding-right: calc(3rem / 2); }
+.g-0, .g-1, .g-2, .g-3, .g-4, .g-5 { margin-left: calc(var(--bs-gap) / -2); margin-right: calc(var(--bs-gap) / -2); }
+
+/* Responsive column widths only apply at their breakpoint and up. */
+@media (min-width: 576px) {
+.col-sm-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-sm-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-sm-3 { flex: 0 0 auto; width: 25%; }
+.col-sm-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-sm-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-sm-6 { flex: 0 0 auto; width: 50%; }
+.col-sm-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-sm-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-sm-9 { flex: 0 0 auto; width: 75%; }
+.col-sm-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-sm-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-sm-12 { flex: 0 0 auto; width: 100%; }
+}
+@media (min-width: 768px) {
+.col-md-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-md-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-md-3 { flex: 0 0 auto; width: 25%; }
+.col-md-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-md-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-md-6 { flex: 0 0 auto; width: 50%; }
+.col-md-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-md-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-md-9 { flex: 0 0 auto; width: 75%; }
+.col-md-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-md-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-md-12 { flex: 0 0 auto; width: 100%; }
+}
+@media (min-width: 992px) {
+.col-lg-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-lg-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-lg-3 { flex: 0 0 auto; width: 25%; }
+.col-lg-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-lg-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-lg-6 { flex: 0 0 auto; width: 50%; }
+.col-lg-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-lg-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-lg-9 { flex: 0 0 auto; width: 75%; }
+.col-lg-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-lg-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-lg-12 { flex: 0 0 auto; width: 100%; }
+}
+@media (min-width: 1200px) {
+.col-xl-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-xl-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-xl-3 { flex: 0 0 auto; width: 25%; }
+.col-xl-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-xl-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-xl-6 { flex: 0 0 auto; width: 50%; }
+.col-xl-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-xl-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-xl-9 { flex: 0 0 auto; width: 75%; }
+.col-xl-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-xl-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-xl-12 { flex: 0 0 auto; width: 100%; }
+}

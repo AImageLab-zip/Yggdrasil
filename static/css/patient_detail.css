@@ -1356,3 +1356,178 @@
     color: var(--bs-secondary-color, #6c757d);
     height: 100%;
 } 
+
+/* ==========================================================================
+ * Patient view — 2.0 rebuild additions (header, toolbar groups, modality tab
+ * strip, tabbed sidebar). Everything above this line is the pre-existing
+ * viewer/section styling; this block only ADDS new shell components — it does
+ * not touch viewer geometry, ids, or existing rules.
+ * ======================================================================== */
+
+/* ---- Patient header (net new) ------------------------------------------ */
+.patient-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+.patient-header__id { display: flex; gap: 14px; align-items: center; }
+.patient-header__avatar {
+    width: 52px;
+    height: 52px;
+    flex: none;
+    border-radius: 12px;
+    background: var(--ygg-accent-soft);
+    color: var(--ygg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.patient-header__name-row { display: flex; align-items: center; gap: 8px; }
+.patient-header__name { margin: 0; font-size: 22px; font-weight: 700; }
+.patient-header__tags {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.patient-header__tagid { font-size: 12px; color: var(--ygg-text-muted); }
+.patient-header__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--ygg-accent-soft);
+    color: var(--ygg-primary);
+}
+.patient-header__folder {
+    font-size: 11px;
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text-muted);
+    border-radius: 999px;
+    padding: 3px 9px;
+}
+.patient-header__uploader { font-size: 11px; color: var(--ygg-text-faint); }
+.patient-header__actions { display: flex; gap: 8px; }
+
+/* ---- Viewer toolbar: grouped View / Tools / Jaw controls ---------------- */
+.viewer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+}
+.viewer-toolbar__group { display: flex; align-items: center; gap: 4px; }
+.viewer-toolbar__label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--ygg-text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: 4px;
+}
+.viewer-toolbar__divider { width: 1px; height: 22px; background: var(--ygg-border); }
+
+/* ---- Modality tab strip (restyles the existing radio+label toggle group —
+   no id/class/JS contract changes; patient_detail.js still reads the radio
+   `change` event and each label's data-modality attribute). ---------------- */
+.modality-tabs {
+    display: inline-flex;
+    gap: 4px;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 10px;
+}
+.modality-tabs .modality-toggle {
+    padding: 7px 14px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--ygg-text-muted);
+    border: 0;
+    background: transparent;
+}
+.modality-tabs .btn-check:checked + .modality-toggle {
+    background: var(--ygg-accent-soft);
+    color: var(--ygg-primary);
+}
+
+/* ---- Tabbed sidebar (replaces the collapse-card stack) ------------------ */
+.side-panel {
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: 12px;
+    overflow: hidden;
+    position: sticky;
+    top: 76px;
+}
+.side-panel__tabs {
+    display: flex;
+    border-bottom: 1px solid var(--ygg-border);
+    overflow-x: auto;
+}
+.side-tab {
+    padding: 12px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--ygg-text-muted);
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+}
+.side-tab.is-active { color: var(--ygg-primary); border-bottom-color: var(--ygg-primary); }
+.side-panel__body {
+    padding: 18px;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+.side-tab-pane { display: none; }
+.side-tab-pane.is-active { display: block; }
+/* Section partials still carry their own outer spacing (mb-4 etc via
+   bs-compat / leftover Bootstrap utility classes) — collapse that once they
+   are the sole content of a pane. */
+.side-tab-pane > *:last-child { margin-bottom: 0 !important; }
+
+@media (max-width: 900px) {
+    .side-panel { position: static; }
+}
+
+/* ---- Page-level layout (replaces Bootstrap .container-fluid/.row/.col-lg-*) */
+.patient-view-grid {
+    display: grid;
+    grid-template-columns: 1.7fr 1fr;
+    gap: 20px;
+    align-items: flex-start;
+    max-width: 1500px;
+    margin: 0 auto;
+}
+@media (max-width: 1100px) {
+    .patient-view-grid { grid-template-columns: 1fr; }
+}
+.patient-view-viewer { min-width: 0; }
+.viewer-hint {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--ygg-text-faint);
+}

@@ -1,12 +1,4 @@
-<!-- Vocal Caption Section -->
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#vocalCaptionCollapse" aria-expanded="{% if vocal_caption_open %}true{% else %}false{% endif %}" aria-controls="vocalCaptionCollapse" style="cursor: pointer;">
-        <h6 class="mb-0"><i class="fas fa-microphone me-2"></i>Voice Captions</h6>
-        <i class="fas fa-chevron-right collapse-indicator"></i>
-    </div>
-
-    <div class="collapse{% if vocal_caption_open %} show{% endif %}" id="vocalCaptionCollapse">
-        {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
         <!-- Hidden CSRF token for AJAX usage -->
         <form style="display:none;">{% csrf_token %}</form>
 
@@ -115,11 +107,9 @@
                                     <small class="text-primary me-2">{{ c.user.username }}</small>
                                     {% if ns != 'brain' %}
                                     <div class="dropdown d-inline-block me-2">
-                                        <span class="badge bg-secondary {% if c.can_edit_content %}dropdown-toggle modality-badge-clickable{% endif %}" 
-                                              id="modalityDropdown{{ c.id }}" 
-                                              {% if c.can_edit_content %}data-bs-toggle="dropdown"{% endif %}
-                                              data-bs-auto-close="true"
-                                              data-bs-boundary="viewport"
+                                        <span class="badge bg-secondary {% if c.can_edit_content %}dropdown-toggle modality-badge-clickable{% endif %}"
+                                              id="modalityDropdown{{ c.id }}"
+                                              {% if c.can_edit_content %}data-ygg-toggle="dropdown"{% endif %}
                                               aria-expanded="false"
                                               data-caption-id="{{ c.id }}"
                                               data-current-modality="{{ c.modality }}"
@@ -128,7 +118,7 @@
                                             {{ c.get_modality_display }}
                                         </span>
                                         {% if c.can_edit_content %}
-                                        <ul class="dropdown-menu" aria-labelledby="modalityDropdown{{ c.id }}">
+                                        <ul class="dropdown-menu ygg-dropdown-menu" aria-labelledby="modalityDropdown{{ c.id }}">
                                             {% for modality in allowed_modalities %}
                                             <li>
                                                 <a class="dropdown-item modality-option {% if modality.slug == c.modality %}active{% endif %}" 
@@ -220,19 +210,19 @@
         </div>
 
         <!-- Edit Transcription Modal -->
-        <div class="modal fade" id="editTranscriptionModal" tabindex="-1" aria-labelledby="editTranscriptionLabel" aria-hidden="true">
+        <div class="modal" id="editTranscriptionModal" tabindex="-1" aria-labelledby="editTranscriptionLabel" aria-hidden="true">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="editTranscriptionLabel">Edit Transcription</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <textarea id="transcriptionText" class="form-control" rows="6"></textarea>
+                        <textarea id="transcriptionText" class="form-input" rows="6"></textarea>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" id="revertToOriginal">Revert</button>
-                        <button type="button" class="btn btn-primary" id="saveTranscription">Save</button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="revertToOriginal">Revert</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="saveTranscription">Save</button>
                     </div>
                 </div>
             </div>
@@ -420,5 +410,3 @@
             {% endif %}
         });
         </script>
-    </div>
-</div>

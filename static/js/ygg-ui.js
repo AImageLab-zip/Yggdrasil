@@ -215,9 +215,21 @@
     }
 
     document.addEventListener('click', function (e) {
+        // Bootstrap's alert-dismiss button — still emitted by nifti_metadata.js.
+        var dismissAlert = e.target.closest('[data-bs-dismiss="alert"], [data-ygg-dismiss="alert"]');
+        if (dismissAlert) {
+            var alertEl = dismissAlert.closest('.alert');
+            if (alertEl) alertEl.remove();
+            return;
+        }
+
         var toggle = e.target.closest('[data-ygg-toggle], [data-bs-toggle]');
 
         if (!toggle) {
+            // A click landing inside an open dropdown's own menu (e.g. dragging
+            // a range input in the CBCT windowing dropdown) must not close it —
+            // only a genuine outside click should.
+            if (e.target.closest('.ygg-dropdown-menu')) return;
             closeAllDropdowns(null);
             return;
         }

@@ -3,25 +3,19 @@
 <!-- django-data consumed by laparoscopy_annotator.js WebSocket bootstrap -->
 <script id="django-data" type="application/json">{"scanId": {{ patient.patient_id }}}</script>
 
-<div class="container-fluid laparoscopy-patient-detail">
-    <div class="row">
+{% include 'common/sections/patient_header_section.html' %}
+
+<div class="patient-view-grid laparoscopy-patient-detail">
 
         <!-- ======================================================== -->
         <!-- Left column: video player + annotation interface          -->
         <!-- ======================================================== -->
-        <div class="col-lg-8">
+        <div class="patient-view-viewer">
 
-            <!-- Patient header -->
-            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                <h4 class="mb-0">
-                    <i class="fas fa-video me-2"></i>
-                    {% if patient.name %}{{ patient.name }}{% else %}Patient {{ patient.patient_id }}{% endif %}
-                </h4>
-                <div class="d-flex gap-2 align-items-center flex-wrap">
-                    <button id="annotation-toggle-btn" class="btn btn-sm btn-outline-warning d-none">
-                        <i class="fas fa-draw-polygon me-1"></i>Enter Annotation Mode
-                    </button>
-                </div>
+            <div class="d-flex justify-content-end align-items-center mb-2">
+                <button id="annotation-toggle-btn" class="btn btn-sm btn-outline-warning d-none">
+                    <i class="fas fa-draw-polygon me-1"></i>Enter Annotation Mode
+                </button>
             </div>
 
             <!-- Annotation toolbar (hidden until annotation mode) -->
@@ -137,13 +131,13 @@
                                 <i class="fas fa-map-pin me-1"></i>Add Marker
                             </button>
 
-                            <div class="dropdown">
-                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                                        id="timeline-class-dropdown-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                            <div class="ygg-dropdown">
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                        id="timeline-class-dropdown-btn" data-ygg-toggle="dropdown" aria-expanded="false">
                                     <span id="timeline-class-active-swatch" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ccc;vertical-align:middle;margin-right:3px;"></span>
                                     <span id="timeline-class-active-label">—</span>
                                 </button>
-                                <ul id="timeline-class-list" class="dropdown-menu" aria-labelledby="timeline-class-dropdown-btn"></ul>
+                                <ul id="timeline-class-list" class="ygg-dropdown-menu" aria-labelledby="timeline-class-dropdown-btn"></ul>
                             </div>
 
                             <span id="timeline-active-class" class="badge text-bg-secondary ms-auto">Current: -</span>
@@ -256,18 +250,39 @@
                 </div>
             </div>
 
-        </div><!-- /col-lg-8 -->
+        </div><!-- /left column -->
 
         <!-- ======================================================== -->
-        <!-- Right column: annotation panels + sidebar                 -->
+        <!-- Right column: tabbed sidebar + annotation panels          -->
         <!-- ======================================================== -->
-        <div class="col-lg-4">
+        <div>
+            <div class="side-panel mb-3">
+                <div class="side-panel__tabs" role="tablist">
+                    <button type="button" class="side-tab is-active" data-tab-target="captions">Captions</button>
+                    <button type="button" class="side-tab" data-tab-target="files">Files</button>
+                    <button type="button" class="side-tab" data-tab-target="settings">Settings</button>
+                    <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
+                </div>
+                <div class="side-panel__body">
+                    <div class="side-tab-pane is-active" data-tab-pane="captions">
+                        {% include 'common/sections/vocal_caption_section.html' %}
+                    </div>
+                    <div class="side-tab-pane" data-tab-pane="files">
+                        {% include 'common/sections/file_management_section.html' %}
+                    </div>
+                    <div class="side-tab-pane" data-tab-pane="settings">
+                        {% include 'common/sections/scan_settings_section.html' %}
+                    </div>
+                    <div class="side-tab-pane" data-tab-pane="activity">
+                        {% include 'common/sections/activity_section.html' %}
+                    </div>
+                </div>
+            </div>
 
-            {% include 'common/sections/vocal_caption_section.html' %}
-            {% include 'common/sections/scan_settings_section.html' %}
-            {% include 'common/sections/file_management_section.html' %}
-            {% include 'common/sections/activity_section.html' %}
-
+            {# Annotation-mode panels stay OUTSIDE the tab shell: the annotator
+               script toggles their .d-none directly (see the bottom of this
+               file), and a parent tab-pane's own display:none would fight
+               that toggle when its tab isn't the active one. #}
             <div id="magic-toolbox-panel" class="d-none mb-3">
                 <div class="card border-info-subtle">
                     <div class="card-header d-flex justify-content-between align-items-center py-2">
@@ -328,20 +343,17 @@
                 </div>
             </div>
 
-        </div><!-- /col-lg-4 -->
+        </div><!-- /right column -->
 
-    </div><!-- /row -->
+</div><!-- /patient-view-grid -->
 
     <!-- Back button -->
-    <div class="row mt-3">
-        <div class="col-12">
-            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-            <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
-                <i class="fas fa-arrow-left me-2"></i>Back to Scan List
-            </a>
-        </div>
+    <div class="mt-3">
+        {% firstof request.resolver_match.namespace 'laparoscopy' as ns %}
+        <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Scan List
+        </a>
     </div>
-</div>
 
 <!-- Saving Indicator -->
 <div class="saving-indicator" id="savingIndicator">

@@ -3,7 +3,7 @@
 
 {% block title %}Patient {{ patient.name }} - Yggdrasil{% endblock %}
 
-{% block main_class %}container-fluid mt-4{% endblock %}
+{% block main_class %}mx-auto px-4 pt-4{% endblock %}
 
 {% block extra_css %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
@@ -23,7 +23,6 @@
 
 {% block extra_js %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-{# Legacy layer: Bootstrap JS + tooltips, needed before the viewer scripts. #}
 {{ django_data|json_script:"django-data" }}
 {# Core volume rendering #}
 <script src="{% static 'js/volume_renderer.js' %}"></script>
@@ -62,6 +61,8 @@
 {# Additional features #}
 <script src="{% static 'js/vocal_caption.js' %}"></script>
 <script src="{% static 'js/nifti_metadata.js' %}"></script>
-<script src="{% static 'js/collapse_sections.js' %}"></script>
 <script src="{% static 'js/cbct_upload.js' %}"></script>
+
+{# Sidebar tab controller (Classification/Captions/Files/Metadata/Settings/Activity) #}
+<script src="{% static 'js/patient_tabs.js' %}"></script>
 {% endblock %}
