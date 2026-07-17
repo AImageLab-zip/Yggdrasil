@@ -40,7 +40,9 @@ EXPORT_MODALITY_FILE_TYPES = {
     },
     "ios": {
         "raw": ["ios_raw_upper", "ios_raw_lower"],
-        "processed": ["ios_processed_upper", "ios_processed_lower"],
+        # Legacy: ios_processed_upper/_lower. New completions: ios_processed
+        # (with subtype='upper'/'lower'). Both listed so exports include either.
+        "processed": ["ios_processed_upper", "ios_processed_lower", "ios_processed"],
     },
     "audio": {
         "raw": ["audio_raw"],

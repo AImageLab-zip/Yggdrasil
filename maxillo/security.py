@@ -1,5 +1,5 @@
 """
-Centralized authorization utilities for ToothFairy application.
+Centralized authorization utilities for Yggdrasil.
 
 This module provides consistent authorization checks across the application
 to prevent security vulnerabilities and ensure consistent access control.

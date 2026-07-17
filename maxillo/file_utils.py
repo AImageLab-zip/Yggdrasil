@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 from common.job_routing import is_runner_enabled_for_modality
-from common.modality_config import modality_requires_processing
+from common.modality_config import get_step, modality_requires_processing
 from common.models import FileRegistry, Job
 from common.uploads import create_step_jobs
 from django.db import transaction
@@ -87,10 +87,14 @@ def get_file_type_for_modality(
     if potential_file_type in valid_file_types:
         return potential_file_type
 
-    # Fallback mappings for special cases
+    # Fallback mappings for special cases. `ios` deliberately has no entry here:
+    # every real caller either passes `subtype` (handled above) or wants the
+    # generic `ios_raw`/`ios_processed` from the final fallback below (used by
+    # mark_job_completed's generic registration branch) -- there is no code path
+    # that calls this with modality_slug="ios" and no subtype expecting the
+    # upper-arch default.
     fallback_mappings = {
         "cbct": "cbct_raw" if not is_processed else "cbct_processed",
-        "ios": "ios_raw_upper" if not is_processed else "ios_processed_upper",
         "audio": "audio_raw" if not is_processed else "audio_processed",
         "bite_classification": "bite_classification",  # Special case - no raw/processed distinction
         "intraoral-photo": "intraoral_raw"
@@ -115,8 +119,13 @@ def get_file_type_for_modality(
         elif file_format in ["jpg", "jpeg", "png", "bmp", "tiff", "tif"]:
             return "image_raw"
 
-    # Final fallback
-    return "generic_processed" if is_processed else "generic_raw"
+    # Final fallback: `choices=` on FileRegistry.file_type is advisory only (not
+    # DB-enforced), so a modality/algorithm with no FILE_TYPE_CHOICES entry still
+    # gets its own distinct, correctly namespaced file_type here instead of being
+    # dumped into the generic_raw/generic_processed bucket. This is what lets a
+    # freshly admin-declared ProcessingStep.slug (e.g. a new algorithm) register
+    # its outputs with zero code changes.
+    return potential_file_type
 
 
 def _entity_filter_kwargs(patient):
@@ -936,82 +945,7 @@ def mark_job_completed(job_id, output_files, logs=None):
         # Register output files
         logger.info(f"Registering output files for modality: {job.modality_slug}")
 
-        if job.modality_slug == "cbct":
-            # CBCT processing exposes only the segmentation artifact.
-            processed_files = {}
-            total_size = 0
-
-            # Clean up any existing processed CBCT files for this patient
-            cbct_processed_type = get_file_type_for_modality("cbct", is_processed=True)
-            existing_processed_files = FileRegistry.objects.filter(
-                file_type=cbct_processed_type, **_job_entity_fk_kwargs(job)
-            )
-            # Remove existing DB entries only; keep object storage files
-            try:
-                existing_count = existing_processed_files.count()
-                if existing_count:
-                    logger.info(
-                        f"Deleting {existing_count} existing {cbct_processed_type} FileRegistry entries for patient {getattr(job_patient, 'patient_id', 'unknown')}"
-                    )
-                    existing_processed_files.delete()
-            except Exception as e:
-                logger.error(
-                    f"Error deleting existing {cbct_processed_type} FileRegistry entries: {e}"
-                )
-
-            for file_type, out_spec in output_files.items():
-                path_or_key = _resolve_output_path_or_key(out_spec)
-                logger.info(
-                    f"Processing CBCT output: type={file_type}, path_or_key={path_or_key}"
-                )
-                if not path_or_key or not artifact_exists(path_or_key):
-                    logger.warning(f"Output not found: {path_or_key}")
-                    continue
-
-                file_size, file_hash = _size_hash_for_path_or_key(path_or_key)
-                if isinstance(file_size, int):
-                    total_size += file_size
-
-                processed_files[file_type] = {
-                    "path": path_or_key,
-                    "size": file_size,
-                    "hash": file_hash,
-                    "type": file_type,
-                }
-
-            # Create single FileRegistry entry for CBCT with all outputs in metadata
-            if processed_files:
-                primary_path = processed_files.get("segmentation_nifti", {}).get("path", "")
-                if not primary_path and processed_files:
-                    primary_path = list(processed_files.values())[0]["path"]
-
-                cbct_modality = None
-                try:
-                    from common.models import Modality as _Modality
-
-                    cbct_modality = _Modality.objects.filter(slug="cbct").first()
-                except Exception:
-                    cbct_modality = None
-
-                FileRegistry.objects.create(
-                    file_type=get_file_type_for_modality("cbct", is_processed=True),
-                    file_path=primary_path,
-                    file_size=total_size,  # Total size of all files
-                    file_hash="multi-file",  # Indicator that this contains multiple files
-                    processing_job=job,
-                    **_job_entity_fk_kwargs(job),
-                    modality=cbct_modality,
-                    metadata={
-                        "processed_at": timezone.now().isoformat(),
-                        "files": processed_files,  # All output files stored here
-                        "logs": logs if logs else "",
-                    },
-                )
-                logger.info(
-                    f"CBCT FileRegistry entry created with {len(processed_files)} output files"
-                )
-
-        elif job.modality_slug == "intraoral-photo":
+        if job.modality_slug == "intraoral-photo":
             from .models import IntraoralToothSegmentation
             from .views.intraoral_segmentation import _normalize_teeth_payload
 
@@ -1078,84 +1012,55 @@ def mark_job_completed(job_id, output_files, logs=None):
             output_files["skipped_confirmed_segmentations"] = skipped_confirmed_count
             job.output_files = output_files
             job.save(update_fields=["output_files"])
-        elif job.modality_slug == "video":
-            # Video jobs produce two named outputs ("compressed", "subsampled").
-            # Store each as video_processed with subtype=<output_key> so the
-            # player can reliably select only the compressed derivative.
-            modality_fk = None
-            try:
-                from common.models import Modality as _Modality
-                modality_fk = _Modality.objects.filter(slug="video").first()
-            except Exception:
-                pass
-            for output_key, out_spec in output_files.items():
+        elif job.modality_slug != "bite_classification":
+            # Generic registration: one FileRegistry row per output key, shared by
+            # every modality that isn't intraoral-photo/bite_classification (both
+            # genuine domain logic above/below, not naming) -- including cbct, ios,
+            # video, and any future algorithm. No per-modality branch needed.
+            step = get_step(job.modality_slug)
+            registry_type = get_file_type_for_modality(
+                job.modality_slug, is_processed=True
+            )
+
+            # Idempotent replace: clear any previously-registered rows of this type
+            # for the entity before writing the fresh set, so retries/reprocessing
+            # with a changed output path don't leave stale rows behind (this is what
+            # keeps single-row lookups like Patient.get_cbct_processed_file() valid).
+            FileRegistry.objects.filter(
+                file_type=registry_type, **_job_entity_fk_kwargs(job)
+            ).delete()
+
+            for file_type, out_spec in output_files.items():
                 path_or_key = _resolve_output_path_or_key(out_spec)
-                logger.info(f"Processing video output: key={output_key}, path={path_or_key}")
+                logger.info(
+                    f"Processing output file: type={file_type}, path_or_key={path_or_key}"
+                )
                 if not path_or_key or not artifact_exists(path_or_key):
-                    logger.warning(f"Video output not found: {path_or_key}")
                     continue
+
                 file_size, file_hash = _size_hash_for_path_or_key(path_or_key)
+                logger.info(f"Storing FileRegistry entry with type={registry_type}")
+
+                # subtype distinguishes multiple outputs sharing one file_type (e.g.
+                # ios's upper/lower, video's compressed/subsampled, or any algorithm
+                # that writes several files per job).
                 FileRegistry.objects.update_or_create(
                     file_path=path_or_key,
                     defaults={
-                        "file_type": "video_processed",
-                        "subtype": output_key,
-                        "modality": modality_fk,
+                        "file_type": registry_type,
+                        "subtype": str(file_type),
+                        "modality": step.modality if step else None,
                         "file_size": file_size or 0,
                         "file_hash": file_hash or "object",
                         "processing_job": job,
                         **_job_entity_fk_kwargs(job),
                         "metadata": {
                             "processed_at": timezone.now().isoformat(),
-                            "output_key": output_key,
                             "logs": logs if logs else "",
                         },
                     },
                 )
-                logger.info(f"Video FileRegistry entry stored: subtype={output_key}")
-        else:
-            # For non-CBCT modalities, register simple outputs idempotently.
-            # Bite classification has a dedicated handler below.
-            if job.modality_slug != "bite_classification":
-                if job.modality_slug == "ios":
-                    FileRegistry.objects.filter(
-                        file_type__in=["ios_processed_upper", "ios_processed_lower"],
-                        **_job_entity_fk_kwargs(job),
-                    ).delete()
-
-                for file_type, out_spec in output_files.items():
-                    path_or_key = _resolve_output_path_or_key(out_spec)
-                    logger.info(
-                        f"Processing output file: type={file_type}, path_or_key={path_or_key}"
-                    )
-                    if not path_or_key or not artifact_exists(path_or_key):
-                        continue
-
-                    file_size, file_hash = _size_hash_for_path_or_key(path_or_key)
-
-                    if job.modality_slug == "ios":
-                        registry_type = f"ios_processed_{file_type}"
-                    else:
-                        registry_type = get_file_type_for_modality(
-                            job.modality_slug, is_processed=True
-                        )
-                    logger.info(f"Storing FileRegistry entry with type={registry_type}")
-
-                    FileRegistry.objects.update_or_create(
-                        file_path=path_or_key,
-                        defaults={
-                            "file_type": registry_type,
-                            "file_size": file_size or 0,
-                            "file_hash": file_hash or "object",
-                            "processing_job": job,
-                            **_job_entity_fk_kwargs(job),
-                            "metadata": {
-                                "processed_at": timezone.now().isoformat(),
-                                "logs": logs if logs else "",
-                            },
-                        },
-                    )
-                    logger.info("FileRegistry entry stored/updated successfully")
+                logger.info("FileRegistry entry stored/updated successfully")
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")

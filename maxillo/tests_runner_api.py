@@ -25,6 +25,9 @@ CLAIM_JOB_PAYLOAD_KEYS = {
     "project_slug",
     "patient_id",
     "created_at",
+    # Added for the SLURM-over-SSH runner worker (Yggdrasil 2.0): tells the worker
+    # which ALGO_BASE_DIR/<algo_name>/run.sbatch to submit for this job's step.
+    "algo_name",
 }
 
 

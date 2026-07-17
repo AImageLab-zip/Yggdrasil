@@ -59,7 +59,11 @@ See [running.md](running.md) for day-to-day commands. The short version:
 docker compose --env-file .env up -d --build
 ```
 
-This builds the web image, then starts `web` (Django), `db` (MySQL), and `redis`.
+This builds the web image, then starts the app services (`web`, `beat`,
+`maintenance-worker`, `db`, and `redis`). The `runner-worker` is also defined in
+the compose file, but it is deliberately not attached to `app-net-$DOCKER_SUFFIX`;
+configure `.env.worker`, the SSH key, and the known-hosts mount before relying on
+it for SLURM dispatch.
 
 ## 5. Run migrations
 

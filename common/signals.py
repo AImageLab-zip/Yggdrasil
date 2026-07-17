@@ -6,7 +6,7 @@ from django.dispatch import receiver
 
 from common.job_routing import is_runner_enabled_for_modality, select_runner_queue
 from common.models import Job
-from toothfairy.celery import app as celery_app
+from yggdrasil.celery import app as celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +31,18 @@ def _job_pre_save(sender, instance: Job, **kwargs):
         instance.started_at = None
         instance.completed_at = None
         instance.worker_id = ""
+        # Cleared on re-dispatch; the runner worker restamps it (observability only).
+        instance.slurm_job_id = ""
         instance.error_logs = ""
 
 
 @receiver(post_save, sender=Job)
 def _job_post_save(sender, instance: Job, created: bool, **kwargs):
+    """Dispatch is pure Redis/Celery: enqueue the runner task and nothing more.
+
+    The web app knows nothing about how jobs execute — a dedicated Celery worker
+    (see common.runner) consumes the queue and drives the cluster.
+    """
     try:
         prev = getattr(instance, "_previous_status", None)
         should_enqueue = False
@@ -57,7 +64,7 @@ def _job_post_save(sender, instance: Job, created: bool, **kwargs):
 
         queue = select_runner_queue(instance)
         task_name = getattr(
-            settings, "RUNNER_TASK_NAME", "toothfairy4m_runner.process_job"
+            settings, "RUNNER_TASK_NAME", "yggdrasil.runner.process_job"
         )
         celery_app.send_task(task_name, args=[instance.id], queue=queue)
         logger.info(

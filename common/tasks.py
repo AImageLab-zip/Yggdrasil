@@ -157,3 +157,16 @@ def prune_backups():
         storage.delete(key)
         logger.info("Pruned old backup %s", key)
     return to_delete
+
+
+# --- Runner task (Yggdrasil 2.0) -------------------------------------------
+# Consumed by the dedicated runner worker (docker-compose 'runner-worker'), NOT the
+# maintenance worker. The explicit task name keeps it clear of the
+# "common.tasks.*" -> MAINTENANCE_QUEUE route; it is enqueued by common.signals with
+# name settings.RUNNER_TASK_NAME (default 'yggdrasil.runner.process_job').
+@shared_task(name="yggdrasil.runner.process_job", bind=True)
+def process_job(self, job_id):
+    """Execute one Job on the SLURM cluster. See common.runner.run.run_job."""
+    from common.runner.run import run_job
+
+    return run_job(job_id)

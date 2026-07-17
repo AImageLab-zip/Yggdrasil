@@ -128,6 +128,17 @@ class ProcessingStep(models.Model):
 	slug = models.SlugField(max_length=60, unique=True)
 	# Explicit queue override; when non-blank it wins over ALL env routing.
 	queue_name = models.CharField(max_length=100, blank=True, default='')
+	# SLURM-over-SSH dispatch opt-in (Yggdrasil 2.0). When non-blank, the runner
+	# worker submits settings.ALGO_BASE_DIR/<algo_name>/run.sbatch on the cluster
+	# login node for this step's jobs instead of enqueueing a Celery task; blank
+	# keeps the historical Celery path. Resource requests (partition, gres, time,
+	# ...) live as #SBATCH directives inside that run.sbatch, not here.
+	algo_name = models.CharField(
+		max_length=200, blank=True, default='',
+		help_text="Exact algo directory name under ALGO_BASE_DIR on the cluster "
+		"(e.g. 'sn' -> ALGO_BASE_DIR/sn/run.sbatch). Non-blank routes this step "
+		"to SLURM-over-SSH dispatch instead of Celery.",
+	)
 	# Steps whose output feeds this step's input. Declaring one here is what
 	# establishes the dependency: at upload time create_step_jobs wires a
 	# Job.dependencies edge so this step waits for each input to complete, and
@@ -335,6 +346,9 @@ class Job(DomainFKAccessorMixin, models.Model):
 
 	# Worker info (generic, non-Docker-specific)
 	worker_id = models.CharField(max_length=100, blank=True, help_text='ID of worker processing this job')
+	# SLURM job id stamped by the runner worker (common.runner) for observability;
+	# cleared on retry. The web app never reads it — dispatch is pure Celery.
+	slurm_job_id = models.CharField(max_length=32, blank=True, default='', help_text='SLURM job id set by the runner worker')
 
 	class Meta:
 		ordering = ['-priority', 'created_at']

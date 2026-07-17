@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "toothfairy.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "yggdrasil.settings")
 
 from common.models import FileRegistry, Job
 from common.object_storage import ObjectStorageError, get_object_storage

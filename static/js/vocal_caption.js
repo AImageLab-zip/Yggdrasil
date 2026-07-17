@@ -47,7 +47,8 @@ class VocalCaptionRecorder {
             it: { label: 'Italian', speechRecognition: 'it-IT' },
             de: { label: 'German', speechRecognition: 'de-DE' }
         };
-        this.brainSpeechLanguageStorageKey = 'toothfairy.brainSpeechLanguage';
+        this.brainSpeechLanguageStorageKey = 'yggdrasil.brainSpeechLanguage';
+        this.legacyBrainSpeechLanguageStorageKey = 'toothfairy.brainSpeechLanguage';
         
         this.initializeElements();
         this.checkBrowserSupport();
@@ -170,7 +171,14 @@ class VocalCaptionRecorder {
 
     getStoredBrainSpeechLanguage() {
         try {
-            const language = window.localStorage.getItem(this.brainSpeechLanguageStorageKey);
+            let language = window.localStorage.getItem(this.brainSpeechLanguageStorageKey);
+            if (!language) {
+                language = window.localStorage.getItem(this.legacyBrainSpeechLanguageStorageKey);
+                if (this.brainSpeechLanguages[language]) {
+                    window.localStorage.setItem(this.brainSpeechLanguageStorageKey, language);
+                    window.localStorage.removeItem(this.legacyBrainSpeechLanguageStorageKey);
+                }
+            }
             return this.brainSpeechLanguages[language] ? language : 'en';
         } catch (error) {
             return 'en';
