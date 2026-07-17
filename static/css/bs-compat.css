@@ -267,3 +267,139 @@
 .col-xl-11 { flex: 0 0 auto; width: 91.6667%; }
 .col-xl-12 { flex: 0 0 auto; width: 100%; }
 }
+
+/* ---- Text-color utilities -------------------------------------------------
+   Sitewide, not just Part 4: ~90 .text-muted alone remain across templates
+   not yet rewritten. Without these every one renders as inherited (usually
+   near-black) text instead of muted gray — the single highest-impact gap
+   left once .d-none/.card/.badge were covered. */
+.text-muted { color: var(--ygg-text-muted); }
+.text-danger { color: var(--ygg-danger); }
+.text-primary { color: var(--ygg-primary); }
+.text-success { color: var(--ygg-accent2); }
+.text-secondary { color: var(--ygg-text-muted); }
+.text-warning { color: var(--ygg-warn); }
+.text-info { color: var(--ygg-primary); }
+.text-dark { color: var(--ygg-text); }
+.text-white { color: #fff; }
+
+/* ---- Form control (Bootstrap's base input class; distinct from .form-input
+   in tailwind.src.css, which templates not yet rewritten don't use). ------- */
+.form-control,
+.form-select {
+    display: block;
+    width: 100%;
+    padding: 0.45rem 0.75rem;
+    border-radius: var(--ygg-radius-md);
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    font-size: 0.875rem;
+}
+.form-control:focus,
+.form-select:focus {
+    outline: none;
+    border-color: var(--ygg-primary);
+}
+.form-control::placeholder { color: var(--ygg-text-faint); }
+.form-text { font-size: 0.8rem; color: var(--ygg-text-muted); margin-top: 0.25rem; }
+/* .form-label already comes from tailwind.src.css — not redefined here. */
+
+/* ---- Misc display utilities not covered above. --------------------------- */
+.d-grid { display: grid; gap: 0.5rem; }
+@media (min-width: 768px) {
+    .d-md-flex { display: flex; }
+    .justify-content-md-end { justify-content: flex-end; }
+    .me-md-2 { margin-inline-end: 0.5rem; }
+}
+
+/* ---- Flex alignment / sizing utilities ----------------------------------- */
+.align-items-center { align-items: center; }
+.align-items-end { align-items: flex-end; }
+.justify-content-between { justify-content: space-between; }
+.justify-content-center { justify-content: center; }
+.justify-content-end { justify-content: flex-end; }
+.w-100 { width: 100%; }
+
+/* ---- Typography helpers --------------------------------------------------- */
+.small { font-size: 0.8125rem; }
+.fw-semibold { font-weight: 600; }
+.fw-bold { font-weight: 700; }
+.card-title { font-weight: 600; margin-bottom: 0.25rem; }
+.card-subtitle { color: var(--ygg-text-muted); font-size: 0.85rem; }
+h1.h4, .h4 { font-size: 1.25rem; font-weight: 600; }
+h1.h5, .h5 { font-size: 1.05rem; font-weight: 600; }
+h1.h6, .h6 { font-size: 0.9rem; font-weight: 600; }
+
+/* ---- Semantic background/border utilities --------------------------------- */
+.bg-secondary { background: var(--ygg-surface-2); }
+.bg-success { background: var(--ygg-ok-soft); }
+.bg-info { background: var(--ygg-accent-soft); }
+.bg-light { background: var(--ygg-surface-2); }
+.border-secondary { border-color: var(--ygg-border); }
+.border-success { border-color: var(--ygg-ok); }
+.border-info { border-color: var(--ygg-primary); }
+.border-warning { border-color: var(--ygg-warn); }
+
+/* ---- Button group (visually joins adjacent .btn elements) ----------------- */
+.btn-group { display: inline-flex; }
+.btn-group > .btn { border-radius: 0; margin-left: -1px; }
+.btn-group > .btn:first-child { border-top-left-radius: var(--ygg-radius-md); border-bottom-left-radius: var(--ygg-radius-md); margin-left: 0; }
+.btn-group > .btn:last-child { border-top-right-radius: var(--ygg-radius-md); border-bottom-right-radius: var(--ygg-radius-md); }
+.btn-lg { padding: 0.65rem 1.25rem; font-size: 1rem; }
+.btn-warning { background: var(--ygg-warn); color: #fff; }
+.btn-warning:hover { filter: brightness(0.95); }
+
+/* ---- Checkbox/radio + label pattern ("form-check") ------------------------ */
+.form-check { display: flex; align-items: center; gap: 0.4rem; }
+.form-check-input { width: 1rem; height: 1rem; accent-color: var(--ygg-primary); }
+.form-check-label { font-size: 0.875rem; color: var(--ygg-text); }
+.form-select-sm { padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+
+/* ---- Table ----------------------------------------------------------------
+   .table-ygg (tailwind.src.css) is the design-system table; bare .table is
+   what not-yet-rewritten pages (export list) still emit. */
+.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.table th, .table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--ygg-border); text-align: left; vertical-align: middle; }
+.table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ygg-text-muted); font-weight: 500; }
+.table-hover tbody tr:hover { background: var(--ygg-surface-2); }
+.table-responsive { overflow-x: auto; }
+
+/* ---- Pagination ------------------------------------------------------------ */
+.pagination { display: flex; gap: 4px; list-style: none; padding: 0; margin: 0; }
+.page-item.disabled .page-link { opacity: 0.45; pointer-events: none; }
+.page-item.active .page-link { background: var(--ygg-primary); color: var(--ygg-on-primary); border-color: var(--ygg-primary); }
+.page-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+    color: var(--ygg-text);
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+.page-link:hover { background: var(--ygg-surface-2); }
+
+/* ---- Progress bar animation (Bootstrap's striped/animated variant) -------- */
+.progress-bar-striped {
+    background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent);
+    background-size: 1rem 1rem;
+}
+.progress-bar-animated { animation: bs-compat-progress 1s linear infinite; }
+@keyframes bs-compat-progress { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .progress-bar-animated { animation: none; } }
+
+/* ---- Remaining one-off utilities/variants seen sitewide ------------------- */
+.list-unstyled { list-style: none; padding-left: 0; margin: 0; }
+.list-group-flush .list-group-item { border-radius: 0; border-left: 0; border-right: 0; }
+.btn-group-sm > .btn { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+.btn-light { background: var(--ygg-surface-2); color: var(--ygg-text); border: 1px solid var(--ygg-border); }
+.btn-light:hover { background: var(--ygg-surface-3); }
+.form-control-sm { padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+.flex-grow-1 { flex-grow: 1; }
+.img-fluid { max-width: 100%; height: auto; }
+.h-100 { height: 100%; }
+.rounded-pill { border-radius: 999px; }
+.position-relative { position: relative; }
+.position-absolute { position: absolute; }

@@ -140,6 +140,11 @@
     @apply text-xs uppercase tracking-wide text-content-muted mt-1;
   }
 
+  /* ---- Definition list (compact key/value pairs, e.g. profile info) ---- */
+  .ygg-dl { @apply grid grid-cols-2 gap-x-3 gap-y-2 text-sm; }
+  .ygg-dl dt { @apply text-content-muted; }
+  .ygg-dl dd { @apply m-0 text-content font-medium text-right; }
+
   /* ---- Top navigation (chrome) ---- */
   .ygg-nav {
     @apply sticky top-0 z-40 bg-ink-900 text-content-ondark border-b border-white/5;
