@@ -124,6 +124,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "common.context_processors.current_project",
                 "common.context_processors.app_meta",
+                "common.context_processors.user_prefs",
             ],
         },
     },

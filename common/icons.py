@@ -135,6 +135,11 @@ _LUCIDE_PASSTHROUGH = {
     "shield-check",
     "archive",
     "menu",
+    # 2.0 revamp: theme toggle, notifications, grid view
+    "sun",
+    "moon",
+    "bell",
+    "grip",
 }
 
 # Fallback Lucide glyph when a name can't be resolved.

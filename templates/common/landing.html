@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 {% load icons %}
+{% load activity_tags %}
 
 {% block title %}Yggdrasil — medical imaging platform{% endblock %}
 
@@ -114,6 +115,24 @@
         <span class="domain__cta">{% if user.is_authenticated %}Open workspace{% else %}Sign in to open{% endif %} {% icon 'arrow-right' %}</span>
     </a>
 </div>
+
+{% user_recents user 6 as recents %}
+{% if recents %}
+<div class="landing-recents">
+    <div class="landing-recents__label">Continue where you left off</div>
+    <div class="landing-recents__row">
+        {% for r in recents %}
+        <a class="landing-recents__item" href="{% url r.domain|add:':patient_detail' patient_id=r.patient_pk %}">
+            <span class="landing-recents__icon domain--{{ r.domain }}">{% icon 'user' %}</span>
+            <span class="landing-recents__meta">
+                <span class="landing-recents__name">{{ r.patient_name|default:r.patient_pk }}</span>
+                <span class="landing-recents__proj">{{ r.project_label }}</span>
+            </span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {% if demo_url %}
 <div class="landing-demo">

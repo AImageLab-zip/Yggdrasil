@@ -337,3 +337,72 @@ def healthz(request):
         {"status": "ok" if healthy else "unavailable"},
         status=200 if healthy else 503,
     )
+
+
+@login_required
+def set_report_language(request):
+    """Cross-app AJAX endpoint: persist the user's Report Template language.
+
+    Supersedes the old brain-only endpoint. Stores on the shared
+    ``common.UserPreference`` so all three domains share one preference.
+    """
+    import json
+    from .models import UserPreference
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body)
+        language = (body.get("language") or "it").strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    if language not in ("it", "en", "de"):
+        return JsonResponse({"error": "Invalid language"}, status=400)
+
+    pref, _ = UserPreference.objects.get_or_create(user=request.user)
+    pref.report_language = language
+    pref.save(update_fields=["report_language", "updated_at"])
+    return JsonResponse({"ok": True, "language": language})
+
+
+@login_required
+def notifications_api(request):
+    """Return the current user's unread count + latest notifications (bell)."""
+    from .models import Notification
+
+    qs = Notification.objects.filter(user=request.user)
+    unread = qs.filter(is_read=False).count()
+    items = [
+        {
+            "id": n.id,
+            "level": n.level,
+            "message": n.message,
+            "url": n.url,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%b %d, %H:%M"),
+        }
+        for n in qs[:20]
+    ]
+    return JsonResponse({"unread": unread, "items": items})
+
+
+@login_required
+def notifications_mark_read(request):
+    """Mark one (``id`` in body) or all of the user's notifications read."""
+    import json
+    from .models import Notification
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, AttributeError):
+        body = {}
+
+    qs = Notification.objects.filter(user=request.user, is_read=False)
+    nid = body.get("id")
+    if nid:
+        qs = qs.filter(id=nid)
+    updated = qs.update(is_read=True)
+    return JsonResponse({"ok": True, "marked": updated})

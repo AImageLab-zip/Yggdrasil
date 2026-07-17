@@ -1,0 +1,49 @@
+{% load static %}
+{% load icons %}
+{% comment %}
+  Breadcrumb topbar for the rail shell. Left: namespace + page breadcrumb
+  (override {% block breadcrumb %} per page). Right: user menu. Theme toggle /
+  notifications / avatar live in the rail.
+{% endcomment %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
+<div class="ygg-topbar">
+    <div class="ygg-breadcrumb">
+        {% block breadcrumb %}
+            <span class="capitalize">{{ current_project_name|default:ns }}</span>
+            {% if request.resolver_match.url_name and request.resolver_match.url_name != 'patient_list' %}
+                {% icon 'chevron-right' 'ygg-icon-sm' %}
+                <span class="crumb-current">{{ page_title|default:request.resolver_match.url_name }}</span>
+            {% else %}
+                {% icon 'chevron-right' 'ygg-icon-sm' %}
+                <span class="crumb-current">Patients</span>
+            {% endif %}
+        {% endblock %}
+    </div>
+    <div class="flex items-center gap-2">
+        {% if is_demo_guest %}
+            <span class="badge-ygg badge-neutral">Public demo — read-only</span>
+            <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+                <button type="submit" class="ygg-icon-btn" title="Exit demo / Log in">{% icon 'sign-in-alt' %}</button>
+            </form>
+        {% elif user.is_authenticated %}
+            <div class="relative" data-dropdown>
+                <button type="button" class="btn btn-secondary btn-sm" data-dropdown-toggle aria-expanded="false">
+                    <span class="ygg-avatar">{{ user.username|slice:':2' }}</span>
+                    <span class="hidden sm:inline">{{ user.username }}</span>
+                    {% icon 'chevron-down' 'ygg-icon-sm opacity-60' %}
+                </button>
+                <div class="ygg-menu" data-dropdown-menu hidden>
+                    <a class="ygg-menu-item" href="{% url ns|add:':user_profile' %}">{% icon 'user' %}<span>Profile</span></a>
+                    {% if user.is_staff %}
+                        <a class="ygg-menu-item" href="{% url 'admin_control_panel' %}">{% icon 'layout-dashboard' %}<span>Control Panel</span></a>
+                        <a class="ygg-menu-item" href="{% url 'invitation_list' %}">{% icon 'envelope' %}<span>Manage Invitations</span></a>
+                    {% endif %}
+                    <div class="border-t border-line my-1"></div>
+                    <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+                        <button type="submit" class="ygg-menu-item w-full text-danger">{% icon 'sign-out-alt' %}<span>Logout</span></button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>

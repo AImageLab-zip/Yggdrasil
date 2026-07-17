@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% comment %}
+  App shell base for authenticated working pages (patient list/detail, upload,
+  export, dashboards, profile). Swaps the top nav for the 64px fixed icon rail
+  + breadcrumb topbar. Landing and auth pages keep extending base.html directly.
+
+  Pages may override {% block breadcrumb %} to set their trail, and everything
+  else (content, extra_css/js, main_class) works exactly as with base.html.
+{% endcomment %}
+{% block body_class %}has-rail{% endblock %}
+{% block chrome %}
+    {% include 'common/partials/rail.html' %}
+    {% include 'common/partials/topbar.html' %}
+{% endblock %}

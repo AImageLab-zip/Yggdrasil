@@ -286,3 +286,27 @@ body { padding-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
     .domain, .domain::before, .domain__cta, .landing-demo-cta { transition: none; }
 }
+
+/* ---- Recently-viewed strip ("Continue where you left off") -------------- */
+.landing-recents { width: 100%; max-width: 980px; margin: 1.5rem auto 0; }
+.landing-recents__label {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ygg-text-muted); margin-bottom: 0.6rem; text-align: center;
+}
+.landing-recents__row { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
+.landing-recents__item {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.5rem 0.85rem 0.5rem 0.5rem; border-radius: 12px;
+    background: var(--ygg-surface); border: 1px solid var(--ygg-border);
+    color: var(--ygg-text); text-decoration: none; transition: border-color .15s, transform .15s;
+}
+.landing-recents__item:hover { border-color: var(--ygg-border-strong); transform: translateY(-2px); }
+.landing-recents__icon {
+    width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    background: var(--ygg-accent-soft); color: var(--ygg-maxillo);
+}
+.landing-recents__icon.domain--brain { color: var(--ygg-brain); }
+.landing-recents__icon.domain--laparoscopy { color: var(--ygg-laparoscopy); }
+.landing-recents__meta { display: flex; flex-direction: column; line-height: 1.2; }
+.landing-recents__name { font-size: 0.8rem; font-weight: 600; }
+.landing-recents__proj { font-size: 0.7rem; color: var(--ygg-text-muted); font-family: var(--ygg-font-mono); }

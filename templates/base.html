@@ -7,6 +7,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Yggdrasil{% endblock %}</title>
 
+    <!-- Theme bootstrap: stamp data-theme on <html> before first paint (no flash).
+         Stored choice wins; else the landing page defaults dark, other pages
+         follow the OS preference. Toggle lives in static/js/nav.js. -->
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem('ygg-theme');
+                var landingDefault = {% block theme_default_dark %}false{% endblock %};
+                var theme = stored
+                    || (landingDefault ? 'dark'
+                        : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+
     <!-- Favicon (Yggdrasil tree) -->
     <link rel="icon" href="{% static 'icons/favicon.ico' %}" sizes="any">
     <link rel="icon" href="{% static 'icons/favicon.svg' %}" type="image/svg+xml">
@@ -27,8 +45,9 @@
     <link href="{% static 'css/theme.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
     {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+    {% block chrome %}
     {% block navbar %}
     <nav class="ygg-nav">
         <div class="ygg-nav-inner">
@@ -50,6 +69,10 @@
 
             <!-- Right: user menu / login -->
             <div class="ml-auto flex items-center gap-1">
+                <button type="button" class="ygg-nav-link" data-theme-toggle aria-label="Switch theme">
+                    <svg class="ygg-icon" data-theme-icon="moon" aria-hidden="true"><use href="{% static 'icons/lucide-sprite.svg' %}#lc-moon"></use></svg>
+                    <svg class="ygg-icon" data-theme-icon="sun" aria-hidden="true" hidden><use href="{% static 'icons/lucide-sprite.svg' %}#lc-sun"></use></svg>
+                </button>
                 {% if is_demo_guest %}
                     <form method="post" action="{% url 'logout' %}">
                         {% csrf_token %}
@@ -91,6 +114,7 @@
         </div>
     </nav>
     {% endblock %}
+    {% endblock %}{# chrome #}
 
     {% block messages %}
     {% if messages %}
@@ -132,13 +156,20 @@
 
     <script src="{% static 'js/nav.js' %}"></script>
     <script src="{% static 'js/notifications.js' %}"></script>
-    {% block extra_js %}{% endblock %}
     <script>
         (function () {
             try { window.projectNamespace = "{% firstof request.resolver_match.namespace 'maxillo' %}"; }
             catch (e) { window.projectNamespace = 'maxillo'; }
             window.YGG_SPRITE = "{% static 'icons/lucide-sprite.svg' %}";
+            {% if user.is_authenticated and not is_demo_guest %}
+            window.YGG_NOTIF_API = "{% url 'notifications_api' %}";
+            window.YGG_NOTIF_MARK = "{% url 'notifications_mark_read' %}";
+            {% endif %}
         })();
     </script>
+    {% if user.is_authenticated and not is_demo_guest %}
+    <script src="{% static 'js/notifications_feed.js' %}"></script>
+    {% endif %}
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

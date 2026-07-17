@@ -1,0 +1,38 @@
+{% load activity_tags %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
+{% comment %}
+  Patient Activity feed (from common.ActivityEvent). Collapsible card matching
+  the other patient-detail sections; populated by common.activity.log_activity
+  at action sites (caption added, processing complete, …).
+{% endcomment %}
+{% patient_activity ns patient.patient_id 20 as activity_events %}
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-2"
+         data-bs-toggle="collapse" data-bs-target="#activityCollapse"
+         aria-expanded="false" aria-controls="activityCollapse" style="cursor: pointer;">
+        <h6 class="mb-0"><i class="fas fa-stream me-2"></i>Activity</h6>
+        <i class="fas fa-chevron-right collapse-indicator"></i>
+    </div>
+    <div class="collapse" id="activityCollapse">
+        {% if activity_events %}
+            <ul class="list-unstyled mb-0">
+                {% for ev in activity_events %}
+                <li class="d-flex gap-2 mb-3">
+                    <span class="badge rounded-pill bg-secondary" style="align-self:flex-start;">{{ ev.verb }}</span>
+                    <div>
+                        <div style="font-size:0.85rem;">
+                            {% if ev.actor %}<strong>{{ ev.actor.username }}</strong>{% else %}System{% endif %}
+                            {{ ev.target }}
+                        </div>
+                        <div class="text-muted" style="font-size:0.75rem;">{{ ev.created_at|date:"M d, H:i" }}</div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="text-muted mb-0 text-center" style="font-size:0.85rem;">
+                <i class="fas fa-stream me-1"></i>No activity recorded yet.
+            </p>
+        {% endif %}
+    </div>
+</div>

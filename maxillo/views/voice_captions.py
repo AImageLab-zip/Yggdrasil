@@ -202,7 +202,14 @@ def upload_text_caption(request, patient_id):
             processing_status='completed',  # Text is already processed
             is_edited=False
         )
-        
+
+        # Activity feed (best-effort).
+        from common.activity import log_activity
+        _ns = request.resolver_match.namespace if request.resolver_match else 'maxillo'
+        log_activity(request.user, _ns, patient.patient_id,
+                     getattr(patient, 'name', ''), verb='captioned',
+                     target='added a text caption')
+
         # Return caption data for the UI
         quality_status = voice_caption.get_quality_status()
         

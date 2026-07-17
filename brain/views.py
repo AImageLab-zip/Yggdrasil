@@ -46,7 +46,7 @@ from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from .helpers import redirect_with_namespace, render_with_fallback
-from .models import Export, Folder, FolderAccess, Patient, Tag, UserPreference
+from .models import Export, Folder, FolderAccess, Patient, Tag
 
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,6 @@ def patient_detail(request, patient_id):
         caption.can_edit_content = bool(is_admin_user or caption.user_id == request.user.id)
         caption.is_ghost = not caption.can_view_content
 
-    pref = UserPreference.objects.filter(user=request.user).first()
     allowed_modalities = list(Modality.objects.filter(projects__id=request.session.get("current_project_id"), is_active=True))
     if not allowed_modalities:
         allowed_modalities = list(Modality.objects.filter(is_active=True))
@@ -200,8 +199,16 @@ def patient_detail(request, patient_id):
         "segmentation_file": segmentation_file,
         "allowed_modalities": allowed_modalities,
         "allowed_modality_slugs": [m.slug for m in allowed_modalities],
-        "report_language": pref.report_language if pref else "it",
+        # report_language now provided globally by common.context_processors.user_prefs
     }
+
+    # Record for the landing "Continue where you left off" strip (best-effort).
+    from common.activity import record_recent
+    record_recent(
+        request.user, "brain", patient.patient_id,
+        patient_name=getattr(patient, "name", "") or "",
+        project_label="Brain",
+    )
     return render_with_fallback(request, "patient_detail", context)
 
 

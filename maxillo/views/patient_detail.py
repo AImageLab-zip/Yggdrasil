@@ -515,6 +515,15 @@ def patient_detail(request, patient_id):
         context['video_url'] = None
         context['worker_video_source_ref'] = None
         context['worker_video_source_file_id'] = None
+
+    # Record for the landing "Continue where you left off" strip (best-effort).
+    from common.activity import record_recent
+    _ns = request.resolver_match.namespace if request.resolver_match else 'maxillo'
+    record_recent(
+        request.user, _ns, patient.patient_id,
+        patient_name=getattr(patient, 'name', '') or '',
+        project_label=(context.get('current_project_name') or _ns).title(),
+    )
     return render_with_fallback(request, 'patient_detail', context)
 
 @login_required

@@ -12,6 +12,11 @@ module.exports = {
     './*/templates/**/*.html',
     './static/js/nav.js',
   ],
+  // Sitewide dark mode is driven by `data-theme="dark"` on <html> (set pre-paint
+  // in base.html, toggled in nav.js). Most surfaces flip for free because the
+  // semantic colors below resolve --ygg-* vars re-pointed in tokens.css; this
+  // selector additionally enables explicit `dark:` variant utilities.
+  darkMode: ['selector', '[data-theme="dark"]'],
   // `.collapse` is a Bootstrap component class used across legacy templates.
   // Tailwind would otherwise emit a `.collapse{visibility:collapse}` utility
   // that overrides Bootstrap's collapse panels and hides them. Block it.
@@ -47,6 +52,8 @@ module.exports = {
           DEFAULT: 'var(--ygg-surface)',
           alt: 'var(--ygg-surface-alt)',
           sunken: 'var(--ygg-surface-sunken)',
+          2: 'var(--ygg-surface-2)',
+          3: 'var(--ygg-surface-3)',
         },
         line: {
           DEFAULT: 'var(--ygg-border)',
@@ -55,6 +62,7 @@ module.exports = {
         content: {
           DEFAULT: 'var(--ygg-text)',
           muted: 'var(--ygg-text-muted)',
+          faint: 'var(--ygg-text-faint)',
           ondark: 'var(--ygg-text-on-dark)',
           ondarkmuted: 'var(--ygg-text-on-dark-muted)',
         },
@@ -63,15 +71,18 @@ module.exports = {
           hover: 'var(--ygg-primary-hover)',
           soft: 'var(--ygg-primary-soft)',
         },
-        accent: 'var(--ygg-accent)',
+        accent: {
+          DEFAULT: 'var(--ygg-accent)',
+          soft: 'var(--ygg-accent-soft)',
+        },
         proj: {
           maxillo: 'var(--ygg-maxillo)',
           brain: 'var(--ygg-brain)',
           laparoscopy: 'var(--ygg-laparoscopy)',
         },
-        ok: 'var(--ygg-ok)',
-        warn: 'var(--ygg-warn)',
-        danger: 'var(--ygg-danger)',
+        ok: { DEFAULT: 'var(--ygg-ok)', soft: 'var(--ygg-ok-soft)' },
+        warn: { DEFAULT: 'var(--ygg-warn)', soft: 'var(--ygg-warn-soft)' },
+        danger: { DEFAULT: 'var(--ygg-danger)', soft: 'var(--ygg-danger-soft)' },
       },
       fontFamily: {
         sans: 'var(--ygg-font-body)',

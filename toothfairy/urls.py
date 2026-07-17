@@ -46,6 +46,17 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("status/", common_views.status_page, name="status_page"),
     path("healthz", common_views.healthz, name="healthz"),
+    path(
+        "api/preferences/report-language/",
+        common_views.set_report_language,
+        name="set_report_language",
+    ),
+    path("api/notifications/", common_views.notifications_api, name="notifications_api"),
+    path(
+        "api/notifications/mark-read/",
+        common_views.notifications_mark_read,
+        name="notifications_mark_read",
+    ),
     path("", scans_views.home, name="home"),
     path("maxillo/", include("maxillo.urls")),
     path("brain/", include("brain.urls")),

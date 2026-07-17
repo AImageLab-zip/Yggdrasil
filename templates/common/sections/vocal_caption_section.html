@@ -28,8 +28,10 @@
                         <button type="button" class="btn btn-outline-danger btn-sm ms-1 d-none" id="discardRecording">
                             <i class="fas fa-times me-1"></i>Discard
                         </button>
-                        {% if ns == 'brain' %}
-                        <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Speech language" id="brainSpeechLanguageToggle">
+                        <!-- Speech-recognition language (shown for every app when the
+                             browser exposes the Web Speech API; hidden on the Whisper
+                             fallback path). Unhidden by vocal_caption.js. -->
+                        <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Speech language" id="brainSpeechLanguageToggle" hidden>
                             <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageEn" value="en" autocomplete="off" checked>
                             <label class="btn btn-outline-secondary" for="brainSpeechLanguageEn">EN</label>
                             <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageIt" value="it" autocomplete="off">
@@ -37,7 +39,6 @@
                             <input type="radio" class="btn-check" name="brainSpeechLanguage" id="brainSpeechLanguageDe" value="de" autocomplete="off">
                             <label class="btn btn-outline-secondary" for="brainSpeechLanguageDe">DE</label>
                         </div>
-                        {% endif %}
                     </div>
                     <div id="textControls" class="d-flex align-items-center">
                         <small class="text-muted me-2">Characters: <span id="textCharCount">0</span></small>
@@ -53,7 +54,7 @@
                 </div>
 
                 <div id="textInputContainer" class="mb-2 position-relative">
-                    <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="{% if ns == 'brain' %}Speak or write your caption here...{% else %}Write your caption here...{% endif %}"></textarea>
+                    <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="Speak or write your caption here..."></textarea>
                 </div>
 
                 <div id="recordingArea" class="d-none">
@@ -96,6 +97,11 @@
             </div>
         </div>
         {% endif %}
+
+        <!-- Report Template: shown directly under the voice-caption controls so
+             clinicians can read the structured reporting checklist while
+             dictating. Content is per-domain; language persists cross-app. -->
+        {% include 'common/sections/report_template_section.html' %}
 
         <!-- Captions List -->
         <div class="voice-captions-list">
@@ -245,7 +251,11 @@
 
             var charCount = document.getElementById('textCharCount');
             var clearTextBtn = document.getElementById('clearTextCaption');
-            var isBrainCaption = '{{ ns }}' === 'brain';
+            // Live speech-to-text is used whenever the browser exposes the Web Speech
+            // API (Chrome/Edge). On that path the caption box stays editable so the
+            // transcript streams in; otherwise we record audio and let Whisper run.
+            var useLiveStt = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+            var isBrainCaption = useLiveStt;
 
             function updateCharCount() {
                 if (charCount && textArea) {

@@ -18,7 +18,36 @@
         });
     }
 
+    /* Theme toggle: flip data-theme on <html>, persist, swap the button icon.
+       Any element with [data-theme-toggle] works (rail button, nav button). The
+       pre-paint stamp lives in base.html's <head>. */
+    function currentTheme() {
+        return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    }
+    function syncThemeToggles(theme) {
+        document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
+            var sun = btn.querySelector('[data-theme-icon="sun"]');
+            var moon = btn.querySelector('[data-theme-icon="moon"]');
+            if (sun) sun.hidden = theme === 'light';
+            if (moon) moon.hidden = theme === 'dark';
+            btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+        });
+    }
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        try { localStorage.setItem('ygg-theme', theme); } catch (e) {}
+        syncThemeToggles(theme);
+    }
+    document.addEventListener('DOMContentLoaded', function () { syncThemeToggles(currentTheme()); });
+
     document.addEventListener('click', function (e) {
+        var themeBtn = e.target.closest('[data-theme-toggle]');
+        if (themeBtn) {
+            e.preventDefault();
+            applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+            return;
+        }
+
         var toggle = e.target.closest('[data-dropdown-toggle]');
         if (toggle) {
             e.preventDefault();

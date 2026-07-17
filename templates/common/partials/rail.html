@@ -1,0 +1,46 @@
+{% load static %}
+{% load icons %}
+{% comment %}
+  64px left icon rail for authenticated working pages (patient list/detail,
+  upload, export, dashboards). Icon-only, namespace-aware, staff-gated — mirrors
+  common/partials/nav_links.html. Activated by base.html when {% block use_rail %}
+  is truthy; positioned fixed via theme.css (.ygg-rail / body.has-rail).
+{% endcomment %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
+{% with un=request.resolver_match.url_name %}
+<nav class="ygg-rail" aria-label="Primary">
+    <a class="ygg-rail-logo" href="/" title="Yggdrasil">
+        <img src="{% static 'icons/logo-yggdrasil.png' %}" alt="Yggdrasil" style="width:20px;height:20px;object-fit:contain">
+    </a>
+
+    {% if user.is_authenticated %}
+        <a href="{% url ns|add:':patient_list' %}" class="ygg-rail-item{% if un == 'patient_list' %} is-active{% endif %}" title="Scans">{% icon 'list' %}</a>
+        {% if user.profile.can_upload_scans and not is_demo_guest %}
+            <a href="{% url ns|add:':upload_patient' %}" class="ygg-rail-item{% if un == 'upload_patient' %} is-active{% endif %}" title="Upload">{% icon 'upload' %}</a>
+        {% endif %}
+        {% if user.is_staff or user.profile.is_admin %}
+            <a href="{% url ns|add:':export_list' %}" class="ygg-rail-item{% if un == 'export_list' %} is-active{% endif %}" title="Export">{% icon 'download' %}</a>
+        {% endif %}
+        {% if user.is_staff %}
+            <a href="{% url 'online_users_dashboard' %}" class="ygg-rail-item{% if un == 'online_users_dashboard' %} is-active{% endif %}" title="Live Users">{% icon 'circle-dot' %}</a>
+            <a href="{% url 'user_activity_stats' %}" class="ygg-rail-item{% if un == 'user_activity_stats' %} is-active{% endif %}" title="User Activity">{% icon 'chart-line' %}</a>
+            <a href="{% url 'admin_control_panel' %}" class="ygg-rail-item{% if un == 'admin_control_panel' %} is-active{% endif %}" title="Control Panel">{% icon 'layout-dashboard' %}</a>
+        {% endif %}
+    {% endif %}
+
+    <div class="ygg-rail-spacer"></div>
+
+    <button type="button" class="ygg-rail-item" data-theme-toggle title="Toggle theme">
+        <svg class="ygg-icon" data-theme-icon="moon" aria-hidden="true"><use href="{% static 'icons/lucide-sprite.svg' %}#lc-moon"></use></svg>
+        <svg class="ygg-icon" data-theme-icon="sun" aria-hidden="true" hidden><use href="{% static 'icons/lucide-sprite.svg' %}#lc-sun"></use></svg>
+    </button>
+
+    {% if user.is_authenticated and not is_demo_guest %}
+        {% include 'common/partials/notifications_bell.html' with rail=True %}
+    {% endif %}
+
+    {% if user.is_authenticated %}
+        <span class="ygg-avatar" title="{{ user.username }}">{{ user.username|slice:':2' }}</span>
+    {% endif %}
+</nav>
+{% endwith %}

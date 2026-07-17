@@ -1,0 +1,235 @@
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
+<!--
+  Shared Report Template panel — rendered UNDER the Voice-caption controls
+  (see common/sections/vocal_caption_section.html) so clinicians can read the
+  structured reporting checklist while dictating. Content is per-domain
+  (brain / maxillo / laparoscopy), each in EN/IT/DE. Language persists via the
+  cross-app `set_report_language` endpoint + common.UserPreference.
+-->
+<style>
+.report-fields li { list-style: none; margin-bottom: 0.25rem; }
+.report-fields li details summary {
+    cursor: pointer;
+    user-select: none;
+    padding: 0.15rem 0;
+    font-weight: 500;
+}
+.report-fields li details summary::marker,
+.report-fields li details summary::-webkit-details-marker { color: var(--ygg-text-muted); }
+.report-fields li details p {
+    margin: 0.3rem 0 0.5rem 1.2rem;
+    font-size: 0.82rem;
+    color: var(--ygg-text-muted);
+    line-height: 1.5;
+}
+</style>
+
+<div class="report-template mt-3 pt-3" style="border-top: 1px solid var(--ygg-border);">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0 flex-grow-1"
+            data-bs-toggle="collapse"
+            data-bs-target="#reportTemplateCollapse"
+            aria-expanded="true"
+            aria-controls="reportTemplateCollapse"
+            style="cursor: pointer;">
+            <i class="fas fa-file-medical-alt me-2"></i>Report Template
+        </h6>
+        <div class="d-flex align-items-center gap-2">
+            <div class="btn-group btn-group-sm" role="group" aria-label="Report language">
+                <button type="button" id="reportLangEnBtn" data-lang="en"
+                        class="btn {% if report_language == 'en' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn">EN</button>
+                <button type="button" id="reportLangItBtn" data-lang="it"
+                        class="btn {% if report_language == 'it' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn">IT</button>
+                <button type="button" id="reportLangDeBtn" data-lang="de"
+                        class="btn {% if report_language == 'de' %}btn-primary{% else %}btn-outline-secondary{% endif %} report-lang-btn">DE</button>
+            </div>
+            <i class="fas fa-chevron-right collapse-indicator"
+               data-bs-toggle="collapse"
+               data-bs-target="#reportTemplateCollapse"
+               style="cursor: pointer;"></i>
+        </div>
+    </div>
+
+    <div class="collapse show" id="reportTemplateCollapse">
+        <div class="card">
+            <div class="card-body p-3">
+                {% if ns == 'brain' %}
+                {# ===================== BRAIN ===================== #}
+                <ul class="mb-0 ps-2 report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Side of Tumor Center</summary><p>Anatomical laterality of the tumor center from the barycenter position relative to the brain midline (left, right, midline).</p></details></li>
+                    <li><details><summary>Enhancement Quality</summary><p>Qualitative assessment of CET contrast enhancement — whether enhancement is present and how pronounced.</p></details></li>
+                    <li><details><summary>Enhancing Margin Definition</summary><p>Whether most of the outer margin of the enhancement is well or poorly defined.</p></details></li>
+                    <li><details><summary>Non-Enhancing Margin Definition</summary><p>Whether most of the outer margin of the non-enhancing component is well or poorly defined.</p></details></li>
+                    <li><details><summary>Intratumoral Hemorrhage</summary><p>Whether intrinsic hemorrhage is visible anywhere in the tumor matrix.</p></details></li>
+                    <li><details><summary>Tumor Heterogeneity</summary><p>Degree of heterogeneity of the internal architecture of the tumor.</p></details></li>
+                    <li><details><summary>Number of Lesions</summary><p>Number of independent lesions observed in the brain.</p></details></li>
+                    <li><details><summary>Lesion Type</summary><p>Single, multicentric, or multifocal.</p></details></li>
+                    <li><details><summary>Ependymal Invasion</summary><p>Whether the TC abuts any adjacent ependymal surface.</p></details></li>
+                    <li><details><summary>Depth of TC</summary><p>Cortical, subcortical white matter, deep white matter, or basal nuclei.</p></details></li>
+                    <li><details><summary>Macroarea of Tumor Center</summary><p>Lobe in which the barycenter lies, obtained from the atlas.</p></details></li>
+                    <li><details><summary>Midline Shift (mm)</summary><p>Shift of the midline caused by the tumor mass, in millimeters.</p></details></li>
+                    <li><details><summary>Tumor Shape</summary><p>Approximate shape of the tumor mass.</p></details></li>
+                    <li><details><summary>Tumor Origin</summary><p>Periventricular, gyral, or deep white matter.</p></details></li>
+                    <li><details><summary>Tumor Crosses the Midline</summary><p>Whether the tumor crosses the midline.</p></details></li>
+                    <li><details><summary>Subject-Specific Findings</summary><p>Any findings not covered by a predefined category.</p></details></li>
+                </ul>
+                <ul class="mb-0 ps-2 report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Lato del Centro del Tumore</summary><p>Lateralità anatomica del centro del tumore in base alla posizione del baricentro rispetto alla linea mediana (sinistra, destra, mediana).</p></details></li>
+                    <li><details><summary>Qualità dell'Enhancement</summary><p>Valutazione qualitativa dell'enhancement CET — presenza e intensità.</p></details></li>
+                    <li><details><summary>Definizione del Margine Enhancing</summary><p>Se il margine esterno dell'enhancement è ben definito o scarsamente definito.</p></details></li>
+                    <li><details><summary>Definizione del Margine Non-Enhancing</summary><p>Se il margine esterno della componente non-enhancing è ben definito o scarsamente definito.</p></details></li>
+                    <li><details><summary>Emorragia Intratumorale</summary><p>Se un'emorragia intrinseca è visibile nella matrice tumorale.</p></details></li>
+                    <li><details><summary>Eterogeneità del Tumore</summary><p>Grado di eterogeneità dell'architettura interna del tumore.</p></details></li>
+                    <li><details><summary>Numero di Lesioni</summary><p>Numero di lesioni indipendenti osservate nel cervello.</p></details></li>
+                    <li><details><summary>Tipo di Lesione</summary><p>Singola, multicentrica o multifocale.</p></details></li>
+                    <li><details><summary>Invasione Ependimale</summary><p>Se il TC è a contatto con una superficie ependimale adiacente.</p></details></li>
+                    <li><details><summary>Profondità del TC</summary><p>Corticale, sostanza bianca sottocorticale, sostanza bianca profonda o nuclei della base.</p></details></li>
+                    <li><details><summary>Macroarea del Centro del Tumore</summary><p>Lobo in cui ricade il baricentro, ottenuto dall'atlante.</p></details></li>
+                    <li><details><summary>Spostamento della Linea Mediana (mm)</summary><p>Spostamento della linea mediana causato dalla massa, in millimetri.</p></details></li>
+                    <li><details><summary>Forma del Tumore</summary><p>Forma approssimativa della massa tumorale.</p></details></li>
+                    <li><details><summary>Origine del Tumore</summary><p>Periventricolare, girale o sostanza bianca profonda.</p></details></li>
+                    <li><details><summary>Il Tumore Attraversa la Linea Mediana</summary><p>Se il tumore attraversa la linea mediana.</p></details></li>
+                    <li><details><summary>Reperti Specifici del Soggetto</summary><p>Reperti non coperti da alcuna categoria predefinita.</p></details></li>
+                </ul>
+                <ul class="mb-0 ps-2 report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Seite des Tumorzentrums</summary><p>Anatomische Lateralität des Tumorzentrums anhand des Schwerpunkts relativ zur Mittellinie (links, rechts, Mittellinie).</p></details></li>
+                    <li><details><summary>Anreicherungsqualität</summary><p>Qualitative Beurteilung der CET-Anreicherung — Vorhandensein und Ausprägung.</p></details></li>
+                    <li><details><summary>Definition des anreichernden Randes</summary><p>Ob der äußere Rand der Anreicherung gut oder schlecht abgegrenzt ist.</p></details></li>
+                    <li><details><summary>Definition des nicht-anreichernden Randes</summary><p>Ob der äußere Rand der nicht-anreichernden Komponente gut oder schlecht abgegrenzt ist.</p></details></li>
+                    <li><details><summary>Intratumorale Einblutung</summary><p>Ob eine intrinsische Einblutung in der Tumormatrix sichtbar ist.</p></details></li>
+                    <li><details><summary>Tumorheterogenität</summary><p>Grad der Heterogenität der inneren Architektur des Tumors.</p></details></li>
+                    <li><details><summary>Anzahl der Läsionen</summary><p>Anzahl der unabhängigen Läsionen im Gehirn.</p></details></li>
+                    <li><details><summary>Läsionstyp</summary><p>Solitär, multizentrisch oder multifokal.</p></details></li>
+                    <li><details><summary>Ependymale Invasion</summary><p>Ob das TC an eine angrenzende Ependymoberfläche angrenzt.</p></details></li>
+                    <li><details><summary>Tiefe des TC</summary><p>Kortikal, subkortikale/tiefe weiße Substanz oder Basalganglien.</p></details></li>
+                    <li><details><summary>Makrobereich des Tumorzentrums</summary><p>Lobus, in dem der Schwerpunkt liegt, aus dem Atlas ermittelt.</p></details></li>
+                    <li><details><summary>Mittellinienverlagerung (mm)</summary><p>Durch die Tumormasse verursachte Verlagerung der Mittellinie in mm.</p></details></li>
+                    <li><details><summary>Tumorform</summary><p>Ungefähre Form der Tumormasse.</p></details></li>
+                    <li><details><summary>Tumorursprung</summary><p>Periventrikulär, gyral oder tiefe weiße Substanz.</p></details></li>
+                    <li><details><summary>Tumor überschreitet die Mittellinie</summary><p>Ob der Tumor die Mittellinie überschreitet.</p></details></li>
+                    <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
+                </ul>
+
+                {% elif ns == 'laparoscopy' %}
+                {# ===================== LAPAROSCOPY ===================== #}
+                <ul class="mb-0 ps-2 report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Procedure Type</summary><p>The laparoscopic procedure performed (e.g. cholecystectomy, appendectomy, hernia repair).</p></details></li>
+                    <li><details><summary>Surgical Phase</summary><p>Operative phase visible in the segment (preparation, dissection, clipping/cutting, extraction, closure).</p></details></li>
+                    <li><details><summary>Anatomical Structures Identified</summary><p>Key structures recognised in view (e.g. cystic duct, cystic artery, common bile duct, liver bed).</p></details></li>
+                    <li><details><summary>Critical View of Safety</summary><p>Whether the critical view of safety is achieved before clipping/division.</p></details></li>
+                    <li><details><summary>Instruments in Use</summary><p>Instruments visible in the field (grasper, hook, clip applier, scissors, suction).</p></details></li>
+                    <li><details><summary>Adhesions</summary><p>Presence and severity of adhesions encountered.</p></details></li>
+                    <li><details><summary>Bleeding Events</summary><p>Any intraoperative bleeding, its source and whether controlled.</p></details></li>
+                    <li><details><summary>Intraoperative Complications</summary><p>Perforation, thermal injury, spillage or other adverse events.</p></details></li>
+                    <li><details><summary>Estimated Blood Loss</summary><p>Approximate blood loss during the segment.</p></details></li>
+                    <li><details><summary>Subject-Specific Findings</summary><p>Any findings not covered by a predefined category.</p></details></li>
+                </ul>
+                <ul class="mb-0 ps-2 report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Tipo di Procedura</summary><p>Procedura laparoscopica eseguita (es. colecistectomia, appendicectomia, riparazione d'ernia).</p></details></li>
+                    <li><details><summary>Fase Chirurgica</summary><p>Fase operatoria visibile nel segmento (preparazione, dissezione, clipaggio/taglio, estrazione, chiusura).</p></details></li>
+                    <li><details><summary>Strutture Anatomiche Identificate</summary><p>Strutture chiave riconosciute (es. dotto cistico, arteria cistica, coledoco, letto epatico).</p></details></li>
+                    <li><details><summary>Critical View of Safety</summary><p>Se la critical view of safety è raggiunta prima del clipaggio/sezione.</p></details></li>
+                    <li><details><summary>Strumenti in Uso</summary><p>Strumenti visibili nel campo (grasper, uncino, clip applier, forbici, aspiratore).</p></details></li>
+                    <li><details><summary>Aderenze</summary><p>Presenza e gravità delle aderenze riscontrate.</p></details></li>
+                    <li><details><summary>Eventi Emorragici</summary><p>Sanguinamenti intraoperatori, origine e controllo.</p></details></li>
+                    <li><details><summary>Complicanze Intraoperatorie</summary><p>Perforazione, lesione termica, spillage o altri eventi avversi.</p></details></li>
+                    <li><details><summary>Perdita Ematica Stimata</summary><p>Perdita ematica approssimativa durante il segmento.</p></details></li>
+                    <li><details><summary>Reperti Specifici del Soggetto</summary><p>Reperti non coperti da alcuna categoria predefinita.</p></details></li>
+                </ul>
+                <ul class="mb-0 ps-2 report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Art des Eingriffs</summary><p>Durchgeführter laparoskopischer Eingriff (z. B. Cholezystektomie, Appendektomie, Hernienreparatur).</p></details></li>
+                    <li><details><summary>Operative Phase</summary><p>Im Segment sichtbare Phase (Vorbereitung, Dissektion, Clippen/Schneiden, Extraktion, Verschluss).</p></details></li>
+                    <li><details><summary>Identifizierte anatomische Strukturen</summary><p>Erkannte Schlüsselstrukturen (z. B. Ductus cysticus, A. cystica, Ductus choledochus, Leberbett).</p></details></li>
+                    <li><details><summary>Critical View of Safety</summary><p>Ob die Critical View of Safety vor dem Clippen/Durchtrennen erreicht ist.</p></details></li>
+                    <li><details><summary>Verwendete Instrumente</summary><p>Im Feld sichtbare Instrumente (Fasszange, Haken, Clip-Applikator, Schere, Sauger).</p></details></li>
+                    <li><details><summary>Adhäsionen</summary><p>Vorhandensein und Schweregrad der Adhäsionen.</p></details></li>
+                    <li><details><summary>Blutungsereignisse</summary><p>Intraoperative Blutungen, Quelle und Kontrolle.</p></details></li>
+                    <li><details><summary>Intraoperative Komplikationen</summary><p>Perforation, thermische Verletzung, Spillage oder andere unerwünschte Ereignisse.</p></details></li>
+                    <li><details><summary>Geschätzter Blutverlust</summary><p>Ungefährer Blutverlust während des Segments.</p></details></li>
+                    <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
+                </ul>
+
+                {% else %}
+                {# ===================== MAXILLO (default) ===================== #}
+                <ul class="mb-0 ps-2 report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Skeletal Class (Sagittal)</summary><p>Antero-posterior jaw relationship — Class I, II, or III.</p></details></li>
+                    <li><details><summary>Vertical Pattern</summary><p>Facial growth pattern — hypodivergent, normodivergent, or hyperdivergent.</p></details></li>
+                    <li><details><summary>Transverse Relationship</summary><p>Presence of crossbite or transverse discrepancy between arches.</p></details></li>
+                    <li><details><summary>Dental Midlines</summary><p>Coincidence of upper/lower dental midlines with the facial midline.</p></details></li>
+                    <li><details><summary>Overjet</summary><p>Horizontal overlap of the incisors, in millimeters.</p></details></li>
+                    <li><details><summary>Overbite</summary><p>Vertical overlap of the incisors, in millimeters or as a percentage.</p></details></li>
+                    <li><details><summary>Molar &amp; Canine Relationship</summary><p>Angle classification of molar and canine occlusion, by side.</p></details></li>
+                    <li><details><summary>Crowding / Spacing</summary><p>Space discrepancy in the upper and lower arches.</p></details></li>
+                    <li><details><summary>TMJ Findings</summary><p>Condylar morphology, symmetry and any degenerative signs.</p></details></li>
+                    <li><details><summary>Airway / Soft Tissue</summary><p>Airway patency and relevant soft-tissue profile notes.</p></details></li>
+                    <li><details><summary>Subject-Specific Findings</summary><p>Any findings not covered by a predefined category.</p></details></li>
+                </ul>
+                <ul class="mb-0 ps-2 report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Classe Scheletrica (Sagittale)</summary><p>Rapporto antero-posteriore tra le arcate — Classe I, II o III.</p></details></li>
+                    <li><details><summary>Pattern Verticale</summary><p>Pattern di crescita facciale — ipodivergente, normodivergente o iperdivergente.</p></details></li>
+                    <li><details><summary>Rapporto Trasverso</summary><p>Presenza di crossbite o discrepanza trasversale tra le arcate.</p></details></li>
+                    <li><details><summary>Linee Mediane Dentali</summary><p>Coincidenza delle linee mediane superiore/inferiore con la mediana facciale.</p></details></li>
+                    <li><details><summary>Overjet</summary><p>Sovrapposizione orizzontale degli incisivi, in millimetri.</p></details></li>
+                    <li><details><summary>Overbite</summary><p>Sovrapposizione verticale degli incisivi, in millimetri o percentuale.</p></details></li>
+                    <li><details><summary>Rapporto Molare e Canino</summary><p>Classificazione di Angle dell'occlusione molare e canina, per lato.</p></details></li>
+                    <li><details><summary>Affollamento / Spaziatura</summary><p>Discrepanza di spazio nelle arcate superiore e inferiore.</p></details></li>
+                    <li><details><summary>Reperti ATM</summary><p>Morfologia condilare, simmetria ed eventuali segni degenerativi.</p></details></li>
+                    <li><details><summary>Vie Aeree / Tessuti Molli</summary><p>Pervietà delle vie aeree e note sul profilo dei tessuti molli.</p></details></li>
+                    <li><details><summary>Reperti Specifici del Soggetto</summary><p>Reperti non coperti da alcuna categoria predefinita.</p></details></li>
+                </ul>
+                <ul class="mb-0 ps-2 report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
+                    <li><details><summary>Skelettklasse (Sagittal)</summary><p>Antero-posteriore Kieferrelation — Klasse I, II oder III.</p></details></li>
+                    <li><details><summary>Vertikales Muster</summary><p>Faziales Wachstumsmuster — hypodivergent, normodivergent oder hyperdivergent.</p></details></li>
+                    <li><details><summary>Transversale Relation</summary><p>Vorliegen eines Kreuzbisses oder transversaler Diskrepanz zwischen den Zahnbögen.</p></details></li>
+                    <li><details><summary>Dentale Mittellinien</summary><p>Übereinstimmung der oberen/unteren Mittellinie mit der Gesichtsmittellinie.</p></details></li>
+                    <li><details><summary>Overjet</summary><p>Horizontale Frontzahnstufe in Millimetern.</p></details></li>
+                    <li><details><summary>Overbite</summary><p>Vertikale Frontzahnstufe in Millimetern oder Prozent.</p></details></li>
+                    <li><details><summary>Molaren- &amp; Eckzahnrelation</summary><p>Angle-Klassifikation der Molaren- und Eckzahnokklusion, seitenweise.</p></details></li>
+                    <li><details><summary>Engstand / Lücken</summary><p>Platzdiskrepanz im Ober- und Unterkiefer.</p></details></li>
+                    <li><details><summary>Kiefergelenk-Befunde</summary><p>Kondylenmorphologie, Symmetrie und degenerative Zeichen.</p></details></li>
+                    <li><details><summary>Atemweg / Weichgewebe</summary><p>Atemwegsdurchgängigkeit und relevante Weichteilprofil-Notizen.</p></details></li>
+                    <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var LS_KEY = 'report_template_lang';
+    var LANGS = ['en', 'it', 'de'];
+
+    function applyLang(lang) {
+        LANGS.forEach(function (l) {
+            var fields = document.querySelector('.report-fields-' + l);
+            var btn = document.getElementById('reportLang' + l.charAt(0).toUpperCase() + l.slice(1) + 'Btn');
+            if (fields) fields.classList.toggle('d-none', l !== lang);
+            if (btn) btn.className = 'btn ' + (l === lang ? 'btn-primary' : 'btn-outline-secondary') + ' report-lang-btn btn-sm';
+        });
+    }
+
+    var saved = localStorage.getItem(LS_KEY);
+    if (saved && saved !== '{{ report_language }}') {
+        applyLang(saved);
+    }
+
+    document.querySelectorAll('.report-lang-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var lang = this.dataset.lang;
+            applyLang(lang);
+            localStorage.setItem(LS_KEY, lang);
+            fetch('{% url "set_report_language" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] ?? '',
+                },
+                body: JSON.stringify({ language: lang }),
+            }).catch(function () {/* non-critical */});
+        });
+    });
+})();
+</script>

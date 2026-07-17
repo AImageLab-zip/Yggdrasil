@@ -37,10 +37,19 @@
     --ygg-surface: #ffffff;
     --ygg-surface-alt: #f4f6f8;
     --ygg-surface-sunken: #eef1f5;
+    --ygg-surface-2: #eef1f5;
+    --ygg-surface-3: #e3e8ee;
     --ygg-border: #e3e8ee;
     --ygg-border-strong: #cdd5e0;
     --ygg-text: #1c2233;
     --ygg-text-muted: #5c6577;
+    --ygg-text-faint: #95a0b3;
+
+    /* ---- Accent-soft + status-soft chips (theme-aware, consumed by pills) ---- */
+    --ygg-accent-soft: #e7eefb;
+    --ygg-ok-soft: #d6f3ec;
+    --ygg-warn-soft: #f7edda;
+    --ygg-danger-soft: #fbeae8;
 
     /* ---- On-dark text ---- */
     --ygg-text-on-dark: #eef2f8;
@@ -86,4 +95,62 @@
     --ygg-shadow-card: 0 10px 30px rgba(10, 15, 31, 0.25);
     --ygg-shadow-card-light: 0 1px 2px rgba(28, 34, 51, 0.06), 0 4px 16px rgba(28, 34, 51, 0.06);
     --ygg-shadow-pop: 0 8px 28px rgba(14, 21, 36, 0.14);
+
+    color-scheme: light;
+}
+
+/*
+ * ---- Dark theme -------------------------------------------------------------
+ * Sitewide dark mode. The Tailwind semantic colors (surface/line/content/
+ * primary/…) resolve these --ygg-* vars at runtime, so re-pointing the vars
+ * here flips every utility and .ygg-* component with no recompile. The stamp
+ * lives on <html data-theme="dark">, set pre-paint by the inline script in
+ * base.html and toggled from static/js/nav.js.
+ */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* Working surfaces → deep ink/navy atmosphere */
+    --ygg-surface: #0e1524;
+    --ygg-surface-alt: #0a0f1a;
+    --ygg-surface-sunken: #152036;
+    --ygg-surface-2: #152036;
+    --ygg-surface-3: #1c2c48;
+    --ygg-border: #1c2c48;
+    --ygg-border-strong: #294066;
+    --ygg-text: #eef2f8;
+    --ygg-text-muted: #9fb0cc;
+    --ygg-text-faint: #6b7a95;
+
+    /* On-dark aliases equal the base text on a dark ground */
+    --ygg-text-on-dark: #eef2f8;
+    --ygg-text-on-dark-muted: #9fb0cc;
+
+    /* Accents — brighter on dark for contrast */
+    --ygg-primary: var(--ygg-green-400);
+    --ygg-primary-hover: var(--ygg-green-300);
+    --ygg-primary-soft: #0e2a26;
+    --ygg-link: var(--ygg-green-400);
+    --ygg-accent: var(--ygg-gold-400);
+
+    /* Per-project accents (lighter variants) */
+    --ygg-maxillo: #7aa5ff;
+    --ygg-brain: #35c3a6;
+    --ygg-laparoscopy: #f09a80;
+
+    /* Soft chip backgrounds on dark */
+    --ygg-accent-soft: #16233c;
+    --ygg-ok-soft: #0e2a26;
+    --ygg-warn-soft: #332a15;
+    --ygg-danger-soft: #3a1e1a;
+
+    /* Status foregrounds tuned for dark */
+    --ygg-ok: #35c3a6;
+    --ygg-warn: #dcb968;
+    --ygg-danger: #e88a7d;
+
+    /* Elevation deepens on dark */
+    --ygg-shadow-card: 0 10px 30px rgba(4, 8, 16, 0.55);
+    --ygg-shadow-card-light: 0 10px 30px rgba(4, 8, 16, 0.45);
+    --ygg-shadow-pop: 0 8px 28px rgba(4, 8, 16, 0.6);
 }

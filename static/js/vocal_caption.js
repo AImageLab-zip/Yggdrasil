@@ -8,7 +8,18 @@ class VocalCaptionRecorder {
         this.isRecording = false;
         this.isPaused = false;
         this.isBrainProject = window.location.pathname.indexOf('/brain/') === 0;
-        
+
+        // Unified voice-caption capture (all three apps):
+        //   • Chrome / browsers with the Web Speech API  -> real-time client STT
+        //     (fills the caption box live; saved as a text caption).
+        //   • Everything else                            -> record audio, upload,
+        //     and let the server-side Whisper job transcribe (fallback).
+        // `isBrainProject` still governs *modality* data only (brain captions
+        // carry no modality); `useLiveStt` governs the capture *method*.
+        this.speechApiAvailable = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+        this.useLiveStt = this.speechApiAvailable;
+
+
         this.recordingStartTime = null;
         this.totalPausedDuration = 0;
         this.currentPauseStart = null;
@@ -137,7 +148,12 @@ class VocalCaptionRecorder {
     }
 
     initializeBrainSpeechLanguage() {
-        if (!this.isBrainProject || !this.brainSpeechLanguageInputs.length) return;
+        if (!this.useLiveStt || !this.brainSpeechLanguageInputs.length) return;
+
+        // Reveal the EN/IT/DE toggle (hidden by default; only relevant when the
+        // browser's live speech recognition is the active capture path).
+        const langToggle = document.getElementById('brainSpeechLanguageToggle');
+        if (langToggle) langToggle.hidden = false;
 
         this.selectBrainSpeechLanguage(this.getStoredBrainSpeechLanguage());
 
@@ -247,7 +263,7 @@ class VocalCaptionRecorder {
     }
     
     async startRecording() {
-        if (this.isBrainProject) {
+        if (this.useLiveStt) {
             return this.startBrainLocalStt();
         }
 
@@ -291,7 +307,7 @@ class VocalCaptionRecorder {
     }
     
     togglePause() {
-        if (this.isBrainProject && this.brainStt.enabled) {
+        if (this.useLiveStt && this.brainStt.enabled) {
             this.toggleBrainLocalPause();
             return;
         }
@@ -329,7 +345,7 @@ class VocalCaptionRecorder {
     }
     
     stopRecording() {
-        if (this.isBrainProject && this.brainStt.enabled) {
+        if (this.useLiveStt && this.brainStt.enabled) {
             this.stopBrainLocalStt({ flush: false });
             return;
         }
@@ -349,7 +365,7 @@ class VocalCaptionRecorder {
     }
     
     async saveRecording() {
-        if (this.isBrainProject) {
+        if (this.useLiveStt) {
             if (this.brainStt.enabled) {
                 await this.stopBrainLocalStt({ flush: true });
             }
@@ -403,7 +419,7 @@ class VocalCaptionRecorder {
     }
     
     discardRecording() {
-        if (this.isBrainProject && this.brainStt.enabled) {
+        if (this.useLiveStt && this.brainStt.enabled) {
             this.stopBrainLocalStt({ flush: false, discard: true });
             return;
         }

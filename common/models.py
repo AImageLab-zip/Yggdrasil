@@ -737,3 +737,99 @@ class SystemCheck(models.Model):
 
 	def __str__(self):
 		return f"{self.name} [{self.status}] @ {self.ran_at:%Y-%m-%d %H:%M}"
+
+
+class UserPreference(models.Model):
+    """Cross-app per-user UI preferences.
+
+    Supersedes the brain-only ``brain.UserPreference``: the report-template
+    language now lives here so all three domains share one endpoint/context.
+    """
+    LANGUAGE_CHOICES = [
+        ('it', 'Italian'),
+        ('en', 'English'),
+        ('de', 'German'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='ygg_preference')
+    report_language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='it')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Preferences for {self.user.username}"
+
+
+class RecentlyViewed(models.Model):
+    """Per-user recently-opened patients across domains.
+
+    Patients live in per-app tables, so this stores ``(domain, patient_pk)``
+    rather than a hard FK. Powers the landing "Continue where you left off".
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='recently_viewed')
+    domain = models.CharField(max_length=20)
+    patient_pk = models.IntegerField()
+    patient_name = models.CharField(max_length=255, blank=True)
+    project_label = models.CharField(max_length=120, blank=True)
+    icon = models.CharField(max_length=40, blank=True)
+    viewed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-viewed_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=('user', 'domain', 'patient_pk'), name='common_recentlyviewed_uniq'
+            ),
+        ]
+        indexes = [models.Index(fields=['user', '-viewed_at'], name='common_rv_user_viewed_idx')]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.domain}#{self.patient_pk}"
+
+
+class ActivityEvent(models.Model):
+    """Cross-domain audit/activity feed (patient-view Activity tab).
+
+    Emitted via ``common.activity.log_activity`` at action sites (upload,
+    processing complete, classification edit, caption add/edit, export).
+    """
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='activity_events'
+    )
+    domain = models.CharField(max_length=20)
+    patient_pk = models.IntegerField(null=True, blank=True)
+    patient_name = models.CharField(max_length=255, blank=True)
+    verb = models.CharField(max_length=40)
+    target = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['domain', 'patient_pk', '-created_at'], name='common_ae_dom_pat_idx')]
+
+    def __str__(self):
+        return f"{self.actor_id or '?'} {self.verb} {self.domain}#{self.patient_pk}"
+
+
+class Notification(models.Model):
+    """Per-user in-app notification (topbar bell with unread count)."""
+    LEVEL_CHOICES = [
+        ('info', 'Info'),
+        ('success', 'Success'),
+        ('warning', 'Warning'),
+        ('danger', 'Danger'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    level = models.CharField(max_length=10, choices=LEVEL_CHOICES, default='info')
+    message = models.CharField(max_length=500)
+    url = models.CharField(max_length=500, blank=True)
+    is_read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['user', 'is_read', '-created_at'], name='common_notif_user_read_idx')]
+
+    def __str__(self):
+        return f"[{self.level}] {self.message[:40]} → {self.user.username}"

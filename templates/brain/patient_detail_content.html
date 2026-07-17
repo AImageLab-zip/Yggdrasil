@@ -83,11 +83,12 @@
 
         <!-- Classification Column -->
         <div class="col-lg-4">
+            {# Report Template now renders inside the voice-caption panel (shared partial) #}
             {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
-            {% include 'brain/sections/report_template_section.html' %}
             {% include 'common/sections/scan_settings_section.html' %}
             {% include 'common/sections/nifti_metadata_section.html' %}
             {% include 'common/sections/file_management_section.html' %}
+            {% include 'common/sections/activity_section.html' %}
         </div>
     </div>
 
