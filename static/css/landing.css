@@ -178,15 +178,14 @@ main.landing {
 .landing-title {
     margin: 0;
     font-size: 52px;
-    font-weight: 700;
+    font-weight: 800;
     line-height: 1;
     letter-spacing: -0.02em;
     cursor: pointer;
     user-select: none;
 }
 .landing-title .accent { color: var(--ygg-accent2); }
-/* Gold: reserved for the runes alone. */
-.landing-title__runes { color: var(--ygg-gold-500); }
+.landing-title__runes { color: var(--ygg-accent2); }
 .landing-title.title--runes { letter-spacing: 0.14em; }
 
 .landing-tagline {
