@@ -1,0 +1,163 @@
+/*
+ * Yggdrasil UI components — the visual half of static/js/ygg-ui.js.
+ *
+ * Replaces the Bootstrap CSS bundle for the four behaviours the app used:
+ * collapse, modal, dropdown, tooltip. Everything resolves --ygg-* tokens, so
+ * these follow the sitewide data-theme="dark" stamp for free.
+ *
+ * Class names intentionally mirror Bootstrap's (`.collapse`, `.show`, `.modal`)
+ * because existing markup and JS assert on them — see ygg-ui.js for why.
+ */
+
+/* ---- Collapse ---------------------------------------------------------- */
+/* Height is animated by JS; `.show` marks the open state. */
+.collapse {
+    height: 0;
+    overflow: hidden;
+    transition: height 0.25s ease;
+}
+.collapse.show {
+    height: auto;
+    overflow: visible;
+}
+/* Mid-animation the JS sets an explicit px height and needs overflow clipped. */
+.collapse.show[style*="height"] {
+    overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+    .collapse { transition: none; }
+}
+
+/* ---- Modal ------------------------------------------------------------- */
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    overflow-y: auto;
+    background: rgba(6, 10, 18, 0.55);
+    padding: 2rem 1rem;
+}
+.modal.show { display: block; }
+body.ygg-modal-open { overflow: hidden; }
+
+.modal-dialog {
+    max-width: 520px;
+    margin: 0 auto;
+    animation: ygg-modal-in 0.18s ease both;
+}
+.modal-dialog.modal-lg { max-width: 800px; }
+.modal-dialog.modal-sm { max-width: 380px; }
+
+@keyframes ygg-modal-in {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .modal-dialog { animation: none; }
+}
+
+.modal-content {
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    box-shadow: var(--ygg-shadow-pop);
+    overflow: hidden;
+}
+.modal-header,
+.modal-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 14px 18px;
+}
+.modal-header {
+    justify-content: space-between;
+    border-bottom: 1px solid var(--ygg-border);
+}
+.modal-footer {
+    justify-content: flex-end;
+    border-top: 1px solid var(--ygg-border);
+}
+.modal-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+}
+.modal-body { padding: 18px; }
+
+.btn-close {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: var(--ygg-radius-sm);
+    background: transparent;
+    color: var(--ygg-text-muted);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+}
+.btn-close::before { content: "\00d7"; }
+.btn-close:hover {
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text);
+}
+
+/* ---- Dropdown ---------------------------------------------------------- */
+.ygg-dropdown { position: relative; }
+.ygg-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 1000;
+    min-width: 200px;
+    padding: 8px;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    box-shadow: var(--ygg-shadow-pop);
+    font-size: 13px;
+}
+.ygg-dropdown-menu.show { display: block; }
+.ygg-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--ygg-radius-sm);
+    background: transparent;
+    color: var(--ygg-text);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.ygg-dropdown-item:hover { background: var(--ygg-surface-2); }
+.ygg-dropdown-item.is-danger { color: var(--ygg-danger); }
+.ygg-dropdown-divider {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--ygg-border);
+}
+
+/* ---- Tooltip ----------------------------------------------------------- */
+.ygg-tooltip {
+    position: absolute;
+    z-index: 1080;
+    max-width: 240px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: var(--ygg-ink-800);
+    color: var(--ygg-text-on-dark);
+    border: 1px solid var(--ygg-navy-600);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+.ygg-tooltip.show { opacity: 1; }

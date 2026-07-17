@@ -6,7 +6,6 @@
 {# Upload uses Bootstrap form components (btn-group/btn-check/progress) and its
    modality fragments' JS toggles Font Awesome + .d-none, so it loads the scoped
    legacy layer rather than being migrated to Tailwind. #}
-{% block extra_css %}{% include 'common/partials/legacy_head.html' %}{% endblock %}
 
 {% block content %}
 <div class="container">

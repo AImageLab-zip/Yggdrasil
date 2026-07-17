@@ -34,6 +34,12 @@ module.exports = {
           600: 'var(--ygg-navy-600)',
           500: 'var(--ygg-navy-500)',
         },
+        blue: {
+          600: 'var(--ygg-blue-600)',
+          500: 'var(--ygg-blue-500)',
+          400: 'var(--ygg-blue-400)',
+          100: 'var(--ygg-blue-100)',
+        },
         green: {
           700: 'var(--ygg-green-700)',
           600: 'var(--ygg-green-600)',
@@ -71,6 +77,15 @@ module.exports = {
           hover: 'var(--ygg-primary-hover)',
           soft: 'var(--ygg-primary-soft)',
         },
+        // Text/icon color that sits ON a primary fill (flips to ink on dark).
+        onprimary: 'var(--ygg-on-primary)',
+        // Green — life / success. Distinct from `ok`, which is the status color.
+        accent2: {
+          DEFAULT: 'var(--ygg-accent2)',
+          hover: 'var(--ygg-accent2-hover)',
+          soft: 'var(--ygg-accent2-soft)',
+        },
+        // Gold. Landing runic wordmark ONLY — not for UI chrome.
         accent: {
           DEFAULT: 'var(--ygg-accent)',
           soft: 'var(--ygg-accent-soft)',

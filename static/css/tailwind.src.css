@@ -26,7 +26,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--ygg-green-500);
+    outline: 2px solid var(--ygg-primary);
     outline-offset: 2px;
   }
 }
@@ -42,7 +42,7 @@
            focus-visible:outline-2 disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply bg-primary text-white hover:bg-primary-hover;
+    @apply bg-primary text-onprimary hover:bg-primary-hover;
   }
   .btn-secondary {
     @apply bg-surface text-content border border-line-strong hover:bg-surface-sunken;
@@ -66,18 +66,22 @@
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
            text-xs font-medium;
   }
-  .badge-ok { @apply bg-green-100 text-green-700; }
-  .badge-warn { @apply bg-amber-100 text-amber-800; }
-  .badge-danger { @apply bg-red-100 text-red-700; }
+  /* Status colors resolve --ygg-* vars, so these follow the dark theme for free.
+     The old fixed Tailwind palettes (green-100/amber-100/red-100) stayed light
+     in dark mode and had to go. */
+  .badge-ok { @apply bg-ok-soft text-ok; }
+  .badge-warn { @apply bg-warn-soft text-warn; }
+  .badge-danger { @apply bg-danger-soft text-danger; }
   .badge-neutral { @apply bg-surface-sunken text-content-muted; }
+  .badge-accent { @apply bg-primary-soft text-primary; }
   .badge-gold { @apply bg-gold-200 text-gold-600; }
 
   /* ---- Forms ---- */
   .form-label { @apply block text-sm font-medium text-content mb-1.5; }
   .form-input {
     @apply w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-content
-           placeholder:text-content-muted focus:border-primary focus:outline-none
-           focus:ring-2 focus:ring-green-300;
+           placeholder:text-content-faint focus:border-primary focus:outline-none
+           focus:ring-2 focus:ring-primary-soft;
   }
   textarea.form-input { @apply min-h-24; }
   .form-help { @apply text-xs text-content-muted mt-1; }
@@ -101,9 +105,10 @@
 
   /* ---- Alerts ---- */
   .alert-ygg { @apply flex items-start gap-2 rounded-md border px-4 py-3 text-sm; }
-  .alert-info { @apply bg-green-100 border-green-300 text-green-700; }
-  .alert-warning { @apply bg-amber-50 border-amber-200 text-amber-800; }
-  .alert-danger { @apply bg-red-50 border-red-200 text-red-700; }
+  .alert-info { @apply bg-primary-soft border-primary text-primary; }
+  .alert-success { @apply bg-ok-soft border-ok text-ok; }
+  .alert-warning { @apply bg-warn-soft border-warn text-warn; }
+  .alert-danger { @apply bg-danger-soft border-danger text-danger; }
 
   /* ---- Auth card (login / register / logged out) ---- */
   .auth-wrap { @apply max-w-md mx-auto my-12 md:my-16 px-4; }
@@ -147,7 +152,8 @@
     @apply inline-flex items-center gap-1.5 font-display font-semibold no-underline
            text-white text-lg tracking-tight;
   }
-  .ygg-brand .brand-accent { color: var(--ygg-green-400); }
+  /* "drasil" — green per the mockup wordmark (accent2), not gold. */
+  .ygg-brand .brand-accent { color: var(--ygg-accent2); }
 
   /* ---- Brand lockup (wordmark), see partials/wordmark.html ---- */
   .ygg-lockup { @apply inline-flex items-center gap-2; }
@@ -173,7 +179,7 @@
   .ygg-toast--success .ygg-toast__icon { color: var(--ygg-ok); }
   .ygg-toast--danger  .ygg-toast__icon { color: var(--ygg-danger); }
   .ygg-toast--warning .ygg-toast__icon { color: var(--ygg-warn); }
-  .ygg-toast--info    .ygg-toast__icon { color: var(--ygg-green-600); }
+  .ygg-toast--info    .ygg-toast__icon { color: var(--ygg-primary); }
   .ygg-toast__body { @apply flex-1 min-w-0; }
   .ygg-toast__title { @apply font-semibold; }
   .ygg-toast__msg { @apply text-content-muted break-words; }
@@ -249,18 +255,18 @@
 }
 
 /* ============================================================================
- * Lucide sprite icon sizing — plain CSS (kept outside @layer base, which was
- * dropping the base .ygg-icon rule). Placed after utilities so it is stable.
+ * Icon sizing helpers — plain CSS (kept outside @layer base, which was dropping
+ * the base rule). Placed after utilities so it is stable.
+ *
+ * Icons are Font Awesome <i> elements. Unlike the SVG sprite these replaced,
+ * they are glyphs: size them with font-size, never width/height, or they clip.
  * ========================================================================= */
 .ygg-icon {
-  width: 1.15em;
-  height: 1.15em;
   display: inline-block;
-  vertical-align: -0.15em;
   flex-shrink: 0;
-  stroke: currentColor;
-  fill: none;
+  text-align: center;
+  width: 1.15em;
 }
-.ygg-icon-sm { width: 1em; height: 1em; }
-.ygg-icon-lg { width: 1.5em; height: 1.5em; }
-.ygg-icon-xl { width: 2rem; height: 2rem; }
+.ygg-icon-sm { font-size: 0.85em; }
+.ygg-icon-lg { font-size: 1.3em; }
+.ygg-icon-xl { font-size: 1.75em; }

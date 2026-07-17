@@ -1,17 +1,17 @@
-"""`{% icon %}` template tag — renders a Lucide sprite icon.
+"""`{% icon %}` template tag — renders a Font Awesome 6 glyph.
 
 Usage:
     {% load icons %}
-    {% icon "tooth" %}
-    {% icon "fa-upload" "ygg-icon-sm" %}
-    {% icon project.icon %}          {# resolves a stored "fas fa-brain" #}
+    {% icon "tooth" %}                    -> <i class="fas fa-tooth" aria-hidden="true"></i>
+    {% icon "fa-upload" "ygg-icon-sm" %}  -> adds extra classes
+    {% icon modality.icon %}              -> resolves a stored "fas fa-brain"
+    {% icon "trash" title="Delete" %}     -> labelled instead of aria-hidden
 
-Renders an inline SVG referencing the self-hosted sprite:
-    <svg class="ygg-icon ..." aria-hidden="true"><use href="/static/icons/lucide-sprite.svg#lc-NAME"></use></svg>
+Font Awesome is self-hosted (static/vendor/fontawesome) and loaded sitewide in
+base.html. Name normalisation/aliasing lives in common/icons.py.
 """
 
 from django import template
-from django.templatetags.static import static
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -22,15 +22,10 @@ register = template.Library()
 
 @register.simple_tag
 def icon(name, css_class="", *, title=""):
-    """Render a Lucide sprite icon by fa/lucide name with optional extra classes."""
-    lucide = resolve(name)
-    sprite = static("icons/lucide-sprite.svg")
-    classes = ("ygg-icon " + css_class).strip()
+    """Render a Font Awesome icon by name with optional extra classes."""
+    fa_classes = resolve(name)
+    if not fa_classes:
+        return ""
+    classes = (fa_classes + " " + css_class).strip() if css_class else fa_classes
     title_attr = format_html(' aria-label="{}"', title) if title else mark_safe(' aria-hidden="true"')
-    return format_html(
-        '<svg class="{}"{}><use href="{}#lc-{}"></use></svg>',
-        classes,
-        title_attr,
-        sprite,
-        lucide,
-    )
+    return format_html('<i class="{}"{}></i>', classes, title_attr)

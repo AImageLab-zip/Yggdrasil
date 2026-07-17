@@ -1,13 +1,15 @@
 /*
- * Yggdrasil sitewide theme — self-hosted fonts + Bootstrap chromatic overrides.
+ * Yggdrasil sitewide theme — self-hosted fonts + app-shell chrome.
  *
- * SCOPE GUARD: global chrome (navbar/footer/typography) now lives in the
- * Tailwind layer (tailwind.css / tailwind.src.css). This file keeps only:
+ * SCOPE GUARD: global chrome (navbar/footer/typography) lives in the Tailwind
+ * layer (tailwind.css / tailwind.src.css); component behaviour styling lives in
+ * ygg-ui.css. This file keeps only:
  *   1. @font-face for the self-hosted IBM Plex families (GDPR: no CDN fonts).
- *   2. COLOR-ONLY overrides for Bootstrap components, which are loaded ONLY on
- *      the patient list / patient detail viewer pages (scoped legacy layer).
- * It MUST NOT restyle annotation viewers or change sizing/spacing/display of
- * Bootstrap components — viewer pages inherit this file.
+ *   2. The fixed footer + 64px icon-rail app-shell layout.
+ * It MUST NOT restyle annotation viewers — viewer pages inherit this file.
+ *
+ * Bootstrap is gone as of the 2.0 rebuild; the chromatic overrides and the
+ * Bootstrap dark remap that used to live here went with it.
  *
  * Tokens live in tokens.css (loaded first).
  */
@@ -48,40 +50,6 @@
     font-style: normal; font-weight: 600; font-display: swap;
     src: url('../fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
 }
-
-/* ==========================================================================
- * Bootstrap chromatic overrides — ONLY affect pages that load Bootstrap
- * (patient list / patient detail). Colors only, never geometry.
- * ======================================================================== */
-.btn { font-family: var(--ygg-font-body); font-weight: 500; }
-.btn-primary {
-    --bs-btn-bg: var(--ygg-green-600);
-    --bs-btn-border-color: var(--ygg-green-600);
-    --bs-btn-hover-bg: var(--ygg-green-700);
-    --bs-btn-hover-border-color: var(--ygg-green-700);
-    --bs-btn-active-bg: var(--ygg-green-700);
-    --bs-btn-active-border-color: var(--ygg-green-700);
-    --bs-btn-disabled-bg: var(--ygg-green-600);
-    --bs-btn-disabled-border-color: var(--ygg-green-600);
-}
-.btn-outline-primary {
-    --bs-btn-color: var(--ygg-green-700);
-    --bs-btn-border-color: var(--ygg-green-600);
-    --bs-btn-hover-bg: var(--ygg-green-600);
-    --bs-btn-hover-border-color: var(--ygg-green-600);
-    --bs-btn-active-bg: var(--ygg-green-700);
-    --bs-btn-active-border-color: var(--ygg-green-700);
-}
-.card { --bs-card-border-color: var(--ygg-border); }
-.text-muted { color: var(--ygg-text-muted) !important; }
-.badge { font-weight: 500; }
-.uniform-btn { min-width: 90px; height: 32px; line-height: 18px; }
-.form-control, .form-select { margin-top: 0.25rem; }
-
-/* Logout button inside the user dropdown (Bootstrap dropdown pages) */
-.dropdown-item.p-0 { overflow: hidden; }
-.dropdown-item.p-0 .btn-link { color: inherit; font-weight: inherit; }
-.dropdown-item.p-0 .btn-link:hover { background-color: var(--ygg-surface-alt); color: inherit; }
 
 /* ==========================================================================
  * Yggdrasil 2.0 chrome — sticky footer, full-width nav, branding assets.
@@ -135,51 +103,3 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
     body.has-rail .ygg-footer { left: 0; }
 }
 
-/* ==========================================================================
- * Dark theme — Bootstrap chromatic remap (patient list / detail / export).
- * COLOR ONLY: re-points Bootstrap's own --bs-* vars at our --ygg-* tokens so
- * the scoped legacy pages follow the sitewide data-theme="dark" stamp. No
- * geometry/spacing changes (scope guard above still applies).
- * ======================================================================== */
-:root[data-theme="dark"] {
-    --bs-body-bg: var(--ygg-surface-alt);
-    --bs-body-color: var(--ygg-text);
-    --bs-border-color: var(--ygg-border);
-    --bs-secondary-bg: var(--ygg-surface-2);
-    --bs-tertiary-bg: var(--ygg-surface-sunken);
-    --bs-emphasis-color: var(--ygg-text);
-    --bs-secondary-color: var(--ygg-text-muted);
-}
-:root[data-theme="dark"] body { background: var(--ygg-surface-alt); color: var(--ygg-text); }
-:root[data-theme="dark"] .card,
-:root[data-theme="dark"] .modal-content,
-:root[data-theme="dark"] .dropdown-menu,
-:root[data-theme="dark"] .list-group-item,
-:root[data-theme="dark"] .accordion-item {
-    background-color: var(--ygg-surface);
-    color: var(--ygg-text);
-    border-color: var(--ygg-border);
-}
-:root[data-theme="dark"] .card-header,
-:root[data-theme="dark"] .modal-header,
-:root[data-theme="dark"] .modal-footer,
-:root[data-theme="dark"] .table > :not(caption) > * > * {
-    border-color: var(--ygg-border);
-}
-:root[data-theme="dark"] .form-control,
-:root[data-theme="dark"] .form-select,
-:root[data-theme="dark"] .input-group-text {
-    background-color: var(--ygg-surface);
-    color: var(--ygg-text);
-    border-color: var(--ygg-border);
-}
-:root[data-theme="dark"] .form-control::placeholder { color: var(--ygg-text-faint); }
-:root[data-theme="dark"] .table { --bs-table-color: var(--ygg-text); --bs-table-bg: transparent; }
-:root[data-theme="dark"] .text-dark { color: var(--ygg-text) !important; }
-:root[data-theme="dark"] .bg-light,
-:root[data-theme="dark"] .bg-white { background-color: var(--ygg-surface-2) !important; }
-:root[data-theme="dark"] .dropdown-item { color: var(--ygg-text); }
-:root[data-theme="dark"] .dropdown-item:hover,
-:root[data-theme="dark"] .dropdown-item:focus { background-color: var(--ygg-surface-2); color: var(--ygg-text); }
-:root[data-theme="dark"] .btn-close { filter: invert(1) grayscale(1) brightness(1.4); }
-:root[data-theme="dark"] .badge.bg-secondary { background-color: var(--ygg-surface-3) !important; color: var(--ygg-text) !important; }

@@ -39,9 +39,13 @@
     <script src="https://unpkg.com/fflate@0.8.2"></script>
     <script src="{% static 'js/nifti-reader.js' %}"></script>
 
-    <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> self-hosted fonts -->
+    <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> components -> fonts.
+         Font Awesome is self-hosted (never a CDN — it ships webfonts, and the
+         GDPR rule that keeps IBM Plex local applies to it too). -->
+    <link href="{% static 'vendor/fontawesome/css/all.min.css' %}" rel="stylesheet">
     <link href="{% static 'css/tokens.css' %}" rel="stylesheet">
     <link href="{% static 'css/tailwind.css' %}" rel="stylesheet">
+    <link href="{% static 'css/ygg-ui.css' %}" rel="stylesheet">
     <link href="{% static 'css/theme.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
@@ -70,8 +74,8 @@
             <!-- Right: user menu / login -->
             <div class="ml-auto flex items-center gap-1">
                 <button type="button" class="ygg-nav-link" data-theme-toggle aria-label="Switch theme">
-                    <svg class="ygg-icon" data-theme-icon="moon" aria-hidden="true"><use href="{% static 'icons/lucide-sprite.svg' %}#lc-moon"></use></svg>
-                    <svg class="ygg-icon" data-theme-icon="sun" aria-hidden="true" hidden><use href="{% static 'icons/lucide-sprite.svg' %}#lc-sun"></use></svg>
+                    <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
+                    <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
                 </button>
                 {% if is_demo_guest %}
                     <form method="post" action="{% url 'logout' %}">
@@ -154,13 +158,15 @@
     </footer>
     {% endblock %}
 
+    {# UI runtime (collapse/modal/dropdown/tooltip). Must load before extra_js: #}
+    {# it publishes the window.bootstrap shim the viewer scripts still call. #}
+    <script src="{% static 'js/ygg-ui.js' %}"></script>
     <script src="{% static 'js/nav.js' %}"></script>
     <script src="{% static 'js/notifications.js' %}"></script>
     <script>
         (function () {
             try { window.projectNamespace = "{% firstof request.resolver_match.namespace 'maxillo' %}"; }
             catch (e) { window.projectNamespace = 'maxillo'; }
-            window.YGG_SPRITE = "{% static 'icons/lucide-sprite.svg' %}";
             {% if user.is_authenticated and not is_demo_guest %}
             window.YGG_NOTIF_API = "{% url 'notifications_api' %}";
             window.YGG_NOTIF_MARK = "{% url 'notifications_mark_read' %}";
