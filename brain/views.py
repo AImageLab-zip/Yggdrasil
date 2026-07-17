@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
 from common.demo import landing_demo_url
-from common.domains import order_projects_for_landing
+from common.domains import landing_cards, order_projects_for_landing
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
@@ -62,8 +62,10 @@ def home(request):
         if current_project_id:
             current_project = projects.filter(id=current_project_id).first()
             current_project_name = current_project.name if current_project else None
+        ordered_projects = order_projects_for_landing(projects)
         return render(request, "common/landing.html", {
-            "projects": order_projects_for_landing(projects),
+            "projects": ordered_projects,
+            "landing_cards": landing_cards(ordered_projects),
             "current_project_id": current_project_id,
             "current_project_name": current_project_name,
             "continue_url": "/brain/" if current_project_name else None,

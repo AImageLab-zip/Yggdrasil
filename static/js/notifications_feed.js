@@ -22,7 +22,12 @@
         return m ? m[1] : '';
     }
 
-    var LEVEL_ICON = { success: 'lc-circle-check', danger: 'lc-triangle-alert', warning: 'lc-triangle-alert', info: 'lc-info' };
+    var LEVEL_ICON = {
+        success: 'fa-circle-check',
+        danger: 'fa-triangle-exclamation',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-circle-info',
+    };
 
     function render(data) {
         var items = (data && data.items) || [];
@@ -31,7 +36,6 @@
         // Drop everything except the empty-state node, then repopulate.
         Array.prototype.slice.call(list.querySelectorAll('[data-notif-item]')).forEach(function (n) { n.remove(); });
         if (empty) empty.hidden = items.length > 0;
-        var sprite = window.YGG_SPRITE || '';
         items.forEach(function (it) {
             var row = document.createElement(it.url ? 'a' : 'div');
             row.className = 'ygg-menu-item items-start' + (it.is_read ? ' opacity-60' : '');
@@ -40,7 +44,7 @@
             if (it.url) row.href = it.url;
             var icon = LEVEL_ICON[it.level] || LEVEL_ICON.info;
             row.innerHTML =
-                '<svg class="ygg-icon" aria-hidden="true"><use href="' + sprite + '#' + icon + '"></use></svg>' +
+                '<i class="fas ' + icon + '" aria-hidden="true"></i>' +
                 '<span class="flex-1 min-w-0"><span class="block">' + escapeHtml(it.message) + '</span>' +
                 '<span class="block text-xs text-content-muted mono">' + escapeHtml(it.created_at) + '</span></span>';
             row.addEventListener('click', function () { markRead(it.id); });

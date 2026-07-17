@@ -1,0 +1,405 @@
+/*
+ * Bootstrap utility-class compatibility layer.
+ *
+ * Bootstrap's CSS is gone (see ade232b), but several files we are explicitly
+ * NOT allowed to edit still emit Bootstrap class names at runtime: viewer code
+ * (viewer_grid.js, modality_viewers/intraoral.js), the laparoscopy annotator
+ * (static/js/laparoscopy/*.js), and vocal_caption.js (Part 6 — accepted as-is).
+ * Without their CSS, `.d-none` stops hiding things, `.spinner-border` renders
+ * as a bare div, etc. This is the CSS-side counterpart to the `window.bootstrap`
+ * JS shim in ygg-ui.js: same reasoning, same scope limit — only what those
+ * files actually still emit (see the grep in the commit that added this file).
+ *
+ * New/rewritten markup should use the real design system (.ygg-*, .btn-*,
+ * .card-ygg, .badge-ygg) instead of reaching for anything here.
+ */
+
+/* ---- Layout utilities --------------------------------------------------- */
+.d-flex { display: flex; }
+.d-block { display: block; }
+.d-none { display: none !important; }
+.d-inline-block { display: inline-block; }
+
+/* ---- Buttons: outline variants (base .btn/.btn-sm come from tailwind.src.css) */
+.btn-outline-primary {
+    background: transparent;
+    color: var(--ygg-primary);
+    border: 1px solid var(--ygg-primary);
+}
+.btn-outline-primary:hover { background: var(--ygg-accent-soft); }
+.btn-outline-secondary {
+    background: transparent;
+    color: var(--ygg-text-muted);
+    border: 1px solid var(--ygg-border);
+}
+.btn-outline-secondary:hover { background: var(--ygg-surface-2); color: var(--ygg-text); }
+.btn-outline-success {
+    background: transparent;
+    color: var(--ygg-accent2);
+    border: 1px solid var(--ygg-accent2);
+}
+.btn-outline-success:hover { background: var(--ygg-accent2-soft); }
+.btn-outline-danger {
+    background: transparent;
+    color: var(--ygg-danger);
+    border: 1px solid var(--ygg-danger);
+}
+.btn-outline-danger:hover { background: var(--ygg-danger-soft); }
+.btn-outline-info,
+.btn-outline-warning,
+.btn-outline-light {
+    background: transparent;
+    color: var(--ygg-text-muted);
+    border: 1px solid var(--ygg-border);
+}
+.btn-outline-info:hover,
+.btn-outline-warning:hover,
+.btn-outline-light:hover { background: var(--ygg-surface-2); color: var(--ygg-text); }
+
+/* Visually-hidden radio/checkbox driving an adjacent <label> styled as a
+   button (Bootstrap's "btn-check" pattern) — used by the modality tab strip
+   and the voice-caption language toggle. */
+.btn-check {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.btn-check + label { cursor: pointer; }
+
+/* ---- Surfaces ------------------------------------------------------------ */
+.card {
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+}
+.card-body { padding: 1rem; }
+.card-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--ygg-border);
+    font-weight: 600;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.list-group { display: flex; flex-direction: column; }
+.list-group-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--ygg-border);
+}
+.list-group-item:last-child { border-bottom: 0; }
+.list-group-item-success { color: var(--ygg-accent2); }
+
+.dropdown-menu {
+    position: absolute;
+    z-index: 1000;
+    min-width: 180px;
+    padding: 6px;
+    margin-top: 6px;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    box-shadow: var(--ygg-shadow-pop);
+    font-size: 13px;
+}
+.dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ygg-text);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.dropdown-item:hover { background: var(--ygg-surface-2); }
+.dropdown-item.active { background: var(--ygg-accent-soft); color: var(--ygg-primary); }
+
+/* ---- Alerts / progress / spinners ---------------------------------------- */
+.alert {
+    padding: 10px 14px;
+    border-radius: var(--ygg-radius-sm);
+    border: 1px solid transparent;
+    font-size: 13px;
+}
+.alert-success { background: var(--ygg-ok-soft); border-color: var(--ygg-ok); color: var(--ygg-ok); }
+.alert-danger { background: var(--ygg-danger-soft); border-color: var(--ygg-danger); color: var(--ygg-danger); }
+.alert-warning { background: var(--ygg-warn-soft); border-color: var(--ygg-warn); color: var(--ygg-warn); }
+.alert-dismissible { position: relative; padding-right: 32px; }
+
+.progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--ygg-surface-2);
+    overflow: hidden;
+}
+.progress-bar {
+    height: 100%;
+    background: var(--ygg-primary);
+    transition: width 0.2s ease;
+}
+
+.spinner-border {
+    display: inline-block;
+    width: 1.4rem;
+    height: 1.4rem;
+    border: 0.2em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    color: var(--ygg-primary);
+    animation: bs-compat-spin 0.75s linear infinite;
+}
+@keyframes bs-compat-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner-border { animation-duration: 1.5s; }
+}
+
+/* ---- Grid: minimal Bootstrap 12-column flex grid ------------------------
+   Real usage remaining: viewer_grid.js and modality_viewers/intraoral.js
+   (untouchable) generate .row/.col-* classes at runtime for photo grids and
+   layout panels; several not-yet-rewritten templates (Part 5) still use them
+   too. This is Bootstrap's own grid math, just re-implemented directly. */
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+}
+.row > * { padding-left: 0.5rem; padding-right: 0.5rem; }
+.col {
+    flex: 1 0 0%;
+    max-width: 100%;
+}
+
+.col-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-3 { flex: 0 0 auto; width: 25%; }
+.col-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-6 { flex: 0 0 auto; width: 50%; }
+.col-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-9 { flex: 0 0 auto; width: 75%; }
+.col-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-12 { flex: 0 0 auto; width: 100%; }
+/* Gap utilities (g-0..g-5), matching Bootstrap's spacer scale. */
+.g-0 { --bs-gap: 0; row-gap: 0; }
+.g-0 > * { padding-left: calc(0 / 2); padding-right: calc(0 / 2); }
+.g-1 { --bs-gap: 0.25rem; row-gap: 0.25rem; }
+.g-1 > * { padding-left: calc(0.25rem / 2); padding-right: calc(0.25rem / 2); }
+.g-2 { --bs-gap: 0.5rem; row-gap: 0.5rem; }
+.g-2 > * { padding-left: calc(0.5rem / 2); padding-right: calc(0.5rem / 2); }
+.g-3 { --bs-gap: 1rem; row-gap: 1rem; }
+.g-3 > * { padding-left: calc(1rem / 2); padding-right: calc(1rem / 2); }
+.g-4 { --bs-gap: 1.5rem; row-gap: 1.5rem; }
+.g-4 > * { padding-left: calc(1.5rem / 2); padding-right: calc(1.5rem / 2); }
+.g-5 { --bs-gap: 3rem; row-gap: 3rem; }
+.g-5 > * { padding-left: calc(3rem / 2); padding-right: calc(3rem / 2); }
+.g-0, .g-1, .g-2, .g-3, .g-4, .g-5 { margin-left: calc(var(--bs-gap) / -2); margin-right: calc(var(--bs-gap) / -2); }
+
+/* Responsive column widths only apply at their breakpoint and up. */
+@media (min-width: 576px) {
+.col-sm-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-sm-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-sm-3 { flex: 0 0 auto; width: 25%; }
+.col-sm-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-sm-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-sm-6 { flex: 0 0 auto; width: 50%; }
+.col-sm-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-sm-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-sm-9 { flex: 0 0 auto; width: 75%; }
+.col-sm-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-sm-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-sm-12 { flex: 0 0 auto; width: 100%; }
+}
+@media (min-width: 768px) {
+.col-md-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-md-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-md-3 { flex: 0 0 auto; width: 25%; }
+.col-md-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-md-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-md-6 { flex: 0 0 auto; width: 50%; }
+.col-md-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-md-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-md-9 { flex: 0 0 auto; width: 75%; }
+.col-md-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-md-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-md-12 { flex: 0 0 auto; width: 100%; }
+}
+@media (min-width: 992px) {
+.col-lg-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-lg-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-lg-3 { flex: 0 0 auto; width: 25%; }
+.col-lg-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-lg-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-lg-6 { flex: 0 0 auto; width: 50%; }
+.col-lg-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-lg-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-lg-9 { flex: 0 0 auto; width: 75%; }
+.col-lg-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-lg-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-lg-12 { flex: 0 0 auto; width: 100%; }
+}
+@media (min-width: 1200px) {
+.col-xl-1 { flex: 0 0 auto; width: 8.33333%; }
+.col-xl-2 { flex: 0 0 auto; width: 16.6667%; }
+.col-xl-3 { flex: 0 0 auto; width: 25%; }
+.col-xl-4 { flex: 0 0 auto; width: 33.3333%; }
+.col-xl-5 { flex: 0 0 auto; width: 41.6667%; }
+.col-xl-6 { flex: 0 0 auto; width: 50%; }
+.col-xl-7 { flex: 0 0 auto; width: 58.3333%; }
+.col-xl-8 { flex: 0 0 auto; width: 66.6667%; }
+.col-xl-9 { flex: 0 0 auto; width: 75%; }
+.col-xl-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-xl-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-xl-12 { flex: 0 0 auto; width: 100%; }
+}
+
+/* ---- Text-color utilities -------------------------------------------------
+   Sitewide, not just Part 4: ~90 .text-muted alone remain across templates
+   not yet rewritten. Without these every one renders as inherited (usually
+   near-black) text instead of muted gray — the single highest-impact gap
+   left once .d-none/.card/.badge were covered. */
+.text-muted { color: var(--ygg-text-muted); }
+.text-danger { color: var(--ygg-danger); }
+.text-primary { color: var(--ygg-primary); }
+.text-success { color: var(--ygg-accent2); }
+.text-secondary { color: var(--ygg-text-muted); }
+.text-warning { color: var(--ygg-warn); }
+.text-info { color: var(--ygg-primary); }
+.text-dark { color: var(--ygg-text); }
+.text-white { color: #fff; }
+
+/* ---- Form control (Bootstrap's base input class; distinct from .form-input
+   in tailwind.src.css, which templates not yet rewritten don't use). ------- */
+.form-control,
+.form-select {
+    display: block;
+    width: 100%;
+    padding: 0.45rem 0.75rem;
+    border-radius: var(--ygg-radius-md);
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    font-size: 0.875rem;
+}
+.form-control:focus,
+.form-select:focus {
+    outline: none;
+    border-color: var(--ygg-primary);
+}
+.form-control::placeholder { color: var(--ygg-text-faint); }
+.form-text { font-size: 0.8rem; color: var(--ygg-text-muted); margin-top: 0.25rem; }
+/* .form-label already comes from tailwind.src.css — not redefined here. */
+
+/* ---- Misc display utilities not covered above. --------------------------- */
+.d-grid { display: grid; gap: 0.5rem; }
+@media (min-width: 768px) {
+    .d-md-flex { display: flex; }
+    .justify-content-md-end { justify-content: flex-end; }
+    .me-md-2 { margin-inline-end: 0.5rem; }
+}
+
+/* ---- Flex alignment / sizing utilities ----------------------------------- */
+.align-items-center { align-items: center; }
+.align-items-end { align-items: flex-end; }
+.justify-content-between { justify-content: space-between; }
+.justify-content-center { justify-content: center; }
+.justify-content-end { justify-content: flex-end; }
+.w-100 { width: 100%; }
+
+/* ---- Typography helpers --------------------------------------------------- */
+.small { font-size: 0.8125rem; }
+.fw-semibold { font-weight: 600; }
+.fw-bold { font-weight: 700; }
+.card-title { font-weight: 600; margin-bottom: 0.25rem; }
+.card-subtitle { color: var(--ygg-text-muted); font-size: 0.85rem; }
+h1.h4, .h4 { font-size: 1.25rem; font-weight: 600; }
+h1.h5, .h5 { font-size: 1.05rem; font-weight: 600; }
+h1.h6, .h6 { font-size: 0.9rem; font-weight: 600; }
+
+/* ---- Semantic background/border utilities --------------------------------- */
+.bg-secondary { background: var(--ygg-surface-2); }
+.bg-success { background: var(--ygg-ok-soft); }
+.bg-info { background: var(--ygg-accent-soft); }
+.bg-light { background: var(--ygg-surface-2); }
+.border-secondary { border-color: var(--ygg-border); }
+.border-success { border-color: var(--ygg-ok); }
+.border-info { border-color: var(--ygg-primary); }
+.border-warning { border-color: var(--ygg-warn); }
+
+/* ---- Button group (visually joins adjacent .btn elements) ----------------- */
+.btn-group { display: inline-flex; }
+.btn-group > .btn { border-radius: 0; margin-left: -1px; }
+.btn-group > .btn:first-child { border-top-left-radius: var(--ygg-radius-md); border-bottom-left-radius: var(--ygg-radius-md); margin-left: 0; }
+.btn-group > .btn:last-child { border-top-right-radius: var(--ygg-radius-md); border-bottom-right-radius: var(--ygg-radius-md); }
+.btn-lg { padding: 0.65rem 1.25rem; font-size: 1rem; }
+.btn-warning { background: var(--ygg-warn); color: #fff; }
+.btn-warning:hover { filter: brightness(0.95); }
+
+/* ---- Checkbox/radio + label pattern ("form-check") ------------------------ */
+.form-check { display: flex; align-items: center; gap: 0.4rem; }
+.form-check-input { width: 1rem; height: 1rem; accent-color: var(--ygg-primary); }
+.form-check-label { font-size: 0.875rem; color: var(--ygg-text); }
+.form-select-sm { padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+
+/* ---- Table ----------------------------------------------------------------
+   .table-ygg (tailwind.src.css) is the design-system table; bare .table is
+   what not-yet-rewritten pages (export list) still emit. */
+.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.table th, .table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--ygg-border); text-align: left; vertical-align: middle; }
+.table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ygg-text-muted); font-weight: 500; }
+.table-hover tbody tr:hover { background: var(--ygg-surface-2); }
+.table-responsive { overflow-x: auto; }
+
+/* ---- Pagination ------------------------------------------------------------ */
+.pagination { display: flex; gap: 4px; list-style: none; padding: 0; margin: 0; }
+.page-item.disabled .page-link { opacity: 0.45; pointer-events: none; }
+.page-item.active .page-link { background: var(--ygg-primary); color: var(--ygg-on-primary); border-color: var(--ygg-primary); }
+.page-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+    color: var(--ygg-text);
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+.page-link:hover { background: var(--ygg-surface-2); }
+
+/* ---- Progress bar animation (Bootstrap's striped/animated variant) -------- */
+.progress-bar-striped {
+    background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent);
+    background-size: 1rem 1rem;
+}
+.progress-bar-animated { animation: bs-compat-progress 1s linear infinite; }
+@keyframes bs-compat-progress { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .progress-bar-animated { animation: none; } }
+
+/* ---- Remaining one-off utilities/variants seen sitewide ------------------- */
+.list-unstyled { list-style: none; padding-left: 0; margin: 0; }
+.list-group-flush .list-group-item { border-radius: 0; border-left: 0; border-right: 0; }
+.btn-group-sm > .btn { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+.btn-light { background: var(--ygg-surface-2); color: var(--ygg-text); border: 1px solid var(--ygg-border); }
+.btn-light:hover { background: var(--ygg-surface-3); }
+.form-control-sm { padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+.flex-grow-1 { flex-grow: 1; }
+.img-fluid { max-width: 100%; height: auto; }
+.h-100 { height: 100%; }
+.rounded-pill { border-radius: 999px; }
+.position-relative { position: relative; }
+.position-absolute { position: absolute; }

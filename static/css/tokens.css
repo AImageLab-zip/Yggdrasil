@@ -6,9 +6,11 @@
  *
  * Identity: the world-tree, read as a clinical instrument. Deep ink/navy
  * atmosphere on hero/dark surfaces; clean cool-white working surfaces (no
- * parchment). Green is the primary "life / medical" accent; gold is a sparing
- * rune highlight, never a field color. IBM Plex Sans for UI, IBM Plex Mono for
- * technical data (scan IDs, metrics, timestamps).
+ * parchment). Per the design Kit: Maxillo blue LEADS (it is --ygg-primary, the
+ * interactive color); medical green carries life/success states (--ygg-accent2);
+ * gold is reserved for the runic wordmark on the landing page ALONE and is never
+ * a field or button color. IBM Plex Sans for UI, IBM Plex Mono for technical
+ * data (scan IDs, metrics, timestamps).
  */
 :root {
     /* ---- Ink / navy (dark atmosphere) ---- */
@@ -19,7 +21,13 @@
     --ygg-navy-600: #1c2c48;
     --ygg-navy-500: #294066;
 
-    /* ---- Green (primary — life / medical) ---- */
+    /* ---- Blue (primary — Maxillo blue, the leading interactive color) ---- */
+    --ygg-blue-600: #3f6fd1;
+    --ygg-blue-500: #5b8def;
+    --ygg-blue-400: #7aa5ff;
+    --ygg-blue-100: #e7eefb;
+
+    /* ---- Green (life / medical — success + accent2) ---- */
     --ygg-green-700: #0a5f4c;
     --ygg-green-600: #0e7c66;
     --ygg-green-500: #14a38b;
@@ -63,12 +71,18 @@
     --ygg-laparoscopy: #e0785f;
     --ygg-laparoscopy-grad: linear-gradient(135deg, #c85a42, #f09a80);
 
-    /* ---- Semantic aliases (what components consume) ---- */
-    --ygg-primary: var(--ygg-green-600);
-    --ygg-primary-hover: var(--ygg-green-700);
-    --ygg-primary-soft: var(--ygg-green-100);
+    /* ---- Semantic aliases (what components consume) ----
+     * Kit rule: blue leads, green = life/success, gold = runic wordmark only. */
+    --ygg-primary: var(--ygg-blue-500);
+    --ygg-primary-hover: var(--ygg-blue-600);
+    --ygg-primary-soft: var(--ygg-blue-100);
+    --ygg-on-primary: #ffffff;
+    --ygg-accent2: var(--ygg-green-600);
+    --ygg-accent2-hover: var(--ygg-green-700);
+    --ygg-accent2-soft: var(--ygg-green-100);
+    /* Gold — landing runic wordmark ONLY. Do not consume for UI chrome. */
     --ygg-accent: var(--ygg-gold-500);
-    --ygg-link: var(--ygg-green-700);
+    --ygg-link: var(--ygg-blue-600);
 
     /* ---- Status ---- */
     --ygg-ok: #0e7c66;
@@ -126,11 +140,16 @@
     --ygg-text-on-dark: #eef2f8;
     --ygg-text-on-dark-muted: #9fb0cc;
 
-    /* Accents — brighter on dark for contrast */
-    --ygg-primary: var(--ygg-green-400);
-    --ygg-primary-hover: var(--ygg-green-300);
-    --ygg-primary-soft: #0e2a26;
-    --ygg-link: var(--ygg-green-400);
+    /* Accents — brighter on dark for contrast. Primary text flips to ink
+     * (the mockups render dark-mode primary buttons as ink-on-blue). */
+    --ygg-primary: var(--ygg-blue-400);
+    --ygg-primary-hover: var(--ygg-blue-500);
+    --ygg-primary-soft: #16233c;
+    --ygg-on-primary: #0e1524;
+    --ygg-accent2: var(--ygg-green-400);
+    --ygg-accent2-hover: var(--ygg-green-300);
+    --ygg-accent2-soft: #0e2a26;
+    --ygg-link: var(--ygg-blue-400);
     --ygg-accent: var(--ygg-gold-400);
 
     /* Per-project accents (lighter variants) */

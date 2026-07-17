@@ -3,8 +3,8 @@
  * Public API (unchanged): window.appNotify(type, message, options)
  *   type:    'success' | 'danger' | 'warning' | 'info' (aliases: error/warn/ok)
  *   options: { autohide?: bool (default true), delay?: ms (default 4500) }
- * Styling lives in the Tailwind layer (.ygg-toast*); icons come from the
- * Lucide sprite at window.YGG_SPRITE.
+ * Styling lives in the Tailwind layer (.ygg-toast*); icons are Font Awesome,
+ * self-hosted and loaded sitewide in base.html.
  */
 (function () {
     'use strict';
@@ -23,7 +23,12 @@
     }
 
     function toastIcon(type) {
-        return { success: 'circle-check', danger: 'circle-alert', warning: 'triangle-alert', info: 'info' }[type] || 'info';
+        return {
+            success: 'fa-circle-check',
+            danger: 'fa-circle-exclamation',
+            warning: 'fa-triangle-exclamation',
+            info: 'fa-circle-info',
+        }[type] || 'fa-circle-info';
     }
 
     function ensureContainer() {
@@ -48,7 +53,6 @@
         const text = String(message || '').trim();
         if (!text) return;
         const settings = options || {};
-        const sprite = window.YGG_SPRITE || '/static/icons/lucide-sprite.svg';
 
         const container = ensureContainer();
         const toast = document.createElement('div');
@@ -56,13 +60,9 @@
         toast.setAttribute('role', 'alert');
         toast.setAttribute('aria-live', t === 'danger' ? 'assertive' : 'polite');
 
-        const svgNS = 'http://www.w3.org/2000/svg';
-        const svg = document.createElementNS(svgNS, 'svg');
-        svg.setAttribute('class', 'ygg-icon ygg-toast__icon');
-        svg.setAttribute('aria-hidden', 'true');
-        const use = document.createElementNS(svgNS, 'use');
-        use.setAttribute('href', sprite + '#lc-' + toastIcon(t));
-        svg.appendChild(use);
+        const iconEl = document.createElement("i");
+        iconEl.className = "fas " + toastIcon(t) + " ygg-toast__icon";
+        iconEl.setAttribute("aria-hidden", "true");
 
         const body = document.createElement('div');
         body.className = 'ygg-toast__body';
@@ -82,7 +82,7 @@
         close.innerHTML = '&times;';
         close.addEventListener('click', function () { dismiss(toast); });
 
-        toast.appendChild(svg);
+        toast.appendChild(iconEl);
         toast.appendChild(body);
         toast.appendChild(close);
         container.appendChild(toast);

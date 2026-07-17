@@ -49,3 +49,63 @@ def order_projects_for_landing(queryset):
     return queryset.annotate(
         _landing_rank=Case(*whens, default=Value(len(DOMAIN_CHOICES)), output_field=IntegerField())
     ).order_by("_landing_rank", "name")
+
+
+# Fallback copy for domains whose Project row has no description set.
+_DOMAIN_BLURBS = {
+    "maxillo": "Dental & maxillofacial imaging — bite classification, IOS, CBCT and panoramic extraction.",
+    "brain": "Brain tumor MRI — multi-sequence review with AI-assisted captioning.",
+    "laparoscopy": "Surgical video annotation — frame-accurate segmentation and tagging.",
+}
+
+# Default glyph per domain when Project.icon is blank.
+_DOMAIN_ICONS = {
+    "maxillo": "fas fa-tooth",
+    "brain": "fas fa-brain",
+    "laparoscopy": "fas fa-video",
+}
+
+
+def patient_count_for(slug):
+    """Return the patient count for a domain, or None if it can't be determined.
+
+    Patients live in per-app tables with no FK back to Project, so this resolves
+    the domain's Patient model by app label. Best-effort: the landing page must
+    never 500 because a count failed.
+    """
+    from django.apps import apps
+
+    try:
+        return apps.get_model(slug, "Patient").objects.count()
+    except Exception:  # noqa: BLE001 - unknown/legacy domain, or table absent
+        return None
+
+
+def landing_cards(projects):
+    """Build the landing page's domain cards from real Project rows.
+
+    Returns dicts of {project, slug, name, icon, blurb, stat}. `stat` is a true
+    patient count (never a placeholder); it is omitted when unavailable so the
+    card renders without a fabricated figure.
+    """
+    cards = []
+    for project in projects:
+        slug = project.slug or ""
+        count = patient_count_for(slug)
+        if count is None:
+            stat = ""
+        elif count == 1:
+            stat = "1 patient"
+        else:
+            stat = "{:,} patients".format(count)
+        cards.append(
+            {
+                "project": project,
+                "slug": slug,
+                "name": project.name,
+                "icon": project.icon or _DOMAIN_ICONS.get(slug, "fas fa-folder-open"),
+                "blurb": project.description or _DOMAIN_BLURBS.get(slug, ""),
+                "stat": stat,
+            }
+        )
+    return cards
