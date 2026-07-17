@@ -1497,8 +1497,15 @@
 .side-tab.is-active { color: var(--ygg-primary); border-bottom-color: var(--ygg-primary); }
 .side-panel__body {
     padding: 18px;
-    max-height: 75vh;
+    max-height: calc(100vh - 100px);
     overflow-y: auto;
+}
+/* The classification dropdowns (.value-dropdown) open downward from the last
+   row and are clipped by .side-panel's own box, which otherwise wraps tight
+   to the (often short) classification content. Reserve room below the grid
+   so a fully-open dropdown always has space to render into. */
+.side-tab-pane[data-tab-pane="classification"] {
+    padding-bottom: 210px;
 }
 .side-tab-pane { display: none; }
 .side-tab-pane.is-active { display: block; }

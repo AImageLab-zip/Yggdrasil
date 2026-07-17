@@ -154,8 +154,8 @@ def patient_list(request):
         comma = request.GET.get('tags', '')
         if comma:
             tags_selected = [t.strip() for t in comma.split(',') if t.strip()]
-    per_page = int(request.GET.get('per_page', 20))
-    
+    per_page = int(request.GET.get('per_page', 10))
+
     # Store base queryset for folder counts BEFORE applying folder filter
     base_patients_for_counts = patients
     
@@ -183,7 +183,7 @@ def patient_list(request):
     patients = patients.order_by('-uploaded_at')
     
     # Get filter parameters for optimization decision
-    per_page = int(request.GET.get('per_page', 20))
+    per_page = int(request.GET.get('per_page', 10))
     page_number = request.GET.get('page')
     
     # Check if we have modality status filters that require processing all patients

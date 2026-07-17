@@ -1,9 +1,9 @@
 <div class="scan-settings-panel">
-    {# Rename moved to the patient header (patient_header_section.html), which
+    {% comment %} Rename moved to the patient header (patient_header_section.html), which
        is now the page's only .btn-edit-name / .scan-name-display instance —
        initNameEditing() in patient_detail.js binds to whichever one exists.
        The hidden `name` field below still must exist: syncManagementNameField()
-       keeps it in sync after a rename so this form doesn't clobber it on save. #}
+       keeps it in sync after a rename so this form doesn't clobber it on save. {% endcomment %}
     {% if can_modify_segmentation %}
                 <form method="post" class="scan-management-form">
                     {% csrf_token %}

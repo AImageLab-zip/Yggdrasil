@@ -8,9 +8,9 @@
     <!-- 3D Viewer Column -->
     <div class="patient-view-viewer">
         <div class="modality-tabs" id="modalityToggleGroup">
-            {# Dynamic modality toggles — restyled as a tab strip via CSS only;
+            {% comment %} Dynamic modality toggles — restyled as a tab strip via CSS only;
                the radio/label DOM and ids are unchanged, so
-               patient_detail.js's `change` listener keeps working verbatim. #}
+               patient_detail.js's `change` listener keeps working verbatim. {% endcomment %}
             {% if patient_modalities %}
                 {% for m in patient_modalities %}
                     {% if m.slug != 'rawzip' %}

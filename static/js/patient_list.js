@@ -98,7 +98,7 @@ function clearAllFilters() {
     
     // Preserve per_page if it's not the default
     const perPage = url.searchParams.get('per_page');
-    if (perPage && perPage !== '20') {
+    if (perPage && perPage !== '10') {
         newSearchParams.set('per_page', perPage);
     }
     

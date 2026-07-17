@@ -90,11 +90,6 @@
         </div>
         {% endif %}
 
-        <!-- Report Template: shown directly under the voice-caption controls so
-             clinicians can read the structured reporting checklist while
-             dictating. Content is per-domain; language persists cross-app. -->
-        {% include 'common/sections/report_template_section.html' %}
-
         <!-- Captions List -->
         <div class="voice-captions-list">
             {% with captions=voice_captions %}
@@ -208,6 +203,11 @@
                 {% endif %}
             {% endwith %}
         </div>
+
+        <!-- Report Template: shown directly under the voice-caption controls so
+             clinicians can read the structured reporting checklist while
+             dictating. Content is per-domain; language persists cross-app. -->
+        {% include 'common/sections/report_template_section.html' %}
 
         <!-- Edit Transcription Modal -->
         <div class="modal" id="editTranscriptionModal" tabindex="-1" aria-labelledby="editTranscriptionLabel" aria-hidden="true">

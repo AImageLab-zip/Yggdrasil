@@ -279,10 +279,10 @@
                 </div>
             </div>
 
-            {# Annotation-mode panels stay OUTSIDE the tab shell: the annotator
+            {% comment %} Annotation-mode panels stay OUTSIDE the tab shell: the annotator
                script toggles their .d-none directly (see the bottom of this
                file), and a parent tab-pane's own display:none would fight
-               that toggle when its tab isn't the active one. #}
+               that toggle when its tab isn't the active one. {% endcomment %}
             <div id="magic-toolbox-panel" class="d-none mb-3">
                 <div class="card border-info-subtle">
                     <div class="card-header d-flex justify-content-between align-items-center py-2">

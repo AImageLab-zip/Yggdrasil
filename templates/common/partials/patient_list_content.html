@@ -120,7 +120,7 @@
 
                     <div class="side-actions">
                         <button type="submit" class="ygg-btn ygg-btn--primary ygg-btn--sm">Apply</button>
-                        <a class="ygg-btn ygg-btn--ghost ygg-btn--sm" href="?{% if folder_id and folder_id != 'all' %}folder={{ folder_id|urlencode }}{% endif %}{% if per_page and per_page != 20 %}{% if folder_id and folder_id != 'all' %}&{% endif %}per_page={{ per_page }}{% endif %}">Reset</a>
+                        <a class="ygg-btn ygg-btn--ghost ygg-btn--sm" href="?{% if folder_id and folder_id != 'all' %}folder={{ folder_id|urlencode }}{% endif %}{% if per_page and per_page != 10 %}{% if folder_id and folder_id != 'all' %}&{% endif %}per_page={{ per_page }}{% endif %}">Reset</a>
                     </div>
                 </form>
             </div>
@@ -130,8 +130,8 @@
         <main class="patients-main">
 
             {% if is_admin_user %}
-            {# Bulk bar: sits ABOVE the list and only appears once rows are
-               selected. patient_list.js shows/hides #bulkToolbarCard. #}
+            {% comment %} Bulk bar: sits ABOVE the list and only appears once rows are
+               selected. patient_list.js shows/hides #bulkToolbarCard. {% endcomment %}
             <div id="bulkToolbarCard" class="bulk-bar" hidden>
                 <div class="bulk-bar__inner" id="bulkToolbar">
                     <div class="bulk-bar__count" id="selectedCount">0 selected</div>
