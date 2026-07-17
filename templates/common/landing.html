@@ -9,150 +9,170 @@
 <link rel="stylesheet" href="{% static 'css/landing.css' %}">
 {% endblock %}
 
-{% block navbar %}{% endblock %}
+{# Landing brings its own chrome (top bar + footer) per the design handoff. #}
+{% block chrome %}{% endblock %}
 {% block footer %}{% endblock %}
 {% block main_class %}landing{% endblock %}
+{% block theme_default_dark %}true{% endblock %}
 
 {% block content %}
-<!-- Auth control -->
-<div class="landing-auth">
-    {% if user.is_authenticated %}
-        <div class="relative" data-dropdown>
-            <button type="button" class="btn btn-secondary btn-sm shadow-card" data-dropdown-toggle aria-expanded="false">
-                {% icon 'user' %}<span>{{ user.username }}</span>{% icon 'chevron-down' 'ygg-icon-sm opacity-60' %}
-            </button>
-            <div class="ygg-menu" data-dropdown-menu hidden>
-                {% if user.is_staff %}
-                    <a class="ygg-menu-item" href="{% url 'admin_control_panel' %}">{% icon 'layout-dashboard' %}<span>Control Panel</span></a>
-                    <a class="ygg-menu-item" href="{% url 'online_users_dashboard' %}">{% icon 'circle-dot' %}<span>Live Users</span></a>
-                    <div class="border-t border-line my-1"></div>
-                {% endif %}
-                <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-                    <button type="submit" class="ygg-menu-item w-full text-danger">{% icon 'sign-out-alt' %}<span>Logout</span></button>
-                </form>
-            </div>
-        </div>
-    {% else %}
-        <div class="flex gap-2">
-            <a href="{% url 'login' %}" class="btn btn-secondary btn-sm shadow-card">{% icon 'sign-in-alt' %}<span>Login</span></a>
-            <a href="{% url 'register' %}" class="btn btn-primary btn-sm shadow-card">{% icon 'user-plus' %}<span>Register</span></a>
-        </div>
-    {% endif %}
-</div>
-
-<!-- Masthead -->
-<header class="landing-top">
-    <div class="landing-lockup" tabindex="0" aria-describedby="landing-tagline">
-        <img class="landing-tree" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
-        <h1 class="landing-title" id="landing-title" data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ">Ygg<span class="accent">drasil</span></h1>
-        <span class="landing-tagline" id="landing-tagline" role="tooltip">Taking its name from the cosmic tree of Norse mythology, YGGDRASIL represents a unified platform that connects diverse research fields, datasets, users, and workflows</span>
+<!-- Top bar: lockup + version, theme toggle, user menu -->
+<header class="landing-bar">
+    <div class="landing-bar__brand">
+        <img class="landing-bar__logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+        <span class="landing-bar__word">Yggdrasil</span>
+        <span class="landing-bar__ver mono">v{{ app_version }}</span>
     </div>
-    {% if user.is_authenticated and not projects %}
-        <p class="landing-notice">{% icon 'lock' %} You don't have access to any project yet. Contact an administrator if you believe this is an error.</p>
-    {% endif %}
+
+    <div class="landing-bar__actions">
+        <button type="button" class="landing-icon-btn" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">
+            <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
+            <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
+        </button>
+
+        {% if user.is_authenticated %}
+            <div class="ygg-dropdown">
+                <button type="button" class="landing-user" data-ygg-toggle="dropdown" aria-expanded="false">
+                    <span class="landing-user__avatar">{{ user.username|slice:':2' }}</span>
+                    <span class="landing-user__name">{{ user.username }}</span>
+                    <i class="fas fa-chevron-down landing-user__caret" aria-hidden="true"></i>
+                </button>
+                <div class="ygg-dropdown-menu">
+                    <div class="landing-menu__who">Signed in as <strong>{{ user.username }}</strong></div>
+                    <div class="ygg-dropdown-divider"></div>
+                    {% if user.is_staff %}
+                        <a class="ygg-dropdown-item" href="{% url 'online_users_dashboard' %}">{% icon 'circle-dot' 'ygg-icon' %}<span>Live Users</span></a>
+                        <a class="ygg-dropdown-item" href="{% url 'admin_control_panel' %}">{% icon 'gauge-high' 'ygg-icon' %}<span>Admin Panel</span></a>
+                        <a class="ygg-dropdown-item" href="{% url 'user_activity_stats' %}">{% icon 'chart-line' 'ygg-icon' %}<span>Activity Stats</span></a>
+                        <div class="ygg-dropdown-divider"></div>
+                    {% endif %}
+                    <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+                        <button type="submit" class="ygg-dropdown-item is-danger">{% icon 'sign-out-alt' 'ygg-icon' %}<span>Logout</span></button>
+                    </form>
+                </div>
+            </div>
+        {% else %}
+            <a href="{% url 'login' %}" class="landing-btn landing-btn--primary">Login</a>
+            <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost">Register</a>
+        {% endif %}
+    </div>
 </header>
 
-<!-- Three-domain chooser -->
-<div class="domains">
-    <!-- Maxillofacial -->
-    <a class="domain domain--maxillo" href="{% if user.is_authenticated %}/maxillo/{% else %}{% url 'login' %}{% endif %}">
-        <span class="domain__code">Maxillo · dental &amp; cranio-facial</span>
-        <h2 class="domain__title">Maxillofacial Imaging</h2>
-        <p class="domain__desc">Cone-beam CT, intraoral 3D scans, panoramic and teleradiographic views — reviewed side by side, with intraoral segmentation and bite analysis.</p>
-        <div class="domain__art">
-            <svg viewBox="0 0 320 240" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                <path d="M40 70 C40 170 120 210 160 210 C200 210 280 170 280 70" opacity="0.35"/>
-                <g fill="currentColor" stroke="none">
-                    <circle cx="52" cy="82" r="9"/><circle cx="60" cy="118" r="10"/><circle cx="78" cy="152" r="11"/>
-                    <circle cx="106" cy="178" r="12"/><circle cx="140" cy="192" r="12"/><circle cx="180" cy="192" r="12"/>
-                    <circle cx="214" cy="178" r="12"/><circle cx="242" cy="152" r="11"/><circle cx="260" cy="118" r="10"/><circle cx="268" cy="82" r="9"/>
-                </g>
-            </svg>
+<div class="landing-stage">
+    <!-- Hero: glow + logo + wordmark -->
+    <div class="landing-hero">
+        <div class="landing-lockup">
+            <span class="landing-glow" aria-hidden="true"></span>
+            <img class="landing-tree" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
         </div>
-        <div class="domain__modalities">
-            <span class="domain__mod">CBCT</span><span class="domain__mod">IOS</span><span class="domain__mod">PANO</span><span class="domain__mod">TELE</span>
-        </div>
-        <span class="domain__cta">{% if user.is_authenticated %}Open workspace{% else %}Sign in to open{% endif %} {% icon 'arrow-right' %}</span>
-    </a>
-
-    <!-- Neuro-oncology -->
-    <a class="domain domain--brain" href="{% if user.is_authenticated %}/brain/{% else %}{% url 'login' %}{% endif %}">
-        <span class="domain__code">Neuro · tumor MRI</span>
-        <h2 class="domain__title">Neuro-Oncology MRI</h2>
-        <p class="domain__desc">Multiparametric brain-tumor MRI — T1, T1c, T2 and FLAIR — in a synchronized four-window grid alongside model segmentations and structured reports.</p>
-        <div class="domain__art">
-            <svg viewBox="0 0 320 240" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                <path d="M96 70 L160 48 L232 84 M96 70 L120 150 M160 48 L200 120 M232 84 L200 120 M120 150 L200 120 M120 150 L96 190 M200 120 L240 178 M96 190 L160 210 L240 178" opacity="0.5"/>
-                <g fill="currentColor" stroke="none">
-                    <circle cx="96" cy="70" r="7"/><circle cx="160" cy="48" r="8"/><circle cx="232" cy="84" r="7"/>
-                    <circle cx="120" cy="150" r="8"/><circle cx="200" cy="120" r="9"/><circle cx="96" cy="190" r="6"/>
-                    <circle cx="160" cy="210" r="7"/><circle cx="240" cy="178" r="7"/>
-                </g>
-            </svg>
-        </div>
-        <div class="domain__modalities">
-            <span class="domain__mod">T1</span><span class="domain__mod">T1c</span><span class="domain__mod">T2</span><span class="domain__mod">FLAIR</span><span class="domain__mod">SEG</span>
-        </div>
-        <span class="domain__cta">{% if user.is_authenticated %}Open workspace{% else %}Sign in to open{% endif %} {% icon 'arrow-right' %}</span>
-    </a>
-
-    <!-- Laparoscopy -->
-    <a class="domain domain--laparoscopy" href="{% if user.is_authenticated %}/laparoscopy/{% else %}{% url 'login' %}{% endif %}">
-        <span class="domain__code">Laparo · surgical video</span>
-        <h2 class="domain__title">Surgical Video Review</h2>
-        <p class="domain__desc">Laparoscopic procedure video with frame-accurate scrubbing and a canvas annotation layer — mark instruments, anatomy and events second by second.</p>
-        <div class="domain__art">
-            <svg viewBox="0 0 320 240" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                <circle cx="160" cy="120" r="78" opacity="0.4"/>
-                <circle cx="160" cy="120" r="52" opacity="0.7"/>
-                <path d="M160 42 v22 M160 176 v22 M82 120 h22 M216 120 h22" opacity="0.7"/>
-                <path d="M108 120 q26 -34 52 0 t52 0" />
-            </svg>
-        </div>
-        <div class="domain__modalities">
-            <span class="domain__mod">VIDEO</span><span class="domain__mod">FRAMES</span><span class="domain__mod">ANNOTATE</span>
-        </div>
-        <span class="domain__cta">{% if user.is_authenticated %}Open workspace{% else %}Sign in to open{% endif %} {% icon 'arrow-right' %}</span>
-    </a>
-</div>
-
-{% user_recents user 6 as recents %}
-{% if recents %}
-<div class="landing-recents">
-    <div class="landing-recents__label">Continue where you left off</div>
-    <div class="landing-recents__row">
-        {% for r in recents %}
-        <a class="landing-recents__item" href="{% url r.domain|add:':patient_detail' patient_id=r.patient_pk %}">
-            <span class="landing-recents__icon domain--{{ r.domain }}">{% icon 'user' %}</span>
-            <span class="landing-recents__meta">
-                <span class="landing-recents__name">{{ r.patient_name|default:r.patient_pk }}</span>
-                <span class="landing-recents__proj">{{ r.project_label }}</span>
-            </span>
-        </a>
-        {% endfor %}
+        <h1 class="landing-title" id="landing-title"
+            data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ"
+            title="Click for the old tongue" role="button" tabindex="0"
+            aria-label="Yggdrasil — click to toggle the runic wordmark"><span class="landing-title__latin"><span>Ygg</span><span class="accent">drasil</span></span></h1>
+        <p class="landing-tagline">The world-tree, read as a clinical instrument. Choose a domain to enter.</p>
     </div>
-</div>
-{% endif %}
 
-{% if demo_url %}
-<div class="landing-demo">
-    <a class="landing-demo-cta" href="{{ demo_url }}">
-        {% icon 'eye' %} Explore the public demo — no account needed {% icon 'arrow-right' %}
-    </a>
+    {% if user.is_authenticated %}
+        {% if landing_cards %}
+            <!-- Domain chooser -->
+            <div class="domains">
+                {% for c in landing_cards %}
+                <a class="domain domain--{{ c.slug }}" href="/{{ c.slug }}/">
+                    <span class="domain__bar" aria-hidden="true"></span>
+                    <i class="{{ c.icon }} domain__watermark" aria-hidden="true"></i>
+                    <span class="domain__tile">{% icon c.icon %}</span>
+                    <h2 class="domain__title">{{ c.name }}</h2>
+                    <p class="domain__desc">{{ c.blurb }}</p>
+                    <span class="domain__spacer"></span>
+                    <span class="domain__foot">
+                        <span class="domain__stat mono">{{ c.stat }}</span>
+                        <span class="domain__cta">Enter <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
+                    </span>
+                </a>
+                {% endfor %}
+            </div>
+
+            {% user_recents user 6 as recents %}
+            {% if recents %}
+            <div class="landing-recents">
+                <div class="landing-recents__label">Continue where you left off</div>
+                <div class="landing-recents__row">
+                    {% for r in recents %}
+                    <a class="landing-recents__item" href="{% url r.domain|add:':patient_detail' patient_id=r.patient_pk %}">
+                        <span class="landing-recents__icon domain--{{ r.domain }}">{% icon 'user' %}</span>
+                        <span class="landing-recents__meta">
+                            <span class="landing-recents__name">{{ r.patient_name|default:r.patient_pk }}</span>
+                            <span class="landing-recents__proj mono">{{ r.project_label }}</span>
+                        </span>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        {% else %}
+            <!-- Authenticated but with no project access -->
+            <div class="landing-warn">
+                <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+                You are not allowed in any project of Yggdrasil. Contact the administrator if you think this is an error.
+            </div>
+        {% endif %}
+    {% else %}
+        <!-- Guest -->
+        <div class="landing-gate">
+            <span class="landing-gate__icon"><i class="fas fa-lock" aria-hidden="true"></i></span>
+            <h3 class="landing-gate__title">Authentication required</h3>
+            <p class="landing-gate__msg">Please log in to access Yggdrasil clinical workspaces.</p>
+            <div class="landing-gate__actions">
+                <a href="{% url 'login' %}" class="landing-btn landing-btn--primary landing-btn--block">Login</a>
+                <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost landing-btn--block">Register</a>
+            </div>
+            {% if demo_url %}
+            <a class="landing-demo-cta" href="{{ demo_url }}">
+                {% icon 'eye' %} Explore the public demo — no account needed <i class="fas fa-arrow-right" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+        </div>
+    {% endif %}
 </div>
-{% endif %}
+
+<footer class="landing-foot">
+    Powered by <a href="https://aimagelab.ing.unimore.it" target="_blank" rel="noopener">AImageLab</a>
+    <span class="landing-foot__dot">·</span> Yggdrasil v{{ app_version }}
+    <span class="landing-foot__dot">·</span>
+    <a href="https://github.com/AImageLab-zip/Yggdrasil" target="_blank" rel="noopener" class="landing-foot__gh">{% icon 'github' %} GitHub</a>
+</footer>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// Runic wordmark: click to swap between Latin and the old tongue. It also opens
+// in runes at random, keeping the easter egg from the previous landing page.
 document.addEventListener('DOMContentLoaded', function () {
     var title = document.getElementById('landing-title');
-    if (!title || Math.random() < 0.5) {
-        return;
+    if (!title) { return; }
+
+    var latin = title.querySelector('.landing-title__latin');
+    var runes = document.createElement('span');
+    runes.className = 'landing-title__runes';
+    runes.textContent = title.dataset.runes;
+    runes.hidden = true;
+    title.appendChild(runes);
+
+    function show(showRunes) {
+        latin.hidden = showRunes;
+        runes.hidden = !showRunes;
+        title.classList.toggle('title--runes', showRunes);
     }
-    title.textContent = title.dataset.runes;
-    title.classList.add('title--runes');
-    title.setAttribute('aria-label', title.dataset.title);
+
+    show(Math.random() < 0.5);
+
+    title.addEventListener('click', function () { show(runes.hidden); });
+    title.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            show(runes.hidden);
+        }
+    });
 });
 </script>
 {% endblock %}

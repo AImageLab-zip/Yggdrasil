@@ -9,7 +9,7 @@ from django.db.models import Q
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import render_with_fallback
 from common.demo import landing_demo_url
-from common.domains import order_projects_for_landing
+from common.domains import landing_cards, order_projects_for_landing
 from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
@@ -64,6 +64,7 @@ def home(request):
         
         return render(request, 'common/landing.html', {
             'projects': projects,
+            'landing_cards': landing_cards(projects),
             'current_project_id': current_project_id,
             'current_project_name': current_project_name,
             'continue_url': continue_url,
