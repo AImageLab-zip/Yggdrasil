@@ -266,13 +266,12 @@ main.landing {
     pointer-events: none;
 }
 /* The brain glyph's ink sits lower in its em-box than the tooth/video
-   glyphs, so the shared bottom offset above crops off the part that
-   actually reads as a brain, leaving only disconnected gyri bumps. Lift
-   and shrink it slightly so the hemisphere silhouette stays in frame. */
+   glyphs (almost no padding below it), so the shared -18px bottom offset
+   crops into the actual silhouette instead of just trimming empty space.
+   Nudge it up just enough to clear the ink; keep the same size/corner
+   anchor as the other watermarks so it reads with the same visual weight. */
 .domain--brain .domain__watermark {
-    bottom: 28px;
-    right: -4px;
-    font-size: 120px;
+    bottom: -3px;
 }
 .domain__tile {
     width: 52px;
