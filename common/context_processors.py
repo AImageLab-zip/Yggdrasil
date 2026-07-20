@@ -1,6 +1,6 @@
 from django.conf import settings
 
-from common.models import Project, ProjectAccess
+from common.models import Project, ProjectAccess, SiteMaintenance
 
 
 def app_meta(request):
@@ -9,6 +9,14 @@ def app_meta(request):
         'app_version': getattr(settings, 'APP_VERSION', ''),
         'is_demo_guest': is_demo_guest(getattr(request, 'user', None)),
     }
+
+
+def site_maintenance(request):
+    try:
+        return {'site_maintenance': SiteMaintenance.get_solo()}
+    except Exception:
+        # Keeps deploys safe while migrations are being applied.
+        return {'site_maintenance': None}
 
 
 def user_prefs(request):

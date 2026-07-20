@@ -141,6 +141,11 @@ urlpatterns = [
         name="patient_viewer_data",
     ),
     path(
+        "api/patient/<int:patient_id>/ios/landmarks/",
+        views.patient_ios_landmarks,
+        name="patient_ios_landmarks",
+    ),
+    path(
         "api/patient/<int:patient_id>/cbct/",
         views.patient_cbct_data,
         name="patient_cbct_data",

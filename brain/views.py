@@ -900,6 +900,7 @@ def upload_text_caption(request, patient_id):
 
 
 @login_required
+@require_http_methods(["DELETE"])
 def delete_voice_caption(request, patient_id, caption_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     caption = get_object_or_404(patient.voice_captions, id=caption_id)

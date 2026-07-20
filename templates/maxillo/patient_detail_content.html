@@ -49,9 +49,20 @@
                         <option value="20">20x20</option>
                     </select>
                 </div>
+            <div class="viewer-toolbar__divider"></div>
+
+            <div class="viewer-toolbar__group ios-landmark-toolbar" id="iosLandmarkControls">
+                <span class="viewer-toolbar__label">Landmarks</span>
+                <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Annotate landmarks" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
+                <select id="landmarkTooth" class="ios-landmark-select" aria-label="Landmark tooth">
+                    <option value="">Tooth</option>
+                </select>
+                <div class="ios-landmark-types" id="iosLandmarkTypes" aria-label="Landmark type"></div>
+                <button type="button" class="icon-btn" id="saveLandmarks" title="Save landmarks" disabled><i class="fas fa-floppy-disk" aria-hidden="true"></i></button>
+                <span class="ios-landmark-status" id="iosLandmarkStatus">Off</span>
             </div>
 
-            <div class="viewer-toolbar__divider"></div>
+            </div>
 
             <div class="viewer-toolbar__group" id="cbctControls" {% if patient.has_ios_scans %}style="display: none;"{% endif %}>
                 <span class="viewer-toolbar__label">Tools</span>
@@ -363,13 +374,22 @@
                                         <li><strong>Reset button:</strong> Return to default view</li>
                                     </ul>
                                 </div>
-                                <div class="instruction-group">
-                                    <h6 class="text-primary mb-2"><i class="fas fa-diagram-project me-1"></i>Display Options</h6>
+                                 <div class="instruction-group">
+                                     <h6 class="text-primary mb-2"><i class="fas fa-diagram-project me-1"></i>Display Options</h6>
                                     <ul class="list-unstyled instruction-list">
                                         <li><strong>Wireframe:</strong> Toggle wireframe mode for better detail</li>
                                         <li><strong>Solid:</strong> Default shaded view</li>
-                                    </ul>
-                                </div>
+                                     </ul>
+                                 </div>
+                                 <div class="instruction-group">
+                                     <h6 class="text-primary mb-2"><i class="fas fa-location-dot me-1"></i>Landmark Annotation</h6>
+                                     <ul class="list-unstyled instruction-list">
+                                         <li><strong>Annotation button:</strong> Show saved landmarks and enter annotation mode</li>
+                                         <li><strong>Tooth and type:</strong> Select the FDI tooth and landmark type</li>
+                                         <li><strong>Middle-click:</strong> Place the selected landmark on the matching jaw surface</li>
+                                         <li><strong>Save:</strong> Persist changes when you are finished</li>
+                                     </ul>
+                                 </div>
                             </div>
                         </div>
                     </div>

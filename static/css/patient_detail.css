@@ -1441,6 +1441,34 @@
     margin-right: 4px;
 }
 .viewer-toolbar__divider { width: 1px; height: 22px; background: var(--ygg-border); }
+.ios-landmark-toolbar { flex-wrap: wrap; }
+.ios-landmark-select {
+    max-width: 78px;
+    height: 28px;
+    border: 1px solid var(--ygg-border);
+    border-radius: 7px;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    font-size: 11px;
+}
+.ios-landmark-types { display: flex; flex-wrap: wrap; gap: 3px; }
+.ios-landmark-type {
+    border: 1px solid var(--ygg-border);
+    border-radius: 6px;
+    background: var(--ygg-surface);
+    color: var(--ygg-text-muted);
+    cursor: pointer;
+    font-size: 10px;
+    line-height: 1;
+    padding: 5px 6px;
+}
+.ios-landmark-type.active, #toggleLandmarkMode.active {
+    border-color: var(--ygg-primary);
+    background: var(--ygg-accent-soft);
+    color: var(--ygg-primary);
+}
+.ios-landmark-type:disabled, .ios-landmark-select:disabled { cursor: not-allowed; opacity: 0.55; }
+.ios-landmark-status { color: var(--ygg-text-faint); font-size: 10px; white-space: nowrap; }
 
 /* ---- Modality tab strip (restyles the existing radio+label toggle group —
    no id/class/JS contract changes; patient_detail.js still reads the radio

@@ -1022,15 +1022,26 @@ def mark_job_completed(job_id, output_files, logs=None):
                 job.modality_slug, is_processed=True
             )
 
-            # Idempotent replace: clear any previously-registered rows of this type
-            # for the entity before writing the fresh set, so retries/reprocessing
-            # with a changed output path don't leave stale rows behind (this is what
-            # keeps single-row lookups like Patient.get_cbct_processed_file() valid).
-            FileRegistry.objects.filter(
-                file_type=registry_type, **_job_entity_fk_kwargs(job)
-            ).delete()
+            landmark_output = None
+            if job.modality_slug == "ios":
+                landmark_output = (
+                    output_files.get("landmarks.json")
+                    or output_files.get("landmarks")
+                )
+            generic_outputs = {
+                file_type: out_spec
+                for file_type, out_spec in output_files.items()
+                if not (job.modality_slug == "ios" and file_type in {"landmarks.json", "landmarks"})
+            }
 
-            for file_type, out_spec in output_files.items():
+            # Idempotent replace only when this completion actually supplied scan
+            # artifacts. A landmarks-only prediction must not remove the viewer STL.
+            if generic_outputs:
+                FileRegistry.objects.filter(
+                    file_type=registry_type, **_job_entity_fk_kwargs(job)
+                ).delete()
+
+            for file_type, out_spec in generic_outputs.items():
                 path_or_key = _resolve_output_path_or_key(out_spec)
                 logger.info(
                     f"Processing output file: type={file_type}, path_or_key={path_or_key}"
@@ -1061,6 +1072,43 @@ def mark_job_completed(job_id, output_files, logs=None):
                     },
                 )
                 logger.info("FileRegistry entry stored/updated successfully")
+
+            if landmark_output:
+                landmark_path = _resolve_output_path_or_key(landmark_output)
+                if not landmark_path or not artifact_exists(landmark_path):
+                    logger.warning("IOS landmark output does not exist for job %s", job.id)
+                elif not job_patient:
+                    logger.warning("IOS landmark output has no patient for job %s", job.id)
+                else:
+                    file_size, file_hash = _size_hash_for_path_or_key(landmark_path)
+                    active = FileRegistry.objects.filter(
+                        file_type="ios_landmarks", **_job_entity_fk_kwargs(job)
+                    ).order_by("-created_at", "-id").first()
+                    defaults = {
+                        "file_size": file_size or 0,
+                        "file_hash": file_hash or "object",
+                        "subtype": "landmarks",
+                        "modality": step.modality if step else None,
+                        "processing_job": job,
+                        **_job_entity_fk_kwargs(job),
+                        "metadata": {
+                            "origin": "ai",
+                            "source_job_id": job.id,
+                            "processed_at": timezone.now().isoformat(),
+                        },
+                    }
+                    if active and (active.metadata or {}).get("origin") != "ai":
+                        FileRegistry.objects.update_or_create(
+                            file_path=landmark_path,
+                            defaults={**defaults, "file_type": "ios_landmarks_prediction"},
+                        )
+                    else:
+                        if active:
+                            active.delete()
+                        FileRegistry.objects.update_or_create(
+                            file_path=landmark_path,
+                            defaults={**defaults, "file_type": "ios_landmarks"},
+                        )
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")

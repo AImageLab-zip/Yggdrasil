@@ -32,7 +32,10 @@ def record_recent(user, domain, patient_pk, patient_name="", project_label="", i
     if not getattr(user, "is_authenticated", False):
         return
     try:
-        from common.models import RecentlyViewed
+        from common.models import RecentlyViewed, SiteMaintenance
+        maintenance = SiteMaintenance.get_solo()
+        if maintenance.access_mode != SiteMaintenance.MODE_NORMAL and not user.is_staff:
+            return
         RecentlyViewed.objects.update_or_create(
             user=user, domain=str(domain or ""), patient_pk=patient_pk,
             defaults={

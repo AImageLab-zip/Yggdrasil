@@ -619,6 +619,8 @@ class FileRegistry(DomainFKAccessorMixin, models.Model):
 		('ios_raw_lower', 'IOS Raw Lower'),
 		('ios_processed_upper', 'IOS Processed Upper'),
 		('ios_processed_lower', 'IOS Processed Lower'),
+		('ios_landmarks', 'IOS Landmarks'),
+		('ios_landmarks_prediction', 'IOS Landmark Prediction'),
 		('audio_raw', 'Audio Raw'),
 		('audio_processed', 'Audio Processed Text'),
 		('bite_classification', 'Bite Classification Results'),
@@ -751,6 +753,43 @@ class SystemCheck(models.Model):
 
 	def __str__(self):
 		return f"{self.name} [{self.status}] @ {self.ran_at:%Y-%m-%d %H:%M}"
+
+
+class SiteMaintenance(models.Model):
+	"""Global operator-controlled access mode and planned-maintenance notice."""
+	MODE_NORMAL = "normal"
+	MODE_READ_ONLY = "read_only"
+	MODE_LOCKDOWN = "lockdown"
+	ACCESS_MODE_CHOICES = [
+		(MODE_NORMAL, "Normal"),
+		(MODE_READ_ONLY, "Read-only"),
+		(MODE_LOCKDOWN, "Full lockdown"),
+	]
+
+	id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+	access_mode = models.CharField(
+		max_length=20, choices=ACCESS_MODE_CHOICES, default=MODE_NORMAL
+	)
+	planned_message_enabled = models.BooleanField(default=False)
+	planned_message = models.TextField(max_length=1000, blank=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		constraints = [
+			models.CheckConstraint(
+				condition=models.Q(id=1),
+				name="common_site_maintenance_singleton",
+			),
+		]
+		verbose_name = "site maintenance"
+		verbose_name_plural = "site maintenance"
+
+	def __str__(self):
+		return f"Site maintenance ({self.get_access_mode_display()})"
+
+	@classmethod
+	def get_solo(cls):
+		return cls.objects.get(pk=1)
 
 
 class UserPreference(models.Model):

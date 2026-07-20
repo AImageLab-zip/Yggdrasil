@@ -121,6 +121,12 @@
     {% endblock %}
     {% endblock %}{# chrome #}
 
+    {% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message %}
+    <div class="alert-ygg alert-warning mx-4 mt-4" role="status">
+        {{ site_maintenance.planned_message }}
+    </div>
+    {% endif %}
+
     {% block messages %}
     {% if messages %}
         <script>

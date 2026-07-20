@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
-from common.models import SystemCheck
+from common.models import SiteMaintenance, SystemCheck
 from common.tasks import backup_database, select_backups_to_delete
 
 
@@ -154,3 +154,45 @@ class AdminControlPanelAccessTests(TestCase):
         response = self.client.get("/admin/control-panel/")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response.url)
+
+
+class SiteMaintenanceMiddlewareTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.staff = User.objects.create_user("maintenance-staff", password="pw", is_staff=True)
+
+    def setUp(self):
+        self.maintenance, _ = SiteMaintenance.objects.get_or_create(pk=1)
+        self.maintenance.access_mode = SiteMaintenance.MODE_NORMAL
+        self.maintenance.planned_message_enabled = False
+        self.maintenance.planned_message = ""
+        self.maintenance.save()
+
+    def test_lockdown_redirects_browser_navigation_and_leaves_staff_accessible(self):
+        self.maintenance.access_mode = SiteMaintenance.MODE_LOCKDOWN
+        self.maintenance.save()
+
+        response = self.client.get("/maxillo/")
+        self.assertRedirects(response, "/maintenance/", fetch_redirect_response=False)
+
+        self.client.login(username="maintenance-staff", password="pw")
+        response = self.client.get("/maxillo/")
+        self.assertNotEqual(response.url if response.status_code == 302 else "", "/maintenance/")
+
+    def test_read_only_blocks_writes_but_runner_callback_is_exempt(self):
+        self.maintenance.access_mode = SiteMaintenance.MODE_READ_ONLY
+        self.maintenance.save()
+
+        response = self.client.post("/api/notifications/mark-read/", {})
+        self.assertEqual(response.status_code, 423)
+
+        response = self.client.post("/api/runner/jobs/999999/claim/", {})
+        self.assertNotEqual(response.status_code, 423)
+
+    def test_planned_message_is_rendered_independently_of_access_mode(self):
+        self.maintenance.planned_message_enabled = True
+        self.maintenance.planned_message = "Maintenance starts tonight."
+        self.maintenance.save()
+
+        response = self.client.get("/maintenance/")
+        self.assertContains(response, "Maintenance starts tonight.", status_code=503)

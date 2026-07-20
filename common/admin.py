@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from common.models import ProcessingStep, SystemCheck
+from common.models import ProcessingStep, SiteMaintenance, SystemCheck
 
 
 @admin.register(ProcessingStep)
@@ -29,6 +29,18 @@ class SystemCheckAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SiteMaintenance)
+class SiteMaintenanceAdmin(admin.ModelAdmin):
+    fields = ("access_mode", "planned_message_enabled", "planned_message", "updated_at")
+    readonly_fields = ("updated_at",)
+
+    def has_add_permission(self, request):
         return False
 
     def has_delete_permission(self, request, obj=None):

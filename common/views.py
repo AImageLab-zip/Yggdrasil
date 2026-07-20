@@ -25,6 +25,11 @@ def _database_health():
         return {"status": "down", "message": str(exc)}
 
 
+def maintenance_page(request):
+    """Public page used while the site is in full lockdown."""
+    return render(request, "common/maintenance.html", status=503)
+
+
 def _object_storage_health():
     try:
         storage = get_object_storage()

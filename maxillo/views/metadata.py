@@ -3,6 +3,7 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
+from django.views.decorators.http import require_POST
 import json
 import logging
 
@@ -208,6 +209,7 @@ def get_nifti_metadata(request, patient_id):
 
 
 @login_required
+@require_POST
 def update_nifti_metadata(request, patient_id):
     """Update NIFTI metadata (admin only)"""
     try:

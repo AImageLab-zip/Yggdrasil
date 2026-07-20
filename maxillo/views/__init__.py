@@ -42,6 +42,7 @@ from .file_management import add_raw_file, delete_raw_file
 # Patient data API endpoints
 from .patient_data import (
     patient_viewer_data,
+    patient_ios_landmarks,
     patient_cbct_data,
     patient_volume_data,
     patient_panoramic_data,
@@ -113,6 +114,7 @@ __all__ = [
     'update_classification',
     # Data APIs
     'patient_viewer_data',
+    'patient_ios_landmarks',
     'patient_cbct_data',
     'patient_volume_data',
     'patient_panoramic_data',

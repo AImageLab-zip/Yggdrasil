@@ -353,7 +353,7 @@ function initViewerToggle() {
                 
                 if (iosContainer) iosContainer.style.display = 'block';
                 if (cbctContainer) cbctContainer.style.display = 'none';
-                if (iosControls) iosControls.style.display = 'block';
+                if (iosControls) iosControls.style.display = 'flex';
                 if (cbctControls) cbctControls.style.display = 'none';
                 
                 // Initialize IOS viewer if not already done
@@ -502,7 +502,7 @@ function initViewerToggle() {
     if (iosRadio && !cbctRadio) {
         if (iosContainer) iosContainer.style.display = 'block';
         if (cbctContainer) cbctContainer.style.display = 'none';
-        if (iosControls) iosControls.style.display = 'block';
+        if (iosControls) iosControls.style.display = 'flex';
         if (cbctControls) cbctControls.style.display = 'none';
         return;
     }
@@ -540,7 +540,7 @@ function initViewerToggle() {
             if (this.checked) {
                 if (iosContainer) iosContainer.style.display = 'block';
                 if (cbctContainer) cbctContainer.style.display = 'none';
-                if (iosControls) iosControls.style.display = 'block';
+                if (iosControls) iosControls.style.display = 'flex';
                 if (cbctControls) cbctControls.style.display = 'none';
                 
                 // Initialize IOS viewer if not already done

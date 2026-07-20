@@ -5,7 +5,7 @@ from common import presence
 from common.models import Project, ProjectAccess
 from django.utils.deprecation import MiddlewareMixin
 import traceback
-from django.http import HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,8 @@ class ProjectSessionMiddleware(MiddlewareMixin):
     
     def process_request(self, request):
         """Set project session based on URL path"""
+        if getattr(request, "maintenance_mode", "normal") != "normal" and not getattr(request.user, "is_staff", False):
+            return None
         if not request.user.is_authenticated:
             return None
         if request.session.get('current_project_id'):
@@ -151,6 +153,57 @@ class ActiveProfileMiddleware(MiddlewareMixin):
         return None
 
 
+class SiteMaintenanceMiddleware(MiddlewareMixin):
+    """Apply global maintenance access rules before application views run."""
+
+    SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+    PUBLIC_PATHS = ("/maintenance/", "/login/", "/logout/", "/healthz")
+
+    @staticmethod
+    def _is_runner_callback(path):
+        return "/api/runner/" in path
+
+    @staticmethod
+    def _expects_json(request):
+        accept = request.headers.get("Accept", "")
+        return "/api/" in request.path or "application/json" in accept or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+    def process_request(self, request):
+        path = request.path
+        if path.startswith("/static/") or path in self.PUBLIC_PATHS or path.startswith("/admin/login/"):
+            return None
+        if self._is_runner_callback(path):
+            return None
+
+        from common.models import SiteMaintenance
+
+        try:
+            maintenance = SiteMaintenance.get_solo()
+        except Exception:
+            # A rolling deployment can serve requests before this migration runs.
+            return None
+
+        mode = maintenance.access_mode
+        request.maintenance_mode = mode
+        if mode == SiteMaintenance.MODE_NORMAL or getattr(request.user, "is_staff", False):
+            return None
+
+        if mode == SiteMaintenance.MODE_LOCKDOWN:
+            if request.method in self.SAFE_METHODS and not self._expects_json(request):
+                return redirect("maintenance_page")
+            return JsonResponse(
+                {"error": "The service is temporarily unavailable for maintenance."},
+                status=503,
+            )
+
+        if mode == SiteMaintenance.MODE_READ_ONLY and request.method not in self.SAFE_METHODS:
+            message = "The site is temporarily read-only for maintenance."
+            if self._expects_json(request):
+                return JsonResponse({"error": message}, status=423)
+            return HttpResponse(message, status=423)
+        return None
+
+
 class DemoGuestReadOnlyMiddleware(MiddlewareMixin):
     """Hard read-only backstop for the shared public-demo guest user.
 
@@ -186,6 +239,8 @@ class PresenceMiddleware(MiddlewareMixin):
     """
 
     def process_request(self, request):
+        if getattr(request, "maintenance_mode", "normal") != "normal" and not getattr(request.user, "is_staff", False):
+            return None
         if request.user.is_authenticated:
             presence.touch(request.user, request.path)
         return None

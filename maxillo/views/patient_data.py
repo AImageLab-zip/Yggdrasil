@@ -11,9 +11,12 @@ import logging
 import tempfile
 import hashlib
 import json
+import math
+import re
 from PIL import Image
 
 from common.file_access import exists as artifact_exists, streaming_response
+from common.file_access import open_binary
 from common.permissions import (
     user_can_read_folder,
     user_can_write_annotations,
@@ -24,6 +27,73 @@ from common.models import FileRegistry, Modality
 from .domain import get_domain_models
 
 logger = logging.getLogger(__name__)
+
+LANDMARK_KEY_RE = re.compile(r"^(\d+)_(upper|lower)_FDI_(\d{2})$")
+LANDMARK_POINT_TYPES = {
+    "incisal", "outer", "bracket", "gingival", "mesial", "distal", "inner", "facial",
+}
+LANDMARK_MULTI_POINT_TYPES = {"cusps", "planar"}
+LANDMARK_PLANE_KEYS = {"origin", "xAxis", "yAxis", "zAxis"}
+
+
+def _normalize_landmark_point(value):
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError("Landmark points must be [x, y, z].")
+    normalized = []
+    for coordinate in value:
+        if isinstance(coordinate, bool):
+            raise ValueError("Landmark coordinates must be numeric.")
+        try:
+            coordinate = float(coordinate)
+        except (TypeError, ValueError):
+            raise ValueError("Landmark coordinates must be numeric.")
+        if not math.isfinite(coordinate):
+            raise ValueError("Landmark coordinates must be finite.")
+        normalized.append(coordinate)
+    return normalized
+
+
+def _normalize_landmarks_payload(payload, patient_id):
+    if not isinstance(payload, dict):
+        raise ValueError("Landmarks must be a JSON object.")
+
+    normalized = {}
+    for entry_key, entry in payload.items():
+        match = LANDMARK_KEY_RE.match(str(entry_key))
+        if not match or match.group(1) != str(patient_id):
+            raise ValueError("Landmark keys must belong to this patient and use the FDI format.")
+        if not isinstance(entry, dict):
+            raise ValueError("Each tooth landmark entry must be an object.")
+
+        jaw, tooth = match.group(2), match.group(3)
+        if tooth[0] not in "1234" or tooth[1] not in "12345678":
+            raise ValueError("Landmark tooth codes must be permanent-dentition FDI codes.")
+        if (tooth[0] in "12") != (jaw == "upper"):
+            raise ValueError("Landmark jaw and FDI tooth code do not match.")
+
+        normalized_entry = dict(entry)
+        for landmark_type in LANDMARK_POINT_TYPES:
+            if landmark_type in entry:
+                normalized_entry[landmark_type] = _normalize_landmark_point(entry[landmark_type])
+        for landmark_type in LANDMARK_MULTI_POINT_TYPES:
+            if landmark_type not in entry:
+                continue
+            points = entry[landmark_type]
+            if not isinstance(points, list) or len(points) > 500:
+                raise ValueError(f"{landmark_type} must contain at most 500 points.")
+            normalized_entry[landmark_type] = [
+                _normalize_landmark_point(point) for point in points
+            ]
+        if "basePlane" in entry:
+            plane = entry["basePlane"]
+            if not isinstance(plane, dict) or set(plane) != LANDMARK_PLANE_KEYS:
+                raise ValueError("basePlane must include origin, xAxis, yAxis, and zAxis.")
+            normalized_entry["basePlane"] = {
+                name: _normalize_landmark_point(plane[name])
+                for name in LANDMARK_PLANE_KEYS
+            }
+        normalized[str(entry_key)] = normalized_entry
+    return normalized
 
 
 def _serve_file_url(request, file_id):
@@ -47,6 +117,94 @@ def _can_write_patient(request, patient):
     return bool(
         patient.folder and user_can_write_annotations(request.user, patient.folder, request)
     )
+
+
+def _active_ios_landmarks(patient):
+    return patient.files.filter(file_type="ios_landmarks").order_by("-created_at", "-id").first()
+
+
+@login_required
+def patient_ios_landmarks(request, patient_id):
+    """Load or explicitly save the canonical patient IOS landmarks document."""
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+
+    if request.method == "GET":
+        if not _can_read_patient(request, patient):
+            return JsonResponse({"error": "Permission denied"}, status=403)
+        landmark_file = _active_ios_landmarks(patient)
+        if not landmark_file:
+            return JsonResponse({"landmarks": {}, "file_id": None, "source": None})
+        try:
+            body, _ = open_binary(landmark_file.file_path)
+            try:
+                landmarks = json.loads(body.read().decode("utf-8"))
+            finally:
+                body.close()
+        except Exception:
+            logger.exception("Unable to load IOS landmarks for patient %s", patient.patient_id)
+            return JsonResponse({"error": "Landmark file could not be loaded"}, status=500)
+        return JsonResponse({
+            "landmarks": landmarks,
+            "file_id": landmark_file.id,
+            "source": (landmark_file.metadata or {}).get("origin"),
+        })
+
+    if request.method != "PUT":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    if not _can_write_patient(request, patient):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+        landmarks = body.get("landmarks") if isinstance(body, dict) and "landmarks" in body else body
+        landmarks = _normalize_landmarks_payload(landmarks, patient.patient_id)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        return JsonResponse({"error": str(exc) or "Invalid landmarks payload"}, status=400)
+
+    encoded = json.dumps(landmarks, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    object_key = f"maxillo/processed/ios/ios_landmarks_patient_{patient.patient_id}.json"
+    fd, tmp_path = tempfile.mkstemp(prefix="ios_landmarks_", suffix=".json")
+    try:
+        with os.fdopen(fd, "wb") as temp_file:
+            temp_file.write(encoded)
+        get_object_storage().upload_file(tmp_path, key=object_key)
+    except Exception:
+        logger.exception("Unable to save IOS landmarks for patient %s", patient.patient_id)
+        return JsonResponse({"error": "Unable to save landmarks"}, status=500)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    now = timezone.now()
+    metadata = {
+        "origin": "manual",
+        "updated_by": request.user.username,
+        "updated_at": now.isoformat(),
+        "schema_version": 1,
+    }
+    landmark_file = _active_ios_landmarks(patient)
+    if landmark_file:
+        landmark_file.file_path = object_key
+        landmark_file.file_size = len(encoded)
+        landmark_file.file_hash = hashlib.sha256(encoded).hexdigest()
+        landmark_file.metadata = metadata
+        landmark_file.processing_job = None
+        landmark_file.modality = Modality.objects.filter(slug="ios").first()
+        landmark_file.save()
+    else:
+        landmark_file = FileRegistry.objects.create(
+            file_type="ios_landmarks",
+            file_path=object_key,
+            file_size=len(encoded),
+            file_hash=hashlib.sha256(encoded).hexdigest(),
+            metadata=metadata,
+            modality=Modality.objects.filter(slug="ios").first(),
+            domain="maxillo",
+            patient=patient,
+        )
+    return JsonResponse({"success": True, "file_id": landmark_file.id, "updated_at": now.isoformat()})
 
 
 def _content_type_for_image_path(file_path):

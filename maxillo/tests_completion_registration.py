@@ -208,6 +208,36 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
         self.assertIsNotNone(processed["upper"])
         self.assertIsNotNone(processed["lower"])
 
+    def test_ios_landmark_prediction_becomes_active_without_manual_landmarks(self):
+        job = self._job("ios")
+        landmark_path = "maxillo/processed/ios/job_%d/landmarks.json" % job.id
+
+        mark_job_completed(job.id, {"landmarks.json": landmark_path})
+
+        landmark = FileRegistry.objects.get(file_type="ios_landmarks", patient=self.patient)
+        self.assertEqual(landmark.file_path, landmark_path)
+        self.assertEqual(landmark.metadata["origin"], "ai")
+
+    def test_ios_prediction_does_not_replace_manual_landmarks(self):
+        FileRegistry.objects.create(
+            file_type="ios_landmarks",
+            file_path="maxillo/processed/ios/ios_landmarks_patient_%d.json" % self.patient.patient_id,
+            file_size=1,
+            file_hash="manual",
+            metadata={"origin": "manual"},
+            domain="maxillo",
+            patient=self.patient,
+        )
+        job = self._job("ios")
+        landmark_path = "maxillo/processed/ios/job_%d/landmarks.json" % job.id
+
+        mark_job_completed(job.id, {"landmarks.json": landmark_path})
+
+        active = FileRegistry.objects.get(file_type="ios_landmarks", patient=self.patient)
+        self.assertEqual(active.metadata["origin"], "manual")
+        prediction = FileRegistry.objects.get(file_type="ios_landmarks_prediction", patient=self.patient)
+        self.assertEqual(prediction.file_path, landmark_path)
+
     def test_video_completion_unchanged_shape(self):
         job = self._job("video")
         mark_job_completed(

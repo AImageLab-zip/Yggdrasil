@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block title %}Maintenance | Yggdrasil{% endblock %}
+{% block chrome %}{% endblock %}
+{% block main_class %}mx-auto flex min-h-[70vh] max-w-2xl items-center px-4{% endblock %}
+{% block content %}
+<section class="w-full rounded-xl border border-line bg-surface p-8 text-center shadow-sm">
+    <h1 class="text-2xl font-semibold text-content">Scheduled maintenance</h1>
+    <p class="mt-3 text-content-muted">Yggdrasil is temporarily unavailable while maintenance is in progress.</p>
+    {% if site_maintenance and site_maintenance.planned_message %}
+    <p class="mt-4 text-content">{{ site_maintenance.planned_message }}</p>
+    {% endif %}
+    <p class="mt-6 text-sm text-content-muted">Please try again shortly.</p>
+</section>
+{% endblock %}

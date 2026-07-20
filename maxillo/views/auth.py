@@ -10,6 +10,7 @@ from django.contrib import messages
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from ..models import Invitation
 from ..forms import InvitationForm, InvitedUserCreationForm
@@ -178,6 +179,7 @@ def invitation_list(request):
 
 @login_required
 @user_passes_test(lambda u: u.is_staff)
+@require_POST
 def delete_invitation(request, code):
     invitation = get_object_or_404(Invitation, code=code)
     if not invitation.used_at:  # Only allow deleting unused invitations
