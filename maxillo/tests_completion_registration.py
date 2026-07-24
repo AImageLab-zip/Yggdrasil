@@ -208,6 +208,20 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
         self.assertIsNotNone(processed["upper"])
         self.assertIsNotNone(processed["lower"])
 
+    def test_ios_reader_recognizes_runner_output_filenames(self):
+        job = self._job("ios")
+        mark_job_completed(
+            job.id,
+            {
+                "upper_oriented.stl": "maxillo/processed/ios/job_%d/upper_oriented.stl" % job.id,
+                "lower_oriented.stl": "maxillo/processed/ios/job_%d/lower_oriented.stl" % job.id,
+            },
+        )
+
+        processed = self.patient.get_ios_processed_files()
+        self.assertEqual(processed["upper"].subtype, "upper_oriented.stl")
+        self.assertEqual(processed["lower"].subtype, "lower_oriented.stl")
+
     def test_ios_landmark_prediction_becomes_active_without_manual_landmarks(self):
         job = self._job("ios")
         landmark_path = "maxillo/processed/ios/job_%d/landmarks.json" % job.id

@@ -189,10 +189,43 @@ class SiteMaintenanceMiddlewareTests(TestCase):
         response = self.client.post("/api/runner/jobs/999999/claim/", {})
         self.assertNotEqual(response.status_code, 423)
 
-    def test_planned_message_is_rendered_independently_of_access_mode(self):
+    def test_planned_message_is_rendered_without_duplicate_banner(self):
         self.maintenance.planned_message_enabled = True
         self.maintenance.planned_message = "Maintenance starts tonight."
         self.maintenance.save()
 
         response = self.client.get("/maintenance/")
         self.assertContains(response, "Maintenance starts tonight.", status_code=503)
+        self.assertNotContains(response, 'class="maintenance-banner"', status_code=503)
+        self.assertNotContains(response, "has-maintenance-banner", status_code=503)
+
+    def test_maintenance_page_offers_administrator_login(self):
+        self.maintenance.access_mode = SiteMaintenance.MODE_LOCKDOWN
+        self.maintenance.save()
+
+        response = self.client.get("/maintenance/")
+
+        self.assertContains(response, "Administrator sign in", status_code=503)
+        self.assertContains(response, 'href="/login/?next=/"', status_code=503)
+
+    def test_staff_can_sign_in_during_lockdown(self):
+        self.maintenance.access_mode = SiteMaintenance.MODE_LOCKDOWN
+        self.maintenance.save()
+
+        response = self.client.get("/login/?next=/")
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(
+            "/login/?next=/",
+            {"username": "maintenance-staff", "password": "pw"},
+        )
+        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertEqual(self.client.get("/").status_code, 200)
+
+    def test_planned_message_bar_is_absent_when_disabled(self):
+        self.maintenance.planned_message = "Maintenance starts tonight."
+        self.maintenance.save()
+
+        response = self.client.get("/maintenance/")
+        self.assertNotContains(response, 'class="maintenance-banner"', status_code=503)
+        self.assertNotContains(response, "has-maintenance-banner", status_code=503)

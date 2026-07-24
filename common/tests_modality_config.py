@@ -85,6 +85,17 @@ class ModalityConfigAccessorTests(TestCase):
         step.save()
         self.assertTrue(mc.modality_discard_raw("panoramic"))
 
+    def test_prefer_processed_for_viewer_defaults_false_without_step(self):
+        self.assertFalse(mc.modality_prefers_processed_for_viewer("ios"))
+
+    def test_prefer_processed_for_viewer_uses_step_value(self):
+        m = _modality("ios")
+        step = _step(m, prefer_processed_for_viewer=False)
+        self.assertFalse(mc.modality_prefers_processed_for_viewer("ios"))
+        step.prefer_processed_for_viewer = True
+        step.save()
+        self.assertTrue(mc.modality_prefers_processed_for_viewer("ios"))
+
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
 class RawFileHiddenTests(TestCase):
@@ -142,6 +153,18 @@ class RawFileHiddenTests(TestCase):
         from maxillo.models import Patient
         patient = Patient.objects.create()
         self.assertFalse(mc.raw_file_hidden(self._raw(patient)))
+
+    def test_discard_raw_recognizes_ios_arch_file_types(self):
+        m = _modality("ios")
+        _step(m, discard_raw=True)
+        from maxillo.models import Patient
+        patient = Patient.objects.create()
+
+        upper = self._raw(patient, "ios_raw_upper", "p/upper.stl")
+        lower = self._raw(patient, "ios_raw_lower", "p/lower.stl")
+
+        self.assertTrue(mc.raw_file_hidden(upper))
+        self.assertTrue(mc.raw_file_hidden(lower))
 
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)

@@ -108,17 +108,31 @@ const landmarkState1 = {
     active: false,
     selectedTooth: '',
     selectedType: null,
+    tool: 'place',
+    selectedMarker: null,
     landmarks: {},
-    dirty: false
+    dirty: false,
+    undoStack: []
 };
 const landmarkTypes1 = [
     'incisal', 'outer', 'bracket', 'gingival', 'mesial', 'distal', 'inner', 'facial', 'cusps', 'planar'
 ];
+const editableLandmarkTypes1 = landmarkTypes1.filter(type => type !== 'planar');
+const landmarkTypeLabels1 = {
+    incisal: 'Incisal', outer: 'Outer', bracket: 'Bracket', gingival: 'Gingival',
+    mesial: 'Mesial', distal: 'Distal', inner: 'Inner', facial: 'Facial', cusps: 'Cusps'
+};
 const landmarkColors1 = {
     incisal: 0xf97316, outer: 0x2563eb, bracket: 0x7c3aed, gingival: 0xdc2626,
     mesial: 0x16a34a, distal: 0x0891b2, inner: 0x4f46e5, facial: 0xdb2777,
     cusps: 0xca8a04, planar: 0x64748b
 };
+const landmarkTeeth1 = [
+    '18', '17', '16', '15', '14', '13', '12', '11',
+    '21', '22', '23', '24', '25', '26', '27', '28',
+    '48', '47', '46', '45', '44', '43', '42', '41',
+    '31', '32', '33', '34', '35', '36', '37', '38'
+];
 
 // Initialize 3D viewer
 function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
@@ -212,10 +226,7 @@ function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
     // Create grid helper (hidden by default)
     createGrid(9); // Default to 9x9 grid
 
-    renderer.domElement.addEventListener('mousedown', onLandmarkMouseDown, true);
-    renderer.domElement.addEventListener('auxclick', function(event) {
-        if (landmarkState1.active && event.button === 1) event.preventDefault();
-    }, true);
+    renderer.domElement.addEventListener('pointerdown', onLandmarkPointerDown, true);
     
     // Load STL files
     loadSTLFiles(scene, loadingIndicator, upperStlUrl, lowerStlUrl);
@@ -358,6 +369,7 @@ function loadSTLFiles(scene, loadingIndicator, upperStlUrl, lowerStlUrl) {
         
         scene.add(mesh);
         upperMesh1 = mesh;
+        renderLandmarks();
         
         console.debug('Upper mesh added to scene');
         onModelLoaded();
@@ -383,6 +395,7 @@ function loadSTLFiles(scene, loadingIndicator, upperStlUrl, lowerStlUrl) {
         
         scene.add(mesh);
         lowerMesh1 = mesh;
+        renderLandmarks();
         
         console.debug('Lower mesh added to scene');
         onModelLoaded();
@@ -551,6 +564,8 @@ function landmarkApiUrl() {
 }
 
 function getCsrfToken() {
+    const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    if (input && input.value) return input.value;
     const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
     return cookie ? decodeURIComponent(cookie.split('=')[1]) : '';
 }
@@ -564,58 +579,140 @@ function setLandmarkStatus(message) {
     if (status) status.textContent = message;
 }
 
+function cloneLandmarks() {
+    return JSON.parse(JSON.stringify(landmarkState1.landmarks || {}));
+}
+
+function pushLandmarkUndo() {
+    landmarkState1.undoStack.push(cloneLandmarks());
+    if (landmarkState1.undoStack.length > 50) landmarkState1.undoStack.shift();
+}
+
+function landmarkCountForTooth(tooth) {
+    const jaw = ['1', '2'].includes(tooth[0]) ? 'upper' : 'lower';
+    const entry = landmarkState1.landmarks[`${window.scanId}_${jaw}_FDI_${tooth}`] || {};
+    return landmarkTypes1.reduce((count, type) => {
+        if (['cusps', 'planar'].includes(type)) return count + (Array.isArray(entry[type]) ? entry[type].length : 0);
+        return count + (Array.isArray(entry[type]) && entry[type].length === 3 ? 1 : 0);
+    }, 0);
+}
+
+function renderLandmarkTeeth() {
+    const container = document.getElementById('iosLandmarkTeeth');
+    if (!container) return;
+    container.querySelectorAll('.ios-landmark-tooth').forEach(button => {
+        const count = landmarkCountForTooth(button.dataset.tooth);
+        button.classList.toggle('active', button.dataset.tooth === landmarkState1.selectedTooth);
+        button.classList.toggle('has-landmarks', count > 0);
+        button.dataset.count = String(count);
+        button.setAttribute('aria-pressed', String(button.dataset.tooth === landmarkState1.selectedTooth));
+    });
+}
+
+function currentLandmarkInstruction() {
+    if (!canEditLandmarks()) return 'Viewing saved landmarks';
+    if (!landmarkState1.selectedTooth) return 'Select an FDI tooth';
+    if (!landmarkState1.selectedType) return `Tooth ${landmarkState1.selectedTooth} · Select a landmark type`;
+    return `Tooth ${landmarkState1.selectedTooth} · ${landmarkTypeLabels1[landmarkState1.selectedType]} · Shift + left-click to place`;
+}
+
 function updateLandmarkControls() {
     const modeButton = document.getElementById('toggleLandmarkMode');
-    const toothSelect = document.getElementById('landmarkTooth');
+    const workbench = document.getElementById('iosLandmarkWorkbench');
     const saveButton = document.getElementById('saveLandmarks');
-    const editable = landmarkState1.active && canEditLandmarks();
+    const placeButton = document.getElementById('landmarkPlaceTool');
+    const selectButton = document.getElementById('landmarkSelectTool');
+    const undoButton = document.getElementById('undoLandmark');
+    const deleteButton = document.getElementById('deleteLandmark');
+    const editable = canEditLandmarks();
     if (modeButton) {
         modeButton.classList.toggle('active', landmarkState1.active);
         modeButton.setAttribute('aria-pressed', String(landmarkState1.active));
+        modeButton.setAttribute('aria-expanded', String(landmarkState1.active));
     }
-    if (toothSelect) toothSelect.disabled = !editable;
+    if (workbench) workbench.hidden = !landmarkState1.active;
+    document.querySelectorAll('.ios-landmark-tooth').forEach(button => { button.disabled = !editable; });
     document.querySelectorAll('.ios-landmark-type').forEach(button => {
         button.disabled = !editable;
         button.classList.toggle('active', button.dataset.landmarkType === landmarkState1.selectedType);
     });
+    if (placeButton) {
+        placeButton.disabled = !editable;
+        placeButton.classList.toggle('active', landmarkState1.tool === 'place');
+        placeButton.setAttribute('aria-pressed', String(landmarkState1.tool === 'place'));
+    }
+    if (selectButton) {
+        selectButton.classList.toggle('active', landmarkState1.tool === 'select');
+        selectButton.setAttribute('aria-pressed', String(landmarkState1.tool === 'select'));
+    }
+    if (undoButton) undoButton.disabled = !editable || !landmarkState1.undoStack.length;
+    if (deleteButton) deleteButton.disabled = !editable || !landmarkState1.selectedMarker || landmarkState1.selectedMarker.type === 'planar';
     if (saveButton) saveButton.disabled = !editable || !landmarkState1.dirty;
+    if (renderer1) renderer1.domElement.style.cursor = landmarkState1.active && landmarkState1.tool === 'place' ? 'crosshair' : '';
+    renderLandmarkTeeth();
 }
 
 function initLandmarkControls() {
-    const toothSelect = document.getElementById('landmarkTooth');
+    const teeth = document.getElementById('iosLandmarkTeeth');
     const types = document.getElementById('iosLandmarkTypes');
-    if (!toothSelect || !types || toothSelect.dataset.initialized) return;
-    toothSelect.dataset.initialized = 'true';
-    ['18', '17', '16', '15', '14', '13', '12', '11', '21', '22', '23', '24', '25', '26', '27', '28', '48', '47', '46', '45', '44', '43', '42', '41', '31', '32', '33', '34', '35', '36', '37', '38'].forEach(tooth => {
-        const option = document.createElement('option');
-        option.value = tooth;
-        option.textContent = tooth;
-        toothSelect.appendChild(option);
+    if (!teeth || !types || teeth.dataset.initialized) return;
+    teeth.dataset.initialized = 'true';
+    landmarkTeeth1.forEach(tooth => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ios-landmark-tooth';
+        button.dataset.tooth = tooth;
+        button.textContent = tooth;
+        button.setAttribute('aria-label', `Tooth ${tooth}`);
+        button.addEventListener('click', function() {
+            landmarkState1.selectedTooth = tooth;
+            landmarkState1.selectedMarker = null;
+            setLandmarkStatus(currentLandmarkInstruction());
+            updateLandmarkControls();
+            renderLandmarks();
+        });
+        teeth.appendChild(button);
     });
-    landmarkTypes1.forEach(type => {
+    editableLandmarkTypes1.forEach(type => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'ios-landmark-type';
         button.dataset.landmarkType = type;
-        button.textContent = type;
+        button.textContent = landmarkTypeLabels1[type];
+        button.style.setProperty('--landmark-color', `#${landmarkColors1[type].toString(16).padStart(6, '0')}`);
         button.addEventListener('click', function() {
             landmarkState1.selectedType = type;
-            setLandmarkStatus(`Selected ${type}`);
+            landmarkState1.tool = 'place';
+            landmarkState1.selectedMarker = null;
+            setLandmarkStatus(currentLandmarkInstruction());
             updateLandmarkControls();
+            renderLandmarks();
         });
         types.appendChild(button);
     });
-    toothSelect.addEventListener('change', function() {
-        landmarkState1.selectedTooth = this.value;
-        setLandmarkStatus(this.value ? `Selected tooth ${this.value}` : 'Select a tooth');
-    });
     document.getElementById('toggleLandmarkMode').addEventListener('click', function() {
         landmarkState1.active = !landmarkState1.active;
+        landmarkState1.selectedMarker = null;
         renderLandmarks();
-        setLandmarkStatus(landmarkState1.active ? (canEditLandmarks() ? 'Select tooth and type' : 'Viewing landmarks') : 'Off');
+        if (landmarkState1.active) setLandmarkStatus(currentLandmarkInstruction());
         updateLandmarkControls();
     });
+    document.getElementById('landmarkPlaceTool').addEventListener('click', function() {
+        landmarkState1.tool = 'place';
+        landmarkState1.selectedMarker = null;
+        setLandmarkStatus(currentLandmarkInstruction());
+        updateLandmarkControls();
+        renderLandmarks();
+    });
+    document.getElementById('landmarkSelectTool').addEventListener('click', function() {
+        landmarkState1.tool = 'select';
+        setLandmarkStatus('Click a marker to select it');
+        updateLandmarkControls();
+    });
+    document.getElementById('undoLandmark').addEventListener('click', undoLandmarkChange);
+    document.getElementById('deleteLandmark').addEventListener('click', deleteSelectedLandmark);
     document.getElementById('saveLandmarks').addEventListener('click', saveLandmarks);
+    document.addEventListener('keydown', onLandmarkKeyDown);
     updateLandmarkControls();
 }
 
@@ -626,32 +723,69 @@ function renderLandmarks() {
         marker.geometry.dispose();
         marker.material.dispose();
     });
-    if (!landmarkState1.active || !upperMesh1 || !lowerMesh1) return;
-    upperMesh1.updateWorldMatrix(true, false);
-    lowerMesh1.updateWorldMatrix(true, false);
+    if (!landmarkState1.active || (!upperMesh1 && !lowerMesh1)) return;
+    if (upperMesh1) upperMesh1.updateWorldMatrix(true, false);
+    if (lowerMesh1) lowerMesh1.updateWorldMatrix(true, false);
     Object.entries(landmarkState1.landmarks || {}).forEach(([key, entry]) => {
         const match = /^(\d+)_(upper|lower)_FDI_(\d{2})$/.exec(key);
-        if (!match || !entry || typeof entry !== 'object') return;
+        if (!match || match[1] !== String(window.scanId) || !entry || typeof entry !== 'object') return;
         const mesh = match[2] === 'upper' ? upperMesh1 : lowerMesh1;
+        if (!mesh) return;
         landmarkTypes1.forEach(type => {
             const values = ['cusps', 'planar'].includes(type) ? entry[type] : [entry[type]];
             if (!Array.isArray(values)) return;
-            values.forEach(value => {
+            values.forEach((value, index) => {
                 if (!Array.isArray(value) || value.length !== 3) return;
                 const marker = new THREE.Mesh(
                     new THREE.SphereGeometry(0.65, 16, 12),
-                    new THREE.MeshBasicMaterial({ color: landmarkColors1[type] || 0xffffff, depthTest: false })
+                    new THREE.MeshBasicMaterial({ color: landmarkColors1[type] || 0xffffff, depthTest: false, transparent: true, opacity: 0.92 })
                 );
                 marker.position.copy(mesh.localToWorld(new THREE.Vector3(value[0], value[1], value[2])));
-                marker.renderOrder = 1;
+                marker.userData.landmark = { key, type, index: ['cusps', 'planar'].includes(type) ? index : null, tooth: match[3] };
+                if (landmarkState1.selectedMarker && landmarkState1.selectedMarker.key === key && landmarkState1.selectedMarker.type === type && landmarkState1.selectedMarker.index === marker.userData.landmark.index) {
+                    marker.scale.setScalar(1.45);
+                    marker.material.opacity = 1;
+                }
+                marker.renderOrder = 2;
                 landmarkMarkers1.add(marker);
             });
         });
     });
 }
 
-function onLandmarkMouseDown(event) {
-    if (!landmarkState1.active || event.button !== 1) return;
+function raycastLandmarkEvent(event, objects) {
+    if (!camera1 || !renderer1) return null;
+    const rect = renderer1.domElement.getBoundingClientRect();
+    const pointer = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera1);
+    return raycaster.intersectObjects(objects, false)[0] || null;
+}
+
+function onLandmarkPointerDown(event) {
+    if (!landmarkState1.active || event.button !== 0) return;
+    if (landmarkState1.tool === 'select' && landmarkMarkers1) {
+        const markerHit = raycastLandmarkEvent(event, landmarkMarkers1.children);
+        if (!markerHit) {
+            landmarkState1.selectedMarker = null;
+            updateLandmarkControls();
+            renderLandmarks();
+            return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        landmarkState1.selectedMarker = { ...markerHit.object.userData.landmark };
+        landmarkState1.selectedTooth = landmarkState1.selectedMarker.tooth;
+        const readOnlySuffix = landmarkState1.selectedMarker.type === 'planar' ? ' · Read-only' : '';
+        setLandmarkStatus(`Selected tooth ${landmarkState1.selectedTooth} · ${landmarkTypeLabels1[landmarkState1.selectedMarker.type] || landmarkState1.selectedMarker.type}${readOnlySuffix}`);
+        updateLandmarkControls();
+        renderLandmarks();
+        return;
+    }
+    if (landmarkState1.tool !== 'place' || !event.shiftKey) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (!canEditLandmarks()) return;
@@ -659,17 +793,10 @@ function onLandmarkMouseDown(event) {
         setLandmarkStatus('Select a tooth and landmark type');
         return;
     }
-    if (!camera1 || !renderer1 || !upperMesh1 || !lowerMesh1) return;
-    upperMesh1.updateWorldMatrix(true, false);
-    lowerMesh1.updateWorldMatrix(true, false);
-    const rect = renderer1.domElement.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1
-    );
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, camera1);
-    const hit = raycaster.intersectObjects([upperMesh1, lowerMesh1].filter(mesh => mesh.visible), false)[0];
+    if (!camera1 || !renderer1 || (!upperMesh1 && !lowerMesh1)) return;
+    if (upperMesh1) upperMesh1.updateWorldMatrix(true, false);
+    if (lowerMesh1) lowerMesh1.updateWorldMatrix(true, false);
+    const hit = raycastLandmarkEvent(event, [upperMesh1, lowerMesh1].filter(mesh => mesh && mesh.visible));
     if (!hit) {
         setLandmarkStatus('Click a visible scan surface');
         return;
@@ -684,6 +811,7 @@ function onLandmarkMouseDown(event) {
     const key = `${window.scanId}_${expectedJaw}_FDI_${landmarkState1.selectedTooth}`;
     const entry = landmarkState1.landmarks[key] || {};
     const point = [localPoint.x, localPoint.y, localPoint.z];
+    pushLandmarkUndo();
     if (['cusps', 'planar'].includes(landmarkState1.selectedType)) {
         entry[landmarkState1.selectedType] = Array.isArray(entry[landmarkState1.selectedType]) ? entry[landmarkState1.selectedType] : [];
         entry[landmarkState1.selectedType].push(point);
@@ -691,10 +819,57 @@ function onLandmarkMouseDown(event) {
         entry[landmarkState1.selectedType] = point;
     }
     landmarkState1.landmarks[key] = entry;
+    landmarkState1.selectedMarker = null;
     landmarkState1.dirty = true;
-    setLandmarkStatus('Unsaved changes');
+    setLandmarkStatus(`Placed ${landmarkTypeLabels1[landmarkState1.selectedType]} on tooth ${landmarkState1.selectedTooth} · Unsaved`);
     renderLandmarks();
     updateLandmarkControls();
+}
+
+function deleteSelectedLandmark() {
+    const selected = landmarkState1.selectedMarker;
+    if (!selected || selected.type === 'planar' || !canEditLandmarks()) return;
+    const entry = landmarkState1.landmarks[selected.key];
+    if (!entry) return;
+    pushLandmarkUndo();
+    if (selected.index === null) {
+        delete entry[selected.type];
+    } else if (Array.isArray(entry[selected.type])) {
+        entry[selected.type].splice(selected.index, 1);
+        if (!entry[selected.type].length) delete entry[selected.type];
+    }
+    if (!Object.keys(entry).length) delete landmarkState1.landmarks[selected.key];
+    landmarkState1.selectedMarker = null;
+    landmarkState1.dirty = true;
+    setLandmarkStatus('Landmark deleted · Unsaved');
+    renderLandmarks();
+    updateLandmarkControls();
+}
+
+function undoLandmarkChange() {
+    if (!landmarkState1.undoStack.length || !canEditLandmarks()) return;
+    landmarkState1.landmarks = landmarkState1.undoStack.pop();
+    landmarkState1.selectedMarker = null;
+    landmarkState1.dirty = true;
+    setLandmarkStatus('Last change undone · Unsaved');
+    renderLandmarks();
+    updateLandmarkControls();
+}
+
+function onLandmarkKeyDown(event) {
+    if (!landmarkState1.active || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName)) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        undoLandmarkChange();
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && landmarkState1.selectedMarker) {
+        event.preventDefault();
+        deleteSelectedLandmark();
+    } else if (event.key === 'Escape') {
+        landmarkState1.selectedMarker = null;
+        setLandmarkStatus(currentLandmarkInstruction());
+        renderLandmarks();
+        updateLandmarkControls();
+    }
 }
 
 function loadLandmarks() {
@@ -702,22 +877,44 @@ function loadLandmarks() {
         .then(response => response.ok ? response.json() : Promise.reject(new Error('Unable to load landmarks')))
         .then(data => {
             landmarkState1.landmarks = data.landmarks && typeof data.landmarks === 'object' ? data.landmarks : {};
+            landmarkState1.undoStack = [];
+            landmarkState1.dirty = false;
             renderLandmarks();
+            updateLandmarkControls();
         })
-        .catch(error => console.error('Error loading IOS landmarks:', error));
+        .catch(error => {
+            setLandmarkStatus('Landmarks could not be loaded');
+            console.error('Error loading IOS landmarks:', error);
+        });
 }
 
 function saveLandmarks() {
     if (!landmarkState1.dirty || !canEditLandmarks()) return;
     setLandmarkStatus('Saving...');
+    const headers = { 'Content-Type': 'application/json' };
+    const csrfToken = getCsrfToken();
+    if (csrfToken) headers['X-CSRFToken'] = csrfToken;
     fetch(landmarkApiUrl(), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+        headers,
         body: JSON.stringify({ landmarks: landmarkState1.landmarks })
     })
-        .then(response => response.ok ? response.json() : response.json().then(data => Promise.reject(new Error(data.error || 'Unable to save landmarks'))))
+        .then(async response => {
+            const body = await response.text();
+            let data = {};
+            if (body) {
+                try {
+                    data = JSON.parse(body);
+                } catch (error) {
+                    if (response.ok) throw new Error('The server returned an invalid save response');
+                }
+            }
+            if (!response.ok) throw new Error(data.error || `Unable to save landmarks (HTTP ${response.status})`);
+            return data;
+        })
         .then(() => {
             landmarkState1.dirty = false;
+            landmarkState1.undoStack = [];
             setLandmarkStatus('Saved');
             updateLandmarkControls();
             if (typeof window.appNotify === 'function') window.appNotify('success', 'Landmarks saved');

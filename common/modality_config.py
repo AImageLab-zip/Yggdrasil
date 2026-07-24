@@ -112,6 +112,14 @@ def modality_discard_raw(modality_slug):
     return False
 
 
+def modality_prefers_processed_for_viewer(modality_slug):
+    """Whether the modality viewer should prefer processed files over raw."""
+    step = get_step(modality_slug)
+    if step is not None:
+        return bool(step.prefer_processed_for_viewer)
+    return False
+
+
 def _modality_slug_for_file(file_obj):
     """Best-effort modality slug for a FileRegistry row.
 
@@ -125,6 +133,8 @@ def _modality_slug_for_file(file_obj):
     if isinstance(metadata, dict) and metadata.get("modality_slug"):
         return str(metadata["modality_slug"]).strip()
     file_type = str(getattr(file_obj, "file_type", "") or "")
+    if file_type in {"ios_raw_upper", "ios_raw_lower"}:
+        return "ios"
     if file_type.endswith("_raw"):
         return file_type[: -len("_raw")]
     return ""
@@ -132,7 +142,10 @@ def _modality_slug_for_file(file_obj):
 
 def _file_is_raw(file_obj):
     file_type = str(getattr(file_obj, "file_type", "") or "")
-    return file_type.endswith("_raw") or file_type == "rgb_image"
+    return (
+        file_type.endswith("_raw")
+        or file_type in {"ios_raw_upper", "ios_raw_lower", "rgb_image"}
+    )
 
 
 def _processed_exists_for(file_obj, slug):

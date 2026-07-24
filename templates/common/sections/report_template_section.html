@@ -3,7 +3,7 @@
   Shared Report Template panel — rendered UNDER the Voice-caption controls
   (see common/sections/vocal_caption_section.html) so clinicians can read the
   structured reporting checklist while dictating. Content is per-domain
-  (brain / maxillo / laparoscopy), each in EN/IT/DE. Language persists via the
+  (brain / maxillo), each in EN/IT/DE. Language persists via the
   cross-app `set_report_language` endpoint + common.UserPreference.
 -->
 <style>
@@ -95,45 +95,6 @@
                     <li><details><summary>Tumorform</summary><p>Ungefähre Form der Tumormasse.</p></details></li>
                     <li><details><summary>Tumorursprung</summary><p>Periventrikulär, gyral oder tiefe weiße Substanz.</p></details></li>
                     <li><details><summary>Tumor überschreitet die Mittellinie</summary><p>Ob der Tumor die Mittellinie überschreitet.</p></details></li>
-                    <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
-                </ul>
-
-                {% elif ns == 'laparoscopy' %}
-                {# ===================== LAPAROSCOPY ===================== #}
-                <ul class="mb-0 ps-2 report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Procedure Type</summary><p>The laparoscopic procedure performed (e.g. cholecystectomy, appendectomy, hernia repair).</p></details></li>
-                    <li><details><summary>Surgical Phase</summary><p>Operative phase visible in the segment (preparation, dissection, clipping/cutting, extraction, closure).</p></details></li>
-                    <li><details><summary>Anatomical Structures Identified</summary><p>Key structures recognised in view (e.g. cystic duct, cystic artery, common bile duct, liver bed).</p></details></li>
-                    <li><details><summary>Critical View of Safety</summary><p>Whether the critical view of safety is achieved before clipping/division.</p></details></li>
-                    <li><details><summary>Instruments in Use</summary><p>Instruments visible in the field (grasper, hook, clip applier, scissors, suction).</p></details></li>
-                    <li><details><summary>Adhesions</summary><p>Presence and severity of adhesions encountered.</p></details></li>
-                    <li><details><summary>Bleeding Events</summary><p>Any intraoperative bleeding, its source and whether controlled.</p></details></li>
-                    <li><details><summary>Intraoperative Complications</summary><p>Perforation, thermal injury, spillage or other adverse events.</p></details></li>
-                    <li><details><summary>Estimated Blood Loss</summary><p>Approximate blood loss during the segment.</p></details></li>
-                    <li><details><summary>Subject-Specific Findings</summary><p>Any findings not covered by a predefined category.</p></details></li>
-                </ul>
-                <ul class="mb-0 ps-2 report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Tipo di Procedura</summary><p>Procedura laparoscopica eseguita (es. colecistectomia, appendicectomia, riparazione d'ernia).</p></details></li>
-                    <li><details><summary>Fase Chirurgica</summary><p>Fase operatoria visibile nel segmento (preparazione, dissezione, clipaggio/taglio, estrazione, chiusura).</p></details></li>
-                    <li><details><summary>Strutture Anatomiche Identificate</summary><p>Strutture chiave riconosciute (es. dotto cistico, arteria cistica, coledoco, letto epatico).</p></details></li>
-                    <li><details><summary>Critical View of Safety</summary><p>Se la critical view of safety è raggiunta prima del clipaggio/sezione.</p></details></li>
-                    <li><details><summary>Strumenti in Uso</summary><p>Strumenti visibili nel campo (grasper, uncino, clip applier, forbici, aspiratore).</p></details></li>
-                    <li><details><summary>Aderenze</summary><p>Presenza e gravità delle aderenze riscontrate.</p></details></li>
-                    <li><details><summary>Eventi Emorragici</summary><p>Sanguinamenti intraoperatori, origine e controllo.</p></details></li>
-                    <li><details><summary>Complicanze Intraoperatorie</summary><p>Perforazione, lesione termica, spillage o altri eventi avversi.</p></details></li>
-                    <li><details><summary>Perdita Ematica Stimata</summary><p>Perdita ematica approssimativa durante il segmento.</p></details></li>
-                    <li><details><summary>Reperti Specifici del Soggetto</summary><p>Reperti non coperti da alcuna categoria predefinita.</p></details></li>
-                </ul>
-                <ul class="mb-0 ps-2 report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Art des Eingriffs</summary><p>Durchgeführter laparoskopischer Eingriff (z. B. Cholezystektomie, Appendektomie, Hernienreparatur).</p></details></li>
-                    <li><details><summary>Operative Phase</summary><p>Im Segment sichtbare Phase (Vorbereitung, Dissektion, Clippen/Schneiden, Extraktion, Verschluss).</p></details></li>
-                    <li><details><summary>Identifizierte anatomische Strukturen</summary><p>Erkannte Schlüsselstrukturen (z. B. Ductus cysticus, A. cystica, Ductus choledochus, Leberbett).</p></details></li>
-                    <li><details><summary>Critical View of Safety</summary><p>Ob die Critical View of Safety vor dem Clippen/Durchtrennen erreicht ist.</p></details></li>
-                    <li><details><summary>Verwendete Instrumente</summary><p>Im Feld sichtbare Instrumente (Fasszange, Haken, Clip-Applikator, Schere, Sauger).</p></details></li>
-                    <li><details><summary>Adhäsionen</summary><p>Vorhandensein und Schweregrad der Adhäsionen.</p></details></li>
-                    <li><details><summary>Blutungsereignisse</summary><p>Intraoperative Blutungen, Quelle und Kontrolle.</p></details></li>
-                    <li><details><summary>Intraoperative Komplikationen</summary><p>Perforation, thermische Verletzung, Spillage oder andere unerwünschte Ereignisse.</p></details></li>
-                    <li><details><summary>Geschätzter Blutverlust</summary><p>Ungefährer Blutverlust während des Segments.</p></details></li>
                     <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
                 </ul>
 

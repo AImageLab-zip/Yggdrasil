@@ -20,11 +20,6 @@ urlpatterns = [
         name="update_patient_name",
     ),
     path(
-        "patient/<int:patient_id>/voice-caption/",
-        views.upload_voice_caption,
-        name="upload_voice_caption",
-    ),
-    path(
         "patient/<int:patient_id>/text-caption/",
         views.upload_text_caption,
         name="upload_text_caption",

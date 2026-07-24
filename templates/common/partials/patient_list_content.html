@@ -14,32 +14,18 @@
     #moveFolderSelect, #btnMoveSelected/#btnDeleteSelected/#btnBulkRerunSelected/
     #btnClearSelection, the folder/rerun modal ids, and handlePageJumpSubmit.
 
-  The table/grid toggle is CSS-only (.patient-list.is-grid): rendering two
-  copies of each row would duplicate .row-select and break selection, which
-  patient_list.js collects with a document-wide query.
+  Selection uses document-wide .row-select queries, so each patient must only
+  be rendered once.
 {% endcomment %}
 <!-- Hidden CSRF token for AJAX usage -->
 <form style="display:none;">{% csrf_token %}</form>
 
 <div class="patients-page">
 
-    <!-- Page header: count, view toggle, upload -->
+    <!-- Page header -->
     <div class="patients-head">
-        <div>
-            <h1 class="patients-title">{% icon 'users' 'patients-title__icon' %}Patients</h1>
-            <div class="patients-count">
-                {{ page_obj.object_list|length }} of {{ page_obj.paginator.count }} patient{{ page_obj.paginator.count|pluralize }}
-            </div>
-        </div>
+        <h1 class="patients-title">{% icon 'users' 'patients-title__icon' %}Patients</h1>
         <div class="patients-head__actions">
-            <div class="view-toggle" role="group" aria-label="View mode">
-                <button type="button" class="view-toggle__btn is-active" data-view="table" title="Table view" aria-label="Table view">
-                    <i class="fas fa-list" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="view-toggle__btn" data-view="grid" title="Grid view" aria-label="Grid view">
-                    <i class="fas fa-grip" aria-hidden="true"></i>
-                </button>
-            </div>
             {% if user.profile.can_upload_scans and not is_demo_guest %}
             <a class="ygg-btn ygg-btn--primary" href="{% url request.resolver_match.namespace|add:':upload_patient' %}">
                 <i class="fas fa-upload" aria-hidden="true"></i>Upload
@@ -79,18 +65,21 @@
                 {% endif %}
             </div>
 
-            <!-- Filters -->
-            <div class="side-card">
-                <div class="side-card__label">Filters</div>
-                <form id="filterForm">
-                    <input type="hidden" name="folder" value="{{ folder_id|default:'all' }}">
+        </aside>
 
-                    <div class="side-search">
-                        <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                        <input type="text" class="filter-input" name="search" placeholder="Name or ID" value="{{ search_query }}" aria-label="Search by name or ID">
-                    </div>
+        <!-- Main list -->
+        <main class="patients-main">
 
-                    <div class="side-card__sublabel">Modalities</div>
+            <form id="filterForm" class="filter-bar">
+                <input type="hidden" name="folder" value="{{ folder_id|default:'all' }}">
+
+                <div class="filter-bar__search">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="text" class="filter-input" name="search" placeholder="Name or ID" value="{{ search_query }}" aria-label="Search by name or ID">
+                </div>
+
+                <div class="filter-bar__group" aria-label="Patient filters">
+                    <span class="filter-bar__label">Filters</span>
                     <div class="status-filter-buttons">
                         {% for m in modality_filter_specs %}
                         <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
@@ -108,26 +97,36 @@
                                 data-label="Reports" title="All Reports (no filter)" data-ygg-toggle="tooltip">
                             <i class="fas fa-comment" aria-hidden="true"></i>
                         </button>
+                        {% if show_maxillo_presence_filters %}
+                        <input type="hidden" id="presence_bite_classification_value" name="has_bite_classification" value="{{ has_bite_classification_filter }}">
+                        <button type="button" class="status-filter-btn" data-filter="presence_bite_classification"
+                                data-label="Bite classification" title="All bite classifications (no filter)" data-ygg-toggle="tooltip">
+                            <i class="fas fa-teeth" aria-hidden="true"></i>
+                        </button>
+                        <input type="hidden" id="presence_landmarks_value" name="has_landmarks" value="{{ has_landmarks_filter }}">
+                        <button type="button" class="status-filter-btn" data-filter="presence_landmarks"
+                                data-label="Landmarks" title="All landmarks (no filter)" data-ygg-toggle="tooltip">
+                            <i class="fas fa-location-dot" aria-hidden="true"></i>
+                        </button>
+                        {% endif %}
                     </div>
+                </div>
 
-                    <div class="side-card__sublabel">Per page</div>
+                <label class="filter-bar__page-size">
+                    <span class="filter-bar__label">Per page</span>
                     <select name="per_page" class="filter-select" aria-label="Results per page">
                         <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
                         <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
                         <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
                         <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
                     </select>
+                </label>
 
-                    <div class="side-actions">
-                        <button type="submit" class="ygg-btn ygg-btn--primary ygg-btn--sm">Apply</button>
-                        <a class="ygg-btn ygg-btn--ghost ygg-btn--sm" href="?{% if folder_id and folder_id != 'all' %}folder={{ folder_id|urlencode }}{% endif %}{% if per_page and per_page != 10 %}{% if folder_id and folder_id != 'all' %}&{% endif %}per_page={{ per_page }}{% endif %}">Reset</a>
-                    </div>
-                </form>
-            </div>
-        </aside>
-
-        <!-- Main list -->
-        <main class="patients-main">
+                <div class="filter-bar__actions">
+                    <button type="submit" class="ygg-btn ygg-btn--primary ygg-btn--sm">Apply</button>
+                    <a class="ygg-btn ygg-btn--ghost ygg-btn--sm" href="?{% if folder_id and folder_id != 'all' %}folder={{ folder_id|urlencode }}{% endif %}{% if per_page and per_page != 10 %}{% if folder_id and folder_id != 'all' %}&{% endif %}per_page={{ per_page }}{% endif %}">Reset</a>
+                </div>
+            </form>
 
             {% if is_admin_user %}
             {% comment %} Bulk bar: sits ABOVE the list and only appears once rows are
@@ -177,7 +176,6 @@
                     </div>
 
                     <div class="scan-name">
-                        <span class="patient-avatar" aria-hidden="true">{{ p.name|default:'?'|slice:':2' }}</span>
                         <span class="scan-name__meta">
                             <a class="scan-name-text" href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" title="Open patient">{{ p.name|default:'Unnamed' }}</a>
                             <span class="scan-name__id mono">ID {{ p.patient_id }}</span>
@@ -219,13 +217,13 @@
                     </div>
 
                     <div class="privacy">
-                        {% if p.folder %}<span class="privacy-badge">{{ p.folder.name }}</span>{% else %}<span class="cell-empty">—</span>{% endif %}
+                        {% if item.folder %}<span class="privacy-badge">{{ item.folder.name }}</span>{% else %}<span class="cell-empty">—</span>{% endif %}
                     </div>
 
                     <div class="actions">
                         <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="icon-btn btn-open" title="View" aria-label="View"><i class="fas fa-eye" aria-hidden="true"></i></a>
                         {% if user_profile.is_admin %}
-                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-modalities="{% for ms in item.modality_status_list %}{% if ms.slug != 'rawzip' and ms.status != 'absent' %}{% if not forloop.first %},{% endif %}{{ ms.slug }}{% endif %}{% endfor %}{% if item.voice_caption_count > 0 or item.voice_caption_processing or item.voice_caption_processed %},voice{% endif %}" title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
+                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-modalities="{% for ms in item.modality_status_list %}{% if ms.slug != 'rawzip' and ms.slug != 'voice' and ms.status != 'absent' %}{% if not forloop.first %},{% endif %}{{ ms.slug }}{% endif %}{% endfor %}" title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
                         {% endif %}
                         {% if item.can_delete %}
                         <button class="icon-btn icon-btn--danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" aria-label="Delete"><i class="fas fa-trash" aria-hidden="true"></i></button>

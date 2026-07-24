@@ -57,6 +57,8 @@ function updateFilterURL() {
     url.searchParams.delete('has_voice');
     url.searchParams.delete('has_bite');
     url.searchParams.delete('has_reports');
+    url.searchParams.delete('has_bite_classification');
+    url.searchParams.delete('has_landmarks');
     // Clear dynamic status_<slug> params
     Array.from(url.searchParams.keys()).forEach(key => {
         if (key.startsWith('status_')) {
@@ -593,12 +595,8 @@ function initBulkSelection() {
         selectedRows.forEach(row => {
             row.querySelectorAll('.status-pill[data-modality-slug]').forEach(pill => {
                 const slug = (pill.dataset.modalitySlug || '').trim();
-                if (!slug || slug === 'rawzip') return;
+                if (!slug || slug === 'rawzip' || slug === 'voice') return;
                 if (pill.classList.contains('status-absent')) return;
-                if (slug === 'voice') {
-                    slugSet.add('voice');
-                    return;
-                }
                 slugSet.add(slug);
             });
         });
@@ -879,13 +877,14 @@ function initStatusFilterButtons() {
         btn.addEventListener('click', function() {
             const filterKey = this.dataset.filter; // e.g., 'status_cbct' or legacy 'ios'
             const isReports = filterKey === 'reports';
+            const isPresence = filterKey.startsWith('presence_');
             const isDynamic = filterKey.startsWith('status_');
             const currentValue = this.dataset.value || '';
             
             let newValue, newClass;
             
             // Reports filter: '' -> yes (green) -> '' (gray)
-            if (isReports) {
+            if (isReports || isPresence) {
                 if (currentValue === '') { newValue = 'yes'; newClass = 'status-green'; }
                 else { newValue = ''; newClass = 'status-gray'; }
             }
@@ -908,7 +907,9 @@ function initStatusFilterButtons() {
             setFilterButtonState(this, newClass);
 
             // Update hidden input value
-            const hiddenInput = document.getElementById(isDynamic ? `${filterKey}_value` : `${filterKey}FilterValue`);
+            const hiddenInput = document.getElementById(
+                (isDynamic || isPresence) ? `${filterKey}_value` : `${filterKey}FilterValue`
+            );
             if (hiddenInput) {
                 hiddenInput.value = newValue;
             }
@@ -962,6 +963,16 @@ function initializeStatusButtonStates() {
         setFilterButtonState(button, className);
         updateButtonTitle(button, `status_${slug}`, value);
     });
+
+    document.querySelectorAll('input[id^="presence_"][id$="_value"]').forEach(input => {
+        const filterKey = input.id.replace(/_value$/, '');
+        const button = document.querySelector(`[data-filter="${filterKey}"]`);
+        if (!button) return;
+        const value = input.value;
+        button.dataset.value = value;
+        setFilterButtonState(button, value === 'yes' ? 'status-green' : 'status-gray');
+        updateButtonTitle(button, filterKey, value);
+    });
 }
 
 function updateButtonTitle(button, filterKey, value) {
@@ -972,6 +983,9 @@ function updateButtonTitle(button, filterKey, value) {
             || filterKey.replace('status_', '').toUpperCase();
         const labels = { '': `All ${name} (no filter)`, 'processed': `${name} processed`, 'processing': `${name} processing`, 'failed': `${name} failed` };
         button.title = labels[value] || labels[''];
+    } else if (filterKey.startsWith('presence_')) {
+        const name = button.dataset.label || 'Data';
+        button.title = value === 'yes' ? `Has ${name}` : `All ${name} (no filter)`;
     } else {
         const filterLabels = {
             'reports': { '': 'All Reports (no filter)', 'yes': 'Has Reports' }
@@ -1013,32 +1027,6 @@ function initInlineTagRemoval() {
     });
 }
 
-// Initialize everything
-// Table/grid view toggle. Both views share the same DOM (see the template
-// comment on .patients-page) — this only flips a class and remembers the
-// choice, it never re-renders rows.
-function initViewToggle() {
-    const buttons = document.querySelectorAll('.view-toggle__btn');
-    const list = document.getElementById('patientList');
-    if (!buttons.length || !list) return;
-
-    const STORAGE_KEY = 'ygg.patientListView';
-
-    function setView(view) {
-        list.classList.toggle('is-grid', view === 'grid');
-        buttons.forEach(btn => btn.classList.toggle('is-active', btn.dataset.view === view));
-        try { localStorage.setItem(STORAGE_KEY, view); } catch (e) { /* storage unavailable */ }
-    }
-
-    buttons.forEach(btn => {
-        btn.addEventListener('click', function() { setView(this.dataset.view); });
-    });
-
-    let stored = null;
-    try { stored = localStorage.getItem(STORAGE_KEY); } catch (e) { /* storage unavailable */ }
-    if (stored === 'grid') setView('grid');
-}
-
 document.addEventListener('DOMContentLoaded', function() {
     initListNameEditing();
     initAdminActions();
@@ -1048,7 +1036,6 @@ document.addEventListener('DOMContentLoaded', function() {
     initTagAddInline();
     initStatusFilterButtons();
     initInlineTagRemoval();
-    initViewToggle();
 
     // Add form submission handler to clean empty values
     const filterForm = document.getElementById('filterForm');
@@ -1078,4 +1065,3 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
-

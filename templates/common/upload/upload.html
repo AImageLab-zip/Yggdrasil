@@ -2,86 +2,93 @@
 {% load static %}
 
 {% block title %}Upload Patient Data - Yggdrasil{% endblock %}
-
-{% comment %} Upload uses Bootstrap form components (btn-group/btn-check/progress) and its
-   modality fragments' JS toggles Font Awesome + .d-none, so it loads the scoped
-   legacy layer rather than being migrated to Tailwind. {% endcomment %}
+{% block main_class %}upload-main{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/upload.css' %}">{% endblock %}
 
 {% block content %}
-<div class="container">
-	<div class="row justify-content-center">
-		<div class="col-lg-8">
-			<div class="card">
-				<div class="card-header">
-					<h3><i class="fas fa-upload me-2"></i>Upload New Patient Data</h3>
-				</div>
-				<div class="card-body">
-					<form method="post" enctype="multipart/form-data">
-						{% csrf_token %}
-						<input type="hidden" name="cbct_upload_type" value="file">
+<div class="upload-page">
+    <header class="upload-header">
+        <div>
+            <p class="upload-eyebrow">New patient</p>
+            <h1>Upload patient data</h1>
+            <p>Add files by modality. Drop them into a target or select them from your device.</p>
+        </div>
+        {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+        <a href="{% url ns|add:':patient_list' %}" class="upload-close" aria-label="Cancel upload" title="Cancel">
+            <i class="fas fa-xmark" aria-hidden="true"></i>
+        </a>
+    </header>
 
-						<h5 class="mb-3"><i class="fas fa-info-circle me-2"></i>Scan Information</h5>
-						<div class="mb-4">
-							<label for="{{ patient_upload_form.name.id_for_label }}" class="form-label">{{ patient_upload_form.name.label }}</label>
-							{{ patient_upload_form.name }}
-							{% if patient_upload_form.name.errors %}
-								<div class="text-danger">{{ patient_upload_form.name.errors }}</div>
-							{% endif %}
-							<div class="form-text">(Optional) Enter name for this patient</div>
-						</div>
+    <form method="post" enctype="multipart/form-data" class="upload-form" id="patientUploadForm">
+        {% csrf_token %}
+        <input type="hidden" name="cbct_upload_type" value="file">
 
-						<h5 class="mb-3"><i class="fas fa-file-medical me-2"></i>Files</h5>
+        <aside class="upload-details" aria-labelledby="patient-details-title">
+            <div>
+                <p class="upload-section-kicker">Patient</p>
+                <h2 id="patient-details-title">Details</h2>
+            </div>
 
-						{# Include modality partials based solely on slug #}
-						{% for m in allowed_modalities %}
-							{% with tpl='common/upload/modalities/'|add:m.slug|add:'.html' %}
-								{% include tpl %}
-							{% endwith %}
-						{% endfor %}
+            <label class="upload-field" for="{{ patient_upload_form.name.id_for_label }}">
+                <span>{{ patient_upload_form.name.label }}</span>
+                {{ patient_upload_form.name }}
+                {% for error in patient_upload_form.name.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+            </label>
 
-						<h5 class="mb-3 upload-organization"><i class="fas fa-folder-tree me-2"></i>Organization</h5>
-						<div class="mb-3">
-							<label for="{{ patient_upload_form.folder.id_for_label }}" class="form-label">{{ patient_upload_form.folder.label }}</label>
-							{{ patient_upload_form.folder }}
-							{% if patient_upload_form.folder.errors %}
-								<div class="text-danger">{{ patient_upload_form.folder.errors }}</div>
-							{% endif %}
-							<div class="form-text">Select a folder (optional)</div>
-						</div>
-						<div class="mb-3">
-							<label for="{{ patient_upload_form.tags_text.id_for_label }}" class="form-label">{{ patient_upload_form.tags_text.label }}</label>
-							{{ patient_upload_form.tags_text }}
-							{% if patient_upload_form.tags_text.errors %}
-								<div class="text-danger">{{ patient_upload_form.tags_text.errors }}</div>
-							{% endif %}
-							<div class="form-text">Comma-separated tags</div>
-						</div>
+            <label class="upload-field" for="{{ patient_upload_form.folder.id_for_label }}">
+                <span>{{ patient_upload_form.folder.label }}</span>
+                {{ patient_upload_form.folder }}
+                {% for error in patient_upload_form.folder.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+            </label>
 
-						{% if patient_upload_form.non_field_errors %}
-							<div class="alert alert-danger">
-								{% for error in patient_upload_form.non_field_errors %}
-									<div>{{ error }}</div>
-								{% endfor %}
-							</div>
-						{% endif %}
+            <label class="upload-field" for="{{ patient_upload_form.tags_text.id_for_label }}">
+                <span>{{ patient_upload_form.tags_text.label }}</span>
+                {{ patient_upload_form.tags_text }}
+                <small>Separate tags with commas</small>
+                {% for error in patient_upload_form.tags_text.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+            </label>
 
-						<div class="d-grid gap-2 d-md-flex justify-content-md-end">
-							{% firstof request.resolver_match.namespace 'maxillo' as ns %}
-							<a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary me-md-2">
-								<i class="fas fa-times me-2"></i>Cancel
-							</a>
-							<button type="submit" class="btn btn-primary">
-								<i class="fas fa-upload me-2"></i>Upload & Process
-							</button>
-						</div>
-					</form>
-				</div>
-			</div>
-		</div>
-	</div>
+            {% if patient_upload_form.non_field_errors %}
+            <div class="upload-alert" role="alert">
+                {% for error in patient_upload_form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="upload-actions">
+                <a href="{% url ns|add:':patient_list' %}" class="upload-btn upload-btn--secondary">Cancel</a>
+                <button type="submit" class="upload-btn upload-btn--primary">
+                    <i class="fas fa-arrow-up-from-bracket" aria-hidden="true"></i>
+                    <span>Upload &amp; process</span>
+                </button>
+            </div>
+
+            <div class="upload-progress" id="uploadProgress" hidden>
+                <div class="upload-progress__label">
+                    <span id="uploadProgressLabel">Uploading files</span>
+                    <span id="uploadProgressPercent">0%</span>
+                </div>
+                <div class="upload-progress__track"><span id="uploadProgressBar"></span></div>
+            </div>
+        </aside>
+
+        <section class="upload-files" aria-labelledby="patient-files-title">
+            <div class="upload-files__header">
+                <div>
+                    <p class="upload-section-kicker">Clinical data</p>
+                    <h2 id="patient-files-title">Files</h2>
+                </div>
+                <span>At least one file is required</span>
+            </div>
+            <div class="upload-modality-grid">
+                {% for m in allowed_modalities %}
+                    {% with tpl='common/upload/modalities/'|add:m.slug|add:'.html' %}{% include tpl %}{% endwith %}
+                {% empty %}
+                    <div class="upload-alert">No upload modalities are configured for this project.</div>
+                {% endfor %}
+            </div>
+        </section>
+    </form>
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<script src="{% static 'js/cbct_upload.js' %}"></script>
-{% endblock %}
+{% block extra_js %}<script src="{% static 'js/cbct_upload.js' %}"></script>{% endblock %}

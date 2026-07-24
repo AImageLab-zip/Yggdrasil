@@ -9,14 +9,14 @@ if [ "${AUTO_MIGRATE:-1}" = "1" ]; then
     python manage.py migrate --noinput
 fi
 
-# RUN_DEV_SERVER=1 keeps the Django dev server for local development.
+# RUN_DEV_SERVER=1 keeps auto-reload for local development.
 if [ "${RUN_DEV_SERVER:-0}" = "1" ]; then
-    exec python manage.py runserver 0.0.0.0:8000
+    exec uvicorn yggdrasil.asgi:application --host 0.0.0.0 --port 8000 --reload
 fi
 
-exec gunicorn yggdrasil.wsgi:application \
-    --bind 0.0.0.0:8000 \
-    --workers "${GUNICORN_WORKERS:-4}" \
-    --timeout "${GUNICORN_TIMEOUT:-120}" \
-    --access-logfile - \
-    --error-logfile -
+exec uvicorn yggdrasil.asgi:application \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers "${ASGI_WORKERS:-4}" \
+    --timeout-keep-alive "${ASGI_KEEP_ALIVE:-5}" \
+    --access-log

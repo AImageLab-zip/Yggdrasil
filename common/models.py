@@ -161,6 +161,11 @@ class ProcessingStep(models.Model):
 	# the patient file view (a security screen). The files still exist in MySQL
 	# and object storage — only visibility/download is blocked.
 	discard_raw = models.BooleanField(default=False)
+	prefer_processed_for_viewer = models.BooleanField(
+		default=False,
+		help_text="Prefer a complete processed file set in the modality viewer, "
+		"falling back to raw files when processed files are unavailable.",
+	)
 	updated_at = models.DateTimeField(auto_now=True)
 
 	class Meta:
@@ -375,7 +380,7 @@ class Job(DomainFKAccessorMixin, models.Model):
 		return f"Job {self.id} - {self.modality_slug} - {self.status}{related_str}"
 
 	def can_retry(self):
-		return self.status == 'failed' and self.retry_count < self.max_retries
+		return self.status in {'processing', 'failed'} and self.retry_count < self.max_retries
 
 	def mark_processing(self, worker_id=None):
 		self.status = 'processing'

@@ -16,9 +16,9 @@ class SshHelperTests(SimpleTestCase):
     def _ssh(self):
         return SlurmSSH(host="dummy", poll_interval=0, max_wall_seconds=10)
 
-    def test_export_str_quotes_and_prefixes_all(self):
+    def test_export_str_quotes_shell_assignments(self):
         s = SlurmSSH._export_str({"YGG_JOB_ID": 5, "YGG_STAGE": "/a b"})
-        self.assertTrue(s.startswith("ALL,"))
+        self.assertNotIn("ALL", s)
         self.assertIn("YGG_JOB_ID=5", s)
         self.assertIn("YGG_STAGE='/a b'", s)  # shell-quoted
 
@@ -43,7 +43,8 @@ class SshHelperTests(SimpleTestCase):
         self.assertIn("--output=/stage/logs/job_7-%j.out", captured["cmd"])
         self.assertIn("--error=/stage/logs/job_7-%j.err", captured["cmd"])
         self.assertIn("--chdir=/stage", captured["cmd"])
-        self.assertIn("--export=ALL,YGG_JOB_ID=7", captured["cmd"])
+        self.assertTrue(captured["cmd"].startswith("YGG_JOB_ID=7 sbatch --parsable"))
+        self.assertNotIn("--export", captured["cmd"])
         self.assertIn("/algo/sn/run.sbatch", captured["cmd"])
 
     def test_sbatch_raises_on_failure(self):
@@ -162,6 +163,26 @@ class RunHelperTests(SimpleTestCase):
             },
         )
 
+    def test_normalize_cbct_output_adds_required_logical_name(self):
+        path = "proj/processed/cbct/job_5/predictions/scan.nii.gz"
+        out = run_mod._normalize_output_files(
+            "cbct",
+            {
+                "predictions/scan.nii.gz": path,
+                "gpu_stats.json": "proj/processed/cbct/job_5/gpu_stats.json",
+            },
+        )
+        self.assertEqual(out["segmentation_nifti"], path)
+
+    def test_normalize_cbct_output_rejects_ambiguous_nifti_files(self):
+        output_files = {
+            "predictions/a.nii.gz": "out/a.nii.gz",
+            "predictions/b.nii.gz": "out/b.nii.gz",
+        }
+        self.assertEqual(
+            run_mod._normalize_output_files("cbct", output_files), output_files
+        )
+
 
 class RunJobTests(SimpleTestCase):
     def _patch_ssh(self, poll_state="COMPLETED"):
@@ -236,6 +257,31 @@ class RunJobTests(SimpleTestCase):
         ssh.read_text_if_exists.assert_any_call("/stage/logs/job_5-900.err")
         ssh.remove_file.assert_called_once()
         api.complete.assert_not_called()
+
+    def test_completion_failure_reports_fail(self):
+        api = mock.MagicMock()
+        api.claim.return_value = {
+            "algo_name": "U-Mamba2",
+            "project_slug": "maxillo",
+            "modality_slug": "cbct",
+            "input_files": {"input": "maxillo/raw/cbct/scan.nii.gz"},
+        }
+        api.complete.side_effect = RuntimeError("invalid output contract")
+        ssh = self._patch_ssh()
+        with override_settings(SLURM_STAGE_DIR="/stage", ALGO_BASE_DIR="/algo"), \
+             mock.patch.object(run_mod, "JobApiClient", return_value=api), \
+             mock.patch.object(run_mod.SlurmSSH, "from_settings", return_value=ssh), \
+             mock.patch.object(
+                 run_mod,
+                 "_collect_output_files",
+                 return_value={"predictions/scan.nii.gz": "out/scan.nii.gz"},
+             ):
+            result = run_mod.run_job(5)
+
+        self.assertEqual(result, "failed:completion")
+        api.fail.assert_called_once_with(
+            5, "Completion error: invalid output contract"
+        )
 
     def test_missing_script_fails_fast(self):
         api = mock.MagicMock()

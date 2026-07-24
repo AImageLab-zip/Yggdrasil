@@ -3,7 +3,34 @@
  * Handles common UI elements and modality viewer coordination
  */
 
-// Revolutionary Classification UI Functions
+function closeClassificationDropdown(dropdown, restoreFocus) {
+    if (!dropdown) return;
+
+    dropdown.classList.remove('show');
+    const button = dropdown.previousElementSibling;
+    if (button) {
+        button.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) button.focus();
+    }
+}
+
+function setSelectedClassificationOption(button, dropdown) {
+    const selectedText = button.textContent.trim();
+    dropdown.querySelectorAll('.dropdown-option').forEach(option => {
+        option.setAttribute('aria-selected', String(option.textContent.trim() === selectedText));
+    });
+}
+
+function focusClassificationOption(dropdown, position) {
+    const options = Array.from(dropdown.querySelectorAll('.dropdown-option'));
+    if (!options.length) return;
+
+    const selectedIndex = options.findIndex(option => option.getAttribute('aria-selected') === 'true');
+    const index = position === 'last' ? options.length - 1 : Math.max(selectedIndex, 0);
+    options[index].focus();
+}
+
+// Bite classification dropdowns
 function toggleDropdown(button) {
     if (!window.canEdit) {
         return; // Not editable for non-annotators
@@ -12,14 +39,20 @@ function toggleDropdown(button) {
     // Close all other dropdowns
     document.querySelectorAll('.value-dropdown.show').forEach(dropdown => {
         if (dropdown !== button.nextElementSibling) {
-            dropdown.classList.remove('show');
+            closeClassificationDropdown(dropdown, false);
         }
     });
     
     // Toggle this dropdown
     const dropdown = button.nextElementSibling;
     if (dropdown) {
-        dropdown.classList.toggle('show');
+        const willShow = !dropdown.classList.contains('show');
+        dropdown.classList.toggle('show', willShow);
+        button.setAttribute('aria-expanded', String(willShow));
+
+        if (!willShow) return;
+
+        setSelectedClassificationOption(button, dropdown);
         
         dropdown.querySelectorAll('.dropdown-option').forEach(option => {
             option.onclick = function() {
@@ -40,7 +73,10 @@ function updateClassification(button, option) {
     button.classList.add('manual-verified');
     
     // Hide dropdown
-    button.nextElementSibling.classList.remove('show');
+    option.parentElement.querySelectorAll('.dropdown-option').forEach(item => {
+        item.setAttribute('aria-selected', String(item === option));
+    });
+    closeClassificationDropdown(button.nextElementSibling, true);
     
     // Save via AJAX
     postJson(`/${window.projectNamespace}/patient/${window.scanId}/update/`, {
@@ -169,8 +205,53 @@ function syncManagementNameField(value) {
 document.addEventListener('click', function(event) {
     if (!event.target.closest('.classification-value')) {
         document.querySelectorAll('.value-dropdown.show').forEach(dropdown => {
-            dropdown.classList.remove('show');
+            closeClassificationDropdown(dropdown, false);
         });
+    }
+});
+
+document.addEventListener('keydown', function(event) {
+    const button = event.target.closest('.value-button');
+    if (button && event.key === 'Escape') {
+        const dropdown = button.nextElementSibling;
+        if (dropdown && dropdown.classList.contains('show')) {
+            event.preventDefault();
+            closeClassificationDropdown(dropdown, true);
+        }
+        return;
+    }
+
+    if (button && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        const dropdown = button.nextElementSibling;
+        if (!dropdown) return;
+        if (!dropdown.classList.contains('show')) toggleDropdown(button);
+        focusClassificationOption(dropdown, event.key === 'ArrowUp' ? 'last' : 'selected');
+        return;
+    }
+
+    const option = event.target.closest('.dropdown-option');
+    if (!option) return;
+
+    const dropdown = option.parentElement;
+    const options = Array.from(dropdown.querySelectorAll('.dropdown-option'));
+    const currentIndex = options.indexOf(option);
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const offset = event.key === 'ArrowDown' ? 1 : -1;
+        options[(currentIndex + offset + options.length) % options.length].focus();
+    } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        options[event.key === 'Home' ? 0 : options.length - 1].focus();
+    } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        updateClassification(dropdown.previousElementSibling, option);
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeClassificationDropdown(dropdown, true);
+    } else if (event.key === 'Tab') {
+        closeClassificationDropdown(dropdown, false);
     }
 });
 
@@ -371,7 +452,7 @@ function initViewerToggle() {
                 if (iosContainer) iosContainer.style.display = 'none';
                 if (cbctContainer) cbctContainer.style.display = 'block';
                 if (iosControls) iosControls.style.display = 'none';
-                if (cbctControls) cbctControls.style.display = 'block';
+                if (cbctControls) cbctControls.style.display = 'flex';
                 
                 // Show cbct-viewer container
                 const cbctViewer = document.getElementById('cbct-viewer');
@@ -455,7 +536,7 @@ function initViewerToggle() {
                 if (iosContainer) iosContainer.style.display = 'none';
                 if (cbctContainer) cbctContainer.style.display = 'none';
                 if (iosControls) iosControls.style.display = 'none';
-                if (cbctControls) cbctControls.style.display = 'block';
+                if (cbctControls) cbctControls.style.display = 'flex';
 
                 const generic = document.getElementById(`${modality}-viewer`);
                 const allGeneric = document.querySelectorAll('[id$="-viewer"]:not(#scan-viewer)');
@@ -512,7 +593,7 @@ function initViewerToggle() {
         if (iosContainer) iosContainer.style.display = 'none';
         if (cbctContainer) cbctContainer.style.display = 'block';
         if (iosControls) iosControls.style.display = 'none';
-        if (cbctControls) cbctControls.style.display = 'block';
+        if (cbctControls) cbctControls.style.display = 'flex';
         setTimeout(() => {
             ensureCbctViewerReady('cbct');
             loadCbctInlinePanoramic();
@@ -557,7 +638,7 @@ function initViewerToggle() {
                 if (iosContainer) iosContainer.style.display = 'none';
                 if (cbctContainer) cbctContainer.style.display = 'block';
                 if (iosControls) iosControls.style.display = 'none';
-                if (cbctControls) cbctControls.style.display = 'block';
+                if (cbctControls) cbctControls.style.display = 'flex';
 
                 // Only initialize viewer if CBCT is processed
                 if (window.isCBCTProcessed) {

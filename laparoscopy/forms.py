@@ -1,5 +1,6 @@
 from django import forms
 
+from common.permissions import filter_folders_for_user
 from .models import Classification, Dataset, Folder, Patient, Tag
 
 
@@ -47,6 +48,11 @@ class PatientUploadForm(forms.ModelForm):
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
+        if user:
+            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
+            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'laparoscopy')
+        else:
+            self.fields['folder'].queryset = Folder.objects.none()
         '''if user and hasattr(user, 'profile'):
             if user.profile.is_student_developer():
                 self.fields['visibility'].choices = [('debug', 'Debug')]

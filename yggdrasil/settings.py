@@ -12,12 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 import json as _json
-import mimetypes
 from pathlib import Path
 from decouple import config
-
-# Ensure .wasm files are served with the correct MIME type (required for ONNX runtime)
-mimetypes.add_type("application/wasm", ".wasm")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -93,6 +89,17 @@ INSTALLED_APPS = [
     "laparoscopy",
 ]
 
+# Live Whisper is reached only by the ASGI WebSocket relay. The browser never
+# receives the shared API token or connects to the self-signed upstream.
+WHISPER_WS_URL = config(
+    "WHISPER_WS_URL", default="wss://155.185.48.254:9097/ws"
+)
+WHISPER_API_TOKEN = config("WHISPER_API_TOKEN", default="")
+WHISPER_CA_CERT = config(
+    "WHISPER_CA_CERT", default=str(BASE_DIR / "certs" / "whisper-live.pem")
+)
+WHISPER_CONNECT_TIMEOUT = config("WHISPER_CONNECT_TIMEOUT", default=10, cast=int)
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -133,6 +140,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "yggdrasil.wsgi.application"
+ASGI_APPLICATION = "yggdrasil.asgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

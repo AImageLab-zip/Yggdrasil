@@ -11,7 +11,7 @@ Example modality routing (set in `.env`):
 
 ```
 RUNNER_DEFAULT_QUEUE=runner_dev
-RUNNER_QUEUE_BY_MODALITY={"ios":"runner_ios_dev","bite_classification":"runner_bite_dev","cbct":"runner_cbct_dev","audio":"runner_audio_dev","voice":"runner_audio_dev"}
+RUNNER_QUEUE_BY_MODALITY={"ios":"runner_ios_dev","bite_classification":"runner_bite_dev","cbct":"runner_cbct_dev"}
 RUNNER_QUEUE_BY_PROJECT={}
 ```
 

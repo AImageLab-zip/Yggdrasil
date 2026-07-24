@@ -338,15 +338,31 @@ class Patient(models.Model):
         """Get IOS processed files from FileRegistry.
 
         Legacy rows are file_type='ios_processed_upper'/'_lower'; new completions
-        write file_type='ios_processed', subtype='upper'/'lower' — both match.
+        write file_type='ios_processed'. Runner output filenames are preserved in
+        subtype, so both 'upper' and names such as 'upper_oriented.stl' match.
         """
-        upper = self.files.filter(
-            Q(file_type='ios_processed_upper') | Q(file_type='ios_processed', subtype='upper')
-        ).order_by('-created_at', '-id').first()
-        lower = self.files.filter(
-            Q(file_type='ios_processed_lower') | Q(file_type='ios_processed', subtype='lower')
-        ).order_by('-created_at', '-id').first()
-        return {'upper': upper, 'lower': lower}
+        arches = {'upper': None, 'lower': None}
+        files = self.files.filter(
+            file_type__in=['ios_processed_upper', 'ios_processed_lower', 'ios_processed']
+        ).order_by('-created_at', '-id')
+        for file_obj in files:
+            arch = None
+            if file_obj.file_type == 'ios_processed_upper':
+                arch = 'upper'
+            elif file_obj.file_type == 'ios_processed_lower':
+                arch = 'lower'
+            else:
+                name = os.path.splitext(os.path.basename(file_obj.subtype.lower()))[0]
+                tokens = name.replace('-', '_').split('_')
+                if 'upper' in tokens:
+                    arch = 'upper'
+                elif 'lower' in tokens:
+                    arch = 'lower'
+            if arch and arches[arch] is None:
+                arches[arch] = file_obj
+            if arches['upper'] and arches['lower']:
+                break
+        return arches
     
     def has_ios_scans_new(self):
         """Check if both upper and lower scans are available in FileRegistry"""

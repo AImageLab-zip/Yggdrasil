@@ -74,7 +74,10 @@ export DOCKER_SUFFIX=YOUR-DOCKER-SUFFIX
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py migrate
 ```
 
-The container serves the app with gunicorn (`GUNICORN_WORKERS`, `GUNICORN_TIMEOUT` tunable via `.env`). For local development with auto-reload, set `RUN_DEV_SERVER=1` to use Django's dev server instead.
+The container serves the Django ASGI application with Uvicorn (`ASGI_WORKERS` and
+`ASGI_KEEP_ALIVE` are tunable via `.env`). For local development with auto-reload,
+set `RUN_DEV_SERVER=1`; the entrypoint will run Uvicorn with `--reload` so the live
+transcription WebSocket remains available.
 
 ## 6. Seed projects and modalities
 
@@ -93,7 +96,29 @@ docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_
 
 These are idempotent (`get_or_create` + update) — safe to re-run after upgrades that add/change modalities.
 
-## 7. Optional: laparoscopy AI worker
+## 7. Configure Live Whisper
+
+Microphone captions stream through an authenticated Yggdrasil WebSocket relay.
+Configure the upstream shared token in `.env`; it is never exposed to browsers:
+
+```dotenv
+WHISPER_WS_URL=wss://155.185.48.254:9097/ws
+WHISPER_API_TOKEN=replace-with-the-server-token
+WHISPER_CA_CERT=/app/certs/whisper-live.pem
+```
+
+The tracked certificate pins the current self-signed Live Whisper certificate.
+Verify its SHA-256 fingerprint before deployment:
+`C8:34:A6:FC:93:65:E8:76:B6:11:83:0F:38:C6:12:D7:3E:E9:45:D4:07:F3:48:CB:EC:30:E0:21:50:F3:70:F8`.
+It expires on 23 July 2027 and must be replaced when the upstream certificate is
+rotated. Connect by `155.185.48.254`, not `pdor.ing.unimore.it`, because the
+current certificate contains the IP address but not that DNS name.
+
+The public reverse proxy must pass WebSocket upgrade requests for
+`/ws/live-transcription/` to the web container. The standard nginx-proxy setup
+used by `docker-compose.yml` handles WebSocket upgrades automatically.
+
+## 8. Optional: laparoscopy AI worker
 
 Laparoscopy's point-prompt segmentation proxies to an external worker service. If you're not running one, those endpoints will fail closed but the rest of the app works fine. To enable it, set in `.env`:
 

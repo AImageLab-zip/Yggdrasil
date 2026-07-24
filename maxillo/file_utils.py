@@ -701,55 +701,6 @@ def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):
     }
 
 
-def save_audio_to_dataset(voice_caption, audio_file):
-    """
-    Save audio file to object storage and create processing job
-
-    Args:
-        voice_caption: VoiceCaption instance
-        audio_file: Django UploadedFile instance
-
-    Returns:
-        tuple: (file_path, processing_job)
-    """
-    patient = _get_patient(voice_caption)
-
-    # Generate filename: audio_voice_{id}_patient_{patient_id}.webm
-    original_name = audio_file.name
-    extension = Path(original_name).suffix or ".webm"
-    filename = f"audio_voice_{voice_caption.id}_patient_{patient.patient_id}{extension}"
-    key = f"{_raw_key_prefix_for(patient, 'audio')}/{filename}"
-    key, file_size, file_hash = _upload_uploaded_file_to_storage(
-        key=key, uploaded_file=audio_file
-    )
-
-    # Create file registry entry
-    file_registry = FileRegistry.objects.create(
-        file_type=get_file_type_for_modality("audio", is_processed=False),
-        file_path=key,
-        file_size=file_size,
-        file_hash=file_hash,
-        **_voice_entity_fk_kwargs(voice_caption),
-        **_entity_fk_kwargs(patient),
-        metadata={
-            "original_filename": original_name,
-            "duration": voice_caption.duration,
-            "modality": voice_caption.modality,
-            "uploaded_at": timezone.now().isoformat(),
-        },
-    )
-
-    # Create processing job only when an audio worker route is configured.
-    processing_job = _create_job_if_runner_enabled(
-        "audio",
-        **_voice_entity_fk_kwargs(voice_caption),
-        **_entity_fk_kwargs(patient),
-        input_files={"input": key},
-    )
-
-    return key, processing_job
-
-
 def save_rgb_images_to_dataset(patient_or_legacy, images):
     """Save one or more RGB images for a patient to object storage and register them.
 
@@ -1112,55 +1063,7 @@ def mark_job_completed(job_id, output_files, logs=None):
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")
-        if job_voice_caption and job.modality_slug == "audio":
-            job_voice_caption.processing_status = "completed"
-
-            # Use logs parameter directly if it contains transcription text
-            if logs and isinstance(logs, str) and logs.strip():
-                job_voice_caption.text_caption = logs.strip()
-                logger.info(
-                    f"Successfully saved transcription from logs: {logs[:50]}..."
-                )
-            else:
-                logger.warning(f"Logs parameter is empty or invalid: {logs}")
-                # Fallback: try to extract text from output files if available
-                text_extracted = False
-                for out_spec in output_files.values():
-                    path_or_key = _resolve_output_path_or_key(out_spec)
-                    if not path_or_key or not str(path_or_key).endswith(".txt"):
-                        continue
-                    try:
-                        fh, _ = open_binary(path_or_key)
-                        try:
-                            text_content = (
-                                fh.read().decode("utf-8", errors="replace").strip()
-                            )
-                        finally:
-                            with contextlib.suppress(Exception):
-                                fh.close()
-                        if text_content:
-                            job_voice_caption.text_caption = text_content
-                            text_extracted = True
-                            logger.info(
-                                f"Successfully extracted text from {path_or_key}: {text_content[:50]}..."
-                            )
-                        else:
-                            logger.warning(f"Text file {path_or_key} is empty")
-                    except Exception as e:
-                        logger.error(f"Error reading text file {path_or_key}: {e}")
-
-                if not text_extracted:
-                    logger.warning(
-                        f"No text was extracted for voice caption {job_voice_caption.id}"
-                    )
-                    # Set a placeholder text to indicate processing completed but no text found
-                    job_voice_caption.text_caption = ""
-
-            # Save the original transcription when processing is first completed
-            job_voice_caption.save_original_transcription()
-            job_voice_caption.save()
-
-        elif job_patient and job.modality_slug == "bite_classification":
+        if job_patient and job.modality_slug == "bite_classification":
             logger.info(
                 f"Bite classification job completed for patient {getattr(job_patient, 'patient_id', 'unknown')}"
             )
@@ -1312,10 +1215,7 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         job_voice_caption = _job_voice_caption(job)
         job.mark_failed(error_msg, can_retry)
 
-        if job_voice_caption and job.modality_slug == "audio":
-            job_voice_caption.processing_status = "failed"
-            job_voice_caption.save()
-        elif job_patient and job.modality_slug == "bite_classification":
+        if job_patient and job.modality_slug == "bite_classification":
             logger.info(
                 f"Bite classification job failed for patient {getattr(job_patient, 'patient_id', 'unknown')}"
             )

@@ -59,8 +59,49 @@
 /* Fixed footer: pinned to the viewport bottom at all times; body reserves room
  * so content is never hidden behind it. (Landing blanks the footer + is its own
  * 100vh overflow-hidden viewport, so it's unaffected.) */
-:root { --ygg-footer-h: 3rem; }
+:root {
+    --ygg-footer-h: 3rem;
+    --ygg-maintenance-h: 2rem;
+}
 body { min-height: 100vh; padding-bottom: var(--ygg-footer-h); }
+.maintenance-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2100;
+    height: var(--ygg-maintenance-h);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 1rem;
+    overflow: hidden;
+    border-bottom: 1px solid #dfbd35;
+    background: #f5dc69;
+    color: #493900;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1;
+}
+.maintenance-banner span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+body.has-maintenance-banner { padding-top: var(--ygg-maintenance-h); }
+body.has-maintenance-banner .ygg-nav,
+body.has-maintenance-banner .ygg-topbar { top: var(--ygg-maintenance-h); }
+body.has-maintenance-banner .ygg-toast-container {
+    top: calc(var(--ygg-maintenance-h) + 1rem);
+}
+body.has-maintenance-banner main.landing {
+    min-height: calc(100vh - var(--ygg-maintenance-h));
+}
+:root[data-theme="dark"] .maintenance-banner {
+    border-bottom-color: #b79520;
+    background: #d8bb43;
+    color: #211a00;
+}
 .ygg-footer {
     position: fixed;
     left: 0;
@@ -93,6 +134,10 @@ body { min-height: 100vh; padding-bottom: var(--ygg-footer-h); }
     height: 100vh;
     z-index: 45;
 }
+body.has-maintenance-banner .ygg-rail {
+    top: var(--ygg-maintenance-h);
+    height: calc(100vh - var(--ygg-maintenance-h));
+}
 body.has-rail { padding-left: var(--ygg-rail-w); }
 body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
 @media (max-width: 640px) {
@@ -102,4 +147,3 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
     body.has-rail.rail-open .ygg-rail { transform: none; }
     body.has-rail .ygg-footer { left: 0; }
 }
-

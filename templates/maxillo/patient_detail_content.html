@@ -49,18 +49,11 @@
                         <option value="20">20x20</option>
                     </select>
                 </div>
-            <div class="viewer-toolbar__divider"></div>
-
-            <div class="viewer-toolbar__group ios-landmark-toolbar" id="iosLandmarkControls">
-                <span class="viewer-toolbar__label">Landmarks</span>
-                <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Annotate landmarks" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
-                <select id="landmarkTooth" class="ios-landmark-select" aria-label="Landmark tooth">
-                    <option value="">Tooth</option>
-                </select>
-                <div class="ios-landmark-types" id="iosLandmarkTypes" aria-label="Landmark type"></div>
-                <button type="button" class="icon-btn" id="saveLandmarks" title="Save landmarks" disabled><i class="fas fa-floppy-disk" aria-hidden="true"></i></button>
-                <span class="ios-landmark-status" id="iosLandmarkStatus">Off</span>
-            </div>
+                <div class="viewer-toolbar__divider"></div>
+                <div class="viewer-toolbar__group" id="iosLandmarkControls">
+                    <span class="viewer-toolbar__label">Landmarks</span>
+                    <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Show landmark tools" aria-controls="iosLandmarkWorkbench" aria-expanded="false" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
+                </div>
 
             </div>
 
@@ -118,18 +111,47 @@
                         </div>
                     </div>
                 {% else %}
-                    <div id="scan-viewer"></div>
-                    <div class="viewer-controls">
-                        <div class="btn-group-vertical">
-                            <button class="btn btn-light btn-sm active" id="showUpper" title="Upper Jaw"><i class="fas fa-eye me-1"></i>U</button>
-                            <button class="btn btn-light btn-sm active" id="showLower" title="Lower Jaw"><i class="fas fa-eye me-1"></i>L</button>
-                            <hr class="my-1" style="border-color: var(--ygg-border);">
-                            <button class="btn btn-light btn-sm" id="viewRight" title="View from Right"><i class="fas fa-arrow-right me-1"></i>R</button>
-                            <button class="btn btn-light btn-sm" id="viewLeft" title="View from Left"><i class="fas fa-arrow-left me-1"></i>L</button>
-                            <button class="btn btn-light btn-sm" id="viewFront" title="View from Front"><i class="fas fa-arrow-up me-1"></i>F</button>
-                            <hr class="my-1" style="border-color: var(--ygg-border);">
-                            <button class="btn btn-light btn-sm" id="viewUpper" title="View Upper Scan"><i class="fas fa-chevron-up me-1"></i>U</button>
-                            <button class="btn btn-light btn-sm" id="viewLower" title="View Lower Scan"><i class="fas fa-chevron-down me-1"></i>L</button>
+                    <section class="ios-landmark-workbench" id="iosLandmarkWorkbench" aria-label="Landmark annotation tools" hidden>
+                        <div hidden>{% csrf_token %}</div>
+                        <div class="ios-landmark-workbench__header">
+                            <div>
+                                <strong>Landmark annotation</strong>
+                                <span class="ios-landmark-status" id="iosLandmarkStatus">Select a tooth and landmark type</span>
+                            </div>
+                            <div class="ios-landmark-actions" aria-label="Annotation actions">
+                                <button type="button" class="ios-landmark-action active" id="landmarkPlaceTool" title="Place landmarks with Shift + left-click" aria-pressed="true"><i class="fas fa-location-dot" aria-hidden="true"></i><span>Place</span></button>
+                                <button type="button" class="ios-landmark-action" id="landmarkSelectTool" title="Select an existing landmark" aria-pressed="false"><i class="fas fa-arrow-pointer" aria-hidden="true"></i><span>Select</span></button>
+                                <button type="button" class="ios-landmark-action" id="undoLandmark" title="Undo last change" disabled><i class="fas fa-rotate-left" aria-hidden="true"></i><span>Undo</span></button>
+                                <button type="button" class="ios-landmark-action" id="deleteLandmark" title="Delete selected landmark" disabled><i class="fas fa-trash" aria-hidden="true"></i><span>Delete</span></button>
+                                <button type="button" class="ios-landmark-action ios-landmark-action--save" id="saveLandmarks" title="Save landmarks" disabled><i class="fas fa-floppy-disk" aria-hidden="true"></i><span>Save</span></button>
+                            </div>
+                        </div>
+                        <div class="ios-landmark-workbench__body">
+                            <div class="ios-landmark-section ios-landmark-section--teeth">
+                                <span class="ios-landmark-section__label">FDI tooth</span>
+                                <div class="ios-landmark-teeth" id="iosLandmarkTeeth" aria-label="Select FDI tooth"></div>
+                            </div>
+                            <div class="ios-landmark-section ios-landmark-section--types">
+                                <span class="ios-landmark-section__label">Landmark type</span>
+                                <div class="ios-landmark-types" id="iosLandmarkTypes" aria-label="Select landmark type"></div>
+                                <small>Hold Shift and left-click the matching jaw surface to place.</small>
+                            </div>
+                        </div>
+                    </section>
+                    <div class="ios-scan-stage">
+                        <div id="scan-viewer"></div>
+                        <div class="viewer-controls">
+                            <div class="btn-group-vertical">
+                                <button class="btn btn-light btn-sm active" id="showUpper" title="Upper Jaw"><i class="fas fa-eye me-1"></i>U</button>
+                                <button class="btn btn-light btn-sm active" id="showLower" title="Lower Jaw"><i class="fas fa-eye me-1"></i>L</button>
+                                <hr class="my-1" style="border-color: var(--ygg-border);">
+                                <button class="btn btn-light btn-sm" id="viewRight" title="View from Right"><i class="fas fa-arrow-right me-1"></i>R</button>
+                                <button class="btn btn-light btn-sm" id="viewLeft" title="View from Left"><i class="fas fa-arrow-left me-1"></i>L</button>
+                                <button class="btn btn-light btn-sm" id="viewFront" title="View from Front"><i class="fas fa-arrow-up me-1"></i>F</button>
+                                <hr class="my-1" style="border-color: var(--ygg-border);">
+                                <button class="btn btn-light btn-sm" id="viewUpper" title="View Upper Scan"><i class="fas fa-chevron-up me-1"></i>U</button>
+                                <button class="btn btn-light btn-sm" id="viewLower" title="View Lower Scan"><i class="fas fa-chevron-down me-1"></i>L</button>
+                            </div>
                         </div>
                     </div>
                 {% endif %}
@@ -386,7 +408,8 @@
                                      <ul class="list-unstyled instruction-list">
                                          <li><strong>Annotation button:</strong> Show saved landmarks and enter annotation mode</li>
                                          <li><strong>Tooth and type:</strong> Select the FDI tooth and landmark type</li>
-                                         <li><strong>Middle-click:</strong> Place the selected landmark on the matching jaw surface</li>
+                                         <li><strong>Shift + left-click:</strong> Place the selected landmark on the matching jaw surface</li>
+                                         <li><strong>Select:</strong> Select a marker, then delete it or undo recent changes</li>
                                          <li><strong>Save:</strong> Persist changes when you are finished</li>
                                      </ul>
                                  </div>

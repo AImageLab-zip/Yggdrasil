@@ -52,6 +52,9 @@ def rerun_processing(request, patient_id):
 
         # Process each requested modality dynamically
         for modality_slug in requested_jobs:
+            if modality_slug in {"audio", "voice"}:
+                not_found.append(modality_slug)
+                continue
             # Handle both old-style ProcessingJob and new-style Job
             jobs_found = False
 
@@ -78,37 +81,6 @@ def rerun_processing(request, patient_id):
                     updated.append(modality_slug)
             except Exception as e:
                 logger.error(f"Error processing job for modality {modality_slug}: {e}")
-
-            # Handle special case for audio/voice captions (check via modality metadata)
-            from ..modality_helpers import get_modality_by_slug
-
-            modality_obj = get_modality_by_slug(modality_slug)
-            is_audio_modality = False
-            if modality_obj:
-                metadata = getattr(modality_obj, "metadata", {}) or {}
-                is_audio_modality = metadata.get(
-                    "is_audio_modality", False
-                ) or modality_slug in ["audio", "voice"]
-
-            if is_audio_modality:
-                # Use 'audio' as the canonical slug for job lookups
-                actual_slug = "audio" if modality_slug == "voice" else modality_slug
-                audio_jobs = Job.objects.filter(modality_slug=actual_slug, **job_filter)
-                if audio_jobs.exists():
-                    for job in audio_jobs:
-                        job.status = "pending"
-                        job.started_at = None
-                        job.completed_at = None
-                        job.worker_id = ""
-                        job.error_logs = ""
-                        job.save()
-                    # Also reset related captions to pending
-                    for vc in patient.voice_captions.all():
-                        vc.processing_status = "pending"
-                        vc.save()
-                    if modality_slug not in updated:
-                        updated.append(modality_slug)
-                    jobs_found = True
 
             if not jobs_found and modality_slug not in updated:
                 not_found.append(modality_slug)
@@ -187,7 +159,8 @@ def bulk_rerun_processing(request):
             s = str(slug or "").strip()
             if not s:
                 continue
-            normalized_jobs.append("audio" if s == "voice" else s)
+            if s not in {"audio", "voice"}:
+                normalized_jobs.append(s)
         normalized_jobs = list(set(normalized_jobs))
 
         if not normalized_jobs:
@@ -228,11 +201,6 @@ def bulk_rerun_processing(request):
 
                 updated_pairs += 1
                 updated_by_modality[modality_slug] = updated_by_modality.get(modality_slug, 0) + 1
-
-                if modality_slug == "audio":
-                    for vc in patient.voice_captions.all():
-                        vc.processing_status = "pending"
-                        vc.save(update_fields=["processing_status"])
 
         message = (
             f"Bulk rerun queued for {updated_pairs} patient-modality pairs "

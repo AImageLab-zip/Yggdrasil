@@ -50,8 +50,14 @@
     <link href="{% static 'css/theme.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}{% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message and not hide_maintenance_banner %} has-maintenance-banner{% endif %}">
     {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+    {% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message and not hide_maintenance_banner %}
+    <div class="maintenance-banner" role="status" title="{{ site_maintenance.planned_message }}">
+        <span>{{ site_maintenance.planned_message }}</span>
+    </div>
+    {% endif %}
+
     {% block chrome %}
     {% block navbar %}
     <nav class="ygg-nav">
@@ -120,12 +126,6 @@
     </nav>
     {% endblock %}
     {% endblock %}{# chrome #}
-
-    {% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message %}
-    <div class="alert-ygg alert-warning mx-4 mt-4" role="status">
-        {{ site_maintenance.planned_message }}
-    </div>
-    {% endif %}
 
     {% block messages %}
     {% if messages %}

@@ -1,15 +1,69 @@
 {% extends 'base.html' %}
+{% load static %}
+{% load icons %}
 
 {% block title %}Maintenance | Yggdrasil{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/maintenance.css' %}">{% endblock %}
+{% block theme_default_dark %}true{% endblock %}
+{% block body_class %}maintenance-mode{% endblock %}
 {% block chrome %}{% endblock %}
-{% block main_class %}mx-auto flex min-h-[70vh] max-w-2xl items-center px-4{% endblock %}
+{% block footer %}{% endblock %}
+{% block main_class %}maintenance-shell{% endblock %}
 {% block content %}
-<section class="w-full rounded-xl border border-line bg-surface p-8 text-center shadow-sm">
-    <h1 class="text-2xl font-semibold text-content">Scheduled maintenance</h1>
-    <p class="mt-3 text-content-muted">Yggdrasil is temporarily unavailable while maintenance is in progress.</p>
-    {% if site_maintenance and site_maintenance.planned_message %}
-    <p class="mt-4 text-content">{{ site_maintenance.planned_message }}</p>
-    {% endif %}
-    <p class="mt-6 text-sm text-content-muted">Please try again shortly.</p>
-</section>
+<header class="maintenance-bar">
+    <a class="maintenance-brand" href="/" aria-label="Yggdrasil home">
+        <img src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+        <span>Yggdrasil</span>
+        <span class="maintenance-version mono">v{{ app_version }}</span>
+    </a>
+    <button type="button" class="maintenance-theme" data-theme-toggle aria-label="Switch theme" title="Switch theme">
+        <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
+        <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
+    </button>
+</header>
+
+<div class="maintenance-stage">
+    <section class="maintenance-card" aria-labelledby="maintenance-title">
+        <div class="maintenance-visual" aria-hidden="true">
+            <span class="maintenance-orbit maintenance-orbit--outer"></span>
+            <span class="maintenance-orbit maintenance-orbit--inner"></span>
+            <span class="maintenance-tree-glow"></span>
+            <img src="{% static 'icons/logo-yggdrasil.png' %}" alt="">
+            <span class="maintenance-code mono">503</span>
+        </div>
+
+        <div class="maintenance-copy">
+            <div class="maintenance-status">
+                <span class="maintenance-status__dot" aria-hidden="true"></span>
+                Maintenance in progress
+            </div>
+            <p class="maintenance-kicker mono">SYSTEM CARE / TEMPORARY PAUSE</p>
+            <h1 id="maintenance-title">We are tending to Yggdrasil.</h1>
+            <p class="maintenance-lead">The platform is temporarily unavailable while scheduled work is completed. Your data remains safe.</p>
+
+            {% if site_maintenance and site_maintenance.planned_message %}
+            <div class="maintenance-message" role="status">
+                <span class="maintenance-message__icon">{% icon 'circle-info' %}</span>
+                <p>{{ site_maintenance.planned_message }}</p>
+            </div>
+            {% endif %}
+
+            <div class="maintenance-actions">
+                <a class="maintenance-action maintenance-action--primary" href="/">
+                    {% icon 'sync' %}<span>Try again</span>
+                </a>
+                <a class="maintenance-action maintenance-action--secondary" href="{% url 'login' %}?next=/">
+                    {% icon 'user-shield' %}<span>Administrator sign in</span>
+                </a>
+            </div>
+            <p class="maintenance-admin-note">Authorized staff can continue to access the platform during maintenance.</p>
+        </div>
+    </section>
+</div>
+
+<footer class="maintenance-foot">
+    <span>Powered by <a href="https://aimagelab.ing.unimore.it" target="_blank" rel="noopener">AImageLab</a></span>
+    <span class="maintenance-foot__dot" aria-hidden="true"></span>
+    <span>Medical imaging infrastructure</span>
+</footer>
 {% endblock %}

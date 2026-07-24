@@ -12,7 +12,10 @@
         <!-- ======================================================== -->
         <div class="patient-view-viewer">
 
-            <div class="d-flex justify-content-end align-items-center mb-2">
+            <div class="d-flex justify-content-end align-items-center gap-2 mb-2">
+                <button id="laparoscopy-tour-btn" class="btn btn-sm btn-outline-info d-none" type="button">
+                    <i class="fas fa-route me-1"></i>Start tutorial
+                </button>
                 <button id="annotation-toggle-btn" class="btn btn-sm btn-outline-warning d-none">
                     <i class="fas fa-draw-polygon me-1"></i>Enter Annotation Mode
                 </button>
@@ -256,29 +259,6 @@
         <!-- Right column: tabbed sidebar + annotation panels          -->
         <!-- ======================================================== -->
         <div>
-            <div class="side-panel mb-3">
-                <div class="side-panel__tabs" role="tablist">
-                    <button type="button" class="side-tab is-active" data-tab-target="captions">Captions</button>
-                    <button type="button" class="side-tab" data-tab-target="files">Files</button>
-                    <button type="button" class="side-tab" data-tab-target="settings">Settings</button>
-                    <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
-                </div>
-                <div class="side-panel__body">
-                    <div class="side-tab-pane is-active" data-tab-pane="captions">
-                        {% include 'common/sections/vocal_caption_section.html' %}
-                    </div>
-                    <div class="side-tab-pane" data-tab-pane="files">
-                        {% include 'common/sections/file_management_section.html' %}
-                    </div>
-                    <div class="side-tab-pane" data-tab-pane="settings">
-                        {% include 'common/sections/scan_settings_section.html' %}
-                    </div>
-                    <div class="side-tab-pane" data-tab-pane="activity">
-                        {% include 'common/sections/activity_section.html' %}
-                    </div>
-                </div>
-            </div>
-
             {% comment %} Annotation-mode panels stay OUTSIDE the tab shell: the annotator
                script toggles their .d-none directly (see the bottom of this
                file), and a parent tab-pane's own display:none would fight
@@ -343,6 +323,29 @@
                 </div>
             </div>
 
+            <div class="side-panel mb-3">
+                <div class="side-panel__tabs" role="tablist">
+                    <button type="button" class="side-tab is-active" data-tab-target="captions">Captions</button>
+                    <button type="button" class="side-tab" data-tab-target="files">Files</button>
+                    <button type="button" class="side-tab" data-tab-target="settings">Settings</button>
+                    <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
+                </div>
+                <div class="side-panel__body">
+                    <div class="side-tab-pane is-active" data-tab-pane="captions">
+                        {% include 'common/sections/vocal_caption_section.html' %}
+                    </div>
+                    <div class="side-tab-pane" data-tab-pane="files">
+                        {% include 'common/sections/file_management_section.html' %}
+                    </div>
+                    <div class="side-tab-pane" data-tab-pane="settings">
+                        {% include 'common/sections/scan_settings_section.html' %}
+                    </div>
+                    <div class="side-tab-pane" data-tab-pane="activity">
+                        {% include 'common/sections/activity_section.html' %}
+                    </div>
+                </div>
+            </div>
+
         </div><!-- /right column -->
 
 </div><!-- /patient-view-grid -->
@@ -391,6 +394,7 @@
 <script src="{% static 'js/laparoscopy/laparoscopy_annotator_worker.js' %}"></script>
 <script src="{% static 'js/laparoscopy/laparoscopy_annotator_magic.js' %}"></script>
 <script src="{% static 'js/laparoscopy/laparoscopy_annotator.js' %}"></script>
+<script src="{% static 'js/laparoscopy/laparoscopy_tutorial.js' %}"></script>
 
 <script>
 (function () {
@@ -406,6 +410,7 @@
     var quadrantTypesPanel = document.getElementById('quadrant-types-panel');
     var regionPanel = document.getElementById('region-types-panel');
     var magicPanel = document.getElementById('magic-toolbox-panel');
+    var tourBtn = document.getElementById('laparoscopy-tour-btn');
 
     placeholder.remove();
 
@@ -637,6 +642,8 @@
             if (annotator.currentTool === 'point') annotator._setTool(annotator._lastNonPointTool || 'brush');
             if (subsampledPreviewVideo) subsampledPreviewVideo.style.display = 'none';
         };
+
+        if (tourBtn) tourBtn.classList.remove('d-none');
     }
 
     if (video.readyState >= 1) {

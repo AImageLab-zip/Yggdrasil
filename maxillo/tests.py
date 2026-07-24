@@ -13,7 +13,7 @@ from common.models import Invitation, Modality, Project, ProjectAccess
 from .models import Folder, FolderAccess, Patient
 from .views.auth import _repair_empty_invitation_codes
 from .views.intraoral_segmentation import _normalize_teeth_payload
-from .views.patient_data import _normalize_landmarks_payload
+from .views.patient_data import _normalize_landmarks_payload, _normalize_loaded_landmarks
 
 
 class IntraoralSegmentationNormalizationTests(SimpleTestCase):
@@ -71,6 +71,27 @@ class IOSLandmarkNormalizationTests(SimpleTestCase):
             _normalize_landmarks_payload({'13_upper_FDI_11': {'incisal': [1, 2, 3]}}, 12)
         with self.assertRaises(ValueError):
             _normalize_landmarks_payload({'12_lower_FDI_11': {'incisal': [1, 2, 3]}}, 12)
+
+    def test_loaded_landmarks_accept_worker_wrapper(self):
+        payload = {
+            'landmarks': {
+                '12_upper_FDI_11': {'incisal': [1, 2, 3]},
+            },
+        }
+
+        normalized = _normalize_loaded_landmarks(payload, 12)
+
+        self.assertEqual(normalized['12_upper_FDI_11']['incisal'], [1.0, 2.0, 3.0])
+
+    def test_loaded_landmarks_filter_other_patients(self):
+        payload = {
+            '012_upper_FDI_11': {'incisal': [1, 2, 3]},
+            '99_lower_FDI_41': {'incisal': [4, 5, 6]},
+        }
+
+        normalized = _normalize_loaded_landmarks(payload, 12)
+
+        self.assertEqual(list(normalized), ['12_upper_FDI_11'])
 
 
 class InvitationCodeTests(TestCase):

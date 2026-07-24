@@ -80,6 +80,22 @@ def _collect_output_files(output_prefix):
     return output_files
 
 
+def _normalize_output_files(modality, output_files):
+    """Apply modality-specific logical names to generic collected artifacts."""
+    output_files = dict(output_files or {})
+    if modality != "cbct" or "segmentation_nifti" in output_files:
+        return output_files
+
+    nifti_outputs = [
+        key
+        for key in output_files
+        if key.lower().endswith((".nii", ".nii.gz"))
+    ]
+    if len(nifti_outputs) == 1:
+        output_files["segmentation_nifti"] = output_files[nifti_outputs[0]]
+    return output_files
+
+
 def _format_slurm_failure(slurm_id, state, accounting, stdout_text, stderr_text):
     display_state = (accounting or {}).get("state") or state
     lines = [f"SLURM job {slurm_id} ended in state {display_state}"]
@@ -187,7 +203,14 @@ def run_job(job_id: int) -> str:
         )
         return f"failed:{state}"
 
-    output_files = _collect_output_files(output_prefix)
-    api.complete(job_id, output_files=output_files, logs="")
+    try:
+        output_files = _normalize_output_files(
+            modality, _collect_output_files(output_prefix)
+        )
+        api.complete(job_id, output_files=output_files, logs="")
+    except Exception as exc:
+        logger.exception("Completion callback failed for job %s", job_id)
+        api.fail(job_id, f"Completion error: {exc}")
+        return "failed:completion"
     logger.info("Job %s completed (slurm %s, %d outputs)", job_id, slurm_id, len(output_files))
     return "completed"

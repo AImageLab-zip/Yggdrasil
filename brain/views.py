@@ -249,12 +249,24 @@ def patient_list(request):
     if tags_selected:
         patients = patients.filter(tags__name__in=tags_selected).distinct()
 
+    has_reports_filter = request.GET.get("has_reports", "")
+    if has_reports_filter == "yes":
+        patients = patients.filter(voice_captions__isnull=False).distinct()
+
     patients = patients.order_by("-uploaded_at")
     allowed_modalities = []
     if current_project_id:
         project = Project.objects.filter(id=current_project_id).prefetch_related("modalities").first()
         if project:
             allowed_modalities = list(project.modalities.filter(is_active=True))
+
+    status_filters = {}
+    for modality in allowed_modalities:
+        slug = modality.slug or ""
+        if slug and slug != "rawzip":
+            value = request.GET.get(f"status_{slug}", "").strip()
+            if value in {"processed", "processing", "failed"}:
+                status_filters[slug] = value
 
     patients_with_status = []
     is_admin = user_is_project_admin(request.user, "brain")
@@ -305,7 +317,18 @@ def patient_list(request):
             "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())),
         })
 
-    per_page = int(request.GET.get("per_page", 20))
+    if status_filters:
+        patients_with_status = [
+            item for item in patients_with_status
+            if all(item["modality_statuses"].get(slug, "absent") == value for slug, value in status_filters.items())
+        ]
+
+    try:
+        per_page = int(request.GET.get("per_page", 10))
+    except (TypeError, ValueError):
+        per_page = 10
+    if per_page not in {10, 20, 50, 100}:
+        per_page = 10
     page_obj = Paginator(patients_with_status, per_page).get_page(request.GET.get("page"))
     folders = filter_folders_for_user(request.user, Folder.objects.filter(parent__isnull=True).order_by("name"), "brain")
     context = {
@@ -319,10 +342,11 @@ def patient_list(request):
         "per_page": per_page,
         "user_profile": request.user.profile,
         "is_admin_user": is_admin,
+        "has_reports_filter": has_reports_filter,
         "allowed_modalities": allowed_modalities,
-        "status_filters": {},
+        "status_filters": status_filters,
         "modality_filter_specs": [
-            {"slug": m.slug, "name": m.name, "icon": m.icon or "", "label": m.label or "", "value": ""}
+            {"slug": m.slug, "name": m.name, "icon": m.icon or "", "label": m.label or "", "value": status_filters.get(m.slug, "")}
             for m in allowed_modalities
             if m.slug != "rawzip"
         ],
@@ -343,11 +367,38 @@ def upload_patient(request):
         messages.error(request, "You do not have permission to upload scans.")
         return redirect_with_namespace(request, "patient_list")
 
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True).order_by("name"),
+        namespace,
+    )
+    allowed_modalities = []
+    current_project_id = request.session.get("current_project_id")
+    if current_project_id:
+        try:
+            project = Project.objects.prefetch_related("modalities").get(id=current_project_id)
+            allowed_modalities = list(project.modalities.filter(is_active=True).exclude(slug="rawzip"))
+        except Project.DoesNotExist:
+            pass
+
     if request.method == "POST":
         patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
         patient_form = PatientForm()
 
-        if patient_upload_form.is_valid():
+        brain_upload_fields = {
+            "braintumor-mri-t1",
+            "braintumor-mri-t2",
+            "braintumor-mri-flair",
+            "braintumor-mri-t1c",
+            "braintumor-mri-seg",
+        }
+        has_upload = any(request.FILES.getlist(field_name) for field_name in brain_upload_fields)
+        form_is_valid = patient_upload_form.is_valid()
+        if form_is_valid and not has_upload:
+            patient_upload_form.add_error(None, "Add at least one file before uploading.")
+            form_is_valid = False
+
+        if form_is_valid:
             patient = patient_upload_form.save(commit=False)
             patient.uploaded_by = request.user
 
@@ -371,6 +422,7 @@ def upload_patient(request):
                         "patient_form": patient_form,
                         "patient_upload_form": patient_upload_form,
                         "folders": allowed_folders,
+                        "allowed_modalities": allowed_modalities,
                     })
 
             patient.save()
@@ -423,21 +475,6 @@ def upload_patient(request):
     else:
         patient_form = PatientForm()
         patient_upload_form = PatientUploadForm(user=request.user)
-
-    folders = filter_folders_for_user(
-        request.user,
-        Folder.objects.filter(parent__isnull=True).order_by("name"),
-        namespace,
-    )
-
-    allowed_modalities = []
-    current_project_id = request.session.get("current_project_id")
-    if current_project_id:
-        try:
-            project = Project.objects.prefetch_related("modalities").get(id=current_project_id)
-            allowed_modalities = list(project.modalities.filter(is_active=True))
-        except Project.DoesNotExist:
-            pass
 
     return render(request, "common/upload/upload.html", {
         "patient_form": patient_form,
@@ -859,14 +896,17 @@ def remove_patient_tag(request, patient_id):
 
 
 @login_required
-def upload_voice_caption(request, patient_id):
-    return JsonResponse({"error": "Voice captions are handled by text captions for Brain."}, status=400)
-
-
-@login_required
 @require_POST
 def upload_text_caption(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        user_is_project_admin(request.user, "brain")
+        or any(
+            user_can_write_annotations(request.user, folder, "brain")
+            for folder in patient.folders.all()
+        )
+    ):
+        return JsonResponse({"error": "Permission denied"}, status=403)
     try:
         data = _json.loads(request.body) if request.body else request.POST
     except _json.JSONDecodeError:

@@ -3,12 +3,7 @@ from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse
-from django.urls import reverse
 import json
-import os
-import logging
-
-from common.file_access import exists as artifact_exists
 from common.permissions import (
     user_can_delete_caption,
     user_can_edit_caption,
@@ -17,92 +12,6 @@ from common.permissions import (
 )
 
 from .domain import get_domain_models
-
-logger = logging.getLogger(__name__)
-
-@login_required
-def upload_voice_caption(request, patient_id):
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-
-    domain_models = get_domain_models(request)
-    Patient = domain_models['Patient']
-    VoiceCaption = domain_models['VoiceCaption']
-
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
-    
-    try:
-        audio_file = request.FILES.get('audio_file')
-        duration = float(request.POST.get('duration', 0))
-        modality = request.POST.get('modality', '').strip()
-        
-        if not audio_file:
-            return JsonResponse({'error': 'No audio file provided'}, status=400)
-        
-        if duration <= 0:
-            return JsonResponse({'error': 'Invalid duration'}, status=400)
-        
-        # Validate modality against database
-        from ..modality_helpers import is_valid_modality_slug, get_all_modalities
-        if not modality or not is_valid_modality_slug(modality):
-            # Fallback to first available modality
-            all_modalities = get_all_modalities()
-            modality = all_modalities[0].slug if all_modalities else 'unknown'
-        
-        # Create VoiceCaption instance (without audio file initially)
-        voice_caption = VoiceCaption.objects.create(
-            patient=patient,
-            user=request.user,
-            modality=modality,
-            duration=duration,
-            processing_status='pending'
-        )
-        
-        # Save audio file to dataset and create processing job
-        try:
-            from ..file_utils import save_audio_to_dataset
-            file_path, processing_job = save_audio_to_dataset(voice_caption, audio_file)
-            if processing_job:
-                logger.info(f"Audio file saved to {file_path}, processing job #{processing_job.id} created")
-            else:
-                logger.info(f"Audio file saved to {file_path}; audio processing is disabled")
-        except Exception as e:
-            logger.error(f"Error saving audio file or creating processing job: {e}", exc_info=True)
-            # Continue anyway, the caption is saved
-        
-        # Return caption data for the UI
-        quality_status = voice_caption.get_quality_status()
-        
-        # Get audio file URL from FileRegistry
-        audio_file = voice_caption.get_audio_file()
-        audio_url = None
-        if audio_file and artifact_exists(audio_file.file_path):
-            namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-            audio_url = reverse(f'{namespace}:api_serve_file', kwargs={'file_id': audio_file.id})
-            # Ensure HTTPS for audio URLs too
-            if request.is_secure():
-                audio_url = f'https://{request.get_host()}{audio_url}'
-        
-        return JsonResponse({
-            'success': True,
-            'caption': {
-                'id': voice_caption.id,
-                'user_username': voice_caption.user.username,
-                'modality_display': voice_caption.get_modality_display(),
-                'display_duration': voice_caption.get_display_duration(),
-                'quality_color': quality_status['color'],
-                'created_at': voice_caption.created_at.strftime('%b %d, %H:%M'),
-                'audio_url': audio_url,
-                'is_processed': voice_caption.is_processed(),
-                'text_caption': voice_caption.text_caption if voice_caption.is_processed() else None
-            }
-        })
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
 def delete_voice_caption(request, patient_id, caption_id):

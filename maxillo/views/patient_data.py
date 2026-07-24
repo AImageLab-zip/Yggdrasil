@@ -96,6 +96,23 @@ def _normalize_landmarks_payload(payload, patient_id):
     return normalized
 
 
+def _normalize_loaded_landmarks(payload, patient_id):
+    """Accept worker wrappers/aggregate files and return this patient's canonical document."""
+    if isinstance(payload, dict) and isinstance(payload.get("landmarks"), dict):
+        payload = payload["landmarks"]
+    if not isinstance(payload, dict):
+        raise ValueError("Landmarks must be a JSON object.")
+
+    patient_landmarks = {}
+    for key, entry in payload.items():
+        match = LANDMARK_KEY_RE.match(str(key))
+        if not match or int(match.group(1)) != int(patient_id):
+            continue
+        canonical_key = f"{patient_id}_{match.group(2)}_FDI_{match.group(3)}"
+        patient_landmarks[canonical_key] = entry
+    return _normalize_landmarks_payload(patient_landmarks, patient_id)
+
+
 def _serve_file_url(request, file_id):
     namespace = (
         getattr(request, "resolver_match", None) and request.resolver_match.namespace
@@ -138,7 +155,9 @@ def patient_ios_landmarks(request, patient_id):
         try:
             body, _ = open_binary(landmark_file.file_path)
             try:
-                landmarks = json.loads(body.read().decode("utf-8"))
+                landmarks = _normalize_loaded_landmarks(
+                    json.loads(body.read().decode("utf-8")), patient.patient_id
+                )
             finally:
                 body.close()
         except Exception:
@@ -277,19 +296,35 @@ def patient_viewer_data(request, patient_id):
     upper_scan_url = None
     lower_scan_url = None
 
-    # Check FileRegistry for processed files first, then raw files
+    # Select one complete pair according to the root IOS step's viewer policy.
     try:
-        # Look for processed files first
+        from common.modality_config import (
+            modality_prefers_processed_for_viewer,
+            raw_file_hidden,
+        )
+
         processed_files = patient.get_ios_processed_files()
+        raw_files = patient.get_ios_raw_files()
+
+        processed_pair = None
         if processed_files["upper"] and processed_files["lower"]:
-            upper_scan_url = _serve_file_url(request, processed_files["upper"].id)
-            lower_scan_url = _serve_file_url(request, processed_files["lower"].id)
-        else:
-            # Fallback to raw files from FileRegistry
-            raw_files = patient.get_ios_raw_files()
-            if raw_files["upper"] and raw_files["lower"]:
-                upper_scan_url = _serve_file_url(request, raw_files["upper"].id)
-                lower_scan_url = _serve_file_url(request, raw_files["lower"].id)
+            processed_pair = (processed_files["upper"], processed_files["lower"])
+
+        raw_pair = None
+        if raw_files["upper"] and raw_files["lower"]:
+            candidate = (raw_files["upper"], raw_files["lower"])
+            if not any(raw_file_hidden(file_obj) for file_obj in candidate):
+                raw_pair = candidate
+
+        pairs = (
+            (processed_pair, raw_pair)
+            if modality_prefers_processed_for_viewer(modality_slug)
+            else (raw_pair, processed_pair)
+        )
+        selected_pair = next((pair for pair in pairs if pair is not None), None)
+        if selected_pair:
+            upper_scan_url = _serve_file_url(request, selected_pair[0].id)
+            lower_scan_url = _serve_file_url(request, selected_pair[1].id)
     except Exception:
         pass
 

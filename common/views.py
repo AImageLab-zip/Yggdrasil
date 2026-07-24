@@ -27,7 +27,12 @@ def _database_health():
 
 def maintenance_page(request):
     """Public page used while the site is in full lockdown."""
-    return render(request, "common/maintenance.html", status=503)
+    return render(
+        request,
+        "common/maintenance.html",
+        {"hide_maintenance_banner": True},
+        status=503,
+    )
 
 
 def _object_storage_health():

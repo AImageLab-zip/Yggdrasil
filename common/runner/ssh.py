@@ -105,10 +105,9 @@ class SlurmSSH:
 
     @staticmethod
     def _export_str(export):
-        parts = ["ALL"]
-        for k, v in export.items():
-            parts.append(f"{k}={shlex.quote(str(v))}")
-        return ",".join(parts)
+        return " ".join(
+            f"{k}={shlex.quote(str(v))}" for k, v in export.items()
+        )
 
     def sbatch(
         self, *, script_path, export, output_path=None, error_path=None, work_dir=None
@@ -118,14 +117,18 @@ class SlurmSSH:
         No resource flags are passed here — partition/gres/time/etc are
         #SBATCH directives baked into each algo's own run.sbatch.
         """
-        cmd = ["sbatch", "--parsable"]
+        # This cluster rejects explicit sbatch --export options. Prefixing the
+        # submit command preserves SLURM's default environment propagation.
+        cmd = []
+        if export:
+            cmd.append(self._export_str(export))
+        cmd.extend(["sbatch", "--parsable"])
         if output_path:
             cmd.append(f"--output={shlex.quote(output_path)}")
         if error_path:
             cmd.append(f"--error={shlex.quote(error_path)}")
         if work_dir:
             cmd.append(f"--chdir={shlex.quote(work_dir)}")
-        cmd.append(f"--export={self._export_str(export)}")
         cmd.append(shlex.quote(script_path))
         code, out, err = self.run(" ".join(cmd))
         if code != 0:

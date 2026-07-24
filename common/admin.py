@@ -5,9 +5,19 @@ from common.models import ProcessingStep, SiteMaintenance, SystemCheck
 
 @admin.register(ProcessingStep)
 class ProcessingStepAdmin(admin.ModelAdmin):
-    list_display = ("modality", "name", "slug", "inputs", "queue_name", "algo_name", "is_enabled", "is_blocking", "discard_raw", "updated_at")
-    list_filter = ("is_enabled", "is_blocking", "discard_raw", "modality")
-    list_editable = ("is_enabled", "queue_name", "algo_name", "discard_raw")
+    list_display = (
+        "modality", "name", "slug", "inputs", "queue_name", "algo_name",
+        "is_enabled", "is_blocking", "discard_raw",
+        "prefer_processed_for_viewer", "updated_at",
+    )
+    list_filter = (
+        "is_enabled", "is_blocking", "discard_raw",
+        "prefer_processed_for_viewer", "modality",
+    )
+    list_editable = (
+        "is_enabled", "queue_name", "algo_name", "discard_raw",
+        "prefer_processed_for_viewer",
+    )
     search_fields = ("name", "slug", "modality__name", "modality__slug", "queue_name")
     autocomplete_fields = ("modality",)
     filter_horizontal = ("depends_on",)

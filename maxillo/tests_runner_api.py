@@ -275,10 +275,9 @@ class RunnerFailContractTests(RunnerApiTestCase):
         self.assertEqual(data["reason"], "marked_failed")
         job.refresh_from_db()
         self.assertEqual(job.error_logs, "boom")
-        # Job.can_retry() requires status == "failed", so a fail reported
-        # from "processing" always lands on "failed" (no auto-retry).
-        self.assertEqual(job.status, "failed")
-        self.mock_send_task.assert_not_called()
+        self.assertEqual(job.status, "retrying")
+        self.assertEqual(job.retry_count, 1)
+        self.mock_send_task.assert_called_once()
 
     def test_fail_error_msg_alias_accepted(self):
         job = self._job(status="processing", worker_id="worker-a")

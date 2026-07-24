@@ -5,9 +5,8 @@
  * data-theme stamp. (The previous file hardcoded #fff/#e5e7eb and could never
  * dark-mode.)
  *
- * The table is CSS grid, not a <table>. The grid/table toggle re-lays the SAME
- * rows via .patient-list.is-grid — rendering a second copy would duplicate
- * .row-select and break the selection queries in patient_list.js.
+ * The table is CSS grid, not a <table>. Each patient is rendered once so the
+ * selection queries in patient_list.js remain unambiguous.
  */
 
 /* ---- Page shell -------------------------------------------------------- */
@@ -34,11 +33,6 @@
     gap: 10px;
 }
 .patients-title__icon { color: var(--ygg-primary); font-size: 19px; }
-.patients-count {
-    font-size: 13px;
-    color: var(--ygg-text-muted);
-    margin-top: 2px;
-}
 .patients-head__actions { display: flex; gap: 10px; align-items: center; }
 
 /* ---- Buttons ----------------------------------------------------------- */
@@ -75,27 +69,6 @@
 
 /* .icon-btn lives in ygg-ui.css (loaded sitewide via base.html) — this page
    isn't the only one that needs it, so it isn't the source of truth. */
-
-/* ---- View toggle ------------------------------------------------------- */
-.view-toggle {
-    display: flex;
-    border: 1px solid var(--ygg-border);
-    border-radius: 9px;
-    overflow: hidden;
-}
-.view-toggle__btn {
-    width: 34px;
-    height: 34px;
-    border: none;
-    cursor: pointer;
-    background: transparent;
-    color: var(--ygg-text-muted);
-    font-size: 13px;
-}
-.view-toggle__btn.is-active {
-    background: var(--ygg-accent-soft);
-    color: var(--ygg-primary);
-}
 
 /* ---- Layout ------------------------------------------------------------ */
 .patients-grid {
@@ -162,8 +135,18 @@
 }
 
 /* Filters */
-.side-search { position: relative; margin-bottom: 10px; }
-.side-search > i {
+.filter-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--ygg-border);
+    border-radius: 12px;
+    background: var(--ygg-surface);
+}
+.filter-bar__search { position: relative; flex: 1 1 210px; min-width: 170px; }
+.filter-bar__search > i {
     position: absolute;
     left: 10px;
     top: 50%;
@@ -172,7 +155,27 @@
     color: var(--ygg-text-faint);
     pointer-events: none;
 }
-.side-search .filter-input { padding-left: 28px; }
+.filter-bar__search .filter-input { padding-left: 28px; }
+.filter-bar__group { flex: 1 1 auto; }
+.filter-bar__label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--ygg-text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+.filter-bar__page-size { flex: 0 0 78px; margin: 0; }
+.filter-bar__actions { display: flex; gap: 6px; align-items: center; }
+@media (max-width: 1100px) {
+    .filter-bar { flex-wrap: wrap; }
+    .filter-bar__group { order: 3; flex-basis: 100%; }
+}
+@media (max-width: 640px) {
+    .filter-bar__search { flex-basis: 100%; }
+    .filter-bar__actions { margin-left: auto; }
+}
 
 .filter-input,
 .filter-select {
@@ -193,9 +196,6 @@
 }
 .filter-input::placeholder { color: var(--ygg-text-faint); }
 .filter-select--sm { width: auto; height: 30px; font-size: 12px; }
-
-.side-actions { display: flex; gap: 8px; margin-top: 12px; }
-.side-actions .ygg-btn { flex: 1; }
 
 /* Modality filter buttons (icon-only; JS swaps only the status-* class) */
 .status-filter-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -255,7 +255,7 @@
 .patient-list {
     border: 1px solid var(--ygg-border);
     border-radius: 12px;
-    overflow: hidden;
+    overflow-x: auto;
     background: var(--ygg-surface);
 }
 
@@ -265,6 +265,7 @@
     grid-template-columns: 32px 2fr 1.3fr 1fr 0.9fr 0.7fr 110px;
     gap: 10px;
     align-items: center;
+    min-width: 850px;
 }
 
 .patient-list-header {
@@ -291,20 +292,6 @@
 
 /* Patient cell */
 .scan-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.patient-avatar {
-    width: 30px;
-    height: 30px;
-    flex: none;
-    border-radius: 8px;
-    background: var(--ygg-accent-soft);
-    color: var(--ygg-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-}
 .scan-name__meta { min-width: 0; }
 .scan-name-text {
     display: block;
@@ -434,37 +421,6 @@
     font-size: 13px;
 }
 .patient-empty i { font-size: 28px; margin-bottom: 10px; display: block; }
-
-/* ---- Grid view (same rows, re-laid out) -------------------------------- */
-.patient-list.is-grid {
-    border: 0;
-    background: transparent;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 14px;
-    overflow: visible;
-}
-.patient-list.is-grid .patient-list-header { display: none; }
-.patient-list.is-grid .patient-row {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 16px;
-    border: 1px solid var(--ygg-border);
-    border-radius: 12px;
-    background: var(--ygg-surface);
-}
-.patient-list.is-grid .patient-row.selected { border-color: var(--ygg-primary); }
-.patient-list.is-grid .col-check { position: absolute; right: 12px; top: 12px; }
-.patient-list.is-grid .patient-row { position: relative; }
-.patient-list.is-grid .scan-name { width: 100%; }
-.patient-list.is-grid .tags-col:empty { display: none; }
-.patient-list.is-grid .uploader,
-.patient-list.is-grid .privacy {
-    font-size: 11px;
-    color: var(--ygg-text-muted);
-}
 
 /* ---- Footer / pagination ----------------------------------------------- */
 .patient-list-footer {

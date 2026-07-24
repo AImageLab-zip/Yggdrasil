@@ -34,6 +34,19 @@ def upload_patient(request):
     if current_project_id and not user_profile.can_upload_scans():
         messages.error(request, 'You are not allowed to upload in this project.')
         return redirect_with_namespace(request, 'patient_list')
+
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True).order_by('name'),
+        namespace,
+    )
+    allowed_modalities = []
+    if current_project_id:
+        try:
+            project = Project.objects.prefetch_related('modalities').get(id=current_project_id)
+            allowed_modalities = list(project.modalities.filter(is_active=True).exclude(slug='rawzip'))
+        except Project.DoesNotExist:
+            pass
     
     if request.method == 'POST':
         patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
@@ -59,9 +72,23 @@ def upload_patient(request):
                     'patient_form': patient_form,
                     'patient_upload_form': patient_upload_form,
                     'folders': allowed_folders,
+                    'allowed_modalities': allowed_modalities,
                 })
 
-        if patient_upload_form.is_valid():
+        upload_field_names = (
+            {'video'} if namespace == 'laparoscopy' else
+            {'cbct', 'cbct_folder_files', 'ios_upper', 'ios_lower', 'teleradiography', 'panoramic', 'intraoral-photos'}
+        )
+        has_upload = any(request.FILES.getlist(field_name) for field_name in upload_field_names)
+        form_is_valid = patient_upload_form.is_valid()
+        if form_is_valid and not has_upload:
+            patient_upload_form.add_error(None, 'Add at least one file before uploading.')
+            form_is_valid = False
+        if form_is_valid and len(request.FILES.getlist('intraoral-photos')) > 10:
+            patient_upload_form.add_error(None, 'Select no more than 10 intraoral photographs.')
+            form_is_valid = False
+
+        if form_is_valid:
             # Create and populate Patient from the form
             patient = patient_upload_form.save(commit=False)
             patient.uploaded_by = request.user
@@ -87,6 +114,7 @@ def upload_patient(request):
                         'patient_form': patient_form,
                         'patient_upload_form': patient_upload_form,
                         'folders': allowed_folders,
+                        'allowed_modalities': allowed_modalities,
                     })
                 patient.folder = folder
             patient.save()
@@ -239,22 +267,6 @@ def upload_patient(request):
     else:
         patient_form = PatientForm()
         patient_upload_form = PatientUploadForm(user=request.user)
-    
-    folders = filter_folders_for_user(
-        request.user,
-        Folder.objects.filter(parent__isnull=True).order_by('name'),
-        namespace,
-    )
-    
-    # Get allowed modalities for template rendering
-    allowed_modalities = []
-    cp_id = request.session.get('current_project_id')
-    if cp_id:
-        try:
-            proj = Project.objects.prefetch_related('modalities').get(id=cp_id)
-            allowed_modalities = list(proj.modalities.filter(is_active=True))
-        except Project.DoesNotExist:
-            pass
     
     context = {
         'patient_form': patient_form,

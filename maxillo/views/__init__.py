@@ -60,7 +60,6 @@ from .intraoral_segmentation import (
 
 # Voice captions
 from .voice_captions import (
-    upload_voice_caption,
     delete_voice_caption,
     upload_text_caption,
     edit_voice_caption_transcription,
@@ -125,7 +124,6 @@ __all__ = [
     'patient_intraoral_segmentation_data',
     'update_patient_intraoral_segmentation',
     # Voice captions
-    'upload_voice_caption',
     'delete_voice_caption',
     'upload_text_caption',
     'edit_voice_caption_transcription',

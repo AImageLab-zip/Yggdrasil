@@ -7,7 +7,7 @@ A Django web application for managing and processing medical imaging data across
 ### Maxillo (dental/maxillofacial imaging)
 
 - **Bite Classification**: Automatic and manual classification of dental occlusion (sagittal, vertical, transverse, midline)
-- **AI-Powered Captioning**: IOS and CBCT annotation using speech-to-text technology, with editable/versioned transcriptions
+- **AI-Powered Captioning**: Live Whisper speech-to-text annotation with editable/versioned transcriptions
 - **CBCT Panoramic Extraction**: Automated extraction of panoramic views from CBCT scans
 - **IOS Normalization**: Standardized processing of intraoral scan data
 - **Multi-Modality Support**: Handle IOS, intraoral photos, teleradiography, panoramic images, and CBCT
@@ -18,7 +18,7 @@ A Django web application for managing and processing medical imaging data across
 `brain/` reuses the same patient/folder/export workflow as `maxillo/` for a separate project namespace, with its own database tables, folders, and modalities.
 
 - **Multi-Modality Support**: Handle brain tumor MRI sequences (T1, T2, FLAIR, T1c)
-- **AI-Powered Captioning**: Speech-to-text annotation with editable/versioned transcriptions
+- **AI-Powered Captioning**: Live Whisper speech-to-text annotation with editable/versioned transcriptions
 - **Data Export**: Structured, shareable export of patient data and imaging files
 
 ### Laparoscopy (surgical video annotation)
@@ -26,7 +26,7 @@ A Django web application for managing and processing medical imaging data across
 - **Video Upload & Organization**: Upload laparoscopic surgery videos into folders, datasets, and tags
 - **Frame-Accurate Annotation**: Brush/eraser/polygon region annotation and time-stamped quadrant markers, with per-project, per-user color schemes
 - **AI-Assisted Segmentation**: Point-prompt segmentation proxied to an external worker service (requires `WORKER_BASE_URL` — see [docs/setup.md](docs/setup.md))
-- **Voice Captioning**: Speech-to-text clinical notes, same as Maxillo/Brain
+- **Voice Captioning**: Live Whisper clinical notes, same as Maxillo/Brain
 - **Data Export**: Subsampled video frames plus per-frame annotation masks (NPZ) as ZIP archives
 
 ## Description

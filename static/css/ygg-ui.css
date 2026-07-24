@@ -184,3 +184,62 @@ body.ygg-modal-open { overflow: hidden; }
 .icon-btn--danger:hover { color: var(--ygg-danger); border-color: var(--ygg-danger); }
 .icon-btn--xs { width: 22px; height: 22px; border-radius: 6px; font-size: 9px; }
 .icon-btn.is-disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---- Toast notifications ------------------------------------------------ */
+.ygg-toast-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 2000;
+    display: flex;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    flex-direction: column;
+    gap: 8px;
+}
+.ygg-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--ygg-border);
+    border-radius: 8px;
+    background: var(--ygg-surface);
+    box-shadow: 0 12px 32px rgba(28, 34, 51, 0.18);
+    color: var(--ygg-text);
+    font-size: 14px;
+    line-height: 1.4;
+    animation: ygg-toast-in 160ms ease-out;
+}
+.ygg-toast.is-leaving {
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 150ms ease, transform 150ms ease;
+}
+.ygg-toast__icon { margin-top: 2px; }
+.ygg-toast--success .ygg-toast__icon { color: var(--ygg-ok); }
+.ygg-toast--danger .ygg-toast__icon { color: var(--ygg-danger); }
+.ygg-toast--warning .ygg-toast__icon { color: var(--ygg-warn); }
+.ygg-toast--info .ygg-toast__icon { color: var(--ygg-primary); }
+.ygg-toast__body { min-width: 0; flex: 1; }
+.ygg-toast__title { font-weight: 600; }
+.ygg-toast__msg { color: var(--ygg-text-muted); overflow-wrap: anywhere; }
+.ygg-toast__close {
+    margin: -2px -2px 0 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ygg-text-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 20px;
+    line-height: 1;
+}
+.ygg-toast__close:hover { color: var(--ygg-text); }
+@keyframes ygg-toast-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ygg-toast { animation: none; }
+}

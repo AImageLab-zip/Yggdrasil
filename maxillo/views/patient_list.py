@@ -21,6 +21,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+PATIENT_LIST_PAGE_SIZES = {10, 20, 50, 100}
+
+
+def _patient_list_page_size(request):
+    try:
+        value = int(request.GET.get('per_page', 10))
+    except (TypeError, ValueError):
+        return 10
+    return value if value in PATIENT_LIST_PAGE_SIZES else 10
+
 
 def _get_domain_models(request):
 
@@ -144,9 +154,10 @@ def patient_list(request):
     search_query = request.GET.get('search', '').strip()
     has_ios_filter = request.GET.get('has_ios', '')
     has_cbct_filter = request.GET.get('has_cbct', '')
-    has_bite_filter = request.GET.get('has_bite', '')
     has_voice_filter = request.GET.get('has_voice', '')
     has_reports_filter = request.GET.get('has_reports', '')
+    has_bite_classification_filter = request.GET.get('has_bite_classification', '')
+    has_landmarks_filter = request.GET.get('has_landmarks', '')
 
     folder_id = request.GET.get('folder')
     tags_selected = request.GET.getlist('tags')
@@ -154,7 +165,7 @@ def patient_list(request):
         comma = request.GET.get('tags', '')
         if comma:
             tags_selected = [t.strip() for t in comma.split(',') if t.strip()]
-    per_page = int(request.GET.get('per_page', 10))
+    per_page = _patient_list_page_size(request)
 
     # Store base queryset for folder counts BEFORE applying folder filter
     base_patients_for_counts = patients
@@ -179,11 +190,16 @@ def patient_list(request):
 
     if has_reports_filter == 'yes':
         patients = patients.filter(voice_captions__isnull=False).distinct()
+
+    if namespace == 'maxillo' and has_bite_classification_filter == 'yes':
+        patients = patients.filter(classifications__isnull=False).distinct()
+
+    if namespace == 'maxillo' and has_landmarks_filter == 'yes':
+        patients = patients.filter(files__file_type='ios_landmarks').distinct()
     
     patients = patients.order_by('-uploaded_at')
     
     # Get filter parameters for optimization decision
-    per_page = int(request.GET.get('per_page', 10))
     page_number = request.GET.get('page')
     
     # Check if we have modality status filters that require processing all patients
@@ -450,9 +466,11 @@ def patient_list(request):
         'search_query': search_query,
         'has_ios_filter': has_ios_filter,
         'has_cbct_filter': has_cbct_filter,
-        'has_bite_filter': has_bite_filter,
         'has_voice_filter': has_voice_filter,
         'has_reports_filter': has_reports_filter,
+        'has_bite_classification_filter': has_bite_classification_filter,
+        'has_landmarks_filter': has_landmarks_filter,
+        'show_maxillo_presence_filters': namespace == 'maxillo',
         'folder_id': folder_id or 'all',
         'selected_tags': tags_selected,
         'folders': folders_with_counts,
