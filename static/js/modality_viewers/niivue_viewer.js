@@ -109,6 +109,9 @@ class NiiVueViewer {
         }
 
         const opacity = typeof options.opacity === 'number' ? options.opacity : 0.5;
+        const labelMax = Number.isInteger(options.labelMax) && options.labelMax > 3
+            ? options.labelMax
+            : 3;
 
         // Fast path: overlay already loaded in GPU memory — just make it visible again.
         if (this.segmentationOverlayLoaded && this.nv.volumes && this.nv.volumes.length >= 2) {
@@ -132,20 +135,38 @@ class NiiVueViewer {
 
         const overlay = this.nv.volumes[overlayIndex];
 
-        // addColormap is confirmed public in NiiVue 0.67.
-        // I=[0,85,170,255] evenly maps labels 0/1/2/3 across the 0-255 LUT range:
-        //   voxel N → LUT index (N/3)*255  →  0→0, 1→85, 2→170, 3→255
-        // cal_max is hardcoded to 3 — do NOT use global_max which NiiVue may
-        // report as 1.0 for integer label files.
         try {
-            this.nv.addColormap('segmentationMask', {
-                R: [0,   0,   255, 0  ],
-                G: [0,   255, 0,   0  ],
-                B: [0,   0,   0,   255],
-                A: [0,   255, 255, 255],
-                I: [0,   85,  170, 255]
-            });
-            overlay.colormap = 'segmentationMask';
+            if (labelMax > 3) {
+                const colormap = { R: [], G: [], B: [], A: [], I: [] };
+                for (let value = 0; value <= labelMax; value++) {
+                    const hue = (value * 0.61803398875) % 1;
+                    const sector = Math.floor(hue * 6);
+                    const fraction = hue * 6 - sector;
+                    const p = 0.25;
+                    const q = 1 - fraction * 0.75;
+                    const t = 0.25 + fraction * 0.75;
+                    const rgb = [
+                        [1, t, p], [q, 1, p], [p, 1, t],
+                        [p, q, 1], [t, p, 1], [1, p, q]
+                    ][sector % 6];
+                    colormap.R.push(value === 0 ? 0 : Math.round(rgb[0] * 255));
+                    colormap.G.push(value === 0 ? 0 : Math.round(rgb[1] * 255));
+                    colormap.B.push(value === 0 ? 0 : Math.round(rgb[2] * 255));
+                    colormap.A.push(value === 0 ? 0 : 255);
+                    colormap.I.push(Math.round(value * 255 / labelMax));
+                }
+                this.nv.addColormap('cbctSegmentationMask', colormap);
+                overlay.colormap = 'cbctSegmentationMask';
+            } else {
+                this.nv.addColormap('segmentationMask', {
+                    R: [0,   0,   255, 0  ],
+                    G: [0,   255, 0,   0  ],
+                    B: [0,   0,   0,   255],
+                    A: [0,   255, 255, 255],
+                    I: [0,   85,  170, 255]
+                });
+                overlay.colormap = 'segmentationMask';
+            }
         } catch (e) {
             overlay.colormap = 'red';
         }
@@ -155,7 +176,7 @@ class NiiVueViewer {
         // Set cal range after the GPU update inside _setOverlayOpacity so it
         // is not overwritten by any internal reset, then flush to GPU.
         overlay.cal_min = 0;
-        overlay.cal_max = 3;
+        overlay.cal_max = labelMax;
         if (typeof this.nv.updateGLVolume === 'function') {
             this.nv.updateGLVolume();
         } else {
@@ -245,6 +266,29 @@ class NiiVueViewer {
 
         this.nv.setSliceType(sliceType);
         this.currentOrientation = actualOrientation;
+        this.nv.drawScene();
+    }
+
+    setRenderMode() {
+        if (!this.nv) {
+            throw new Error('Cannot enable render mode before initialization');
+        }
+        const renderSliceType = this.nv.sliceTypeRender !== undefined
+            ? this.nv.sliceTypeRender
+            : 4;
+        if (this.nv.opts) {
+            this.nv.opts.gradientOpacity = 0.6;
+            this.nv.opts.gradientAmount = 0.5;
+            this.nv.opts.crosshairWidth = 0;
+        }
+        this.nv.setSliceType(renderSliceType);
+        this.currentOrientation = 'render';
+        if (this.nv.scene) {
+            this.nv.scene.volScaleMultiplier = 1.2;
+        }
+        if (typeof this.nv.setRenderAzimuthElevation === 'function') {
+            this.nv.setRenderAzimuthElevation(180, 15);
+        }
         this.nv.drawScene();
     }
 

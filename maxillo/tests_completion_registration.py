@@ -16,6 +16,7 @@ from django.test import TestCase
 from common.modality_config import _processed_exists_for
 from common.models import FileRegistry, Job, Modality, ProcessingStep
 from maxillo.file_utils import get_file_type_for_modality, mark_job_completed
+from maxillo.views.patient_data import _normalize_loaded_landmarks
 from maxillo.models import Patient
 
 
@@ -162,6 +163,34 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
         self.assertEqual(row.file_type, "cbct_processed")
         self.assertEqual(row.file_path, "maxillo/processed/cbct/a.nii")
 
+    def test_cbct_completion_preserves_volume_and_segmentation_outputs(self):
+        job = self._job("cbct")
+        outputs = {
+            "volume_nifti": "maxillo/processed/cbct/volume.nii.gz",
+            "segmentation_nifti": {
+                "path": "maxillo/processed/cbct/segmentation.nii.gz",
+                "label_max": 98,
+            },
+            "ignored_debug_file": "maxillo/processed/cbct/debug.txt",
+        }
+
+        mark_job_completed(job.id, outputs)
+
+        job.refresh_from_db()
+        self.assertEqual(
+            set(job.output_files), {"volume_nifti", "segmentation_nifti"}
+        )
+        rows = FileRegistry.objects.filter(processing_job=job)
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual(
+            set(rows.values_list("subtype", flat=True)),
+            {"volume_nifti", "segmentation_nifti"},
+        )
+        self.assertIn(
+            self.patient.get_cbct_processed_file().subtype,
+            {"volume_nifti", "segmentation_nifti"},
+        )
+
     def test_cbct_recompletion_replaces_stale_row(self):
         job1 = self._job("cbct")
         mark_job_completed(job1.id, {"segmentation_nifti": "maxillo/processed/cbct/a.nii"})
@@ -221,6 +250,7 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
         processed = self.patient.get_ios_processed_files()
         self.assertEqual(processed["upper"].subtype, "upper_oriented.stl")
         self.assertEqual(processed["lower"].subtype, "lower_oriented.stl")
+        self.assertTrue(self.patient.has_ios_scans())
 
     def test_ios_landmark_prediction_becomes_active_without_manual_landmarks(self):
         job = self._job("ios")
@@ -231,6 +261,57 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
         landmark = FileRegistry.objects.get(file_type="ios_landmarks", patient=self.patient)
         self.assertEqual(landmark.file_path, landmark_path)
         self.assertEqual(landmark.metadata["origin"], "ai")
+
+    def test_dedicated_ios_landmarks_step_registers_nested_landmark_output(self):
+        ios_modality = Modality.objects.get(slug="ios")
+        step = ProcessingStep.objects.create(
+            modality=ios_modality,
+            name="IOS landmarks",
+            slug="ios-landmarks",
+        )
+        job = Job.objects.create(
+            domain="maxillo",
+            modality_slug="ios-landmarks",
+            step=step,
+            patient=self.patient,
+            status="processing",
+        )
+        landmark_path = "maxillo/processed/ios/job_%d/nested/landmarks.json" % job.id
+
+        mark_job_completed(
+            job.id,
+            {
+                "results/nested/landmarks.json": {"path": landmark_path},
+                "upper_seg.npy": "maxillo/processed/ios/job_%d/upper_seg.npy" % job.id,
+                "lower_seg.npy": "maxillo/processed/ios/job_%d/lower_seg.npy" % job.id,
+            },
+        )
+
+        landmark = FileRegistry.objects.get(
+            file_type="ios_landmarks", processing_job=job
+        )
+        self.assertEqual(landmark.file_path, landmark_path)
+        self.assertEqual(landmark.modality, ios_modality)
+        self.assertFalse(
+            FileRegistry.objects.filter(
+                file_type="ios_processed", processing_job=job
+            ).exists()
+        )
+
+    def test_root_ios_completion_rejects_a_single_arch(self):
+        job = self._job("ios")
+
+        with self.assertRaisesMessage(
+            ValueError, "must include both upper and lower scan outputs"
+        ):
+            mark_job_completed(
+                job.id,
+                {"upper_oriented.stl": "maxillo/processed/ios/upper.stl"},
+            )
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "processing")
+        self.assertFalse(FileRegistry.objects.filter(processing_job=job).exists())
 
     def test_ios_prediction_does_not_replace_manual_landmarks(self):
         FileRegistry.objects.create(
@@ -251,6 +332,22 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
         self.assertEqual(active.metadata["origin"], "manual")
         prediction = FileRegistry.objects.get(file_type="ios_landmarks_prediction", patient=self.patient)
         self.assertEqual(prediction.file_path, landmark_path)
+
+    def test_worker_landmark_keys_are_normalized_for_the_patient(self):
+        payload = {
+            "in_lower_FDI_45": {"bracket": [1, 2, 3]},
+            "in_upper_FDI_21": {"bracket": [4, 5, 6]},
+        }
+
+        normalized = _normalize_loaded_landmarks(payload, self.patient.patient_id)
+
+        self.assertEqual(
+            set(normalized),
+            {
+                f"{self.patient.patient_id}_lower_FDI_45",
+                f"{self.patient.patient_id}_upper_FDI_21",
+            },
+        )
 
     def test_video_completion_unchanged_shape(self):
         job = self._job("video")

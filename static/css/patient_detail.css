@@ -1,9 +1,9 @@
 /* 3D Viewer Styles */
 #scan-viewer {
     height: 650px;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    background: var(--ygg-surface-sunken);
 }
 .ios-scan-stage { position: relative; }
 
@@ -24,7 +24,7 @@
 }
 
 .viewer-controls .btn:not(.active) .fa-eye {
-    color: #6c757d;
+    color: var(--ygg-text-muted);
 }
 
 .viewer-controls .btn:not(.active) .fa-eye:before {
@@ -33,8 +33,8 @@
 
 /* Scan Management Section */
 .scan-management-box {
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
     padding: 0.75rem;
     margin-top: 0.5rem;
@@ -69,7 +69,7 @@
 .form-label-sm {
     font-size: 0.75rem;
     font-weight: 600;
-    color: #6c757d;
+    color: var(--ygg-text-muted);
     margin-bottom: 0.15rem;
     display: block;
 }
@@ -331,14 +331,14 @@
 
 /* Vocal Caption Section Styles */
 .vocal-caption-section {
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
     border-radius: 0.5rem;
     padding: 1rem;
 }
 
 .audio-recorder-card {
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
     padding: 1rem;
     text-align: center;
@@ -389,7 +389,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
     border-radius: 1.5rem;
     padding: 0.75rem 1rem;
 }
@@ -399,7 +399,7 @@
     font-weight: bold;
     font-size: 0.9rem;
     min-width: 45px;
-    color: #495057;
+    color: var(--ygg-text);
 }
 
 .progress-container {
@@ -410,7 +410,7 @@
 .progress {
     height: 6px;
     border-radius: 3px;
-    background-color: #e9ecef;
+    background-color: var(--ygg-surface-3);
     overflow: hidden;
 }
 
@@ -442,8 +442,8 @@
     margin-top: 0.5rem;
     padding: 0.4rem 0.55rem;
     border-radius: 0.65rem;
-    border: 1px solid #cfe2ff;
-    background: linear-gradient(180deg, #f4f8ff 0%, #fff 100%);
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface-2);
 }
 
 .audio-level-bar {
@@ -520,8 +520,8 @@
 }
 
 .caption-item-compact {
-    background: white;
-    border: 1px solid #e9ecef;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
     padding: 0.75rem;
     transition: background-color 0.15s ease;
@@ -531,7 +531,7 @@
 }
 
 .caption-item-compact:hover {
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
 }
 
 .caption-info {
@@ -679,8 +679,8 @@
 
 /* Text Input Card Styles */
 .text-input-card {
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
     border-radius: 0.5rem;
     padding: 1.5rem;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
@@ -693,12 +693,12 @@
 
 .text-input-container .form-label {
     font-weight: 600;
-    color: #495057;
+    color: var(--ygg-text);
     margin-bottom: 0.75rem;
 }
 
 .text-input-container .form-control {
-    border: 2px solid #e9ecef;
+    border: 2px solid var(--ygg-border);
     border-radius: 0.5rem;
     padding: 0.75rem;
     font-size: 0.95rem;
@@ -714,7 +714,7 @@
 }
 
 .text-input-container .form-control::placeholder {
-    color: #6c757d;
+    color: var(--ygg-text-faint);
     font-style: italic;
 }
 
@@ -749,7 +749,7 @@
 
 .form-text small {
     font-size: 0.8rem;
-    color: #6c757d;
+    color: var(--ygg-text-muted);
 }
 
 /* Hide old recorder controls */
@@ -772,7 +772,7 @@
 /* Collapsible Section Styles */
 .collapse-indicator {
     transition: transform 0.2s ease-in-out;
-    color: #6c757d;
+    color: var(--ygg-text-muted);
 }
 
 [aria-expanded="true"] .collapse-indicator {
@@ -785,15 +785,15 @@
 
 /* Section Headers */
 .section-header {
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
+    background: var(--ygg-surface-2);
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
     padding: 0.75rem;
     transition: background-color 0.15s ease-in-out;
 }
 
 .section-header:hover {
-    background: #e9ecef;
+    background: var(--ygg-surface-3);
 }
 
 .section-header[data-bs-toggle="collapse"] {
@@ -863,9 +863,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    background: var(--ygg-surface-sunken);
 }
 
 .ios-status-display .text-center {
@@ -909,9 +909,9 @@
 
 /* CBCT Viewer Styles */
 .viewer-container {
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--ygg-border);
     border-radius: 0.375rem;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    background: var(--ygg-surface-sunken);
 }
 
 .cbct-loading {
@@ -920,7 +920,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(255, 255, 255, 0.9);
+    background: color-mix(in srgb, var(--ygg-surface) 90%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -960,7 +960,7 @@
 
 .cbct-view-container {
     position: relative;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--ygg-border);
     border-radius: 0.25rem;
     background: #000;
     overflow: hidden;
@@ -975,7 +975,7 @@
 /* Panoramic view container - keep aspect ratio for panoramic only */
 #panoramicView .cbct-view-container {
     aspect-ratio: 2 / 1 !important; /* 2:1 container ratio */
-    background: #f8f9fa; /* Light background for panoramic */
+    background: var(--ygg-surface-2);
 }
 
 /* Panoramic image styling */
@@ -983,7 +983,7 @@
     width: 100%;
     height: 100%;
     object-fit: contain; /* Preserve aspect ratio, fit within container */
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
 }
 
 /* Panoramic loading and error states */
@@ -994,7 +994,7 @@
     justify-content: center;
     width: 100%;
     height: 100%;
-    color: #6c757d;
+    color: var(--ygg-text-muted);
 }
 
 .panoramic-loading .spinner-border-sm {
@@ -1030,7 +1030,7 @@
 
 /* Instagram-style Caption Display */
 .caption-text-display {
-    border-top: 1px solid #f1f3f4;
+    border-top: 1px solid var(--ygg-border);
     padding-top: 0.5rem;
     width: 100%;
     max-width: 100%;
@@ -1057,17 +1057,17 @@
 }
 
 .caption-text-full::-webkit-scrollbar-track {
-    background: #f1f1f1;
+    background: var(--ygg-surface-2);
     border-radius: 2px;
 }
 
 .caption-text-full::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
+    background: var(--ygg-border-strong);
     border-radius: 2px;
 }
 
 .caption-text-full::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
+    background: var(--ygg-text-faint);
 }
 
 .caption-toggle-btn {
@@ -1109,12 +1109,12 @@
     height: 1.25rem;
 }
 .dropdown-menu.p-3 .form-label-sm {
-    color: #6c757d;
+    color: var(--ygg-text-muted);
 }
 
 /* Viewer Help Modal Styles */
 .viewer-instructions-card {
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--ygg-border);
     border-radius: 0.5rem;
     overflow: hidden;
     height: 100%;
@@ -1148,7 +1148,7 @@
     padding: 0.25rem 0;
     font-size: 0.875rem;
     line-height: 1.4;
-    border-bottom: 1px solid #f8f9fa;
+    border-bottom: 1px solid var(--ygg-border);
 }
 
 .instruction-list li:last-child {
@@ -1156,7 +1156,7 @@
 }
 
 .instruction-list li strong {
-    color: #495057;
+    color: var(--ygg-text);
     font-weight: 600;
 }
 
@@ -1179,8 +1179,8 @@
 }
 
 #viewerHelpModal .alert-light {
-    background-color: #f8f9fa;
-    border-color: #dee2e6;
+    background-color: var(--ygg-surface-2);
+    border-color: var(--ygg-border);
 }
 
 #viewerHelpModal .alert-light h6 {
@@ -1297,7 +1297,7 @@
 }
 
 .modality-option:hover {
-    background-color: #f8f9fa;
+    background-color: var(--ygg-surface-2);
 }
 
 .modality-option.active {

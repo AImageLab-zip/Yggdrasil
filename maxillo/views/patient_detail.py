@@ -24,6 +24,99 @@ from ..file_utils import get_file_type_for_modality
 
 logger = logging.getLogger(__name__)
 
+
+def _bundle_output_path(file_obj, output_key):
+    if file_obj.subtype == output_key and artifact_exists(file_obj.file_path):
+        return file_obj.file_path, 'primary'
+    metadata = file_obj.metadata if isinstance(file_obj.metadata, dict) else {}
+    files = metadata.get('files', {})
+    output = files.get(output_key, {}) if isinstance(files, dict) else {}
+    path = output.get('path') if isinstance(output, dict) else None
+    if path and artifact_exists(path):
+        return path, output_key
+    return None, None
+
+
+def _cbct_viewer_files(patient):
+    """Return a job-paired display volume and optional segmentation."""
+    processed = list(
+        patient.files.filter(
+            file_type='cbct_processed',
+            processing_job__status='completed',
+        )
+        .select_related('processing_job')
+        .order_by('-processing_job__completed_at', '-created_at', '-id')
+    )
+    raw_files = list(
+        patient.files.filter(file_type='cbct_raw').order_by('-created_at', '-id')
+    )
+    raw_by_path = {
+        file_obj.file_path: file_obj
+        for file_obj in raw_files
+        if file_obj.file_path
+        and file_obj.file_path.endswith(('.nii', '.nii.gz'))
+        and artifact_exists(file_obj.file_path)
+    }
+
+    jobs = []
+    for file_obj in processed:
+        if file_obj.processing_job and file_obj.processing_job not in jobs:
+            jobs.append(file_obj.processing_job)
+
+    for job in jobs:
+        job_rows = [row for row in processed if row.processing_job_id == job.id]
+        segmentation_row = None
+        segmentation_key = None
+        for row in job_rows:
+            path, file_key = _bundle_output_path(row, 'segmentation_nifti')
+            if path:
+                segmentation_row, segmentation_key = row, file_key
+                break
+        if not segmentation_row:
+            continue
+
+        display_row = None
+        display_key = None
+        for row in job_rows:
+            path, file_key = _bundle_output_path(row, 'volume_nifti')
+            if path:
+                display_row, display_key = row, file_key
+                break
+
+        if not display_row:
+            raw_input = (job.input_files or {}).get('input')
+            display_row = raw_by_path.get(raw_input)
+            display_key = 'primary' if display_row else None
+        if not display_row:
+            continue
+
+        output_spec = (job.output_files or {}).get('segmentation_nifti')
+        label_max = output_spec.get('label_max', 98) if isinstance(output_spec, dict) else 98
+        return (
+            display_row,
+            display_key,
+            {
+                'id': segmentation_row.id,
+                'fileKey': segmentation_key,
+                'labelMax': label_max,
+            },
+        )
+
+    if raw_by_path:
+        display_row = next(row for row in raw_files if row.file_path in raw_by_path)
+        return display_row, 'primary', None
+
+    for row in processed:
+        path, file_key = _bundle_output_path(row, 'volume_nifti')
+        if path:
+            return row, file_key, None
+    return None, None, None
+
+
+def _call_patient_flag(patient, name):
+    value = getattr(patient, name, False)
+    return bool(value() if callable(value) else value)
+
 @login_required
 def patient_detail(request, patient_id):
     domain_models = get_domain_models(request)
@@ -361,21 +454,16 @@ def patient_detail(request, patient_id):
                     files_qs = patient.files.filter(modality=modality_obj)
 
                     if slug == 'cbct':
-                        file_obj = None
-                        raw_candidates = patient.files.filter(file_type='cbct_raw').order_by('-created_at')
-                        for raw_entry in raw_candidates:
-                            if raw_entry.file_path and (
-                                raw_entry.file_path.endswith('.nii') or raw_entry.file_path.endswith('.nii.gz')
-                            ) and artifact_exists(raw_entry.file_path):
-                                file_obj = raw_entry
-                                break
+                        file_obj, file_key, cbct_segmentation = _cbct_viewer_files(patient)
                     else:
                         file_obj = files_qs.order_by('-created_at').first()
+                        file_key = 'primary'
 
                     if file_obj:
                         modality_files[slug] = {
                             'id': file_obj.id,
                             'file_type': file_obj.file_type,
+                            'file_key': file_key,
                         }
     except Exception as e:
         logger.warning(f"Error building modality_files: {e}")
@@ -384,9 +472,9 @@ def patient_detail(request, patient_id):
     django_data = {
         'canEdit': bool(can_modify),
         'scanId': patient.patient_id,
-        'hasIOS': bool(getattr(patient, 'has_ios_scans', False)),
+        'hasIOS': _call_patient_flag(patient, 'has_ios_scans'),
         'hasCBCT': bool(has_cbct),
-        'isCBCTProcessed': bool(getattr(patient, 'is_cbct_processed', False)),
+        'isCBCTProcessed': _call_patient_flag(patient, 'is_cbct_processed'),
         'modalities': patient_modalities,
         'defaultModality': default_modality_slug,
     }
@@ -394,6 +482,7 @@ def patient_detail(request, patient_id):
         'scanId': patient.patient_id,
         'projectNamespace': (request.resolver_match.namespace if request.resolver_match else None) or 'maxillo',
         'modalityFiles': modality_files,
+        'segmentationFile': locals().get('cbct_segmentation'),
         'fixedMode': True,
         'enableDragDrop': False,
         'enableContextMenu': True,

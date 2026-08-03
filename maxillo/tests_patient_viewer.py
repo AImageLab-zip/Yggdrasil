@@ -85,6 +85,7 @@ class IOSViewerFilePreferenceTests(TestCase):
         self.step.prefer_processed_for_viewer = True
         self.step.save()
 
+        self.assertTrue(self.patient.has_ios_scans())
         self._assert_pair(self._viewer_data(), processed_pair)
 
     def test_checked_option_falls_back_to_complete_raw_pair(self):

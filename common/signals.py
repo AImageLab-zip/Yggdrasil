@@ -33,7 +33,8 @@ def _job_pre_save(sender, instance: Job, **kwargs):
         instance.worker_id = ""
         # Cleared on re-dispatch; the runner worker restamps it (observability only).
         instance.slurm_job_id = ""
-        instance.error_logs = ""
+        if instance.status == "pending":
+            instance.error_logs = ""
 
 
 @receiver(post_save, sender=Job)

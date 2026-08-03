@@ -192,6 +192,16 @@
                     </div>
                     <div class="cbct-inline-panoramic" id="cbctInlinePanoramic">
                         <div class="cbct-inline-panoramic-header"><i class="fas fa-panorama me-2"></i>Panoramic</div>
+                        <div class="panoramic-variant-controls" data-panoramic-variant-controls data-panoramic-target="inline" role="group" aria-label="Panoramic variant" hidden>
+                            <div class="panoramic-projection-toggle" role="group" aria-label="Panoramic projection">
+                                <button type="button" class="panoramic-mode-btn" data-panoramic-mode="mean" aria-pressed="false">MIP</button>
+                                <button type="button" class="panoramic-mode-btn" data-panoramic-mode="raysum" aria-pressed="false">X-ray</button>
+                            </div>
+                            <label class="panoramic-z-control">
+                                <span>Z <output data-panoramic-z-label>0</output></span>
+                                <input type="range" min="-40" max="40" step="20" value="0" data-panoramic-z-slider aria-label="Panoramic Z offset">
+                            </label>
+                        </div>
                         <div class="cbct-inline-panoramic-body">
                             <div class="panoramic-loading" id="cbctPanoramicLoading" style="display: none;">
                                 <div class="text-center py-3">
@@ -260,6 +270,16 @@
             {% if has_panoramic %}
             <!-- panoramic Viewer -->
             <div id="panoramic-viewer" class="viewer-container" {% if default_modality_slug != 'panoramic' %}style="display: none;"{% endif %}>
+                <div class="panoramic-variant-controls" data-panoramic-variant-controls data-panoramic-target="standalone" role="group" aria-label="Panoramic variant" hidden>
+                    <div class="panoramic-projection-toggle" role="group" aria-label="Panoramic projection">
+                        <button type="button" class="panoramic-mode-btn" data-panoramic-mode="mean" aria-pressed="false">MIP</button>
+                        <button type="button" class="panoramic-mode-btn" data-panoramic-mode="raysum" aria-pressed="false">X-ray</button>
+                    </div>
+                    <label class="panoramic-z-control">
+                        <span>Z <output data-panoramic-z-label>0</output></span>
+                        <input type="range" min="-40" max="40" step="20" value="0" data-panoramic-z-slider aria-label="Panoramic Z offset">
+                    </label>
+                </div>
                 <div class="panoramic-loading" id="panoramicLoading" style="display: none;">
                     <div class="text-center py-4">
                         <div class="spinner-border text-primary" role="status"></div>

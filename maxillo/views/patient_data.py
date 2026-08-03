@@ -28,12 +28,44 @@ from .domain import get_domain_models
 
 logger = logging.getLogger(__name__)
 
+PANORAMIC_VARIANTS = {
+    "zplus40_mean": ("panoramic_zplus40_mean_png", "Z+40 MIP"),
+    "zplus40_raysum": ("panoramic_zplus40_raysum_png", "Z+40 X-ray"),
+    "zplus20_mean": ("panoramic_zplus20_mean_png", "Z+20 MIP"),
+    "zplus20_raysum": ("panoramic_zplus20_raysum_png", "Z+20 X-ray"),
+    "z0_mean": ("panoramic_png", "Z+0 MIP"),
+    "z0_raysum": ("panoramic_z0_raysum_png", "Z+0 X-ray"),
+    "zminus20_mean": ("panoramic_zminus20_mean_png", "Z-20 MIP"),
+    "zminus20_raysum": ("panoramic_zminus20_raysum_png", "Z-20 X-ray"),
+    "zminus40_mean": ("panoramic_zminus40_mean_png", "Z-40 MIP"),
+    "zminus40_raysum": ("panoramic_zminus40_raysum_png", "Z-40 X-ray"),
+}
+DEFAULT_PANORAMIC_VARIANT = "z0_mean"
+
 LANDMARK_KEY_RE = re.compile(r"^(\d+)_(upper|lower)_FDI_(\d{2})$")
+WORKER_LANDMARK_KEY_RE = re.compile(r"^in_(upper|lower)_FDI_(\d{2})$")
 LANDMARK_POINT_TYPES = {
     "incisal", "outer", "bracket", "gingival", "mesial", "distal", "inner", "facial",
 }
 LANDMARK_MULTI_POINT_TYPES = {"cusps", "planar"}
 LANDMARK_PLANE_KEYS = {"origin", "xAxis", "yAxis", "zAxis"}
+
+
+def _generated_panoramic_variants(panoramic_file):
+    metadata = panoramic_file.metadata if isinstance(panoramic_file.metadata, dict) else {}
+    if metadata.get("generated_from") != "cbct_to_panoramic":
+        return {}
+    files = metadata.get("files")
+    if not isinstance(files, dict):
+        return {}
+
+    variants = {}
+    for variant, (output_key, label) in PANORAMIC_VARIANTS.items():
+        output = files.get(output_key)
+        path = output.get("path") if isinstance(output, dict) else None
+        if path:
+            variants[variant] = {"path": path, "label": label}
+    return variants
 
 
 def _normalize_landmark_point(value):
@@ -106,9 +138,14 @@ def _normalize_loaded_landmarks(payload, patient_id):
     patient_landmarks = {}
     for key, entry in payload.items():
         match = LANDMARK_KEY_RE.match(str(key))
-        if not match or int(match.group(1)) != int(patient_id):
-            continue
-        canonical_key = f"{patient_id}_{match.group(2)}_FDI_{match.group(3)}"
+        if match and int(match.group(1)) == int(patient_id):
+            jaw, tooth = match.group(2), match.group(3)
+        else:
+            worker_match = WORKER_LANDMARK_KEY_RE.match(str(key))
+            if not worker_match:
+                continue
+            jaw, tooth = worker_match.group(1), worker_match.group(2)
+        canonical_key = f"{patient_id}_{jaw}_FDI_{tooth}"
         patient_landmarks[canonical_key] = entry
     return _normalize_landmarks_payload(patient_landmarks, patient_id)
 
@@ -544,36 +581,43 @@ def patient_volume_data(request, patient_id, modality_slug):
 
 @login_required
 def patient_panoramic_data(request, patient_id):
-    """API endpoint to serve panoramic image data
-
-    Only explicit panoramic modality uploads are served here. CBCT processing
-    no longer generates or exposes a panoramic preview.
-    """
+    """Serve manually uploaded or CBCT-generated panoramic variants."""
 
     Patient = get_domain_models(request)["Patient"]
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
-    # PRIORITY 1: Check for uploaded panoramic modality file
     try:
-        from common.models import FileRegistry
-
-        # Prefer manually processed panoramic, then raw upload.
-        panoramic_file = (
-            patient.files.filter(file_type="panoramic_processed")
-            .order_by("-created_at", "-id")
-            .first()
+        processed_files = list(
+            patient.files.filter(file_type="panoramic_processed").order_by(
+                "-created_at", "-id"
+            )
         )
+        panoramic_file = next(
+            (
+                file_obj
+                for file_obj in processed_files
+                if not isinstance(file_obj.metadata, dict)
+                or file_obj.metadata.get("generated_from") != "cbct_to_panoramic"
+            ),
+            None,
+        )
+        if not panoramic_file:
+            panoramic_file = next(
+                (
+                    file_obj
+                    for file_obj in processed_files
+                    if isinstance(file_obj.metadata, dict)
+                    and file_obj.metadata.get("is_default")
+                ),
+                None,
+            )
+        if not panoramic_file and processed_files:
+            panoramic_file = processed_files[0]
         if not panoramic_file:
             panoramic_file = (
                 patient.files.filter(file_type="panoramic_raw")
-                .order_by("-created_at", "-id")
-                .first()
-            )
-        if not panoramic_file:
-            panoramic_file = (
-                patient.files.filter(modality__slug="panoramic")
                 .order_by("-created_at", "-id")
                 .first()
             )
@@ -586,26 +630,49 @@ def patient_panoramic_data(request, patient_id):
             panoramic_file = None
 
         if panoramic_file and artifact_exists(panoramic_file.file_path):
+            variants = _generated_panoramic_variants(panoramic_file)
+            selected_variant = request.GET.get("variant", "").strip()
+            selected_path = panoramic_file.file_path
+            if selected_variant:
+                selected = variants.get(selected_variant)
+                if not selected or not artifact_exists(selected["path"]):
+                    return JsonResponse(
+                        {"error": "Panoramic variant not available", "status": "not_found"},
+                        status=404,
+                    )
+                selected_path = selected["path"]
+            elif DEFAULT_PANORAMIC_VARIANT in variants:
+                selected_variant = DEFAULT_PANORAMIC_VARIANT
+                selected_path = variants[selected_variant]["path"]
+
+            generated = bool(variants)
             source_file_id = (
                 (panoramic_file.metadata or {}).get("source_file_id")
                 if isinstance(panoramic_file.metadata, dict)
                 else None
             )
             source_file_id = source_file_id or panoramic_file.id
-            # The RGB editor consumes raw_url; withhold it when the raw is discarded.
-            expose_raw = not modality_discard_raw("panoramic")
+            expose_raw = not generated and not modality_discard_raw("panoramic")
             if request.GET.get("meta") == "1":
+                image_url = request.path
+                if selected_variant:
+                    image_url = f"{image_url}?variant={selected_variant}"
                 return JsonResponse(
                     {
-                        "url": _serve_file_url(request, panoramic_file.id),
+                        "url": image_url if generated else _serve_file_url(request, panoramic_file.id),
                         "source_file_id": source_file_id,
                         "raw_url": _serve_file_url(request, source_file_id) if expose_raw else None,
                         "is_processed": panoramic_file.file_type.endswith("_processed"),
+                        "editable": expose_raw,
+                        "selected_variant": selected_variant or None,
+                        "variants": [
+                            {"id": variant, "label": data["label"]}
+                            for variant, data in variants.items()
+                        ],
                     }
                 )
-            logger.debug(f"Serving uploaded panoramic file: {panoramic_file.file_path}")
-            # Determine content type based on file extension
-            file_ext = os.path.splitext(panoramic_file.file_path)[1].lower()
+            logger.debug("Serving panoramic file: %s", selected_path)
+            file_ext = os.path.splitext(selected_path)[1].lower()
             content_type = "image/png"
             if file_ext in [".jpg", ".jpeg"]:
                 content_type = "image/jpeg"
@@ -615,7 +682,7 @@ def patient_panoramic_data(request, patient_id):
                 content_type = "image/webp"
 
             return streaming_response(
-                path_or_key=panoramic_file.file_path,
+                path_or_key=selected_path,
                 content_type=content_type,
                 filename=f"panoramic_{patient_id}{file_ext}",
                 as_attachment=False,

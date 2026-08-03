@@ -394,6 +394,7 @@ class Job(DomainFKAccessorMixin, models.Model):
 		self.status = 'completed'
 		from django.utils import timezone as _tz
 		self.completed_at = _tz.now()
+		self.error_logs = ''
 		if output_files:
 			self.output_files = output_files
 		self.save()

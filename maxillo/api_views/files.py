@@ -36,6 +36,7 @@ def serve_file(request, file_id):
         resolved_file_path = file_obj.file_path
         requested_file_key = (request.GET.get('file_key') or '').strip()
         bundle_filename = ""
+        bundle_not_found = False
 
         # CBCT processed files may be stored as a multi-file bundle. Allow a
         # specific metadata.files key, defaulting to the segmentation.
@@ -58,6 +59,8 @@ def serve_file(request, file_id):
                 if bundle_path and artifact_exists(bundle_path):
                     resolved_file_path = bundle_path
                     bundle_filename = str(bundle_path).split("/")[-1]
+                elif requested_file_key and requested_file_key != "primary":
+                    bundle_not_found = True
 
         request_namespace = (
             getattr(request, "resolver_match", None)
@@ -139,6 +142,9 @@ def serve_file(request, file_id):
             )
             return JsonResponse({"error": "File not found"}, status=404)
 
+        if bundle_not_found:
+            raise Http404("Requested bundle file not found")
+
         # Determine content type
         content_type, _ = mimetypes.guess_type(resolved_file_path)
         if not content_type:
@@ -219,6 +225,8 @@ def serve_file(request, file_id):
     except FileRegistry.DoesNotExist:
         logger.error(f"File with ID {file_id} not found in registry.")
         raise Http404("File not found in registry")
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"Error serving file {file_id}: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")

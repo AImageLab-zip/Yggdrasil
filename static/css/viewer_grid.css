@@ -27,10 +27,10 @@
 .viewer-tool-btn {
   width: 32px;
   height: 32px;
-  border: 1px solid #ced4da;
+  border: 1px solid var(--ygg-border);
   border-radius: 6px;
-  background: #fff;
-  color: #495057;
+  background: var(--ygg-surface);
+  color: var(--ygg-text);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -39,8 +39,8 @@
 }
 
 .viewer-tool-btn:hover {
-  background: #f1f3f5;
-  border-color: #adb5bd;
+  background: var(--ygg-surface-2);
+  border-color: var(--ygg-border-strong);
 }
 
 .viewer-tool-btn.active {
@@ -64,7 +64,7 @@
 }
 
 .viewer-tool-status {
-  color: #495057;
+  color: var(--ygg-text-muted);
   font-size: 0.86rem;
 }
 
@@ -111,13 +111,57 @@
   display: none;
 }
 
+.viewer-window--render .orientation-menu,
+.viewer-window--render .slice-counter,
+.viewer-window--render .measurement-overlay {
+  display: none !important;
+}
+
+.viewer-optional-3d {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #adb5bd;
+  gap: 0.5rem;
+}
+
+.viewer-optional-3d > i {
+  font-size: 2.25rem;
+}
+
+.viewer-optional-3d > p {
+  margin: 0;
+}
+
+.viewer-load-3d-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--ygg-border-strong, #adb5bd);
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.viewer-load-3d-btn:hover {
+  border-color: var(--ygg-primary, #0d6efd);
+  background: color-mix(in srgb, var(--ygg-primary, #0d6efd) 18%, transparent);
+}
+
+.viewer-load-3d-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 /* Modality Chips - Draggable Pills */
 .modality-chip {
   display: inline-block;
   padding: 0.375rem 0.75rem;
   margin-right: 0.5rem;
-  background: #e9ecef;
-  border: 1px solid #dee2e6;
+  background: var(--ygg-surface-2);
+  border: 1px solid var(--ygg-border);
   border-radius: 1rem;
   cursor: grab;
   user-select: none;
@@ -127,8 +171,8 @@
 }
 
 .modality-chip:hover {
-  background: #dee2e6;
-  border-color: #adb5bd;
+  background: var(--ygg-surface-3);
+  border-color: var(--ygg-border-strong);
   transform: translateY(-1px);
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
@@ -167,18 +211,68 @@
 
 .cbct-inline-panoramic {
   margin-top: 0.75rem;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--ygg-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--ygg-surface);
 }
 
 .cbct-inline-panoramic-header {
   padding: 0.5rem 0.75rem;
   font-size: 0.9rem;
   font-weight: 600;
-  color: #495057;
-  border-bottom: 1px solid #e9ecef;
-  background: #f8f9fa;
+  color: var(--ygg-text);
+  border-bottom: 1px solid var(--ygg-border);
+  background: var(--ygg-surface-2);
+}
+
+.panoramic-variant-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--ygg-text-muted, #6c757d);
+  font-size: 0.82rem;
+}
+
+.panoramic-variant-controls[hidden] {
+  display: none;
+}
+
+.panoramic-projection-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--ygg-surface-2, #e9ecef);
+}
+
+.panoramic-mode-btn {
+  padding: 0.3rem 0.65rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ygg-text-muted, #6c757d);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panoramic-mode-btn.active {
+  background: var(--ygg-surface, #fff);
+  color: var(--ygg-primary, #0d6efd);
+  box-shadow: var(--ygg-shadow-card-light, 0 1px 3px rgba(0, 0, 0, 0.15));
+}
+
+.panoramic-z-control {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.panoramic-z-control input {
+  width: min(220px, 42vw);
+  accent-color: var(--ygg-primary, #0d6efd);
 }
 
 .cbct-inline-panoramic-body {
@@ -219,7 +313,7 @@
 
 /* Viewer Instructions Card (in help modal) */
 .viewer-instructions-card {
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--ygg-border);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -426,8 +520,9 @@
 /* Context Menu Styles */
 .viewer-context-menu {
     position: fixed;
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text);
     border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     z-index: 1000;
@@ -441,7 +536,7 @@
 }
 
 .context-menu-section + .context-menu-section {
-    border-top: 1px solid #e9ecef;
+    border-top: 1px solid var(--ygg-border);
     margin-top: 4px;
     padding-top: 8px;
 }
@@ -450,7 +545,7 @@
     padding: 4px 16px;
     font-size: 11px;
     font-weight: 600;
-    color: #6c757d;
+    color: var(--ygg-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -464,8 +559,9 @@
 .context-menu-orient-btn {
     flex: 1;
     padding: 6px 12px;
-    border: 1px solid #dee2e6;
-    background: white;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
     border-radius: 4px;
     cursor: pointer;
     font-weight: 600;
@@ -473,7 +569,7 @@
 }
 
 .context-menu-orient-btn:hover {
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
     border-color: #0d6efd;
 }
 
@@ -491,7 +587,7 @@
 }
 
 .context-menu-option:hover {
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
 }
 
 .context-menu-option i {

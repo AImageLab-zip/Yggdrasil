@@ -301,7 +301,8 @@ const ViewerGrid = (function() {
 
         if (!segmentationFetchPromises[fileId]) {
             segmentationFetchPromises[fileId] = (async () => {
-                const response = await fetch(buildFileServeUrl(fileId, 'volume_nifti'));
+                const fileKey = djangoData.segmentationFile.fileKey || 'volume_nifti';
+                const response = await fetch(buildFileServeUrl(fileId, fileKey));
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -331,7 +332,10 @@ const ViewerGrid = (function() {
 
         try {
             const arrayBuffer = await fetchSegmentationArrayBuffer();
-            await viewer.setSegmentationOverlay(arrayBuffer, { opacity: SEGMENTATION_OPACITY });
+            await viewer.setSegmentationOverlay(arrayBuffer, {
+                opacity: SEGMENTATION_OPACITY,
+                labelMax: djangoData.segmentationFile.labelMax
+            });
             return { ok: true };
         } catch (error) {
             console.warn(`Failed to apply segmentation overlay to window ${windowIndex}:`, error);
@@ -351,7 +355,10 @@ const ViewerGrid = (function() {
             return true;
         }
 
-        const results = await Promise.all(readyWindowIndexes.map((windowIndex) => applySegmentationOverlayToWindow(windowIndex)));
+        const results = [];
+        for (const windowIndex of readyWindowIndexes) {
+            results.push(await applySegmentationOverlayToWindow(windowIndex));
+        }
         return results.some((result) => result.ok);
     }
 
@@ -1127,6 +1134,7 @@ const ViewerGrid = (function() {
         }
 
         const loadGeneration = beginWindowLoad(windowIndex);
+        windowEl.classList.remove('viewer-window--render');
 
         // Dispose existing viewer if present
         const existingState = windowStates[windowIndex];
@@ -1207,17 +1215,20 @@ const ViewerGrid = (function() {
 
         // Fetch file ArrayBuffer from API (with caching)
         try {
+            const fileInfo = djangoData.modalityFiles[modality] || {};
+            const fileKey = fileInfo.file_key || 'primary';
+            const cacheKey = `${fileId}:${fileKey}`;
             let fileArrayBuffer;
-            if (volumeCache[fileId]) {
+            if (volumeCache[cacheKey]) {
                 console.log(`Using cached ArrayBuffer for fileId ${fileId}`);
-                fileArrayBuffer = volumeCache[fileId];
-            } else if (volumeFetchPromises[fileId]) {
+                fileArrayBuffer = volumeCache[cacheKey];
+            } else if (volumeFetchPromises[cacheKey]) {
                 console.log(`Awaiting in-flight ArrayBuffer fetch for fileId ${fileId}`);
-                fileArrayBuffer = await volumeFetchPromises[fileId];
+                fileArrayBuffer = await volumeFetchPromises[cacheKey];
             } else {
                 console.log(`Fetching ArrayBuffer for fileId ${fileId}`);
-                volumeFetchPromises[fileId] = (async () => {
-                    const response = await fetch(buildFileServeUrl(fileId, 'primary'));
+                volumeFetchPromises[cacheKey] = (async () => {
+                    const response = await fetch(buildFileServeUrl(fileId, fileKey));
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
@@ -1225,10 +1236,10 @@ const ViewerGrid = (function() {
                 })();
 
                 try {
-                    fileArrayBuffer = await volumeFetchPromises[fileId];
-                    volumeCache[fileId] = fileArrayBuffer;
+                    fileArrayBuffer = await volumeFetchPromises[cacheKey];
+                    volumeCache[cacheKey] = fileArrayBuffer;
                 } finally {
-                    delete volumeFetchPromises[fileId];
+                    delete volumeFetchPromises[cacheKey];
                 }
                 console.log(`File ArrayBuffer received and cached: ${fileArrayBuffer.byteLength} bytes`);
             }
@@ -1715,6 +1726,7 @@ const ViewerGrid = (function() {
                 windowEl.appendChild(newDropHint);
             }
             windowEl.classList.remove('loaded');
+            windowEl.classList.remove('viewer-window--render');
             return;
         }
 
@@ -1991,6 +2003,23 @@ const ViewerGrid = (function() {
         }
 
         const viewer = state.niivueInstance;
+        if (orientation === 'render' && typeof viewer.setRenderMode === 'function') {
+            for (const groupName in synchronizationGroups) {
+                const groupIndex = synchronizationGroups[groupName].indexOf(windowIndex);
+                if (groupIndex > -1) {
+                    synchronizationGroups[groupName].splice(groupIndex, 1);
+                }
+            }
+            viewer.setRenderMode();
+            windowStates[windowIndex].currentOrientation = 'render';
+            const renderWindow = document.querySelector(`.viewer-window[data-window-index="${windowIndex}"]`);
+            if (renderWindow) {
+                renderWindow.classList.add('viewer-window--render');
+                const label = renderWindow.querySelector('.window-label');
+                if (label) label.textContent = 'CBCT 3D';
+            }
+            return;
+        }
         viewer.setOrientation(orientation);
         windowStates[windowIndex].currentOrientation = orientation;
         updateOrientationGroup(windowIndex, orientation);

@@ -19,6 +19,20 @@ from .models import Classification, Patient, VoiceCaption
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PANORAMIC_OUTPUT = "panoramic_png"
+PANORAMIC_OUTPUT_KEYS = {
+    "panoramic_zplus40_mean_png",
+    "panoramic_zplus40_raysum_png",
+    "panoramic_zplus20_mean_png",
+    "panoramic_zplus20_raysum_png",
+    DEFAULT_PANORAMIC_OUTPUT,
+    "panoramic_z0_raysum_png",
+    "panoramic_zminus20_mean_png",
+    "panoramic_zminus20_raysum_png",
+    "panoramic_zminus40_mean_png",
+    "panoramic_zminus40_raysum_png",
+}
+
 from common.file_access import exists as artifact_exists
 from common.file_access import open_binary
 from common.object_storage import get_object_storage
@@ -47,6 +61,23 @@ def _create_job_if_runner_enabled(modality_slug, **kwargs):
     if job.status == "pending":
         create_step_jobs(job)
     return job
+
+
+def _landmark_output(output_files):
+    for output_name, output_spec in (output_files or {}).items():
+        if os.path.basename(str(output_name)).lower() in {"landmarks", "landmarks.json"}:
+            return output_name, output_spec
+    return None, None
+
+
+def _ios_output_arch(output_name):
+    name = os.path.splitext(os.path.basename(str(output_name)).lower())[0]
+    tokens = name.replace("-", "_").split("_")
+    if "upper" in tokens:
+        return "upper"
+    if "lower" in tokens:
+        return "lower"
+    return None
 
 
 def get_file_type_for_modality(
@@ -864,7 +895,62 @@ def mark_job_completed(job_id, output_files, logs=None):
                 raise ValueError(
                     "CBCT completion missing required output_files.segmentation_nifti"
                 )
-            output_files = {"segmentation_nifti": output_files["segmentation_nifti"]}
+            output_files = {
+                key: output_files[key]
+                for key in (
+                    "volume_nifti",
+                    "segmentation_nifti",
+                    "inference_stats_json",
+                )
+                if key in output_files
+            }
+            for output_name, output_spec in output_files.items():
+                output_path = _resolve_output_path_or_key(output_spec)
+                if not output_path or not artifact_exists(output_path):
+                    raise ValueError(f"CBCT output does not exist: {output_name}")
+
+        if job.modality_slug == "cbct_to_panoramic":
+            panoramic_path = _resolve_output_path_or_key(
+                output_files.get(DEFAULT_PANORAMIC_OUTPUT)
+            )
+            if not panoramic_path or not artifact_exists(panoramic_path):
+                raise ValueError(
+                    "CBCT-to-panoramic completion missing required "
+                    "output_files.panoramic_png"
+                )
+            output_files = {
+                key: value
+                for key, value in output_files.items()
+                if key in PANORAMIC_OUTPUT_KEYS
+            }
+
+        step = job.step or get_step(job.modality_slug)
+        step_modality_slug = (
+            step.modality.slug if step and step.modality_id else job.modality_slug
+        )
+        landmark_output_name, landmark_output = _landmark_output(output_files)
+
+        if job.modality_slug == "ios":
+            scan_outputs = {
+                name: spec
+                for name, spec in output_files.items()
+                if name != landmark_output_name
+            }
+            if scan_outputs:
+                arches = {_ios_output_arch(name) for name in scan_outputs}
+                if not {"upper", "lower"}.issubset(arches):
+                    raise ValueError(
+                        "IOS completion must include both upper and lower scan outputs"
+                    )
+                for output_name, output_spec in scan_outputs.items():
+                    output_path = _resolve_output_path_or_key(output_spec)
+                    if not output_path or not artifact_exists(output_path):
+                        raise ValueError(f"IOS output does not exist: {output_name}")
+
+        if landmark_output and step_modality_slug == "ios":
+            landmark_path = _resolve_output_path_or_key(landmark_output)
+            if not landmark_path or not artifact_exists(landmark_path):
+                raise ValueError("IOS landmark completion output does not exist")
 
         # For IOS -> bite stage chaining, update dependent job inputs before
         # marking IOS as completed. This avoids enqueueing bite jobs without
@@ -963,26 +1049,104 @@ def mark_job_completed(job_id, output_files, logs=None):
             output_files["skipped_confirmed_segmentations"] = skipped_confirmed_count
             job.output_files = output_files
             job.save(update_fields=["output_files"])
+        elif job.modality_slug == "cbct_to_panoramic":
+            newer_completion_exists = Job.objects.filter(
+                modality_slug="cbct_to_panoramic",
+                status="completed",
+                created_at__gt=job.created_at,
+                **_job_entity_fk_kwargs(job),
+            ).exclude(id=job.id).exists()
+            if newer_completion_exists:
+                logger.warning(
+                    "Ignoring stale CBCT-to-panoramic outputs for job %s", job.id
+                )
+                return True
+
+            processed_files = {}
+            for output_key, out_spec in output_files.items():
+                path_or_key = _resolve_output_path_or_key(out_spec)
+                if path_or_key and artifact_exists(path_or_key):
+                    processed_files[str(output_key)] = {
+                        "path": path_or_key,
+                        "type": output_key,
+                    }
+
+            if processed_files:
+                from common.models import Modality
+
+                panoramic_modality = Modality.objects.filter(slug="panoramic").first()
+                generated_rows = FileRegistry.objects.filter(
+                    file_type="panoramic_processed",
+                    **_job_entity_fk_kwargs(job),
+                )
+                generated_rows = [
+                    row
+                    for row in generated_rows
+                    if isinstance(row.metadata, dict)
+                    and row.metadata.get("generated_from") == "cbct_to_panoramic"
+                ]
+                if generated_rows:
+                    FileRegistry.objects.filter(
+                        id__in=[row.id for row in generated_rows]
+                    ).delete()
+
+                for output_key, output in processed_files.items():
+                    file_size, file_hash = _size_hash_for_path_or_key(output["path"])
+                    FileRegistry.objects.update_or_create(
+                        file_path=output["path"],
+                        defaults={
+                            "file_type": "panoramic_processed",
+                            "subtype": output_key,
+                            "file_size": file_size or 0,
+                            "file_hash": file_hash or "object",
+                            "processing_job": job,
+                            "modality": panoramic_modality,
+                            **_job_entity_fk_kwargs(job),
+                            "metadata": {
+                                "processed_at": timezone.now().isoformat(),
+                                "generated_from": "cbct_to_panoramic",
+                                "panoramic_output": output_key,
+                                "is_default": output_key == DEFAULT_PANORAMIC_OUTPUT,
+                                "input_files": job.input_files or {},
+                                "files": processed_files,
+                                "logs": logs if logs else "",
+                            },
+                        },
+                    )
+
         elif job.modality_slug != "bite_classification":
             # Generic registration: one FileRegistry row per output key, shared by
             # every modality that isn't intraoral-photo/bite_classification (both
             # genuine domain logic above/below, not naming) -- including cbct, ios,
             # video, and any future algorithm. No per-modality branch needed.
-            step = get_step(job.modality_slug)
+            step = job.step or get_step(job.modality_slug)
+            output_modality_slug = (
+                step.modality.slug if step and step.modality_id else job.modality_slug
+            )
             registry_type = get_file_type_for_modality(
-                job.modality_slug, is_processed=True
+                output_modality_slug, is_processed=True
             )
 
-            landmark_output = None
-            if job.modality_slug == "ios":
-                landmark_output = (
-                    output_files.get("landmarks.json")
-                    or output_files.get("landmarks")
-                )
             generic_outputs = {
                 file_type: out_spec
                 for file_type, out_spec in output_files.items()
-                if not (job.modality_slug == "ios" and file_type in {"landmarks.json", "landmarks"})
+                if file_type != landmark_output_name
+            }
+            if (
+                landmark_output
+                and step_modality_slug == "ios"
+                and job.modality_slug != "ios"
+            ):
+                # Landmark stages may emit intermediate masks. They are not
+                # oriented IOS meshes and must not replace the viewer pair.
+                generic_outputs = {}
+            generic_outputs = {
+                output_name: output_spec
+                for output_name, output_spec in generic_outputs.items()
+                if (
+                    (output_path := _resolve_output_path_or_key(output_spec))
+                    and artifact_exists(output_path)
+                )
             }
 
             # Idempotent replace only when this completion actually supplied scan
@@ -1024,7 +1188,7 @@ def mark_job_completed(job_id, output_files, logs=None):
                 )
                 logger.info("FileRegistry entry stored/updated successfully")
 
-            if landmark_output:
+            if landmark_output and step_modality_slug == "ios":
                 landmark_path = _resolve_output_path_or_key(landmark_output)
                 if not landmark_path or not artifact_exists(landmark_path):
                     logger.warning("IOS landmark output does not exist for job %s", job.id)

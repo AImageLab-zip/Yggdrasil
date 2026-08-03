@@ -202,16 +202,9 @@ class Patient(models.Model):
             # Check for both raw and processed files
             upper_raw = self.files.filter(file_type='ios_raw_upper').exists()
             lower_raw = self.files.filter(file_type='ios_raw_lower').exists()
-            # Legacy rows are file_type='ios_processed_upper'/'_lower'; new
-            # completions write file_type='ios_processed', subtype='upper'/'lower'.
-            upper_processed = self.files.filter(
-                Q(file_type='ios_processed_upper')
-                | Q(file_type='ios_processed', subtype='upper')
-            ).exists()
-            lower_processed = self.files.filter(
-                Q(file_type='ios_processed_lower')
-                | Q(file_type='ios_processed', subtype='lower')
-            ).exists()
+            processed = self.get_ios_processed_files()
+            upper_processed = processed['upper'] is not None
+            lower_processed = processed['lower'] is not None
             
             # Return True if we have either raw or processed files for both upper and lower
             return (upper_raw or upper_processed) and (lower_raw or lower_processed)
@@ -315,10 +308,9 @@ class Patient(models.Model):
     
     def get_cbct_processed_file(self):
         """Get CBCT processed file from FileRegistry"""
-        try:
-            return self.files.get(file_type='cbct_processed')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self.files.filter(file_type='cbct_processed').order_by(
+            '-created_at', '-id'
+        ).first()
     
     def get_ios_raw_files(self):
         """Get IOS raw files from FileRegistry"""
