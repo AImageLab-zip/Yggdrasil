@@ -1011,7 +1011,15 @@ def mark_job_completed(job_id, output_files, logs=None):
                 raise ValueError(
                     "CBCT completion missing required output_files.segmentation_nifti"
                 )
-            output_files = {"segmentation_nifti": output_files["segmentation_nifti"]}
+            output_files = {
+                key: output_files[key]
+                for key in (
+                    "volume_nifti",
+                    "segmentation_nifti",
+                    "inference_stats_json",
+                )
+                if key in output_files
+            }
 
         if job.modality_slug == "cbct_to_panoramic":
             panoramic_path = _resolve_output_path_or_key(
@@ -1087,7 +1095,7 @@ def mark_job_completed(job_id, output_files, logs=None):
         logger.info(f"Registering output files for modality: {job.modality_slug}")
 
         if job.modality_slug == "cbct":
-            # CBCT processing exposes only the segmentation artifact.
+            # Keep the display volume and segmentation in one job-paired bundle.
             processed_files = {}
             total_size = 0
 

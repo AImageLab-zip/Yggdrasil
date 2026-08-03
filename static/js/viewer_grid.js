@@ -502,7 +502,8 @@ const ViewerGrid = (function() {
 
         if (!segmentationFetchPromises[fileId]) {
             segmentationFetchPromises[fileId] = (async () => {
-                const response = await fetch(buildFileServeUrl(fileId, 'volume_nifti'));
+                const fileKey = djangoData.segmentationFile.fileKey || 'volume_nifti';
+                const response = await fetch(buildFileServeUrl(fileId, fileKey));
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -532,7 +533,10 @@ const ViewerGrid = (function() {
 
         try {
             const arrayBuffer = await fetchSegmentationArrayBuffer();
-            await viewer.setSegmentationOverlay(arrayBuffer, { opacity: SEGMENTATION_OPACITY });
+            await viewer.setSegmentationOverlay(arrayBuffer, {
+                opacity: SEGMENTATION_OPACITY,
+                labelMax: djangoData.segmentationFile.labelMax
+            });
             return { ok: true };
         } catch (error) {
             console.warn(`Failed to apply segmentation overlay to window ${windowIndex}:`, error);
@@ -552,7 +556,10 @@ const ViewerGrid = (function() {
             return true;
         }
 
-        const results = await Promise.all(readyWindowIndexes.map((windowIndex) => applySegmentationOverlayToWindow(windowIndex)));
+        const results = [];
+        for (const windowIndex of readyWindowIndexes) {
+            results.push(await applySegmentationOverlayToWindow(windowIndex));
+        }
         return results.some((result) => result.ok);
     }
 
@@ -1439,7 +1446,9 @@ const ViewerGrid = (function() {
             } else {
                 console.log(`Fetching ArrayBuffer for fileId ${fileId}`);
                 volumeFetchPromises[fileId] = (async () => {
-                    const response = await fetch(buildFileServeUrl(fileId, 'primary'));
+                    const fileInfo = djangoData.modalityFiles[modality] || {};
+                    const fileKey = fileInfo.file_key || 'primary';
+                    const response = await fetch(buildFileServeUrl(fileId, fileKey));
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
@@ -2233,6 +2242,23 @@ const ViewerGrid = (function() {
         }
 
         const viewer = state.niivueInstance;
+        if (orientation === 'render' && typeof viewer.setRenderMode === 'function') {
+            for (const groupName in synchronizationGroups) {
+                const groupIndex = synchronizationGroups[groupName].indexOf(windowIndex);
+                if (groupIndex > -1) {
+                    synchronizationGroups[groupName].splice(groupIndex, 1);
+                }
+            }
+            viewer.setRenderMode();
+            windowStates[windowIndex].currentOrientation = 'render';
+            const renderWindow = document.querySelector(`.viewer-window[data-window-index="${windowIndex}"]`);
+            if (renderWindow) {
+                renderWindow.classList.add('viewer-window--render');
+                const label = renderWindow.querySelector('.window-label');
+                if (label) label.textContent = 'CBCT 3D';
+            }
+            return;
+        }
         viewer.setOrientation(orientation);
         windowStates[windowIndex].currentOrientation = orientation;
         updateOrientationGroup(windowIndex, orientation);

@@ -27,6 +27,55 @@
         }
     }
 
+    function prepareOptional3DWindow(viewerGrid, cbctFileId) {
+        viewerGrid.clearWindow(3);
+        const windowEl = document.querySelector('.viewer-window[data-window-index="3"]');
+        if (!windowEl) {
+            return;
+        }
+
+        windowEl.innerHTML = `
+            <div class="viewer-optional-3d">
+                <i class="fas fa-cube"></i>
+                <p>3D volume rendering</p>
+                <button type="button" class="btn btn-sm btn-outline-light viewer-load-3d-btn">
+                    Load 3D
+                </button>
+            </div>
+        `;
+
+        const button = windowEl.querySelector('.viewer-load-3d-btn');
+        if (!button) {
+            return;
+        }
+
+        button.addEventListener('click', async function() {
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Loading';
+
+            try {
+                await viewerGrid.loadModalityInWindow(3, 'cbct', cbctFileId);
+                const state = viewerGrid.windowStates && viewerGrid.windowStates[3];
+                if (!state || !state.niivueInstance || !state.niivueInstance.isReady()) {
+                    throw new Error('The optional 3D viewer could not be initialized');
+                }
+                viewerGrid.setWindowOrientation(3, 'render');
+
+                const minRange = document.getElementById('windowMinRange');
+                const maxRange = document.getElementById('windowMaxRange');
+                if (window.CBCTViewer && minRange && maxRange) {
+                    window.CBCTViewer.setWindowingFromPercent(
+                        parseInt(minRange.value || '0', 10),
+                        parseInt(maxRange.value || '100', 10)
+                    );
+                }
+            } catch (error) {
+                console.warn('Optional CBCT 3D viewer failed; keeping 2D views active:', error);
+                prepareOptional3DWindow(viewerGrid, cbctFileId);
+            }
+        });
+    }
+
     async function initFixedCbctGrid(cbctFileIdOverride) {
         var viewerGrid = getViewerGrid();
         if (!viewerGrid) {
@@ -79,11 +128,10 @@
             state.niivueInstance.nv.drawScene();
         });
 
-        viewerGrid.clearWindow(3);
-
-        const emptyWindow = document.querySelector('.viewer-window[data-window-index="3"] .drop-hint p');
-        if (emptyWindow) {
-            emptyWindow.textContent = 'Empty';
+        try {
+            prepareOptional3DWindow(viewerGrid, cbctFileId);
+        } catch (error) {
+            console.warn('Optional CBCT 3D controls failed; keeping 2D views active:', error);
         }
 
         return cbctFileId;
@@ -144,7 +192,7 @@
                 return;
             }
 
-            [0, 1, 2].forEach((idx) => {
+            [0, 1, 2, 3].forEach((idx) => {
                 const state = viewerGrid.windowStates[idx];
                 if (state && state.niivueInstance && state.niivueInstance.isReady()) {
                     state.niivueInstance.redraw();
@@ -163,7 +211,7 @@
                 ? windowingOptions.previewOnlyWindowIndex
                 : null;
 
-            [0, 1, 2].forEach((idx) => {
+            [0, 1, 2, 3].forEach((idx) => {
                 if (previewOnlyWindowIndex !== null && idx !== previewOnlyWindowIndex) {
                     return;
                 }
@@ -228,7 +276,7 @@
                     return;
                 }
 
-                const windowOrder = [0, 1, 2];
+                const windowOrder = [0, 1, 2, 3];
 
                 const applyForWindow = (windowIndex) => {
                     if (currentCommitToken !== commitToken) {
@@ -350,7 +398,7 @@
                         return;
                     }
 
-                    [0, 1, 2].forEach((idx) => {
+                    [0, 1, 2, 3].forEach((idx) => {
                         const state = viewerGrid.windowStates[idx];
                         if (state && state.niivueInstance && state.niivueInstance.isReady() && state.niivueInstance.nv) {
                             const pos = state.niivueInstance.nv.scene.crosshairPos;

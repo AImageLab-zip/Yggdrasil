@@ -168,8 +168,8 @@
                 </div>
             </div>
             
-            {% if ai_classification and can_modify_segmentation %}
-                <div class="text-center mt-2">
+            {% if ai_classification and can_modify_segmentation and not manual_classification %}
+                <div class="classification-confirm text-center mt-2">
                     <button type="button" class="btn btn-success btn-sm" id="confirmReview">
                         <i class="fas fa-check me-1"></i>Confirm Review
                     </button>
@@ -195,4 +195,3 @@
         {% endif %}
     </div>
 </div>
-

@@ -526,6 +526,12 @@ class Classification(models.Model):
     
     class Meta:
         ordering = ['-timestamp']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['patient', 'classifier'],
+                name='uniq_maxillo_class_patient_classifier',
+            )
+        ]
         indexes = [
             models.Index(fields=['patient', 'classifier']),
             models.Index(fields=['classifier']),

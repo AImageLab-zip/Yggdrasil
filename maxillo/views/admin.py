@@ -10,6 +10,7 @@ import json
 import logging
 
 from .domain import get_domain_models, get_namespace
+from common.job_routing import is_runner_enabled_for_modality
 from common.object_storage import get_object_storage
 from common.permissions import user_can_perform_bulk_operations
 
@@ -51,6 +52,51 @@ def _reset_job_for_rerun(job):
     job.save()
     if hasattr(job, "update_status_based_on_dependencies"):
         job.update_status_based_on_dependencies()
+
+
+def _reset_cbct_with_dependent_panoramic(cbct_job, patient):
+    """Reset CBCT and ensure its derived panoramic job waits for new output."""
+    from common.models import Job
+
+    panoramic_job = (
+        cbct_job.dependent_jobs.filter(modality_slug=PANORAMIC_JOB_SLUG)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if panoramic_job:
+        _clear_generated_panoramics(patient)
+        # Keep the dependent job from running with the previous segmentation.
+        panoramic_job.status = "dependency"
+        panoramic_job.started_at = None
+        panoramic_job.completed_at = None
+        panoramic_job.worker_id = ""
+        panoramic_job.error_logs = ""
+        panoramic_job.output_files = {}
+        panoramic_job.save()
+    elif is_runner_enabled_for_modality(PANORAMIC_JOB_SLUG):
+        cbct_inputs = cbct_job.input_files
+        if not isinstance(cbct_inputs, dict):
+            cbct_inputs = {}
+        panoramic_inputs = {}
+        if cbct_inputs.get("input"):
+            panoramic_inputs["raw_cbct"] = cbct_inputs["input"]
+        elif cbct_inputs.get("files"):
+            panoramic_inputs["raw_files"] = cbct_inputs["files"]
+
+        panoramic_job = Job.objects.create(
+            modality_slug=PANORAMIC_JOB_SLUG,
+            status="dependency",
+            patient=patient,
+            domain=cbct_job.domain,
+            input_files=panoramic_inputs,
+            priority=cbct_job.priority,
+        )
+        # Do not call add_dependency here: CBCT may still be completed until
+        # the reset below, which would release the panoramic job too early.
+        panoramic_job.dependencies.add(cbct_job)
+
+    _reset_job_for_rerun(cbct_job)
 
 
 @login_required
@@ -102,9 +148,12 @@ def rerun_processing(request, patient_id):
                     .first()
                 )
                 if job:
-                    if job_slug == PANORAMIC_JOB_SLUG:
-                        _clear_generated_panoramics(patient)
-                    _reset_job_for_rerun(job)
+                    if job_slug == "cbct":
+                        _reset_cbct_with_dependent_panoramic(job, patient)
+                    else:
+                        if job_slug == PANORAMIC_JOB_SLUG:
+                            _clear_generated_panoramics(patient)
+                        _reset_job_for_rerun(job)
                     jobs_found = True
                     updated.append(modality_slug)
             except Exception as e:
@@ -249,9 +298,12 @@ def bulk_rerun_processing(request):
                     not_found_by_modality[modality_slug] = not_found_by_modality.get(modality_slug, 0) + 1
                     continue
 
-                if job_slug == PANORAMIC_JOB_SLUG:
-                    _clear_generated_panoramics(patient)
-                _reset_job_for_rerun(job)
+                if job_slug == "cbct":
+                    _reset_cbct_with_dependent_panoramic(job, patient)
+                else:
+                    if job_slug == PANORAMIC_JOB_SLUG:
+                        _clear_generated_panoramics(patient)
+                    _reset_job_for_rerun(job)
 
                 updated_pairs += 1
                 updated_by_modality[modality_slug] = updated_by_modality.get(modality_slug, 0) + 1

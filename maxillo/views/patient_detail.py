@@ -24,6 +24,52 @@ from ..file_utils import get_file_type_for_modality
 
 logger = logging.getLogger(__name__)
 
+
+def _cbct_display_file(patient):
+    raw_candidates = patient.files.filter(file_type='cbct_raw').order_by('-created_at')
+    for raw_entry in raw_candidates:
+        if raw_entry.file_path and raw_entry.file_path.endswith(('.nii', '.nii.gz')) and artifact_exists(raw_entry.file_path):
+            return raw_entry, 'primary'
+
+    processed_candidates = (
+        patient.files.filter(
+            file_type='cbct_processed',
+            processing_job__modality_slug='cbct',
+            processing_job__status='completed',
+        )
+        .order_by('-processing_job__completed_at', '-created_at')
+    )
+    for processed_entry in processed_candidates:
+        files = processed_entry.metadata.get('files', {}) if isinstance(processed_entry.metadata, dict) else {}
+        volume = files.get('volume_nifti', {}) if isinstance(files, dict) else {}
+        volume_path = volume.get('path') if isinstance(volume, dict) else None
+        if volume_path and artifact_exists(volume_path):
+            return processed_entry, 'volume_nifti'
+    return None, None
+
+
+def _cbct_segmentation_file(patient):
+    candidates = (
+        patient.files.filter(
+            file_type='cbct_processed',
+            processing_job__modality_slug='cbct',
+            processing_job__status='completed',
+        )
+        .select_related('processing_job')
+        .order_by('-processing_job__completed_at', '-created_at')
+    )
+    for processed in candidates:
+        files = processed.metadata.get('files', {}) if isinstance(processed.metadata, dict) else {}
+        segmentation = files.get('segmentation_nifti', {}) if isinstance(files, dict) else {}
+        path = segmentation.get('path') if isinstance(segmentation, dict) else None
+        if path and artifact_exists(path):
+            return {
+                'id': processed.id,
+                'fileKey': 'segmentation_nifti',
+                'labelMax': 98,
+            }
+    return None
+
 @login_required
 def patient_detail(request, patient_id):
     domain_models = get_domain_models(request)
@@ -43,7 +89,11 @@ def patient_detail(request, patient_id):
         return redirect_with_namespace(request, 'patient_list')
     
     ai_classification = patient.classifications.filter(classifier='pipeline').first()
-    manual_classification = patient.classifications.filter(classifier='manual').first()
+    manual_classification = (
+        patient.classifications.filter(classifier='manual')
+        .order_by('timestamp', 'pk')
+        .first()
+    )
     
     management_form = PatientManagementForm(instance=patient, user=request.user)
     
@@ -80,17 +130,22 @@ def patient_detail(request, patient_id):
         action = request.POST.get('action')
         
         if action == 'accept_ai' and ai_classification:
-            Classification.objects.create(
+            manual_classification, created = Classification.objects.get_or_create(
                 patient=patient,
                 classifier='manual',
-                sagittal_left=ai_classification.sagittal_left,
-                sagittal_right=ai_classification.sagittal_right,
-                vertical=ai_classification.vertical,
-                transverse=ai_classification.transverse,
-                midline=ai_classification.midline,
-                annotator=request.user
+                defaults={
+                    'sagittal_left': ai_classification.sagittal_left,
+                    'sagittal_right': ai_classification.sagittal_right,
+                    'vertical': ai_classification.vertical,
+                    'transverse': ai_classification.transverse,
+                    'midline': ai_classification.midline,
+                    'annotator': request.user,
+                },
             )
-            messages.success(request, 'AI classification accepted!')
+            if created:
+                messages.success(request, 'AI classification accepted!')
+            else:
+                messages.info(request, 'Bite classification is already confirmed.')
             return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
         
         elif action == 'update_management':
@@ -360,27 +415,27 @@ def patient_detail(request, patient_id):
                     files_qs = patient.files.filter(modality=modality_obj)
 
                     if slug == 'cbct':
-                        file_obj = None
-                        raw_candidates = patient.files.filter(file_type='cbct_raw').order_by('-created_at')
-                        for raw_entry in raw_candidates:
-                            if raw_entry.file_path and (
-                                raw_entry.file_path.endswith('.nii') or raw_entry.file_path.endswith('.nii.gz')
-                            ) and artifact_exists(raw_entry.file_path):
-                                file_obj = raw_entry
-                                break
+                        file_obj, file_key = _cbct_display_file(patient)
                     else:
                         file_obj = files_qs.order_by('-created_at').first()
+                        file_key = 'primary'
 
                     if file_obj:
                         modality_files[slug] = {
                             'id': file_obj.id,
                             'file_type': file_obj.file_type,
+                            'file_key': file_key,
                         }
     except Exception as e:
         logger.warning(f"Error building modality_files: {e}")
 
     # JSON-serialize modality_files for template
     modality_files_json = _json.dumps(modality_files)
+    try:
+        cbct_segmentation_file_json = _json.dumps(_cbct_segmentation_file(patient))
+    except Exception as e:
+        logger.warning(f"Optional CBCT segmentation lookup failed: {e}")
+        cbct_segmentation_file_json = 'null'
 
     context = {
         'patient': patient,
@@ -402,6 +457,7 @@ def patient_detail(request, patient_id):
         'can_create_caption': can_create_caption,
         'modality_files': modality_files,
         'modality_files_json': modality_files_json,
+        'cbct_segmentation_file_json': cbct_segmentation_file_json,
     }
     # Allowed modalities for current project (to conditionally show upload controls)
     try:

@@ -6,6 +6,7 @@
     "scanId": {{ patient.patient_id }},
     "projectNamespace": "{% firstof request.resolver_match.namespace 'maxillo' %}",
     "modalityFiles": {{ modality_files_json|safe }},
+    "segmentationFile": {{ cbct_segmentation_file_json|safe }},
     "fixedMode": true,
     "enableDragDrop": false,
     "enableContextMenu": true,

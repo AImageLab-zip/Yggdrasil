@@ -17,7 +17,7 @@ from common.models import FileRegistry, Invitation, Job, Modality, Project, Proj
 from .file_utils import mark_job_completed, save_cbct_to_dataset
 from .models import Folder, FolderAccess, Patient
 from .views.auth import _repair_empty_invitation_codes
-from .views.admin import rerun_processing
+from .views.admin import bulk_rerun_processing, rerun_processing
 from .views.intraoral_segmentation import _normalize_teeth_payload
 from .views.patient_data import _generated_panoramic_variants
 
@@ -296,6 +296,105 @@ class PanoramicRerunTests(TestCase):
             storage_factory.return_value.delete.call_args_list,
             [((path,),) for path in self.generated_paths],
         )
+
+
+class CbctRerunDependencyTests(TestCase):
+    def setUp(self):
+        self.patient = Patient.objects.create(name='Legacy CBCT Case')
+        self.user = User.objects.create_user(
+            username='cbct-rerun-admin', password='x', is_staff=True,
+        )
+
+    def _request(self, path, data):
+        request = RequestFactory().post(
+            path,
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+        request.user = self.user
+        request.resolver_match = SimpleNamespace(namespace='maxillo')
+        request.session = {}
+        request._messages = FallbackStorage(request)
+        return request
+
+    @override_settings(
+        RUNNER_QUEUE_BY_MODALITY={
+            'cbct': 'runner_cbct_test',
+            'cbct_to_panoramic': 'runner_cbct_to_panoramic_test',
+        },
+    )
+    @patch('common.signals.celery_app.send_task')
+    def test_single_cbct_rerun_creates_missing_panoramic_dependency(
+        self, send_task,
+    ):
+        raw_key = 'maxillo/raw/cbct/legacy.nii.gz'
+        cbct_job = Job.objects.create(
+            modality_slug='cbct',
+            status='completed',
+            patient=self.patient,
+            input_files={'input': raw_key},
+        )
+
+        response = rerun_processing(
+            self._request(
+                f'/maxillo/patient/{self.patient.patient_id}/rerun-processing/',
+                {'jobs': ['cbct']},
+            ),
+            self.patient.patient_id,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['updated'], ['cbct'])
+        cbct_job.refresh_from_db()
+        panoramic_job = Job.objects.get(modality_slug='cbct_to_panoramic')
+        self.assertEqual(cbct_job.status, 'pending')
+        self.assertEqual(panoramic_job.status, 'dependency')
+        self.assertEqual(panoramic_job.input_files, {'raw_cbct': raw_key})
+        self.assertEqual(list(panoramic_job.dependencies.all()), [cbct_job])
+        self.assertEqual(Job.objects.filter(modality_slug='cbct_to_panoramic').count(), 1)
+        send_task.assert_called_once()
+
+    @override_settings(
+        RUNNER_QUEUE_BY_MODALITY={
+            'cbct': 'runner_cbct_test',
+            'cbct_to_panoramic': 'runner_cbct_to_panoramic_test',
+        },
+    )
+    @patch('common.signals.celery_app.send_task')
+    def test_bulk_cbct_rerun_resets_existing_panoramic_dependency(
+        self, send_task,
+    ):
+        cbct_job = Job.objects.create(
+            modality_slug='cbct',
+            status='completed',
+            patient=self.patient,
+            input_files={'files': ['maxillo/raw/cbct/legacy/slice.dcm']},
+        )
+        panoramic_job = Job.objects.create(
+            modality_slug='cbct_to_panoramic',
+            status='completed',
+            patient=self.patient,
+            output_files={'panoramic_png': {'path': 'maxillo/processed/pano.png'}},
+        )
+        panoramic_job.add_dependency(cbct_job)
+
+        response = bulk_rerun_processing(
+            self._request(
+                '/maxillo/patients/bulk-rerun-processing/',
+                {'scan_ids': [self.patient.patient_id], 'jobs': ['cbct']},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['updated_pairs'], 1)
+        cbct_job.refresh_from_db()
+        panoramic_job.refresh_from_db()
+        self.assertEqual(cbct_job.status, 'pending')
+        self.assertEqual(panoramic_job.status, 'dependency')
+        self.assertEqual(panoramic_job.output_files, {})
+        self.assertEqual(Job.objects.filter(modality_slug='cbct_to_panoramic').count(), 1)
+        send_task.assert_called_once()
+
 
 class MaxilloCbctFolderUploadTests(TestCase):
     def setUp(self):

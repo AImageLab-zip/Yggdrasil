@@ -1,18 +1,14 @@
 """Classification update views."""
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required, user_passes_test
-from django.contrib import messages
-from django.http import JsonResponse, HttpResponse
+import json
+
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-import json
-import os
-import logging
 
 from .domain import get_domain_models
 from common.permissions import user_can_write_annotations, user_is_project_admin
-
-logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -33,7 +29,10 @@ def update_classification(request, patient_id):
         
         if not can_classify:
             return JsonResponse({'error': 'Permission denied'}, status=403)
-        data = json.loads(request.body)
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload'}, status=400)
         
         field = data.get('field')
         value = data.get('value')
@@ -41,28 +40,28 @@ def update_classification(request, patient_id):
         valid_fields = ['sagittal_left', 'sagittal_right', 'vertical', 'transverse', 'midline']
         if field not in valid_fields:
             return JsonResponse({'error': 'Invalid field'}, status=400)
-        
+
+        valid_values = {choice[0] for choice in Classification._meta.get_field(field).flatchoices}
+        if value not in valid_values:
+            return JsonResponse({'error': 'Invalid value'}, status=400)
+
+        defaults = {
+            'sagittal_left': 'Unknown',
+            'sagittal_right': 'Unknown',
+            'vertical': 'Unknown',
+            'transverse': 'Unknown',
+            'midline': 'Unknown',
+            'annotator': request.user,
+        }
+        ai_classification = patient.classifications.filter(classifier='pipeline').first()
+        if ai_classification:
+            for classification_field in valid_fields:
+                defaults[classification_field] = getattr(ai_classification, classification_field)
         manual_classification, created = Classification.objects.get_or_create(
             patient=patient,
             classifier='manual',
-            defaults={
-                'sagittal_left': 'Unknown',
-                'sagittal_right': 'Unknown',
-                'vertical': 'Unknown',
-                'transverse': 'Unknown',
-                'midline': 'Unknown',
-                'annotator': request.user,
-            }
+            defaults=defaults,
         )
-        
-        if created:
-            ai_classification = patient.classifications.filter(classifier='pipeline').first()
-            if ai_classification:
-                manual_classification.sagittal_left = ai_classification.sagittal_left
-                manual_classification.sagittal_right = ai_classification.sagittal_right
-                manual_classification.vertical = ai_classification.vertical
-                manual_classification.transverse = ai_classification.transverse
-                manual_classification.midline = ai_classification.midline
         
         setattr(manual_classification, field, value)
         manual_classification.save()

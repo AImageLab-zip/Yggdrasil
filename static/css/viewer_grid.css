@@ -111,6 +111,35 @@
   display: none;
 }
 
+.viewer-window--render .orientation-menu,
+.viewer-window--render .windowing-control,
+.viewer-window--render .slice-counter,
+.viewer-window--render .measurement-overlay {
+  display: none !important;
+}
+
+.viewer-load-3d-btn {
+  pointer-events: auto;
+}
+
+.viewer-optional-3d {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #adb5bd;
+  gap: 0.5rem;
+}
+
+.viewer-optional-3d > i {
+  font-size: 2.25rem;
+}
+
+.viewer-optional-3d > p {
+  margin: 0;
+}
+
 /* Modality Chips - Draggable Pills */
 .modality-chip {
   display: inline-block;

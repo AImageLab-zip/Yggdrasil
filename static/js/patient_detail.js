@@ -94,9 +94,9 @@ function updatePageStatus() {
         statusBadge.classList.remove('ai-pending');
         statusBadge.classList.add('manual-verified');
         
-        const quickActions = document.querySelector('.quick-actions');
-        if (quickActions) {
-            quickActions.style.display = 'none';
+        const confirmation = document.querySelector('.classification-confirm');
+        if (confirmation) {
+            confirmation.style.display = 'none';
         }
     }
 }

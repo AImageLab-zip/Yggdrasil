@@ -58,6 +58,8 @@ def serve_file(request, file_id):
                 if bundle_path and artifact_exists(bundle_path):
                     resolved_file_path = bundle_path
                     bundle_filename = str(bundle_path).split("/")[-1]
+                elif requested_file_key and requested_file_key != "primary":
+                    raise Http404("Requested bundle file not found")
 
         request_namespace = (
             getattr(request, "resolver_match", None)
@@ -209,6 +211,8 @@ def serve_file(request, file_id):
     except FileRegistry.DoesNotExist:
         logger.error(f"File with ID {file_id} not found in registry.")
         raise Http404("File not found in registry")
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"Error serving file {file_id}: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
