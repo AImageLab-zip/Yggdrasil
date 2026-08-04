@@ -1858,3 +1858,25 @@
     font-size: 11px;
     color: var(--ygg-text-faint);
 }
+
+/* CBCT Orientation Selection Modal */
+.cbct-orientation-modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+.cbct-orientation-dialog {
+    background: var(--ygg-surface, #1e1e1e);
+    border: 1px solid var(--ygg-border, #333);
+    border-radius: var(--ygg-radius-lg, 12px);
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 90%;
+    color: var(--ygg-text, #fff);
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}

@@ -132,6 +132,7 @@ def upload_patient(request):
             
             # Handle CBCT (single file or folder)
             cbct_file = request.FILES.get('cbct')
+            cbct_error = None
             if cbct_file or cbct_folder_files:
                 try:
                     modality = Modality.objects.get(slug='cbct')
@@ -154,7 +155,13 @@ def upload_patient(request):
                             if job:
                                 processing_job_ids.append(job.id)
                 except Exception as e:
-                    messages.error(request, f"Error saving CBCT: {e}")
+                    err_text = str(e)
+                    if hasattr(e, 'message') and e.message:
+                        err_text = e.message
+                    elif hasattr(e, 'messages') and e.messages:
+                        err_text = '; '.join(e.messages)
+                    cbct_error = f"Error saving CBCT: {err_text}"
+                    messages.error(request, cbct_error)
 
             # Handle IOS (upper + lower)
             ios_upper = request.FILES.get('ios_upper')
@@ -232,13 +239,16 @@ def upload_patient(request):
                         video_error = 'Video file could not be saved (storage may be unavailable).'
                 except Exception as e:
                     video_error = f"Error saving Video: {e}"
-
             is_xhr = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+            if is_xhr:
+                if cbct_error:
+                    return JsonResponse({'ok': False, 'error': cbct_error}, status=400)
+                if video_error:
+                    return JsonResponse({'ok': False, 'error': video_error}, status=400)
 
             if video_error:
                 messages.error(request, video_error)
-                if is_xhr:
-                    return JsonResponse({'ok': False, 'error': video_error}, status=400)
 
 
             if uploaded_modalities:

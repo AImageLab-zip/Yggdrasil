@@ -165,6 +165,7 @@ def project_upload_api(request, project_slug):
         
         # Handle CBCT files
         try:
+            from django.core.exceptions import ValidationError
             cbct_file = request.FILES.get('cbct')
             cbct_folder_files = request.FILES.getlist('cbct_folder_files')
             if cbct_file:
@@ -177,7 +178,7 @@ def project_upload_api(request, project_slug):
                         'type': 'cbct',
                         'status': processing_job.status
                     })
-                    upload_results['messages'].append(f"CBCT scan queued for processing")
+                    upload_results['messages'].append("CBCT scan queued for processing")
             elif cbct_folder_files:
                 from ..file_utils import save_cbct_folder_to_dataset
 
@@ -188,9 +189,12 @@ def project_upload_api(request, project_slug):
                         'type': 'cbct',
                         'status': processing_job.status
                     })
-                    upload_results['messages'].append(f"CBCT folder queued for processing")
+                    upload_results['messages'].append("CBCT folder queued for processing")
+        except ValidationError as e:
+            err_msg = e.message if hasattr(e, 'message') else '; '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return JsonResponse({'error': err_msg}, status=400)
         except Exception as e:
-            upload_results['messages'].append(f"Error creating CBCT processing job: {e}\ntraceback: {traceback.format_exc()}")
+            return JsonResponse({'error': f"Error creating CBCT processing job: {e}"}, status=400)
 
         # Handle intraoral photographs
         try:

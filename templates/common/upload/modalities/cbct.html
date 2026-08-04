@@ -11,7 +11,7 @@
             {{ patient_upload_form.cbct }}
             <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
             <strong>Drop a CBCT file</strong>
-            <small>DICOM, NIfTI, MetaImage, NRRD or archive</small>
+            <small>DICOM, NIfTI or MetaImage (.mha)</small>
             <span class="upload-file-summary" data-file-summary>No file selected</span>
         </label>
         {% for error in patient_upload_form.cbct.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}

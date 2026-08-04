@@ -433,10 +433,81 @@ def save_generic_modality_folder(patient: Patient, modality_slug: str, folder_fi
     return fr, job
 
 
+def _validate_and_extract_nifti_orientation(cbct_file):
+    """
+    Validate that a CBCT uploaded file is a compressed NIfTI file (.nii.gz)
+    with valid orientation metadata (qform_code >= 1 or sform_code >= 1).
+    Returns the derived orientation string (e.g. 'RAS').
+    Raises django.core.exceptions.ValidationError on failure.
+    """
+    from django.core.exceptions import ValidationError
+
+    original_name = getattr(cbct_file, "name", "") or ""
+    filename_lower = original_name.lower()
+    if not filename_lower.endswith(".nii.gz"):
+        raise ValidationError(
+            "CBCT upload requires a compressed NIfTI file (.nii.gz). "
+            "Please convert DICOM or MetaImage files to .nii.gz before uploading."
+        )
+
+    import tempfile
+    import nibabel as nib
+    import numpy as np
+
+    try:
+        if hasattr(cbct_file, "seek"):
+            cbct_file.seek(0)
+    except Exception:
+        pass
+
+    with tempfile.NamedTemporaryFile(suffix=".nii.gz") as tmp:
+        try:
+            if hasattr(cbct_file, "chunks"):
+                for chunk in cbct_file.chunks():
+                    tmp.write(chunk)
+            else:
+                tmp.write(cbct_file.read())
+            tmp.flush()
+        except Exception as exc:
+            raise ValidationError(f"Failed to read uploaded file: {exc}")
+
+        try:
+            nifti_img = nib.load(tmp.name)
+        except Exception as exc:
+            raise ValidationError(f"The uploaded file is not a valid NIfTI volume: {exc}")
+
+        qform_code = int(nifti_img.header.get("qform_code", 0))
+        sform_code = int(nifti_img.header.get("sform_code", 0))
+
+        if qform_code < 1 and sform_code < 1:
+            raise ValidationError(
+                "CBCT file contains no orientation metadata (qform/sform codes are 0). "
+                "Please specify orientation or convert before uploading."
+            )
+
+        affine = np.asarray(nifti_img.affine, dtype=np.float64)
+        if not np.isfinite(affine).all() or abs(np.linalg.det(affine[:3, :3])) < 1e-9:
+            raise ValidationError("CBCT file contains a degenerate or unreadable affine transform.")
+
+        try:
+            orientation_codes = nib.orientations.aff2axcodes(affine)
+            orientation = "".join(orientation_codes) if orientation_codes else "unknown"
+        except Exception:
+            orientation = "unknown"
+
+    try:
+        if hasattr(cbct_file, "seek"):
+            cbct_file.seek(0)
+    except Exception:
+        pass
+
+    return orientation
+
+
 def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     """
-    Save CBCT file to object storage and create processing job
-    Supports multiple formats: DICOM, NIfTI, MetaImage, NRRD
+    Save CBCT file (.nii.gz only) to object storage and create processing job.
+    Validates orientation metadata server-side.
 
     Args:
         patient_or_legacy: Patient or legacy object with .patient
@@ -446,55 +517,11 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         tuple: (file_path, processing_job)
     """
     patient = _get_patient(patient_or_legacy)
+    original_name = getattr(cbct_file, "name", "cbct.nii.gz") or "cbct.nii.gz"
 
-    original_name = cbct_file.name
-    filename_lower = original_name.lower()
-    if filename_lower.endswith(".nii.gz"):
-        extension = ".nii.gz"
-        file_format = "nifti_compressed"
-    elif filename_lower.endswith(".nii"):
-        extension = ".nii"
-        file_format = "nifti"
-    elif filename_lower.endswith((".dcm", ".dicom")):
-        extension = ".dcm"
-        file_format = "dicom_single"
-    elif filename_lower == "dicomdir" or filename_lower.endswith("/dicomdir"):
-        extension = ""
-        file_format = "dicomdir"
-    elif filename_lower.endswith(".mha"):
-        extension = ".mha"
-        file_format = "metaimage"
-    elif filename_lower.endswith(".mhd"):
-        extension = ".mhd"
-        file_format = "metaimage_header"
-    elif filename_lower.endswith(".nrrd"):
-        extension = ".nrrd"
-        file_format = "nrrd"
-    elif filename_lower.endswith(".nhdr"):
-        extension = ".nhdr"
-        file_format = "nrrd_header"
-    elif filename_lower.endswith(".zip"):
-        extension = ".zip"
-        file_format = "dicom_archive_zip"
-    elif filename_lower.endswith((".tar", ".tar.gz", ".tgz")):
-        if filename_lower.endswith(".tar.gz"):
-            extension = ".tar.gz"
-        elif filename_lower.endswith(".tgz"):
-            extension = ".tgz"
-        else:
-            extension = ".tar"
-        file_format = "dicom_archive_tar"
-    else:
-        # Fallback - treat as raw DICOM
-        extension = os.path.splitext(original_name)[1] or ".dcm"
-        file_format = "unknown"
+    orientation = _validate_and_extract_nifti_orientation(cbct_file)
 
-    # Generate filename preserving original extension
-    base_filename = f"cbct_patient_{patient.patient_id}"
-    if extension == "":  # Special case for DICOMDIR
-        filename = f"{base_filename}_DICOMDIR"
-    else:
-        filename = f"{base_filename}{extension}"
+    base_filename = f"cbct_patient_{patient.patient_id}.nii.gz"
 
     # Clean up existing CBCT files and registry entries for this patient
     cbct_raw_type = get_file_type_for_modality("cbct", is_processed=False)
@@ -508,7 +535,7 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         file_type=cbct_processed_type, **_entity_filter_kwargs(patient)
     )
 
-    key = f"{_raw_key_prefix_for(patient, 'cbct')}/{filename}"
+    key = f"{_raw_key_prefix_for(patient, 'cbct')}/{base_filename}"
     key, file_size, file_hash = _upload_uploaded_file_to_storage(
         key=key, uploaded_file=cbct_file
     )
@@ -519,6 +546,7 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         modality_fk = _Modality.objects.filter(slug="cbct").first()
     except Exception:
         modality_fk = None
+
     # Create file registry entry with format metadata
     file_registry = FileRegistry.objects.create(
         file_type=get_file_type_for_modality("cbct", is_processed=False),
@@ -530,8 +558,9 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
         metadata={
             "original_filename": original_name,
             "uploaded_at": timezone.now().isoformat(),
-            "file_format": file_format,
-            "needs_conversion": file_format != "nifti_compressed",
+            "file_format": "nifti_compressed",
+            "needs_conversion": False,
+            "orientation": orientation,
         },
     )
 
@@ -547,84 +576,15 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
 
 def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
     """
-    Save CBCT folder (multiple DICOM files) to object storage and create processing job
-
-    Args:
-        patient_or_legacy: Patient or legacy object with .patient
-        folder_files: List of Django UploadedFile instances from folder
-
-    Returns:
-        tuple: (folder_path, processing_job)
+    Deprecated: CBCT folder upload via backend API.
+    Raises ValidationError directing caller to upload .nii.gz files.
     """
-    from .models import validate_cbct_folder
+    from django.core.exceptions import ValidationError
 
-    patient = _get_patient(patient_or_legacy)
-
-    # Validate folder contents
-    valid_files = validate_cbct_folder(folder_files)
-
-    base_prefix = f"{_raw_key_prefix_for(patient, 'cbct')}/cbct_patient_{patient.patient_id}_folder"
-
-    # Clean up existing CBCT files and registry entries for this patient
-    cbct_raw_type = get_file_type_for_modality("cbct", is_processed=False)
-    existing_raw_files = FileRegistry.objects.filter(
-        file_type=cbct_raw_type, **_entity_filter_kwargs(patient)
+    raise ValidationError(
+        "CBCT folder uploads via API are deprecated. "
+        "Please convert DICOM folders to .nii.gz before uploading."
     )
-
-    # Save all valid files to object storage
-    saved_files = []
-    total_size = 0
-
-    for file in valid_files:
-        rel = _sanitize_relpath(getattr(file, "name", "file"))
-        obj_key = f"{base_prefix}/{rel}" if rel else f"{base_prefix}/file"
-        obj_key, file_size, file_hash = _upload_uploaded_file_to_storage(
-            key=obj_key, uploaded_file=file
-        )
-        total_size += file_size
-
-        saved_files.append(
-            {"name": file.name, "path": obj_key, "size": file_size, "hash": file_hash}
-        )
-
-    # Calculate folder hash (hash of all file hashes combined)
-    combined_hashes = "".join(f["hash"] for f in saved_files)
-    hash_sha256 = hashlib.sha256()
-    hash_sha256.update(combined_hashes.encode())
-    folder_hash = hash_sha256.hexdigest()
-    modality_fk = None
-    try:
-        from common.models import Modality as _Modality
-
-        modality_fk = _Modality.objects.filter(slug="cbct").first()
-    except Exception:
-        modality_fk = None
-
-    # Create file registry entry for the folder
-    file_registry = FileRegistry.objects.create(
-        file_type=get_file_type_for_modality("cbct", is_processed=False),
-        file_path=base_prefix,
-        file_size=total_size,
-        file_hash=folder_hash,
-        **_entity_fk_kwargs(patient),
-        modality=modality_fk,
-        metadata={
-            "upload_type": "folder",
-            "file_format": "dicom_folder",
-            "uploaded_at": timezone.now().isoformat(),
-            "files": saved_files,  # List of all files in folder
-            "needs_conversion": True,
-        },
-    )
-
-    # Create job only when a CBCT worker route is configured.
-    processing_job = _create_job_if_runner_enabled(
-        "cbct",
-        **_entity_fk_kwargs(patient),
-        input_files={"files": [f.get("path") for f in saved_files if isinstance(f, dict)]},
-    )
-
-    return base_prefix, processing_job
 
 
 def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):

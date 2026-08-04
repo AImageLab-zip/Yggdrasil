@@ -110,21 +110,72 @@
         if (icon) icon.className = submitting ? 'fas fa-spinner fa-spin' : 'fas fa-arrow-up-from-bracket';
     }
 
-    function uploadVideoWithProgress(form) {
+    function promptOrientationSelection() {
+        return new Promise(resolve => {
+            let overlay = document.getElementById('cbctOrientationModal');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'cbctOrientationModal';
+                overlay.className = 'cbct-orientation-modal';
+                overlay.innerHTML = `
+                    <div class="cbct-orientation-dialog">
+                        <i class="fas fa-compass text-primary text-xl mb-2" style="font-size: 1.5rem; color: var(--ygg-primary, #0d6efd);"></i>
+                        <h4 style="margin: 0.5rem 0 0.25rem; font-weight: 600;">Specify Orientation Metadata</h4>
+                        <p style="font-size: 0.85rem; color: var(--ygg-text-muted, #aaa); margin-bottom: 1rem;">
+                            This CBCT volume contains no orientation metadata (qform/sform codes are 0).
+                            Please select the correct orientation to apply:
+                        </p>
+                        <div style="margin-bottom: 1rem;">
+                            <select id="cbctOrientationSelect" class="form-input" style="width: 100%; padding: 0.5rem; background: var(--ygg-surface, #222); color: #fff; border: 1px solid var(--ygg-border, #444); border-radius: 6px;">
+                                <option value="RAS" selected>RAS (Right-Anterior-Superior)</option>
+                                <option value="LAS">LAS (Left-Anterior-Superior)</option>
+                                <option value="LPS">LPS (Left-Posterior-Superior)</option>
+                                <option value="RPS">RPS (Right-Posterior-Superior)</option>
+                                <option value="RAI">RAI (Right-Anterior-Inferior)</option>
+                                <option value="LAI">LAI (Left-Anterior-Inferior)</option>
+                                <option value="LPI">LPI (Left-Posterior-Inferior)</option>
+                                <option value="RPI">RPI (Right-Posterior-Inferior)</option>
+                            </select>
+                        </div>
+                        <button type="button" id="cbctOrientationConfirm" class="btn btn-primary btn-sm" style="width: 100%; padding: 0.5rem; background: #0d6efd; color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                            Apply & Continue
+                        </button>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+            }
+            overlay.hidden = false;
+            const confirmBtn = overlay.querySelector('#cbctOrientationConfirm');
+            const selectEl = overlay.querySelector('#cbctOrientationSelect');
+
+            function onConfirm(e) {
+                e.preventDefault();
+                confirmBtn.removeEventListener('click', onConfirm);
+                overlay.hidden = true;
+                resolve(selectEl.value || 'RAS');
+            }
+
+            confirmBtn.addEventListener('click', onConfirm);
+        });
+    }
+
+    function uploadFormWithProgress(form) {
         const progress = document.getElementById('uploadProgress');
         const bar = document.getElementById('uploadProgressBar');
         const percent = document.getElementById('uploadProgressPercent');
         const progressLabel = document.getElementById('uploadProgressLabel');
         const xhr = new XMLHttpRequest();
-        progress.hidden = false;
+        if (progress) progress.hidden = false;
         setSubmitting(form, true);
-        xhr.upload.addEventListener('progress', event => {
-            if (!event.lengthComputable) return;
-            const value = Math.round((event.loaded / event.total) * 100);
-            bar.style.width = `${value}%`;
-            percent.textContent = `${value}%`;
-            if (value === 100) progressLabel.textContent = 'Finalizing upload';
-        });
+        if (xhr.upload && bar && percent) {
+            xhr.upload.addEventListener('progress', event => {
+                if (!event.lengthComputable) return;
+                const value = Math.round((event.loaded / event.total) * 100);
+                bar.style.width = `${value}%`;
+                percent.textContent = `${value}%`;
+                if (value === 100 && progressLabel) progressLabel.textContent = 'Finalizing upload';
+            });
+        }
         xhr.addEventListener('load', () => {
             let data = null;
             try { data = JSON.parse(xhr.responseText); } catch (error) { /* non-JSON response */ }
@@ -134,12 +185,12 @@
             }
             const message = data && data.error ? data.error : `Upload failed (HTTP ${xhr.status}).`;
             notify('danger', message);
-            progress.hidden = true;
+            if (progress) progress.hidden = true;
             setSubmitting(form, false);
         });
         xhr.addEventListener('error', () => {
             notify('danger', 'Network error during upload. Please try again.');
-            progress.hidden = true;
+            if (progress) progress.hidden = true;
             setSubmitting(form, false);
         });
         xhr.open('POST', form.action || window.location.href, true);
@@ -164,12 +215,57 @@
                 notify('warning', 'Select no more than 10 intraoral photographs.');
                 return;
             }
+
+            const cbctInput = form.querySelector('input[name="cbct"]');
+            const folderInput = form.querySelector('input[name="cbct_folder_files"]');
+            const activeCbctInput = cbctInput && !cbctInput.disabled && cbctInput.files && cbctInput.files.length ? cbctInput :
+                (folderInput && !folderInput.disabled && folderInput.files && folderInput.files.length ? folderInput : null);
+
+            if (activeCbctInput && activeCbctInput.dataset.converted !== 'true' && window.CBCTConvert) {
+                event.preventDefault();
+                setSubmitting(form, true);
+
+                const progressLabel = document.getElementById('uploadProgressLabel');
+                const progress = document.getElementById('uploadProgress');
+                if (progress) progress.hidden = false;
+                if (progressLabel) progressLabel.textContent = 'Converting CBCT to NIfTI (.nii.gz)...';
+
+                window.CBCTConvert.convertFiles(activeCbctInput.files, {
+                    onProgress: (pct, msg) => {
+                        if (progressLabel) progressLabel.textContent = msg;
+                    },
+                    onNeedsOrientation: () => promptOrientationSelection()
+                }).then(({ file }) => {
+                    const transfer = new DataTransfer();
+                    transfer.items.add(file);
+                    if (cbctInput) {
+                        cbctInput.files = transfer.files;
+                        cbctInput.disabled = false;
+                        cbctInput.dataset.converted = 'true';
+                    }
+                    if (folderInput) {
+                        folderInput.value = '';
+                        folderInput.disabled = true;
+                    }
+                    const hiddenType = form.querySelector('input[name="cbct_upload_type"]');
+                    if (hiddenType) hiddenType.value = 'file';
+
+                    uploadFormWithProgress(form);
+                }).catch(err => {
+                    notify('danger', 'CBCT Conversion failed: ' + err.message);
+                    if (progress) progress.hidden = true;
+                    setSubmitting(form, false);
+                });
+                return;
+            }
+
             const video = form.querySelector('input[name="video"]');
             if (video && video.files.length) {
                 event.preventDefault();
-                uploadVideoWithProgress(form);
+                uploadFormWithProgress(form);
             } else {
-                setSubmitting(form, true);
+                event.preventDefault();
+                uploadFormWithProgress(form);
             }
         });
     }

@@ -33,7 +33,7 @@ class PatientUploadForm(forms.ModelForm):
         label='CBCT File',
         widget=forms.FileInput(attrs={
             'class': 'form-control',
-            'accept': '.dcm,.dicom,.nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz'
+            'accept': '.dcm,.dicom,.nii,.nii.gz,.mha,application/dicom'
         })
     )
     cbct_upload_type = forms.CharField(widget=forms.HiddenInput(), required=False)

@@ -33,14 +33,13 @@
 
 {# Modality-specific viewers #}
 <script src="{% static 'js/modality_viewers/ios.js' %}"></script>
+<script src="{% static 'js/volume_metadata.js' %}"></script>
 {% if ns == 'maxillo' %}
 <script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.69.0/dist/niivue.umd.min.js"></script>
 <script src="{% static 'js/modality_viewers/niivue_render_modes.js' %}"></script>
 <script src="{% static 'js/modality_viewers/niivue_viewer.js' %}"></script>
 <script src="{% static 'js/viewer_grid.js' %}"></script>
 <script src="{% static 'js/modality_viewers/maxillo_cbct_grid_adapter.js' %}"></script>
-{% else %}
-<script src="{% static 'js/modality_viewers/cbct.js' %}"></script>
 {% endif %}
 <script src="{% static 'js/modality_viewers/intraoral.js' %}"></script>
 <script src="{% static 'js/modality_viewers/rgb_editor.js' %}"></script>
@@ -59,6 +58,7 @@
 {# Additional features #}
 <script src="{% static 'js/vocal_caption.js' %}"></script>
 <script src="{% static 'js/nifti_metadata.js' %}"></script>
+<script src="{% static 'js/cbct_convert.js' %}"></script>
 <script src="{% static 'js/cbct_upload.js' %}"></script>
 
 {# Sidebar tab controller (Classification/Captions/Files/Metadata/Settings/Activity) #}

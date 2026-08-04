@@ -28,6 +28,8 @@ class NiiVueViewer {
         this.segmentationOverlayLoaded = false;
         this.onLocationChangeCallback = null;
         this.renderController = null;
+        this.volumeMetadata = null;
+        this.segmentationMetadata = null;
     }
 
     async _payloadToArrayBuffer(filePayload) {
@@ -81,6 +83,15 @@ class NiiVueViewer {
         // parses the buffer directly without any HTTP request. The name
         // must end in .nii.gz so NiiVue selects the correct parser.
         let arrayBuffer = await this._payloadToArrayBuffer(fileBlob);
+
+        // Inspect the file's orientation metadata before displaying it.
+        // NiiVue reorients to RAS from the header; when the header carries
+        // no valid qform/sform it silently assumes RAS storage order, so
+        // the result is recorded for the caller to act on (warning banner).
+        this.volumeMetadata = window.VolumeMetadata
+            ? window.VolumeMetadata.parseNiftiMetadata(arrayBuffer)
+            : null;
+
         await this.nv.loadFromArrayBuffer(arrayBuffer, modalitySlug + '.nii.gz');
 
         if (window.NiiVueRenderModes && typeof window.NiiVueRenderModes.createController === 'function') {
@@ -135,6 +146,10 @@ class NiiVueViewer {
 
         const arrayBuffer = await this._payloadToArrayBuffer(fileBlob);
         const previousVolumeCount = this.nv.volumes ? this.nv.volumes.length : 0;
+
+        this.segmentationMetadata = window.VolumeMetadata
+            ? window.VolumeMetadata.parseNiftiMetadata(arrayBuffer)
+            : null;
 
         await this.nv.loadFromArrayBuffer(arrayBuffer, 'braintumor-mri-seg.nii.gz');
 
@@ -489,6 +504,25 @@ class NiiVueViewer {
     }
 
     /**
+     * Orientation metadata parsed from the loaded volume file, or null when
+     * the metadata reader is unavailable. `hasMetadata` is false when the
+     * file declares no valid qform/sform and the display therefore assumes
+     * RAS storage order.
+     * @returns {{ok: boolean, hasMetadata: boolean, orientation: (string|null), issues: string[]}|null}
+     */
+    getVolumeMetadata() {
+        return this.volumeMetadata;
+    }
+
+    /**
+     * Orientation metadata of the segmentation overlay (null until the
+     * overlay is loaded for the first time).
+     */
+    getSegmentationMetadata() {
+        return this.segmentationMetadata;
+    }
+
+    /**
      * Attach a callback for slice changes (wraps NiiVue's onLocationChange)
      * @param {Function} callback - Function called when slice position changes
      */
@@ -717,6 +751,8 @@ class NiiVueViewer {
         this.modalitySlug = null;
         this.segmentationOverlayLoaded = false;
         this.renderController = null;
+        this.volumeMetadata = null;
+        this.segmentationMetadata = null;
     }
 }
 

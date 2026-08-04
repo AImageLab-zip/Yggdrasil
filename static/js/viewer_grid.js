@@ -1198,6 +1198,55 @@ const ViewerGrid = (function() {
     }
 
     /**
+     * Show the orientation-metadata warning banner in a window. Rendered
+     * when the displayed file declares no valid qform/sform: NiiVue then
+     * assumes the storage order is RAS, which can mirror the anatomy.
+     */
+    function showOrientationWarning(windowIndex, metadata) {
+        const windowEl = document.querySelector(`.viewer-window[data-window-index="${windowIndex}"]`);
+        if (!windowEl) {
+            return;
+        }
+        const container = windowEl.querySelector('.niivue-viewer-container');
+        if (!container) {
+            return;
+        }
+        const existing = container.querySelector('.orientation-warning');
+        if (existing) {
+            existing.remove();
+        }
+
+        const banner = document.createElement('div');
+        banner.className = 'orientation-warning';
+
+        const icon = document.createElement('i');
+        icon.className = 'fas fa-triangle-exclamation';
+        banner.appendChild(icon);
+
+        const text = document.createElement('span');
+        text.textContent = metadata && metadata.issues && metadata.issues.length
+            ? `Orientation metadata missing (${metadata.issues.join(' ')}) — display assumes RAS and may be mirrored.`
+            : 'Orientation metadata missing — display assumes RAS and may be mirrored.';
+        banner.appendChild(text);
+
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'orientation-warning__action';
+        action.textContent = 'Specify orientation';
+        action.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const tab = document.querySelector('.side-tab[data-tab-target="metadata"]');
+            if (tab) {
+                tab.click();
+                tab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+        banner.appendChild(action);
+
+        container.appendChild(banner);
+    }
+
+    /**
      * Load a modality into a specific window
      * Each window gets its own NiiVueViewer instance
      * @param {number} windowIndex - 0-3 for grid position
@@ -1345,6 +1394,16 @@ const ViewerGrid = (function() {
             windowStates[windowIndex].niivueInstance = viewer;
             windowStates[windowIndex].loading = false;
             windowStates[windowIndex].error = null;
+
+            // Orientation metadata gate: the viewer parsed the file header
+            // before displaying; warn when no usable orientation metadata
+            // was found so the anatomy cannot be mirrored silently.
+            const volumeMetadata = typeof viewer.getVolumeMetadata === 'function'
+                ? viewer.getVolumeMetadata()
+                : null;
+            if (volumeMetadata && volumeMetadata.ok && !volumeMetadata.hasMetadata) {
+                showOrientationWarning(windowIndex, volumeMetadata);
+            }
 
             window.dispatchEvent(new CustomEvent('viewergridvolumeready', {
                 detail: { windowIndex, modality, fileId }
