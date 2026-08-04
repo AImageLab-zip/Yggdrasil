@@ -220,3 +220,6 @@ CLAUDE.md
 static/vendor/transformers/models/
 static/vendor/transformers/onnxruntime*/
 scripts/.bin/
+
+# External reference repo (browser panorex port source)
+seg2pano/

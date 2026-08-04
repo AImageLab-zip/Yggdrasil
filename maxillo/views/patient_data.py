@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 from django.utils import timezone
+from django.db import transaction
 import os
 import logging
 import tempfile
@@ -13,6 +14,8 @@ import hashlib
 import json
 import math
 import re
+import io
+import uuid
 from PIL import Image
 
 from common.file_access import exists as artifact_exists, streaming_response
@@ -25,22 +28,29 @@ from common.permissions import (
 from common.object_storage import get_object_storage
 from common.models import FileRegistry, Modality
 from .domain import get_domain_models
+from .patient_detail import _resolved_cbct_viewer_source
+from ..models import PanoramicState
 
 logger = logging.getLogger(__name__)
 
 PANORAMIC_VARIANTS = {
-    "zplus40_mean": ("panoramic_zplus40_mean_png", "Z+40 MIP"),
+    "zplus40_mean": ("panoramic_zplus40_mean_png", "Z+40 Average"),
     "zplus40_raysum": ("panoramic_zplus40_raysum_png", "Z+40 X-ray"),
-    "zplus20_mean": ("panoramic_zplus20_mean_png", "Z+20 MIP"),
+    "zplus20_mean": ("panoramic_zplus20_mean_png", "Z+20 Average"),
     "zplus20_raysum": ("panoramic_zplus20_raysum_png", "Z+20 X-ray"),
-    "z0_mean": ("panoramic_png", "Z+0 MIP"),
+    "z0_mean": ("panoramic_png", "Z+0 Average"),
     "z0_raysum": ("panoramic_z0_raysum_png", "Z+0 X-ray"),
-    "zminus20_mean": ("panoramic_zminus20_mean_png", "Z-20 MIP"),
+    "zminus20_mean": ("panoramic_zminus20_mean_png", "Z-20 Average"),
     "zminus20_raysum": ("panoramic_zminus20_raysum_png", "Z-20 X-ray"),
-    "zminus40_mean": ("panoramic_zminus40_mean_png", "Z-40 MIP"),
+    "zminus40_mean": ("panoramic_zminus40_mean_png", "Z-40 Average"),
     "zminus40_raysum": ("panoramic_zminus40_raysum_png", "Z-40 X-ray"),
 }
 DEFAULT_PANORAMIC_VARIANT = "z0_mean"
+BROWSER_PANORAMIC_ALGORITHM = "panorex-js-v2-mip"
+BROWSER_PANORAMIC_MAX_REQUEST = 25 * 1024 * 1024
+BROWSER_PANORAMIC_MAX_PNG = 10 * 1024 * 1024
+BROWSER_PANORAMIC_MAX_STATE = 64 * 1024
+BROWSER_PANORAMIC_MAX_PIXELS = 32_000_000
 
 LANDMARK_KEY_RE = re.compile(r"^(\d+)_(upper|lower)_FDI_(\d{2})$")
 WORKER_LANDMARK_KEY_RE = re.compile(r"^in_(upper|lower)_FDI_(\d{2})$")
@@ -66,6 +76,481 @@ def _generated_panoramic_variants(panoramic_file):
         if path:
             variants[variant] = {"path": path, "label": label}
     return variants
+
+
+def _source_descriptor(source):
+    segmentation = source["segmentation_file"]
+    return {
+        "job_id": source["job"].id if source["job"] else None,
+        "file_id": source["file"].id,
+        "file_key": source["file_key"],
+        "file_hash": source["file_hash"],
+        "segmentation_file_id": segmentation.id if segmentation else None,
+        "segmentation_file_key": source["segmentation_key"] or None,
+        "segmentation_file_hash": source["segmentation_hash"] or None,
+    }
+
+
+def _source_artifact_path(source, file_name, key_name):
+    file_obj = source.get(file_name) if source else None
+    file_key = source.get(key_name) if source else None
+    if not file_obj:
+        return None
+    if not file_key or file_key == "primary":
+        return file_obj.file_path
+    metadata = file_obj.metadata if isinstance(file_obj.metadata, dict) else {}
+    files = metadata.get("files")
+    output = files.get(file_key) if isinstance(files, dict) else None
+    return output.get("path") if isinstance(output, dict) else None
+
+
+def _string_leaves(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for nested in value.values():
+            yield from _string_leaves(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            yield from _string_leaves(nested)
+
+
+def _legacy_panoramic_matches_source(file_obj, active_source):
+    metadata = file_obj.metadata if isinstance(file_obj.metadata, dict) else {}
+    if metadata.get("generated_from") != "cbct_to_panoramic" or not active_source:
+        return True
+    inputs = set(_string_leaves(metadata.get("input_files") or {}))
+    volume_path = _source_artifact_path(active_source, "file", "file_key")
+    segmentation_path = _source_artifact_path(
+        active_source, "segmentation_file", "segmentation_key"
+    )
+    if not volume_path or volume_path not in inputs:
+        return False
+    return not segmentation_path or segmentation_path in inputs
+
+
+def _state_matches_source(state, source):
+    if not state or not source:
+        return False
+    descriptor = _source_descriptor(source)
+    return (
+        state.algorithm_version == BROWSER_PANORAMIC_ALGORITHM
+        and state.source_job_id == descriptor["job_id"]
+        and state.source_file_id == descriptor["file_id"]
+        and state.source_file_key == descriptor["file_key"]
+        and state.source_file_hash == descriptor["file_hash"]
+        and state.source_segmentation_file_id == descriptor["segmentation_file_id"]
+        and (state.source_segmentation_key or None) == descriptor["segmentation_file_key"]
+        and (state.source_segmentation_hash or None) == descriptor["segmentation_file_hash"]
+    )
+
+
+def _source_shape(source):
+    row = source["file"]
+    metadata = row.metadata if isinstance(row.metadata, dict) else {}
+    candidates = [metadata.get("volume_shape"), metadata.get("shape")]
+    files = metadata.get("files")
+    if isinstance(files, dict):
+        output = files.get(source["file_key"])
+        if isinstance(output, dict):
+            candidates.extend((output.get("volume_shape"), output.get("shape")))
+    for candidate in candidates:
+        if (
+            isinstance(candidate, (list, tuple))
+            and len(candidate) == 3
+            and all(isinstance(value, int) and not isinstance(value, bool) for value in candidate)
+        ):
+            return list(candidate)
+    return None
+
+
+def _input_value(data, snake_name, camel_name=None):
+    if snake_name in data:
+        return data[snake_name]
+    if camel_name and camel_name in data:
+        return data[camel_name]
+    return None
+
+
+def _source_input_value(data, *names):
+    for name in names:
+        if name in data:
+            return data[name]
+    return None
+
+
+def _normalize_browser_panoramic_state(payload, active_source):
+    if not isinstance(payload, dict):
+        raise ValueError("state must be a JSON object")
+    source_payload = payload.get("source")
+    if not isinstance(source_payload, dict):
+        raise ValueError("state.source must be an object")
+
+    source = {
+        "job_id": _input_value(source_payload, "job_id", "jobId"),
+        "file_id": _source_input_value(
+            source_payload, "file_id", "fileId", "volume_file_id", "volumeFileId"
+        ),
+        "file_key": _source_input_value(
+            source_payload, "file_key", "fileKey", "volume_file_key", "volumeFileKey"
+        ),
+        "file_hash": _source_input_value(
+            source_payload, "file_hash", "fileHash", "volume_file_hash", "volumeFileHash"
+        ),
+        "segmentation_file_id": _input_value(
+            source_payload, "segmentation_file_id", "segmentationFileId"
+        ),
+        "segmentation_file_key": _input_value(
+            source_payload, "segmentation_file_key", "segmentationFileKey"
+        ),
+        "segmentation_file_hash": _input_value(
+            source_payload, "segmentation_file_hash", "segmentationFileHash"
+        ),
+    }
+    expected_source = _source_descriptor(active_source)
+    if source != expected_source:
+        raise RuntimeError("The active CBCT source has changed")
+
+    shape = _input_value(payload, "volume_shape", "volumeShape")
+    if (
+        not isinstance(shape, list)
+        or len(shape) != 3
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 16384
+            for value in shape
+        )
+    ):
+        raise ValueError("volume_shape must contain three positive integer dimensions")
+    known_shape = _source_shape(active_source)
+    if known_shape and shape != known_shape:
+        raise RuntimeError("The CBCT volume shape has changed")
+
+    axial_slice = _input_value(payload, "axial_slice", "axialSlice")
+    if (
+        isinstance(axial_slice, bool)
+        or not isinstance(axial_slice, int)
+        or axial_slice < 0
+        or axial_slice >= shape[2]
+    ):
+        raise ValueError("axial_slice is outside the CBCT volume")
+
+    spline = payload.get("spline")
+    if isinstance(spline, dict):
+        control_points = _input_value(spline, "control_points", "controlPoints")
+    else:
+        control_points = spline
+    if not isinstance(control_points, list) or not 4 <= len(control_points) <= 64:
+        raise ValueError("spline must contain between 4 and 64 control points")
+    normalized_points = []
+    for point in control_points:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            raise ValueError("Each spline control point must be [x, y]")
+        coordinates = []
+        for axis, coordinate in enumerate(point):
+            if isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)):
+                raise ValueError("Spline coordinates must be numeric")
+            coordinate = float(coordinate)
+            if not math.isfinite(coordinate) or coordinate < 0 or coordinate >= shape[axis]:
+                raise ValueError("Spline control points must be finite and inside the volume")
+            coordinates.append(coordinate)
+        normalized_points.append(coordinates)
+
+    mode = _input_value(payload, "default_mode", "defaultMode")
+    if mode not in {"mip", "raysum"}:
+        raise ValueError("default_mode must be mip or raysum")
+    geometry_source = _input_value(payload, "geometry_source", "geometrySource")
+    if geometry_source not in {"auto", "custom_cp"}:
+        raise ValueError("geometry_source must be auto or custom_cp")
+    algorithm = _input_value(payload, "algorithm_version", "algorithmVersion")
+    if algorithm != BROWSER_PANORAMIC_ALGORITHM:
+        raise ValueError("Unsupported algorithm_version")
+    generation_value = _input_value(payload, "generation_uuid", "generationUuid")
+    try:
+        generation_uuid = uuid.UUID(str(generation_value))
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("generation_uuid must be a valid UUID")
+    base_revision = _input_value(payload, "base_revision", "baseRevision")
+    if isinstance(base_revision, bool) or not isinstance(base_revision, int) or base_revision < 0:
+        raise ValueError("base_revision must be a non-negative integer")
+
+    return {
+        "source": source,
+        "volume_shape": shape,
+        "axial_slice": axial_slice,
+        "spline": normalized_points,
+        "geometry_source": geometry_source,
+        "default_mode": mode,
+        "algorithm_version": algorithm,
+        "generation_uuid": generation_uuid,
+        "base_revision": base_revision,
+    }
+
+
+def _sanitize_browser_png(uploaded, label):
+    if not uploaded:
+        raise ValueError(f"{label}_png is required")
+    if uploaded.size <= 0 or uploaded.size > BROWSER_PANORAMIC_MAX_PNG:
+        raise ValueError(f"{label}_png exceeds the allowed size")
+    raw = uploaded.read(BROWSER_PANORAMIC_MAX_PNG + 1)
+    if len(raw) > BROWSER_PANORAMIC_MAX_PNG or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError(f"{label}_png is not a valid PNG")
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
+                raise ValueError
+            width, height = image.size
+            if width < 1 or height < 1 or width > 16384 or height > 16384:
+                raise ValueError
+            if width * height > BROWSER_PANORAMIC_MAX_PIXELS:
+                raise ValueError
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            image.load()
+            if image.mode not in {"L", "LA", "RGB", "RGBA"}:
+                raise ValueError
+            output = io.BytesIO()
+            image.save(output, format="PNG")
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
+        raise ValueError(f"{label}_png is not a supported single-frame PNG")
+    encoded = output.getvalue()
+    if len(encoded) > BROWSER_PANORAMIC_MAX_PNG:
+        raise ValueError(f"{label}_png exceeds the allowed size after sanitization")
+    return encoded, (width, height), hashlib.sha256(encoded).hexdigest()
+
+
+def _upload_panoramic_bytes(storage, content, key):
+    fd, path = tempfile.mkstemp(prefix="browser_panorex_", suffix=".png")
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(content)
+        storage.upload_file(path, key=key, content_type="image/png")
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _panoramic_save_response(state, *, idempotent=False):
+    variants = [
+        {"id": "mip", "label": "MIP"},
+        {"id": "raysum", "label": "X-ray"},
+    ]
+    return JsonResponse({
+        "success": True,
+        "revision": state.revision,
+        "generation_uuid": str(state.generation_uuid),
+        "default_mode": state.default_mode,
+        "selected_variant": state.default_mode,
+        "variants": variants,
+        "idempotent": idempotent,
+    })
+
+
+@login_required
+@require_POST
+def save_browser_panoramic(request, patient_id):
+    """Validate and persist browser-generated panoramic PNGs without dispatching work."""
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not _can_write_patient(request, patient):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    try:
+        content_length = int(request.META.get("CONTENT_LENGTH", ""))
+    except (TypeError, ValueError):
+        content_length = 0
+    if content_length <= 0 or content_length > BROWSER_PANORAMIC_MAX_REQUEST:
+        return JsonResponse({"error": "Invalid or excessive Content-Length"}, status=413)
+
+    state_raw = request.POST.get("state")
+    if not isinstance(state_raw, str) or len(state_raw.encode("utf-8")) > BROWSER_PANORAMIC_MAX_STATE:
+        return JsonResponse({"error": "state is required and must be at most 64 KiB"}, status=400)
+    active_source = _resolved_cbct_viewer_source(patient)
+    if not active_source:
+        return JsonResponse({"error": "No active CBCT source"}, status=409)
+    try:
+        payload = json.loads(state_raw)
+        normalized = _normalize_browser_panoramic_state(payload, active_source)
+        mip_bytes, mip_size, mip_hash = _sanitize_browser_png(
+            request.FILES.get("mip_png"), "mip"
+        )
+        raysum_bytes, raysum_size, raysum_hash = _sanitize_browser_png(
+            request.FILES.get("raysum_png"), "raysum"
+        )
+        if mip_size != raysum_size:
+            raise ValueError("mip_png and raysum_png dimensions must match")
+        if mip_size[1] != normalized["volume_shape"][2]:
+            raise ValueError("Panoramic image height must match the CBCT depth")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "state is not valid JSON"}, status=400)
+    except RuntimeError as exc:
+        return JsonResponse({"error": str(exc)}, status=409)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    fingerprint_data = dict(normalized)
+    fingerprint_data["generation_uuid"] = str(normalized["generation_uuid"])
+    fingerprint_data["image_hashes"] = [mip_hash, raysum_hash]
+    request_hash = hashlib.sha256(
+        json.dumps(fingerprint_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    current = PanoramicState.objects.filter(patient=patient).first()
+    if current and current.generation_uuid == normalized["generation_uuid"]:
+        if current.request_hash == request_hash:
+            return _panoramic_save_response(current, idempotent=True)
+        return JsonResponse({"error": "generation_uuid was already used"}, status=409)
+    current_matches_source = _state_matches_source(current, active_source)
+    effective_revision = current.revision if current_matches_source else 0
+    if effective_revision != normalized["base_revision"]:
+        return JsonResponse({"error": "Stale panoramic revision"}, status=409)
+
+    generation = str(normalized["generation_uuid"])
+    prefix = f"maxillo/processed/panoramic/patient_{patient.patient_id}/{generation}"
+    keys = {"mip": f"{prefix}/mip.png", "raysum": f"{prefix}/raysum.png"}
+    storage = None
+    uploaded_keys = []
+    idempotent_state = None
+    try:
+        storage = get_object_storage()
+        with transaction.atomic():
+            locked_patient = Patient.objects.select_for_update().get(pk=patient.pk)
+            locked_source = _resolved_cbct_viewer_source(locked_patient)
+            if not locked_source or _source_descriptor(locked_source) != normalized["source"]:
+                raise RuntimeError("The active CBCT source has changed")
+            current = PanoramicState.objects.select_for_update().filter(patient=locked_patient).first()
+            if current and current.generation_uuid == normalized["generation_uuid"]:
+                if current.request_hash == request_hash:
+                    idempotent_state = current
+                else:
+                    raise RuntimeError("generation_uuid was already used")
+            else:
+                idempotent_state = None
+            current_matches_source = _state_matches_source(current, locked_source)
+            effective_revision = current.revision if current_matches_source else 0
+            if idempotent_state is None and effective_revision != normalized["base_revision"]:
+                raise RuntimeError("Stale panoramic revision")
+            if idempotent_state is not None:
+                state = idempotent_state
+            else:
+                # The patient row lock serializes uploads for one case, preventing two
+                # concurrent requests from overwriting or deleting the same UUID keys.
+                uploaded_keys.append(keys["mip"])
+                _upload_panoramic_bytes(storage, mip_bytes, keys["mip"])
+                uploaded_keys.append(keys["raysum"])
+                _upload_panoramic_bytes(storage, raysum_bytes, keys["raysum"])
+
+                revision = effective_revision + 1
+                source_metadata = dict(normalized["source"])
+                common_metadata = {
+                    "generated_from": "browser_cbct_to_panoramic",
+                    "generation_uuid": generation,
+                    "source": source_metadata,
+                    "annotation": {
+                        "axial_slice": normalized["axial_slice"],
+                        "volume_shape": normalized["volume_shape"],
+                        "spline": normalized["spline"],
+                        "geometry_source": normalized["geometry_source"],
+                        "algorithm_version": normalized["algorithm_version"],
+                        "revision": revision,
+                    },
+                    "image_width": mip_size[0],
+                    "image_height": mip_size[1],
+                    "interpolation": "bilinear",
+                    "slab": {
+                        "half_width_voxels": 20,
+                        "intervals": 40,
+                        "sample_count": 41,
+                    },
+                    "generated_by": request.user.username,
+                }
+                modality = Modality.objects.filter(slug="panoramic").first()
+                new_rows = []
+                for variant, content, digest in (
+                    ("mip", mip_bytes, mip_hash),
+                    ("raysum", raysum_bytes, raysum_hash),
+                ):
+                    metadata = dict(common_metadata)
+                    metadata.update({
+                        "variant": variant,
+                        "projection": "maximum" if variant == "mip" else "nonnegative_ray_sum",
+                        "is_default": variant == normalized["default_mode"],
+                    })
+                    new_rows.append(FileRegistry.objects.create(
+                        file_type="panoramic_processed",
+                        subtype=variant,
+                        file_path=keys[variant],
+                        file_size=len(content),
+                        file_hash=digest,
+                        metadata=metadata,
+                        modality=modality,
+                        domain="maxillo",
+                        patient=locked_patient,
+                        processing_job=None,
+                    ))
+                old_rows = []
+                if current:
+                    old_rows = [row for row in (current.mip_file, current.raysum_file) if row]
+                    state = current
+                else:
+                    state = PanoramicState(patient=locked_patient)
+                state.source_job = locked_source["job"]
+                state.source_file = locked_source["file"]
+                state.source_file_key = locked_source["file_key"]
+                state.source_file_hash = locked_source["file_hash"]
+                state.source_segmentation_file = locked_source["segmentation_file"]
+                state.source_segmentation_key = locked_source["segmentation_key"]
+                state.source_segmentation_hash = locked_source["segmentation_hash"]
+                state.mip_file, state.raysum_file = new_rows
+                state.axial_slice = normalized["axial_slice"]
+                state.volume_shape = normalized["volume_shape"]
+                state.spline = normalized["spline"]
+                state.geometry_source = normalized["geometry_source"]
+                state.default_mode = normalized["default_mode"]
+                state.algorithm_version = normalized["algorithm_version"]
+                state.revision = revision
+                state.generation_uuid = normalized["generation_uuid"]
+                state.request_hash = request_hash
+                state.generated_by = request.user
+                state.save()
+
+                old_owned = [
+                    row for row in old_rows
+                    if isinstance(row.metadata, dict)
+                    and row.metadata.get("generated_from") == "browser_cbct_to_panoramic"
+                ]
+                old_ids = [row.id for row in old_owned]
+                old_paths = [row.file_path for row in old_owned]
+                if old_ids:
+                    FileRegistry.objects.filter(id__in=old_ids).delete()
+
+                def cleanup_old_outputs():
+                    for old_path in old_paths:
+                        try:
+                            storage.delete(old_path)
+                        except Exception:
+                            logger.warning("Unable to delete old browser panoramic %s", old_path)
+
+                transaction.on_commit(cleanup_old_outputs, robust=True)
+    except RuntimeError as exc:
+        for key in uploaded_keys:
+            try:
+                if storage:
+                    storage.delete(key)
+            except Exception:
+                logger.warning("Unable to clean rejected browser panoramic %s", key)
+        return JsonResponse({"error": str(exc)}, status=409)
+    except Exception:
+        for key in uploaded_keys:
+            try:
+                if storage:
+                    storage.delete(key)
+            except Exception:
+                logger.warning("Unable to clean failed browser panoramic %s", key)
+        logger.exception("Unable to save browser panoramic for patient %s", patient.patient_id)
+        return JsonResponse({"error": "Unable to save panoramic"}, status=500)
+
+    return _panoramic_save_response(state, idempotent=bool(idempotent_state))
 
 
 def _normalize_landmark_point(value):
@@ -588,16 +1073,77 @@ def patient_panoramic_data(request, patient_id):
     if not _can_read_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
+    active_source = _resolved_cbct_viewer_source(patient)
+    state = PanoramicState.objects.select_related("mip_file", "raysum_file").filter(
+        patient=patient
+    ).first()
+    if _state_matches_source(state, active_source):
+        browser_variants = {
+            "mip": {"file": state.mip_file, "label": "MIP"},
+            "raysum": {"file": state.raysum_file, "label": "X-ray"},
+        }
+        available_variants = {
+            variant: data
+            for variant, data in browser_variants.items()
+            if data["file"] and artifact_exists(data["file"].file_path)
+        }
+        requested_variant = request.GET.get("variant", "").strip()
+        if requested_variant and requested_variant not in available_variants:
+            return JsonResponse(
+                {"error": "Panoramic variant not available", "status": "not_found"},
+                status=404,
+            )
+        selected_variant = requested_variant
+        if not selected_variant and available_variants:
+            selected_variant = (
+                state.default_mode
+                if state.default_mode in available_variants
+                else next(iter(available_variants))
+            )
+        if selected_variant:
+            selected_file = available_variants[selected_variant]["file"]
+            if request.GET.get("meta") == "1":
+                return JsonResponse({
+                    "url": f"{request.path}?variant={selected_variant}",
+                    "source_file_id": active_source["file"].id,
+                    "raw_url": None,
+                    "is_processed": True,
+                    "editable": False,
+                    "selected_variant": selected_variant,
+                    "variants": [
+                        {"id": variant, "label": data["label"]}
+                        for variant, data in available_variants.items()
+                    ],
+                    "revision": state.revision,
+                    "generation_uuid": str(state.generation_uuid),
+                })
+            return streaming_response(
+                path_or_key=selected_file.file_path,
+                content_type="image/png",
+                filename=f"panoramic_{patient_id}_{selected_variant}.png",
+                as_attachment=False,
+            )
+
     try:
         processed_files = list(
             patient.files.filter(file_type="panoramic_processed").order_by(
                 "-created_at", "-id"
             )
         )
+        legacy_processed_files = [
+            file_obj
+            for file_obj in processed_files
+            if (
+                not isinstance(file_obj.metadata, dict)
+                or file_obj.metadata.get("generated_from")
+                != "browser_cbct_to_panoramic"
+            )
+            and _legacy_panoramic_matches_source(file_obj, active_source)
+        ]
         panoramic_file = next(
             (
                 file_obj
-                for file_obj in processed_files
+                for file_obj in legacy_processed_files
                 if not isinstance(file_obj.metadata, dict)
                 or file_obj.metadata.get("generated_from") != "cbct_to_panoramic"
             ),
@@ -607,14 +1153,14 @@ def patient_panoramic_data(request, patient_id):
             panoramic_file = next(
                 (
                     file_obj
-                    for file_obj in processed_files
+                    for file_obj in legacy_processed_files
                     if isinstance(file_obj.metadata, dict)
                     and file_obj.metadata.get("is_default")
                 ),
                 None,
             )
-        if not panoramic_file and processed_files:
-            panoramic_file = processed_files[0]
+        if not panoramic_file and legacy_processed_files:
+            panoramic_file = legacy_processed_files[0]
         if not panoramic_file:
             panoramic_file = (
                 patient.files.filter(file_type="panoramic_raw")

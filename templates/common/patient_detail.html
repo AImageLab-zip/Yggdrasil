@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="{% static 'css/image_viewer.css' %}">
 {% if ns == 'maxillo' %}
 <link rel="stylesheet" href="{% static 'css/intraoral_segmentation.css' %}">
+<link rel="stylesheet" href="{% static 'css/cbct_panorex_editor.css' %}">
 {% endif %}
 {% endblock %}
 
@@ -33,7 +34,8 @@
 {# Modality-specific viewers #}
 <script src="{% static 'js/modality_viewers/ios.js' %}"></script>
 {% if ns == 'maxillo' %}
-<script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.67.0/dist/niivue.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.69.0/dist/niivue.umd.min.js"></script>
+<script src="{% static 'js/modality_viewers/niivue_render_modes.js' %}"></script>
 <script src="{% static 'js/modality_viewers/niivue_viewer.js' %}"></script>
 <script src="{% static 'js/viewer_grid.js' %}"></script>
 <script src="{% static 'js/modality_viewers/maxillo_cbct_grid_adapter.js' %}"></script>
@@ -49,6 +51,8 @@
 <script src="{% static 'js/patient_detail.js' %}"></script>
 {% if ns == 'maxillo' %}
 <script src="https://cdn.jsdelivr.net/npm/konva@9.3.20/konva.min.js"></script>
+<script src="{% static 'js/seg2pano_core.js' %}"></script>
+<script src="{% static 'js/modality_viewers/cbct_panorex_editor.js' %}"></script>
 <script src="{% static 'js/intraoral_segmentation.js' %}"></script>
 {% endif %}
 

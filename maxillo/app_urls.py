@@ -151,6 +151,11 @@ urlpatterns = [
         name="patient_panoramic_data",
     ),
     path(
+        "api/patient/<int:patient_id>/panoramic/generated/",
+        views.save_browser_panoramic,
+        name="save_browser_panoramic",
+    ),
+    path(
         "api/patient/<int:patient_id>/intraoral/",
         views.patient_intraoral_data,
         name="patient_intraoral_data",

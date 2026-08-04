@@ -2,15 +2,7 @@
     'use strict';
 
     function getViewerGrid() {
-        if (window.ViewerGrid) {
-            return window.ViewerGrid;
-        }
-
-        if (typeof ViewerGrid !== 'undefined') {
-            return ViewerGrid;
-        }
-
-        return null;
+        return window.ViewerGrid || (typeof ViewerGrid !== 'undefined' ? ViewerGrid : null);
     }
 
     function getViewerData() {
@@ -18,116 +10,80 @@
         if (!dataEl) {
             return {};
         }
-
         try {
             return JSON.parse(dataEl.textContent || '{}');
-        } catch (e) {
-            console.warn('Failed to parse viewerGridData:', e);
+        } catch (error) {
+            console.warn('Failed to parse viewerGridData:', error);
             return {};
         }
     }
 
-    function prepareOptional3DWindow(viewerGrid, cbctFileId) {
+    function readyViewer(viewerGrid, windowIndex) {
+        const state = viewerGrid && viewerGrid.windowStates && viewerGrid.windowStates[windowIndex];
+        return state && state.niivueInstance && state.niivueInstance.isReady()
+            ? state.niivueInstance
+            : null;
+    }
+
+    function prepareOptional3DWindow(viewerGrid) {
         viewerGrid.clearWindow(3);
         const windowEl = document.querySelector('.viewer-window[data-window-index="3"]');
         if (!windowEl) {
             return;
         }
-
         windowEl.innerHTML = `
             <div class="viewer-optional-3d">
                 <i class="fas fa-cube" aria-hidden="true"></i>
-                <p>3D volume rendering</p>
+                <p>3D rendering loads only when requested.</p>
                 <button type="button" class="viewer-load-3d-btn">Load 3D</button>
             </div>
         `;
-
         const button = windowEl.querySelector('.viewer-load-3d-btn');
-        button.addEventListener('click', async function() {
-            button.disabled = true;
-            button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Loading';
-
-            try {
-                await viewerGrid.loadModalityInWindow(3, 'cbct', cbctFileId);
-                const state = viewerGrid.windowStates && viewerGrid.windowStates[3];
-                if (!state || !state.niivueInstance || !state.niivueInstance.isReady()) {
-                    throw new Error('The optional 3D viewer could not be initialized');
-                }
-                viewerGrid.setWindowOrientation(3, 'render');
-
-                const minRange = document.getElementById('windowMinRange');
-                const maxRange = document.getElementById('windowMaxRange');
-                if (window.CBCTViewer && minRange && maxRange) {
-                    window.CBCTViewer.setWindowingFromPercent(
-                        parseInt(minRange.value || '0', 10),
-                        parseInt(maxRange.value || '100', 10)
-                    );
-                }
-            } catch (error) {
-                console.warn('Optional CBCT 3D viewer failed; keeping 2D views active:', error);
-                prepareOptional3DWindow(viewerGrid, cbctFileId);
-            }
+        button.addEventListener('click', function() {
+            window.CBCTViewer.loadRenderWindow(button);
         });
     }
 
     async function initFixedCbctGrid(cbctFileIdOverride) {
-        var viewerGrid = getViewerGrid();
+        const viewerGrid = getViewerGrid();
         if (!viewerGrid) {
             throw new Error('ViewerGrid is not available');
         }
-
         viewerGrid.init();
 
         const data = getViewerData();
         const cbctInfo = data.modalityFiles && data.modalityFiles.cbct;
         const cbctFileId = cbctFileIdOverride || (cbctInfo && cbctInfo.id);
-
         if (!cbctFileId) {
             throw new Error('CBCT file id not found for fixed grid initialization');
         }
 
         function loadAndOrient(windowIndex, orientation) {
-            return viewerGrid.loadModalityInWindow(windowIndex, 'cbct', cbctFileId)
-                .then(function() {
-                    viewerGrid.setWindowOrientation(windowIndex, orientation);
-                });
+            return viewerGrid.loadModalityInWindow(windowIndex, 'cbct', cbctFileId).then(function() {
+                viewerGrid.setWindowOrientation(windowIndex, orientation);
+            });
         }
 
-        if (typeof viewerGrid.suspendSynchronization === 'function') {
-            viewerGrid.suspendSynchronization();
-        }
-
+        viewerGrid.suspendSynchronization();
         try {
             await loadAndOrient(0, 'axial');
             await loadAndOrient(1, 'sagittal');
             await loadAndOrient(2, 'coronal');
         } finally {
-            if (typeof viewerGrid.resumeSynchronization === 'function') {
-                viewerGrid.resumeSynchronization();
-            }
+            viewerGrid.resumeSynchronization();
         }
 
         [0, 1, 2].forEach(function(windowIndex) {
-            var state = viewerGrid.windowStates && viewerGrid.windowStates[windowIndex];
-            if (!state || !state.niivueInstance || !state.niivueInstance.isReady() || !state.niivueInstance.nv) {
-                return;
+            const viewer = readyViewer(viewerGrid, windowIndex);
+            const position = viewer && viewer.nv && viewer.nv.scene.crosshairPos;
+            if (position && position.length >= 3) {
+                position[0] = 0.5;
+                position[1] = 0.5;
+                position[2] = 0.5;
+                viewer.nv.drawScene();
             }
-            var pos = state.niivueInstance.nv.scene.crosshairPos;
-            if (!pos || pos.length < 3) {
-                return;
-            }
-            pos[0] = 0.5;
-            pos[1] = 0.5;
-            pos[2] = 0.5;
-            state.niivueInstance.nv.drawScene();
         });
-
-        try {
-            prepareOptional3DWindow(viewerGrid, cbctFileId);
-        } catch (error) {
-            console.warn('Optional CBCT 3D controls failed; keeping 2D views active:', error);
-        }
-
+        prepareOptional3DWindow(viewerGrid);
         return cbctFileId;
     }
 
@@ -137,29 +93,30 @@
         panoramicLoaded: false,
         controlsBound: false,
         activeFileId: null,
+        renderLoadPromise: null,
+        renderFocused: false,
+        level: 50,
+        windowWidth: 100,
+        renderMode: 'amip',
         _initGeneration: 0,
 
         init: function(modalitySlug) {
             if (modalitySlug && modalitySlug !== 'cbct') {
                 return;
             }
-
             const data = getViewerData();
             const cbctInfo = data.modalityFiles && data.modalityFiles.cbct;
             const desiredFileId = cbctInfo && cbctInfo.id;
-
-            if (this.initialized && (!desiredFileId || (this.activeFileId && String(this.activeFileId) === String(desiredFileId)))) {
+            if (this.initialized && (!desiredFileId || String(this.activeFileId) === String(desiredFileId))) {
                 this.refreshAllViews();
                 return;
             }
-
             if (this.loading) {
                 return;
             }
 
             const initGeneration = ++this._initGeneration;
             this.loading = true;
-
             initFixedCbctGrid(desiredFileId)
                 .then((activeFileId) => {
                     if (initGeneration !== this._initGeneration) {
@@ -167,251 +124,270 @@
                     }
                     this.bindControls();
                     this.activeFileId = activeFileId;
+                    this.initializeWindowControls();
                     this.initialized = true;
                     this.loading = false;
                 })
-                .catch((e) => {
+                .catch((error) => {
                     if (initGeneration !== this._initGeneration) {
                         return;
                     }
                     this.initialized = false;
                     this.loading = false;
-                    console.error('Failed to initialize fixed CBCT grid:', e);
+                    this.setRenderStatus('CBCT viewer failed to initialize.');
+                    console.error('Failed to initialize fixed CBCT grid:', error);
                 });
         },
 
         refreshAllViews: function() {
-            var viewerGrid = getViewerGrid();
-            if (!viewerGrid || !viewerGrid.windowStates) {
-                return;
-            }
-
-            [0, 1, 2, 3].forEach((idx) => {
-                const state = viewerGrid.windowStates[idx];
-                if (state && state.niivueInstance && state.niivueInstance.isReady()) {
-                    state.niivueInstance.redraw();
+            const viewerGrid = getViewerGrid();
+            [0, 1, 2, 3].forEach(function(windowIndex) {
+                const viewer = readyViewer(viewerGrid, windowIndex);
+                if (viewer) {
+                    viewer.redraw();
                 }
             });
         },
 
-        setWindowingFromPercent: function(percentMin, percentMax, options) {
-            var viewerGrid = getViewerGrid();
-            if (!viewerGrid || !viewerGrid.windowStates) {
-                return;
+        initializeWindowControls: function() {
+            const viewer = readyViewer(getViewerGrid(), 0);
+            if (viewer && typeof viewer.getInitialLevelWindow === 'function') {
+                const initial = viewer.getInitialLevelWindow();
+                this.level = initial.level;
+                this.windowWidth = initial.window;
             }
+            this.syncWindowControls();
+            this.setLevelWindow(this.level, this.windowWidth);
+        },
 
-            const windowingOptions = options || {};
-            const previewOnlyWindowIndex = Number.isInteger(windowingOptions.previewOnlyWindowIndex)
-                ? windowingOptions.previewOnlyWindowIndex
-                : null;
+        syncWindowControls: function() {
+            const levelRange = document.getElementById('windowLevelRange');
+            const windowRange = document.getElementById('windowWidthRange');
+            const levelValue = document.getElementById('windowLevelValue');
+            const windowValue = document.getElementById('windowWidthValue');
+            if (levelRange) levelRange.value = String(this.level);
+            if (windowRange) windowRange.value = String(this.windowWidth);
+            if (levelValue) levelValue.textContent = String(this.level);
+            if (windowValue) windowValue.textContent = String(this.windowWidth);
+        },
 
-            [0, 1, 2, 3].forEach((idx) => {
-                if (previewOnlyWindowIndex !== null && idx !== previewOnlyWindowIndex) {
-                    return;
-                }
-                const state = viewerGrid.windowStates[idx];
-                if (state && state.niivueInstance && state.niivueInstance.isReady()) {
-                    state.niivueInstance.setWindowing(percentMin, percentMax, windowingOptions);
+        setLevelWindow: function(level, width) {
+            this.level = Math.max(0, Math.min(100, Number(level) || 0));
+            this.windowWidth = Math.max(1, Math.min(100, Number(width) || 1));
+            this.syncWindowControls();
+            const viewerGrid = getViewerGrid();
+            [0, 1, 2, 3].forEach((windowIndex) => {
+                const viewer = readyViewer(viewerGrid, windowIndex);
+                if (viewer && typeof viewer.setLevelWindow === 'function') {
+                    viewer.setLevelWindow(this.level, this.windowWidth);
                 }
             });
+        },
+
+        setRenderStatus: function(message, isError) {
+            const status = document.getElementById('cbctRenderStatus');
+            if (!status) {
+                return;
+            }
+            status.textContent = message || '';
+            status.classList.toggle('is-error', !!isError);
+        },
+
+        updateModeAvailability: function(viewer) {
+            const select = document.getElementById('cbctRenderMode');
+            if (!select || !viewer || typeof viewer.getRenderModeAvailability !== 'function') {
+                return;
+            }
+            const availability = viewer.getRenderModeAvailability();
+            Array.from(select.options).forEach(function(option) {
+                const capability = availability[option.value];
+                option.disabled = !capability || !capability.available;
+            });
+        },
+
+        resolveRenderModeResult: function(result) {
+            return result && result.ready ? result.ready : Promise.resolve(result);
+        },
+
+        applyRenderMode: async function(mode) {
+            const viewerGrid = getViewerGrid();
+            const viewer = readyViewer(viewerGrid, 3);
+            if (!viewer) {
+                return { available: false, message: 'Load the 3D viewer to select a render mode.' };
+            }
+            const result = await this.resolveRenderModeResult(viewerGrid.setWindowRenderMode(3, mode));
+            this.updateModeAvailability(viewer);
+            if (result.available) {
+                this.renderMode = mode;
+                const select = document.getElementById('cbctRenderMode');
+                if (select) select.value = mode;
+            }
+            this.setRenderStatus(result.message || '', !result.available);
+            return result;
+        },
+
+        ensureRenderViewer: function() {
+            const viewerGrid = getViewerGrid();
+            const existing = readyViewer(viewerGrid, 3);
+            if (existing) {
+                return Promise.resolve(existing);
+            }
+            if (this.renderLoadPromise) {
+                return this.renderLoadPromise;
+            }
+
+            this.setRenderStatus('Loading 3D volume...');
+            const loadPromise = (async () => {
+                await viewerGrid.loadModalityInWindow(3, 'cbct', this.activeFileId);
+                const viewer = readyViewer(viewerGrid, 3);
+                if (!viewer) {
+                    throw new Error('The 3D viewer could not be initialized');
+                }
+                viewer.setLevelWindow(this.level, this.windowWidth);
+                let result = await this.resolveRenderModeResult(viewerGrid.setWindowRenderMode(3, this.renderMode));
+                this.updateModeAvailability(viewer);
+                if (!result.available && this.renderMode !== 'shaded') {
+                    const unavailableMessage = result.message;
+                    result = await this.resolveRenderModeResult(viewerGrid.setWindowRenderMode(3, 'shaded'));
+                    if (result.available) {
+                        this.renderMode = 'shaded';
+                        const select = document.getElementById('cbctRenderMode');
+                        if (select) select.value = 'shaded';
+                        result.message = unavailableMessage + ' ' + (result.message || 'Using Shaded Volume instead.');
+                    }
+                }
+                this.updateModeAvailability(viewer);
+                this.setRenderStatus(result.message || '', !result.available);
+                return viewer;
+            })();
+            const trackedPromise = loadPromise.catch((error) => {
+                if (this.renderLoadPromise === trackedPromise) {
+                    this.renderLoadPromise = null;
+                }
+                this.setRenderStatus('3D rendering is unavailable: ' + error.message, true);
+                throw error;
+            });
+            this.renderLoadPromise = trackedPromise;
+            return this.renderLoadPromise;
+        },
+
+        setRenderFocus: function(enabled) {
+            const grid = document.querySelector('.viewer-grid');
+            const toggle = document.getElementById('toggleCBCT3DOnly');
+            const exit = document.getElementById('exitCBCT3DFocus');
+            const tools = grid && grid.previousElementSibling && grid.previousElementSibling.classList.contains('viewer-tools-bar')
+                ? grid.previousElementSibling
+                : null;
+            this.renderFocused = !!enabled;
+            if (grid) grid.classList.toggle('viewer-grid--render-focus', this.renderFocused);
+            if (tools) tools.classList.toggle('viewer-tools-bar--render-focus', this.renderFocused);
+            if (toggle) {
+                toggle.classList.toggle('active', this.renderFocused);
+                toggle.setAttribute('aria-pressed', this.renderFocused ? 'true' : 'false');
+            }
+            if (exit) exit.hidden = !this.renderFocused;
+            requestAnimationFrame(() => this.refreshAllViews());
+        },
+
+        enterRenderFocus: async function(sourceButton) {
+            if (this.renderFocused) {
+                this.setRenderFocus(false);
+                return;
+            }
+            if (sourceButton) sourceButton.disabled = true;
+            const toggle = document.getElementById('toggleCBCT3DOnly');
+            if (toggle) toggle.disabled = true;
+            try {
+                await this.ensureRenderViewer();
+                this.setRenderFocus(true);
+            } catch (error) {
+                console.warn('Optional CBCT 3D viewer failed; slice views remain active:', error);
+            } finally {
+                if (sourceButton) sourceButton.disabled = false;
+                if (toggle) toggle.disabled = false;
+            }
+        },
+
+        loadRenderWindow: async function(sourceButton) {
+            if (sourceButton) sourceButton.disabled = true;
+            try {
+                await this.ensureRenderViewer();
+                this.refreshAllViews();
+            } catch (error) {
+                console.warn('Optional CBCT 3D viewer failed; slice views remain active:', error);
+            } finally {
+                if (sourceButton && sourceButton.isConnected) sourceButton.disabled = false;
+            }
+        },
+
+        resetViews: function() {
+            const viewerGrid = getViewerGrid();
+            [0, 1, 2].forEach(function(windowIndex) {
+                const viewer = readyViewer(viewerGrid, windowIndex);
+                if (!viewer || !viewer.nv) return;
+                const position = viewer.nv.scene.crosshairPos;
+                if (position && position.length >= 3) {
+                    position[0] = 0.5;
+                    position[1] = 0.5;
+                    position[2] = 0.5;
+                }
+                viewer.nv.scene.pan2Dxyzmm = [0, 0, 0, 1];
+                viewer.nv.drawScene();
+            });
+            const renderViewer = readyViewer(viewerGrid, 3);
+            if (renderViewer) renderViewer.resetRenderCamera();
         },
 
         bindControls: function() {
             if (this.controlsBound) {
                 return;
             }
-
-            const minRange = document.getElementById('windowMinRange');
-            const maxRange = document.getElementById('windowMaxRange');
-            const minLabel = document.getElementById('windowMinValue');
-            const maxLabel = document.getElementById('windowMaxValue');
+            const levelRange = document.getElementById('windowLevelRange');
+            const windowRange = document.getElementById('windowWidthRange');
             const resetButton = document.getElementById('resetCBCTView');
+            const toggle3D = document.getElementById('toggleCBCT3DOnly');
+            const renderMode = document.getElementById('cbctRenderMode');
+            const reset3D = document.getElementById('resetCBCT3DCamera');
+            const exit3D = document.getElementById('exitCBCT3DFocus');
 
-            const updateLabels = (minVal, maxVal) => {
-                if (minLabel) {
-                    minLabel.textContent = String(minVal);
-                }
-                if (maxLabel) {
-                    maxLabel.textContent = String(maxVal);
-                }
+            const applyRanges = () => {
+                this.setLevelWindow(
+                    parseInt(levelRange ? levelRange.value : String(this.level), 10),
+                    parseInt(windowRange ? windowRange.value : String(this.windowWidth), 10)
+                );
             };
-
-            const targetFps = 15;
-            const frameIntervalMs = 1000 / targetFps;
-            let rafId = null;
-            let lastAppliedTs = 0;
-            let pendingMin = null;
-            let pendingMax = null;
-            let lastAppliedMin = null;
-            let lastAppliedMax = null;
-            let lastCommittedMin = null;
-            let lastCommittedMax = null;
-            let commitToken = 0;
-            let pendingCommitFrameId = null;
-
-            const cancelPendingCommitFrames = () => {
-                if (pendingCommitFrameId !== null) {
-                    cancelAnimationFrame(pendingCommitFrameId);
-                    pendingCommitFrameId = null;
-                }
-            };
-
-            const commitWindowingStaggered = (minVal, maxVal) => {
-                if (minVal === lastCommittedMin && maxVal === lastCommittedMax) {
-                    return;
-                }
-
-                cancelPendingCommitFrames();
-                commitToken += 1;
-                const currentCommitToken = commitToken;
-
-                const viewerGrid = getViewerGrid();
-                if (!viewerGrid || !viewerGrid.windowStates) {
-                    return;
-                }
-
-                const windowOrder = [0, 1, 2, 3];
-
-                const applyForWindow = (windowIndex) => {
-                    if (currentCommitToken !== commitToken) {
-                        return;
+            if (levelRange) levelRange.addEventListener('input', applyRanges);
+            if (windowRange) windowRange.addEventListener('input', applyRanges);
+            if (resetButton) resetButton.addEventListener('click', () => this.resetViews());
+            if (toggle3D) toggle3D.addEventListener('click', () => this.enterRenderFocus(toggle3D));
+            if (renderMode) {
+                renderMode.addEventListener('change', async () => {
+                    try {
+                        await this.ensureRenderViewer();
+                        const result = await this.applyRenderMode(renderMode.value);
+                        if (!result.available) renderMode.value = this.renderMode;
+                    } catch (error) {
+                        renderMode.value = this.renderMode;
                     }
-
-                    const state = viewerGrid.windowStates[windowIndex];
-                    if (state && state.niivueInstance && state.niivueInstance.isReady()) {
-                        state.niivueInstance.setWindowing(minVal, maxVal, { commit: true });
-                    }
-                };
-
-                const run = (idx) => {
-                    if (currentCommitToken !== commitToken) {
-                        return;
-                    }
-                    if (idx >= windowOrder.length) {
-                        lastCommittedMin = minVal;
-                        lastCommittedMax = maxVal;
-                        pendingCommitFrameId = null;
-                        return;
-                    }
-
-                    applyForWindow(windowOrder[idx]);
-
-                    pendingCommitFrameId = requestAnimationFrame(() => run(idx + 1));
-                };
-
-                run(0);
-            };
-
-            const applyWindowingNow = (minVal, maxVal, commit) => {
-                if (!commit && minVal === lastAppliedMin && maxVal === lastAppliedMax) {
-                    return;
-                }
-
-                if (commit) {
-                    commitWindowingStaggered(minVal, maxVal);
-                } else {
-                    // Fast interactive preview on axial window only; apply to all on commit.
-                    this.setWindowingFromPercent(minVal, maxVal, {
-                        commit: false,
-                        previewOnlyWindowIndex: 0
-                    });
-                }
-                lastAppliedMin = minVal;
-                lastAppliedMax = maxVal;
-            };
-
-            const scheduleWindowing = (minVal, maxVal) => {
-                pendingMin = minVal;
-                pendingMax = maxVal;
-
-                if (rafId) {
-                    return;
-                }
-
-                const tick = (ts) => {
-                    if (ts - lastAppliedTs >= frameIntervalMs) {
-                        if (pendingMin !== null && pendingMax !== null) {
-                            applyWindowingNow(pendingMin, pendingMax, false);
-                            lastAppliedTs = ts;
-                        }
-                        rafId = null;
-                        return;
-                    }
-                    rafId = requestAnimationFrame(tick);
-                };
-
-                rafId = requestAnimationFrame(tick);
-            };
-
-            const flushWindowing = (minVal, maxVal) => {
-                if (rafId) {
-                    cancelAnimationFrame(rafId);
-                    rafId = null;
-                }
-
-                pendingMin = null;
-                pendingMax = null;
-                applyWindowingNow(minVal, maxVal, true);
-            };
-
-            const applyWindowing = (commit) => {
-                if (!minRange || !maxRange) {
-                    return;
-                }
-
-                let minVal = parseInt(minRange.value || '0', 10);
-                let maxVal = parseInt(maxRange.value || '100', 10);
-
-                if (minVal > maxVal) {
-                    maxVal = minVal;
-                    maxRange.value = String(maxVal);
-                }
-
-                updateLabels(minVal, maxVal);
-
-                if (commit) {
-                    flushWindowing(minVal, maxVal);
-                } else {
-                    scheduleWindowing(minVal, maxVal);
-                }
-            };
-
-            if (minRange) {
-                minRange.addEventListener('input', () => applyWindowing(false));
-                minRange.addEventListener('change', () => applyWindowing(true));
-            }
-            if (maxRange) {
-                maxRange.addEventListener('input', () => applyWindowing(false));
-                maxRange.addEventListener('change', () => applyWindowing(true));
-            }
-
-            if (resetButton) {
-                resetButton.addEventListener('click', () => {
-                    const viewerGrid = getViewerGrid();
-                    if (!viewerGrid || !viewerGrid.windowStates) {
-                        return;
-                    }
-
-                    [0, 1, 2, 3].forEach((idx) => {
-                        const state = viewerGrid.windowStates[idx];
-                        if (state && state.niivueInstance && state.niivueInstance.isReady() && state.niivueInstance.nv) {
-                            const pos = state.niivueInstance.nv.scene.crosshairPos;
-                            if (pos && pos.length >= 3) {
-                                pos[0] = 0.5;
-                                pos[1] = 0.5;
-                                pos[2] = 0.5;
-                            }
-                            state.niivueInstance.nv.scene.pan2Dxyzmm = [0, 0, 0, 1];
-                            state.niivueInstance.nv.drawScene();
-                        }
-                    });
                 });
             }
-
-            if (minRange && maxRange) {
-                updateLabels(parseInt(minRange.value || '0', 10), parseInt(maxRange.value || '100', 10));
+            if (reset3D) {
+                reset3D.addEventListener('click', () => {
+                    const viewer = readyViewer(getViewerGrid(), 3);
+                    if (viewer) viewer.resetRenderCamera();
+                });
             }
-
+            if (exit3D) exit3D.addEventListener('click', () => this.setRenderFocus(false));
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && this.renderFocused) {
+                    this.setRenderFocus(false);
+                }
+            });
+            window.addEventListener('viewergridvolumeready', (event) => {
+                const detail = event.detail || {};
+                const viewer = readyViewer(getViewerGrid(), detail.windowIndex);
+                if (viewer) viewer.setLevelWindow(this.level, this.windowWidth);
+            });
             this.controlsBound = true;
         },
 
@@ -421,26 +397,21 @@
 
         dispose: function() {
             this._initGeneration += 1;
-
-            var viewerGrid = getViewerGrid();
-            if (!viewerGrid) {
-                this.initialized = false;
-                this.loading = false;
-                this.activeFileId = null;
-                return;
+            this.setRenderFocus(false);
+            const viewerGrid = getViewerGrid();
+            if (viewerGrid) {
+                [0, 1, 2, 3].forEach(function(windowIndex) {
+                    try {
+                        viewerGrid.clearWindow(windowIndex);
+                    } catch (error) {
+                        console.warn('Error clearing viewer window', windowIndex, error);
+                    }
+                });
             }
-
-            [0, 1, 2, 3].forEach((idx) => {
-                try {
-                    viewerGrid.clearWindow(idx);
-                } catch (e) {
-                    console.warn('Error clearing viewer window', idx, e);
-                }
-            });
-
             this.initialized = false;
             this.loading = false;
             this.activeFileId = null;
+            this.renderLoadPromise = null;
         }
     };
 })();

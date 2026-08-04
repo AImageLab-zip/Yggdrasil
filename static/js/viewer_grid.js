@@ -112,11 +112,19 @@ const ViewerGrid = (function() {
         projectNamespace: null,
         modalityFiles: {},
         segmentationFile: null,
+        panorexSource: null,
         fixedMode: false,
         enableDragDrop: true,
         enableContextMenu: true,
         allowClearWindow: true
     };
+
+    function usesCentralizedCbctWindowing(windowIndex) {
+        const state = windowStates[windowIndex];
+        return djangoData.fixedMode &&
+            djangoData.projectNamespace === 'maxillo' &&
+            state && state.modality === 'cbct';
+    }
 
     /**
      * Initialize the viewer grid system
@@ -220,7 +228,9 @@ const ViewerGrid = (function() {
     function updateToolCursors() {
         const windows = document.querySelectorAll('.viewer-window');
         windows.forEach((windowEl) => {
-            windowEl.classList.toggle('measure-tool-active', activeTool === TOOL_IDS.MEASURE);
+            const windowIndex = parseInt(windowEl.dataset.windowIndex, 10);
+            const isRender = windowStates[windowIndex] && windowStates[windowIndex].currentOrientation === 'render';
+            windowEl.classList.toggle('measure-tool-active', activeTool === TOOL_IDS.MEASURE && !isRender);
         });
     }
 
@@ -317,6 +327,72 @@ const ViewerGrid = (function() {
         } finally {
             delete segmentationFetchPromises[fileId];
         }
+    }
+
+    async function getPanorexSegmentationSource() {
+        const source = djangoData.panorexSource;
+        const descriptor = source && source.segmentationFileId
+            ? {
+                id: source.segmentationFileId,
+                fileKey: source.segmentationFileKey || 'volume_nifti'
+            }
+            : djangoData.segmentationFile;
+        if (!descriptor || !descriptor.id) {
+            throw new Error('No paired panoramic segmentation source is available');
+        }
+
+        const fileId = String(descriptor.id);
+        const fileKey = descriptor.fileKey || descriptor.file_key || 'volume_nifti';
+        const cacheKey = `${fileId}:${fileKey}`;
+        if (!segmentationVolumeCache[cacheKey] && segmentationVolumeCache[fileId]) {
+            segmentationVolumeCache[cacheKey] = segmentationVolumeCache[fileId];
+        }
+        if (!segmentationVolumeCache[cacheKey]) {
+            if (fileId === getSegmentationFileId()) {
+                segmentationVolumeCache[cacheKey] = await fetchSegmentationArrayBuffer();
+            } else {
+                if (!segmentationFetchPromises[cacheKey]) {
+                    segmentationFetchPromises[cacheKey] = (async () => {
+                        const response = await fetch(buildFileServeUrl(fileId, fileKey));
+                        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        return response.arrayBuffer();
+                    })();
+                }
+                try {
+                    segmentationVolumeCache[cacheKey] = await segmentationFetchPromises[cacheKey];
+                } finally {
+                    delete segmentationFetchPromises[cacheKey];
+                }
+            }
+        }
+        return {
+            arrayBuffer: segmentationVolumeCache[cacheKey],
+            descriptor: Object.assign({}, source || {}, {
+                fileId,
+                fileKey,
+                revision: source ? source.revision : null
+            })
+        };
+    }
+
+    function getNativeRawVolumeDescriptor() {
+        const source = djangoData.panorexSource;
+        const requestedId = source && source.volumeFileId ? String(source.volumeFileId) : null;
+        const state = Object.values(windowStates).find((candidate) => {
+            if (!candidate || !candidate.niivueInstance || !candidate.niivueInstance.isReady()) return false;
+            return !requestedId || String(candidate.fileId) === requestedId;
+        });
+        if (!state) return null;
+        const descriptor = state.niivueInstance.getNativeVolumeDescriptor();
+        if (!descriptor) return null;
+        descriptor.source = {
+            fileId: requestedId || String(state.fileId),
+            fileKey: source && source.volumeFileKey
+                ? source.volumeFileKey
+                : ((djangoData.modalityFiles.cbct && djangoData.modalityFiles.cbct.file_key) || 'primary'),
+            revision: source ? source.revision : null
+        };
+        return descriptor;
     }
 
     async function applySegmentationOverlayToWindow(windowIndex) {
@@ -631,7 +707,7 @@ const ViewerGrid = (function() {
 
     function renderMeasurementOverlayForWindow(windowIndex) {
         const state = windowStates[windowIndex];
-        if (!state || !state.niivueInstance || !state.niivueInstance.isReady()) {
+        if (!state || state.currentOrientation === 'render' || !state.niivueInstance || !state.niivueInstance.isReady()) {
             return;
         }
 
@@ -812,6 +888,8 @@ const ViewerGrid = (function() {
 
             const { windowIndex, crosshairPos } = event.detail;
 
+            if (windowStates[windowIndex] && windowStates[windowIndex].currentOrientation === 'render') return;
+
             // Skip if source window has free-scroll enabled
             if (freeScrollWindows[windowIndex]) return;
             if (!crosshairPos) return;
@@ -831,7 +909,7 @@ const ViewerGrid = (function() {
     }
 
     function emitSliceChanged(windowIndex, viewer, windowEl) {
-        if (!viewer) {
+        if (!viewer || (windowStates[windowIndex] && windowStates[windowIndex].currentOrientation === 'render')) {
             return;
         }
 
@@ -874,6 +952,7 @@ const ViewerGrid = (function() {
         for (let targetIdx = 0; targetIdx < 4; targetIdx++) {
             if (targetIdx === sourceIdx) continue;
             if (freeScrollWindows[targetIdx]) continue;
+            if (windowStates[targetIdx].currentOrientation === 'render') continue;
 
             const targetViewer = windowStates[targetIdx].niivueInstance;
             if (targetViewer && targetViewer.isReady() && targetViewer.nv) {
@@ -959,6 +1038,7 @@ const ViewerGrid = (function() {
                     projectNamespace: data.projectNamespace,
                     modalityFiles: data.modalityFiles || {},
                     segmentationFile: data.segmentationFile || null,
+                    panorexSource: data.panorexSource || null,
                     fixedMode: !!data.fixedMode,
                     enableDragDrop: data.enableDragDrop !== false,
                     enableContextMenu: data.enableContextMenu !== false,
@@ -1162,9 +1242,7 @@ const ViewerGrid = (function() {
         const viewerHTML = `
             <div class="niivue-viewer-container" style="width: 100%; height: 100%; position: relative;">
                 <div class="niivue-loading" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); z-index: 10;">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
+                    <div class="spinner-border text-primary" role="status" aria-label="Loading"></div>
                 </div>
                 <canvas id="${canvasId}" class="niivue-canvas"></canvas>
                 <canvas class="measurement-overlay"></canvas>
@@ -1267,6 +1345,10 @@ const ViewerGrid = (function() {
             windowStates[windowIndex].niivueInstance = viewer;
             windowStates[windowIndex].loading = false;
             windowStates[windowIndex].error = null;
+
+            window.dispatchEvent(new CustomEvent('viewergridvolumeready', {
+                detail: { windowIndex, modality, fileId }
+            }));
 
             // Hide loading spinner
             const loadingDiv = windowEl.querySelector('.niivue-loading');
@@ -1426,13 +1508,18 @@ const ViewerGrid = (function() {
             // Use capture phase so we intercept before NiiVue's own handlers.
             const canvas = document.getElementById(canvasId);
             if (canvas) {
-                // Track Alt+right-click for intensity adjustment (window/level)
+                // Non-fixed grids retain NiiVue's Alt+right intensity gesture.
+                // Fixed Maxillo CBCT uses the synchronized Level/Window sliders;
+                // allowing native adjustment here would desynchronize four viewers.
                 let isRightClickIntensity = false;
 
                 // Intercept right-click mousedown BEFORE NiiVue processes it.
                 // Without Alt: block NiiVue's drag (intensity square).
                 // With Alt: let NiiVue handle it for window/level adjustment.
                 canvas.addEventListener('mousedown', (e) => {
+                    if (windowStates[windowIndex].currentOrientation === 'render') {
+                        return;
+                    }
                     if (activeTool === TOOL_IDS.MEASURE && isPrimaryUnmodifiedClick(e)) {
                         const tool = toolRegistry[activeTool];
                         const handled = tool && typeof tool.onPrimaryClick === 'function'
@@ -1446,6 +1533,11 @@ const ViewerGrid = (function() {
                     }
 
                     if (e.button === 2) {
+                        if (e.altKey && usesCentralizedCbctWindowing(windowIndex)) {
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                            return;
+                        }
                         if (e.altKey) {
                             isRightClickIntensity = true;
                         } else {
@@ -1464,6 +1556,13 @@ const ViewerGrid = (function() {
                 // show custom menu only on regular right-click (not Alt+right-click)
                 canvas.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
+                    if (windowStates[windowIndex].currentOrientation === 'render') {
+                        return;
+                    }
+                    if (e.altKey && usesCentralizedCbctWindowing(windowIndex)) {
+                        e.stopImmediatePropagation();
+                        return;
+                    }
                     if (isRightClickIntensity) {
                         isRightClickIntensity = false;
                     } else {
@@ -1475,6 +1574,9 @@ const ViewerGrid = (function() {
                 // Shift+scroll: fast navigation (5 slices per step)
                 // Ctrl+scroll: zoom in/out anchored at mouse position
                 canvas.addEventListener('wheel', (e) => {
+                    if (windowStates[windowIndex].currentOrientation === 'render') {
+                        return;
+                    }
                     if (e.ctrlKey) {
                         e.preventDefault();
                         e.stopImmediatePropagation();
@@ -1577,6 +1679,9 @@ const ViewerGrid = (function() {
                 const panSensitivity = 1.5;
 
                 canvas.addEventListener('mousedown', (e) => {
+                    if (windowStates[windowIndex].currentOrientation === 'render') {
+                        return;
+                    }
                     if (e.ctrlKey && e.button === 0) {
                         const startPx = getCanvasPixelPosition(e, canvas, viewer);
                         if (!startPx || !viewer.nv) {
@@ -1598,7 +1703,9 @@ const ViewerGrid = (function() {
                 }, { capture: true });
 
                 canvas.addEventListener('mousemove', (e) => {
-                    updateMeasurementHover(windowIndex, e, canvas, viewer);
+                    if (windowStates[windowIndex].currentOrientation !== 'render') {
+                        updateMeasurementHover(windowIndex, e, canvas, viewer);
+                    }
 
                     if (!isPanning) return;
                     e.preventDefault();
@@ -1795,7 +1902,7 @@ const ViewerGrid = (function() {
      * Show context menu for viewer window at cursor position
      */
     function showViewerContextMenu(x, y, windowIndex, viewer) {
-        if (!djangoData.enableContextMenu) {
+        if (!djangoData.enableContextMenu || (windowStates[windowIndex] && windowStates[windowIndex].currentOrientation === 'render')) {
             return;
         }
 
@@ -1996,7 +2103,7 @@ const ViewerGrid = (function() {
         console.log(`Cleared window ${windowIndex}`);
     }
 
-    function setWindowOrientation(windowIndex, orientation) {
+    function setWindowOrientation(windowIndex, orientation, renderMode) {
         const state = windowStates[windowIndex];
         if (!state || !state.niivueInstance) {
             return;
@@ -2010,7 +2117,7 @@ const ViewerGrid = (function() {
                     synchronizationGroups[groupName].splice(groupIndex, 1);
                 }
             }
-            viewer.setRenderMode();
+            const renderResult = viewer.setRenderMode(renderMode || 'amip');
             windowStates[windowIndex].currentOrientation = 'render';
             const renderWindow = document.querySelector(`.viewer-window[data-window-index="${windowIndex}"]`);
             if (renderWindow) {
@@ -2018,7 +2125,8 @@ const ViewerGrid = (function() {
                 const label = renderWindow.querySelector('.window-label');
                 if (label) label.textContent = 'CBCT 3D';
             }
-            return;
+            updateToolCursors();
+            return renderResult;
         }
         viewer.setOrientation(orientation);
         windowStates[windowIndex].currentOrientation = orientation;
@@ -2026,6 +2134,7 @@ const ViewerGrid = (function() {
 
         const windowEl = document.querySelector(`.viewer-window[data-window-index="${windowIndex}"]`);
         if (windowEl) {
+            windowEl.classList.remove('viewer-window--render');
             const menuBtns = windowEl.querySelectorAll('.orientation-btn');
             menuBtns.forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.orientation === orientation);
@@ -2040,6 +2149,23 @@ const ViewerGrid = (function() {
         }
 
         renderMeasurementOverlayForWindow(windowIndex);
+        updateToolCursors();
+        return null;
+    }
+
+    function setWindowRenderMode(windowIndex, mode) {
+        const state = windowStates[windowIndex];
+        if (!state || !state.niivueInstance || !state.niivueInstance.isReady()) {
+            return { available: false, custom: false, message: '3D viewer is not ready.' };
+        }
+        if (state.currentOrientation !== 'render') {
+            return setWindowOrientation(windowIndex, 'render', mode);
+        }
+        const windowEl = document.querySelector(`.viewer-window[data-window-index="${windowIndex}"]`);
+        if (windowEl) {
+            windowEl.classList.add('viewer-window--render');
+        }
+        return state.niivueInstance.setRenderMode(mode);
     }
 
     function suspendSynchronization() {
@@ -2061,8 +2187,12 @@ const ViewerGrid = (function() {
         loadModalityInWindow: loadModalityInWindow,
         clearWindow: clearWindow,
         setWindowOrientation: setWindowOrientation,
+        setWindowRenderMode: setWindowRenderMode,
         suspendSynchronization: suspendSynchronization,
-        resumeSynchronization: resumeSynchronization
+        resumeSynchronization: resumeSynchronization,
+        getNativeRawVolumeDescriptor: getNativeRawVolumeDescriptor,
+        getPanorexSegmentationSource: getPanorexSegmentationSource,
+        getPanorexSourceDescriptor: () => djangoData.panorexSource
     };
 })();
 

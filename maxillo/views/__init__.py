@@ -46,9 +46,9 @@ from .patient_data import (
     patient_cbct_data,
     patient_volume_data,
     patient_panoramic_data,
+    save_browser_panoramic,
     patient_intraoral_data,
     patient_teleradiography_data,
-    patient_panoramic_data,
     save_rgb_image_edit,
 )
 
@@ -117,9 +117,9 @@ __all__ = [
     'patient_cbct_data',
     'patient_volume_data',
     'patient_panoramic_data',
+    'save_browser_panoramic',
     'patient_intraoral_data',
     'patient_teleradiography_data',
-    'patient_panoramic_data',
     'save_rgb_image_edit',
     'patient_intraoral_segmentation_data',
     'update_patient_intraoral_segmentation',

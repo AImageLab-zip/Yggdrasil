@@ -7,8 +7,10 @@ from django.views.decorators.http import require_POST
 import json
 import os
 import logging
+import hashlib
 
 from common.file_access import exists as artifact_exists
+from common.object_storage import get_object_storage
 from common.permissions import (
     get_user_folder_role,
     user_can_edit_caption,
@@ -37,8 +39,44 @@ def _bundle_output_path(file_obj, output_key):
     return None, None
 
 
-def _cbct_viewer_files(patient):
-    """Return a job-paired display volume and optional segmentation."""
+def _bundle_output_hash(file_obj, file_key):
+    metadata = file_obj.metadata if isinstance(file_obj.metadata, dict) else {}
+    files = metadata.get('files', {})
+    output = files.get(file_key, {}) if isinstance(files, dict) else {}
+    nested_hash = ''
+    if isinstance(output, dict):
+        for name in ('sha256', 'file_hash', 'hash'):
+            if output.get(name):
+                nested_hash = str(output[name])
+                break
+    if file_key and file_key != 'primary' and isinstance(output, dict):
+        # Legacy multi-file rows often have the constant hash "multi-file".
+        # Include the selected artifact path so changing bundle metadata invalidates
+        # any panoramic state bound to the previous object.
+        object_identity = ''
+        path = str(output.get('path') or '')
+        if path and not nested_hash:
+            try:
+                object_identity = str(get_object_storage().head(path).etag or '')
+            except Exception:
+                # Existing bundle metadata may predate object ETags. The path still
+                # protects against metadata retargeting when storage is unavailable.
+                object_identity = ''
+        token = '\0'.join((
+            str(file_obj.file_hash or ''),
+            str(file_key),
+            path,
+            nested_hash,
+            object_identity,
+        ))
+        return hashlib.sha256(token.encode('utf-8')).hexdigest()
+    if nested_hash:
+        return nested_hash
+    return file_obj.file_hash
+
+
+def _resolved_cbct_viewer_source(patient):
+    """Resolve the exact volume/segmentation pair used by the CBCT viewer."""
     processed = list(
         patient.files.filter(
             file_type='cbct_processed',
@@ -92,25 +130,104 @@ def _cbct_viewer_files(patient):
 
         output_spec = (job.output_files or {}).get('segmentation_nifti')
         label_max = output_spec.get('label_max', 98) if isinstance(output_spec, dict) else 98
-        return (
-            display_row,
-            display_key,
-            {
+        return {
+            'job': job,
+            'file': display_row,
+            'file_key': display_key,
+            'file_hash': _bundle_output_hash(display_row, display_key),
+            'segmentation_file': segmentation_row,
+            'segmentation_key': segmentation_key,
+            'segmentation_hash': _bundle_output_hash(segmentation_row, segmentation_key),
+            'segmentation': {
                 'id': segmentation_row.id,
                 'fileKey': segmentation_key,
                 'labelMax': label_max,
             },
-        )
+        }
 
     if raw_by_path:
         display_row = next(row for row in raw_files if row.file_path in raw_by_path)
-        return display_row, 'primary', None
+        return {
+            'job': None,
+            'file': display_row,
+            'file_key': 'primary',
+            'file_hash': display_row.file_hash,
+            'segmentation_file': None,
+            'segmentation_key': '',
+            'segmentation_hash': '',
+            'segmentation': None,
+        }
 
     for row in processed:
         path, file_key = _bundle_output_path(row, 'volume_nifti')
         if path:
-            return row, file_key, None
-    return None, None, None
+            return {
+                'job': row.processing_job,
+                'file': row,
+                'file_key': file_key,
+                'file_hash': _bundle_output_hash(row, file_key),
+                'segmentation_file': None,
+                'segmentation_key': '',
+                'segmentation_hash': '',
+                'segmentation': None,
+            }
+    return None
+
+
+def _cbct_viewer_files(patient):
+    """Return a job-paired display volume and optional segmentation."""
+    source = _resolved_cbct_viewer_source(patient)
+    if not source:
+        return None, None, None
+    return source['file'], source['file_key'], source['segmentation']
+
+
+def _panorex_source_data(patient, source):
+    if not source:
+        return None
+    try:
+        state = patient.panoramic_state
+    except Exception:
+        state = None
+    if state and (
+        state.source_job_id != (source['job'].id if source['job'] else None)
+        or state.source_file_id != source['file'].id
+        or state.source_file_key != source['file_key']
+        or state.source_file_hash != source['file_hash']
+        or state.source_segmentation_file_id != (
+            source['segmentation_file'].id if source['segmentation_file'] else None
+        )
+        or state.source_segmentation_key != source['segmentation_key']
+        or state.source_segmentation_hash != source['segmentation_hash']
+    ):
+        state = None
+    state_data = None
+    if state:
+        state_data = {
+            'revision': state.revision,
+            'generationUuid': str(state.generation_uuid),
+            'axialSlice': state.axial_slice,
+            'volumeShape': state.volume_shape,
+            'spline': state.spline,
+            'geometrySource': state.geometry_source,
+            'defaultMode': state.default_mode,
+            'algorithmVersion': state.algorithm_version,
+        }
+    segmentation_file = source['segmentation_file']
+    return {
+        'jobId': source['job'].id if source['job'] else None,
+        'volumeFileId': source['file'].id,
+        'volumeFileKey': source['file_key'],
+        'volumeFileHash': source['file_hash'],
+        'fileId': source['file'].id,
+        'fileKey': source['file_key'],
+        'fileHash': source['file_hash'],
+        'segmentationFileId': segmentation_file.id if segmentation_file else None,
+        'segmentationFileKey': source['segmentation_key'] or None,
+        'segmentationFileHash': source['segmentation_hash'] or None,
+        'revision': state.revision if state else 0,
+        'state': state_data,
+    }
 
 
 def _call_patient_flag(patient, name):
@@ -454,7 +571,13 @@ def patient_detail(request, patient_id):
                     files_qs = patient.files.filter(modality=modality_obj)
 
                     if slug == 'cbct':
-                        file_obj, file_key, cbct_segmentation = _cbct_viewer_files(patient)
+                        cbct_source = _resolved_cbct_viewer_source(patient)
+                        if cbct_source:
+                            file_obj = cbct_source['file']
+                            file_key = cbct_source['file_key']
+                            cbct_segmentation = cbct_source['segmentation']
+                        else:
+                            file_obj, file_key, cbct_segmentation = None, None, None
                     else:
                         file_obj = files_qs.order_by('-created_at').first()
                         file_key = 'primary'
@@ -483,6 +606,7 @@ def patient_detail(request, patient_id):
         'projectNamespace': (request.resolver_match.namespace if request.resolver_match else None) or 'maxillo',
         'modalityFiles': modality_files,
         'segmentationFile': locals().get('cbct_segmentation'),
+        'panorexSource': _panorex_source_data(patient, locals().get('cbct_source')),
         'fixedMode': True,
         'enableDragDrop': False,
         'enableContextMenu': True,

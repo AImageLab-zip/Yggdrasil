@@ -27,6 +27,7 @@ class NiiVueViewer {
         this.modalitySlug = null;
         this.segmentationOverlayLoaded = false;
         this.onLocationChangeCallback = null;
+        this.renderController = null;
     }
 
     async _payloadToArrayBuffer(filePayload) {
@@ -81,6 +82,15 @@ class NiiVueViewer {
         // must end in .nii.gz so NiiVue selects the correct parser.
         let arrayBuffer = await this._payloadToArrayBuffer(fileBlob);
         await this.nv.loadFromArrayBuffer(arrayBuffer, modalitySlug + '.nii.gz');
+
+        if (window.NiiVueRenderModes && typeof window.NiiVueRenderModes.createController === 'function') {
+            try {
+                this.renderController = window.NiiVueRenderModes.createController(this.nv);
+            } catch (error) {
+                console.warn('NiiVueViewer: enhanced CBCT rendering is unavailable:', error);
+                this.renderController = null;
+            }
+        }
 
         // Keep 2D crosshair behavior deterministic across viewers.
         if (this.nv.opts) {
@@ -182,6 +192,9 @@ class NiiVueViewer {
         } else {
             this.nv.drawScene();
         }
+        if (this.renderController) {
+            this.renderController.reapply();
+        }
 
         this.segmentationOverlayLoaded = true;
     }
@@ -211,7 +224,11 @@ class NiiVueViewer {
             return;
         }
         for (let i = this.nv.volumes.length - 1; i >= 1; i--) {
-            this.nv.closeVolume(i);
+            if (typeof this.nv.removeVolumeByIndex === 'function') {
+                this.nv.removeVolumeByIndex(i);
+            } else if (typeof this.nv.removeVolume === 'function') {
+                this.nv.removeVolume(this.nv.volumes[i]);
+            }
         }
         this.segmentationOverlayLoaded = false;
         this.nv.drawScene();
@@ -269,7 +286,7 @@ class NiiVueViewer {
         this.nv.drawScene();
     }
 
-    setRenderMode() {
+    setRenderMode(mode = 'amip') {
         if (!this.nv) {
             throw new Error('Cannot enable render mode before initialization');
         }
@@ -283,6 +300,67 @@ class NiiVueViewer {
         }
         this.nv.setSliceType(renderSliceType);
         this.currentOrientation = 'render';
+        if (this.nv.scene) {
+            this.nv.scene.volScaleMultiplier = 1.2;
+        }
+        if (typeof this.nv.setRenderAzimuthElevation === 'function') {
+            this.nv.setRenderAzimuthElevation(180, 15);
+        }
+        const nativeShaded = typeof this.nv.setVolumeRenderIllumination === 'function';
+        let modeResult = {
+            available: mode === 'shaded' && nativeShaded,
+            custom: false,
+            fallback: mode === 'shaded' && nativeShaded,
+            message: mode === 'shaded' && nativeShaded
+                ? 'Using NiiVue native shading.'
+                : 'Custom render shaders are unavailable.'
+        };
+        if (this.renderController) {
+            modeResult = this.renderController.setMode(mode);
+        } else if (mode === 'shaded' && nativeShaded) {
+            modeResult.pending = true;
+            try {
+                const operation = this.nv.setVolumeRenderIllumination(0.5);
+                modeResult.ready = Promise.resolve(operation).then(() => {
+                    modeResult.pending = false;
+                    return modeResult;
+                }, (error) => {
+                    console.warn('NiiVueViewer: native shaded rendering failed:', error);
+                    modeResult.available = false;
+                    modeResult.fallback = false;
+                    modeResult.pending = false;
+                    modeResult.message = 'NiiVue native shaded rendering failed on this GPU.';
+                    return modeResult;
+                });
+            } catch (error) {
+                console.warn('NiiVueViewer: native shaded rendering failed:', error);
+                modeResult.available = false;
+                modeResult.fallback = false;
+                modeResult.pending = false;
+                modeResult.message = 'NiiVue native shaded rendering failed on this GPU.';
+                modeResult.ready = Promise.resolve(modeResult);
+            }
+        }
+        this.nv.drawScene();
+        return modeResult;
+    }
+
+    getRenderModeAvailability() {
+        if (this.renderController) {
+            return this.renderController.getModeAvailability();
+        }
+        const nativeShaded = !!(this.nv && typeof this.nv.setVolumeRenderIllumination === 'function');
+        return {
+            mip: { available: false, custom: false, fallback: false },
+            amip: { available: false, custom: false, fallback: false },
+            shaded: { available: nativeShaded, custom: false, fallback: nativeShaded }
+        };
+    }
+
+    resetRenderCamera() {
+        if (!this.nv) {
+            return;
+        }
         if (this.nv.scene) {
             this.nv.scene.volScaleMultiplier = 1.2;
         }
@@ -475,6 +553,49 @@ class NiiVueViewer {
     }
 
     /**
+     * Apply medical Level/Window controls expressed as percentages of the full
+     * volume range. Enhanced shaders update uniforms only; their controller owns
+     * the safe cal_min/cal_max fallback when custom shaders are unavailable.
+     */
+    setLevelWindow(level, width) {
+        if (!this.nv || !this.initialized) {
+            return;
+        }
+        if (this.renderController) {
+            this.renderController.setWindow(level, width);
+            return;
+        }
+
+        const normalizedWidth = Math.max(1, Math.min(100, Number(width) || 100));
+        const normalizedLevel = Math.max(0, Math.min(100, Number(level) || 0));
+        const percentMin = normalizedLevel - normalizedWidth / 2;
+        const percentMax = normalizedLevel + normalizedWidth / 2;
+        this.setWindowing(percentMin, percentMax);
+    }
+
+    getInitialLevelWindow() {
+        if (this.renderController) {
+            return this.renderController.getInitialWindow();
+        }
+        const volumes = this.nv && this.nv.volumes;
+        const volume = volumes && volumes[0];
+        const min = Number.isFinite(volume && volume.global_min) ? volume.global_min : 0;
+        const max = Number.isFinite(volume && volume.global_max) && volume.global_max > min
+            ? volume.global_max
+            : min + 1;
+        const robustMin = Number.isFinite(volume && volume.robust_min) ? volume.robust_min : min;
+        const robustMax = Number.isFinite(volume && volume.robust_max) ? volume.robust_max : max;
+        const span = max - min;
+        const low = Math.max(0, Math.min(1, (robustMin - min) / span));
+        const high = Math.max(low, Math.min(1, (robustMax - min) / span));
+        return {
+            level: Math.round((low + high) * 50),
+            window: Math.max(1, Math.round((high - low) * 100)),
+            range: { min, max, robustMin, robustMax }
+        };
+    }
+
+    /**
      * Get current windowing as percent values
      * @returns {{percentMin: number, percentMax: number}} Current windowing in percent
      */
@@ -529,6 +650,54 @@ class NiiVueViewer {
     }
 
     /**
+     * Expose NiiVue's native-order CPU voxel array without copying it.
+     * Consumers must treat the returned data as read-only.
+     */
+    getNativeVolumeDescriptor() {
+        if (!this.nv || !this.initialized || !this.nv.volumes || !this.nv.volumes[0]) {
+            return null;
+        }
+
+        const volume = this.nv.volumes[0];
+        const header = volume.hdr || {};
+        const dims = header.dims || volume.dims;
+        const data = volume.img;
+        if (!dims || dims.length < 4 || !ArrayBuffer.isView(data)) {
+            return null;
+        }
+
+        const dimensions = {
+            width: Number(dims[1]),
+            height: Number(dims[2]),
+            depth: Number(dims[3])
+        };
+        if (data.length < dimensions.width * dimensions.height * dimensions.depth) {
+            return null;
+        }
+
+        let affine = header.affine || null;
+        if (affine && !Array.isArray(affine[0]) && affine.length >= 16) {
+            affine = [
+                Array.from(affine.slice(0, 4)),
+                Array.from(affine.slice(4, 8)),
+                Array.from(affine.slice(8, 12)),
+                Array.from(affine.slice(12, 16))
+            ];
+        }
+
+        return {
+            data,
+            dimensions,
+            affine,
+            flipZ: Boolean(affine && affine[2] && Number(affine[2][2]) > 0),
+            slope: Number(header.scl_slope) || 1,
+            intercept: Number(header.scl_inter) || 0,
+            datatype: header.datatypeCode,
+            fileName: volume.name || null
+        };
+    }
+
+    /**
      * Dispose of the viewer and clean up resources
      */
     dispose() {
@@ -539,12 +708,7 @@ class NiiVueViewer {
                 this.onLocationChangeCallback = null;
             }
 
-            // Clear all volumes
-            if (this.nv.volumes && this.nv.volumes.length > 0) {
-                for (let i = this.nv.volumes.length - 1; i >= 0; i--) {
-                    this.nv.closeVolume(i);
-                }
-            }
+            if (typeof this.nv.cleanup === 'function') this.nv.cleanup();
             this.nv = null;
         }
 
@@ -552,6 +716,7 @@ class NiiVueViewer {
         this.currentOrientation = 'axial';
         this.modalitySlug = null;
         this.segmentationOverlayLoaded = false;
+        this.renderController = null;
     }
 }
 

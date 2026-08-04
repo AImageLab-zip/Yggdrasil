@@ -8,18 +8,23 @@ window.PanoramicViewer = {
     patientId: null,
     selectedVariant: null,
     variants: [],
+    refreshRevision: null,
     targets: {
         standalone: {
             loadingId: 'panoramicLoading',
             contentId: 'panoramicContent',
             errorId: 'panoramicError',
-            imageId: 'panoramicStandaloneImage'
+            imageId: 'panoramicStandaloneImage',
+            requestToken: 0,
+            abortController: null
         },
         inline: {
             loadingId: 'cbctPanoramicLoading',
             contentId: 'cbctPanoramicContent',
             errorId: 'cbctPanoramicError',
-            imageId: 'cbctPanoramicImage'
+            imageId: 'cbctPanoramicImage',
+            requestToken: 0,
+            abortController: null
         }
     },
     
@@ -51,6 +56,9 @@ window.PanoramicViewer = {
     },
 
     variantSelection: function(variantId) {
+        if (variantId === 'mip' || variantId === 'mean' || variantId === 'raysum') {
+            return { offset: 0, mode: variantId };
+        }
         const match = /^(zplus(\d+)|zminus(\d+)|z0)_(mean|raysum)$/.exec(variantId || '');
         if (!match) return null;
         const offset = match[2] ? Number(match[2]) : match[3] ? -Number(match[3]) : 0;
@@ -63,7 +71,13 @@ window.PanoramicViewer = {
 
     selectVariant: function(controls, offset, mode) {
         const target = controls.dataset.panoramicTarget;
-        const variantId = this.variantId(offset, mode);
+        if (mode === 'mean' && this.variants.some((variant) => variant.id === 'mip')) {
+            mode = 'mip';
+        }
+        const legacyId = this.variantId(offset, mode);
+        const variantId = this.variants.some((variant) => variant.id === legacyId)
+            ? legacyId
+            : mode;
         if (!this.targets[target] || !this.variants.some((variant) => variant.id === variantId)) return;
         this.selectedVariant = variantId;
         this.updateVariantControls();
@@ -71,6 +85,18 @@ window.PanoramicViewer = {
     },
 
     bindVariantControls: function() {
+        const editButton = document.getElementById('editSavedPanoramic');
+        if (editButton && !editButton.dataset.bound) {
+            editButton.dataset.bound = 'true';
+            editButton.addEventListener('click', () => {
+                if (
+                    window.CBCTPanorexEditor &&
+                    typeof window.CBCTPanorexEditor.enterEditMode === 'function'
+                ) {
+                    window.CBCTPanorexEditor.enterEditMode();
+                }
+            });
+        }
         document.querySelectorAll('[data-panoramic-variant-controls]').forEach((controls) => {
             if (controls.dataset.bound) return;
             controls.dataset.bound = 'true';
@@ -78,7 +104,7 @@ window.PanoramicViewer = {
                 const button = event.target.closest('[data-panoramic-mode]');
                 if (!button) return;
                 const slider = controls.querySelector('[data-panoramic-z-slider]');
-                this.selectVariant(controls, Number(slider.value), button.dataset.panoramicMode);
+                this.selectVariant(controls, slider ? Number(slider.value) : 0, button.dataset.panoramicMode);
             });
             const slider = controls.querySelector('[data-panoramic-z-slider]');
             if (slider) {
@@ -99,11 +125,20 @@ window.PanoramicViewer = {
         document.querySelectorAll('[data-panoramic-variant-controls]').forEach((controls) => {
             controls.hidden = this.variants.length === 0;
             controls.querySelectorAll('[data-panoramic-mode]').forEach((button) => {
-                button.classList.toggle('active', button.dataset.panoramicMode === selection.mode);
-                button.setAttribute('aria-pressed', button.dataset.panoramicMode === selection.mode ? 'true' : 'false');
+                if (button.dataset.panoramicMode === 'mean') {
+                    button.textContent = this.variants.some((variant) => variant.id === 'mip') ? 'MIP' : 'Average';
+                }
+                const buttonMode = button.dataset.panoramicMode === 'mean' && selection.mode === 'mip'
+                    ? 'mip'
+                    : button.dataset.panoramicMode;
+                button.classList.toggle('active', buttonMode === selection.mode);
+                button.setAttribute('aria-pressed', buttonMode === selection.mode ? 'true' : 'false');
             });
             const slider = controls.querySelector('[data-panoramic-z-slider]');
             const label = controls.querySelector('[data-panoramic-z-label]');
+            const zControl = controls.querySelector('.panoramic-z-control');
+            const hasLegacySweep = this.variants.some((variant) => /^z(?:plus\d+|minus\d+|0)_(?:mean|raysum)$/.test(variant.id));
+            if (zControl) zControl.hidden = !hasLegacySweep;
             if (slider) slider.value = selection.offset;
             if (label) label.textContent = this.formatOffset(selection.offset);
         });
@@ -119,33 +154,48 @@ window.PanoramicViewer = {
         const content = document.getElementById(config.contentId);
         const error = document.getElementById(config.errorId);
         const img = document.getElementById(config.imageId);
+        const editButton = document.getElementById('editSavedPanoramic');
         
         if (!img) {
             console.debug('Panoramic image element not found for target:', config.imageId);
             return;
         }
         
+        const requestToken = ++config.requestToken;
+        if (config.abortController) config.abortController.abort();
+        config.abortController = typeof AbortController === 'function' ? new AbortController() : null;
+
         // Show loading state
         if (loading) loading.style.display = 'block';
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'none';
+        if (config === this.targets.inline && editButton) editButton.hidden = true;
         
-        fetch(this.getMetaUrl())
+        fetch(this.getMetaUrl(), config.abortController ? { signal: config.abortController.signal } : undefined)
             .then(response => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 return response.json();
             })
             .then(data => {
+                if (requestToken !== config.requestToken) return;
                 this.variants = Array.isArray(data.variants) ? data.variants : [];
                 this.selectedVariant = data.selected_variant || null;
                 this.updateVariantControls();
+                if (config === this.targets.inline && editButton) {
+                    editButton.hidden = !(
+                        data.generation_uuid &&
+                        window.canEdit &&
+                        document.getElementById('cbctPanorexEditor')
+                    );
+                }
                 const container = img.parentElement;
                 if (container) {
                     container.querySelectorAll('.rgb-edit-toolbar, .rgb-crop-layer').forEach((el) => el.remove());
                     container.classList.remove('rgb-edit-host');
                 }
                 delete img.dataset.rgbEditorMounted;
-                img.addEventListener('load', () => {
+                img.onload = () => {
+                    if (requestToken !== config.requestToken) return;
                     console.debug('Panoramic image loaded successfully');
                     if (loading) loading.style.display = 'none';
                     if (content) content.style.display = 'block';
@@ -158,7 +208,7 @@ window.PanoramicViewer = {
                             container,
                         });
                     }
-                }, { once: true });
+                };
 
                 img.onerror = () => {
                     console.error('Failed to load panoramic image');
@@ -168,11 +218,19 @@ window.PanoramicViewer = {
 
                 img.onclick = null;
 
-                img.src = data.url;
+                const cacheToken = data.generation_uuid || (
+                    data.revision !== undefined ? data.revision : this.refreshRevision
+                );
+                img.src = cacheToken === null || cacheToken === undefined
+                    ? data.url
+                    : data.url + (data.url.includes('?') ? '&' : '?') + 'generation=' + encodeURIComponent(cacheToken);
             })
-            .catch(() => {
+            .catch((fetchError) => {
+                if (fetchError && fetchError.name === 'AbortError') return;
+                if (requestToken !== config.requestToken) return;
                 if (loading) loading.style.display = 'none';
                 if (error) error.style.display = 'block';
+                if (config === this.targets.inline && editButton) editButton.hidden = true;
             });
     },
 
@@ -182,6 +240,21 @@ window.PanoramicViewer = {
 
     loadInlineForCBCT: function() {
         this.loadInto(this.targets.inline);
+    },
+
+    refreshAfterSave: function(data) {
+        data = data || {};
+        this.refreshRevision = data.revision !== undefined ? data.revision : Date.now();
+        this.variants = Array.isArray(data.variants) ? data.variants : [
+            { id: 'mip', label: 'MIP' },
+            { id: 'raysum', label: 'X-ray' }
+        ];
+        const preferred = data.selected_variant || data.variant || data.default_mode || 'mip';
+        this.selectedVariant = preferred;
+        this.updateVariantControls();
+        Object.keys(this.targets).forEach((key) => {
+            if (document.getElementById(this.targets[key].imageId)) this.loadInto(this.targets[key]);
+        });
     },
     
     showFullscreenImage: function() {}

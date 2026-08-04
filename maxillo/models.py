@@ -1,4 +1,5 @@
 import secrets
+import uuid
 
 from django.db import models
 from django.db.models import Q
@@ -468,6 +469,82 @@ class IntraoralToothSegmentation(models.Model):
 
     def __str__(self):
         return f"IntraoralSegmentation {self.patient_id}:{self.image_file_id}"
+
+
+class PanoramicState(models.Model):
+    """Current browser-generated panoramic annotation and immutable outputs."""
+
+    MODE_CHOICES = [('mip', 'Maximum intensity projection'), ('raysum', 'Ray sum')]
+    GEOMETRY_SOURCE_CHOICES = [('auto', 'Automatic'), ('custom_cp', 'Edited')]
+
+    patient = models.OneToOneField(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name='panoramic_state',
+    )
+    source_job = models.ForeignKey(
+        Job,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='browser_panoramic_states',
+    )
+    source_file = models.ForeignKey(
+        FileRegistry,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='browser_panoramic_sources',
+    )
+    source_file_key = models.CharField(max_length=60)
+    source_file_hash = models.CharField(max_length=64)
+    source_segmentation_file = models.ForeignKey(
+        FileRegistry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='browser_panoramic_segmentation_sources',
+    )
+    source_segmentation_key = models.CharField(max_length=60, blank=True)
+    source_segmentation_hash = models.CharField(max_length=64, blank=True)
+    mip_file = models.ForeignKey(
+        FileRegistry,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='browser_panoramic_mip_states',
+    )
+    raysum_file = models.ForeignKey(
+        FileRegistry,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='browser_panoramic_raysum_states',
+    )
+    axial_slice = models.PositiveIntegerField()
+    volume_shape = models.JSONField()
+    spline = models.JSONField()
+    geometry_source = models.CharField(
+        max_length=10,
+        choices=GEOMETRY_SOURCE_CHOICES,
+        default='custom_cp',
+    )
+    default_mode = models.CharField(max_length=10, choices=MODE_CHOICES)
+    algorithm_version = models.CharField(max_length=32, default='panorex-js-v2-mip')
+    revision = models.PositiveIntegerField(default=1)
+    generation_uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    request_hash = models.CharField(max_length=64)
+    generated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='generated_panoramic_states',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"PanoramicState {self.patient_id} r{self.revision}"
 
 
 class Classification(ClassificationBase):

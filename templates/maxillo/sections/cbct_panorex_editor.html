@@ -1,0 +1,56 @@
+<section class="panorex-editor" id="cbctPanorexEditor" data-can-edit="{% if can_modify_segmentation %}true{% else %}false{% endif %}" aria-labelledby="panorexEditorTitle" hidden>
+    <div hidden>{% csrf_token %}</div>
+    <header class="panorex-editor__header">
+        <div>
+            <span class="panorex-editor__eyebrow">Browser reconstruction</span>
+            <h3 id="panorexEditorTitle">Panoramic arch editor</h3>
+        </div>
+        <div class="panorex-editor__status" id="panorexEditorStatus" role="status" aria-live="polite">Waiting for CBCT</div>
+    </header>
+
+    <div class="panorex-editor__workspace">
+        <div class="panorex-editor__panel">
+            <div class="panorex-editor__panel-title">
+                <span>Axial source</span>
+            </div>
+            <div class="panorex-editor__axial-layout">
+                <div class="panorex-editor__stage" id="panorexAxialStage" aria-label="Editable axial dental arch"></div>
+                <div class="panorex-editor__slice-controls" aria-label="Superior to inferior Z navigation">
+                    <span>Superior</span>
+                    <button type="button" class="panorex-editor__icon-button" id="panorexPrevZ" aria-label="Move one slice superior"><i class="fas fa-chevron-up" aria-hidden="true"></i></button>
+                    <span class="panorex-editor__z-value panorex-editor__mono">Z <output id="panorexZValue">0</output></span>
+                    <input type="range" id="panorexZSlider" min="0" max="1" step="1" value="0" orient="vertical" aria-label="Absolute Z slice, superior to inferior">
+                    <button type="button" class="panorex-editor__icon-button" id="panorexNextZ" aria-label="Move one slice inferior"><i class="fas fa-chevron-down" aria-hidden="true"></i></button>
+                    <span>Inferior</span>
+                </div>
+            </div>
+            <div class="panorex-editor__edit-actions" aria-label="Arch editing actions">
+                <button type="button" id="panorexResetAuto"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Reset auto</button>
+            </div>
+        </div>
+
+        <div class="panorex-editor__panel panorex-editor__panel--result">
+            <div class="panorex-editor__panel-title">
+                <span>Generated panoramic</span>
+                <div class="panorex-editor__mode" role="group" aria-label="Projection mode">
+                    <button type="button" class="is-active" data-panorex-mode="mip" aria-pressed="true">MIP</button>
+                    <button type="button" data-panorex-mode="raysum" aria-pressed="false">X-ray</button>
+                </div>
+            </div>
+            <div class="panorex-editor__preview">
+                <canvas id="panorexResultCanvas" aria-label="Generated panoramic preview"></canvas>
+                <div class="panorex-editor__empty" id="panorexEmptyResult">Select Reset auto or adjust the axial arch to generate a panoramic.</div>
+            </div>
+            <div class="panorex-editor__progress" id="panorexProgress" hidden>
+                <div id="panorexProgressBar"></div>
+            </div>
+            <div class="panorex-editor__error" id="panorexEditorError" role="alert" hidden>
+                <span id="panorexEditorErrorMessage"></span>
+                <button type="button" id="panorexRetry" hidden>Retry</button>
+            </div>
+            <div class="panorex-editor__primary-actions">
+                <button type="button" class="panorex-editor__save" id="panorexSave" disabled><i class="fas fa-floppy-disk" aria-hidden="true"></i> Save</button>
+            </div>
+        </div>
+    </div>
+</section>

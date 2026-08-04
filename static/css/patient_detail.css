@@ -1756,6 +1756,84 @@
    are the sole content of a pane. */
 .side-tab-pane > *:last-child { margin-bottom: 0 !important; }
 
+/* ---- NIfTI metadata ----------------------------------------------------- */
+.nifti-metadata-box {
+    padding: 1rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+    background: var(--ygg-surface-alt);
+    color: var(--ygg-text);
+}
+.nifti-metadata-box [hidden] { display: none !important; }
+.nifti-metadata-box #niftiMetadataContent {
+    padding: 0.75rem;
+    color: var(--ygg-text-muted);
+}
+.nifti-metadata-box .info-item-compact {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+}
+.nifti-metadata-box .info-item-compact small { font-size: 0.875rem; }
+.affine-matrix-section {
+    padding: 1rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+    background: var(--ygg-surface);
+}
+.affine-matrix-container { overflow-x: auto; }
+.affine-matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--ygg-text);
+    font-family: var(--ygg-font-mono);
+    font-size: 0.875rem;
+}
+.affine-matrix-table th,
+.affine-matrix-table td {
+    min-width: 80px;
+    padding: 0.5rem;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    text-align: center;
+}
+.affine-matrix-table th {
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text-muted);
+    font-weight: 600;
+}
+.affine-matrix-table td:first-child {
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text-muted);
+    font-weight: 600;
+}
+.affine-matrix-table .translation-column {
+    background: var(--ygg-warn-soft);
+    color: var(--ygg-text);
+    font-weight: 600;
+}
+.affine-input {
+    width: 100%;
+    padding: 0.25rem;
+    border: 1px solid var(--ygg-border-strong);
+    border-radius: 0.25rem;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    font-family: var(--ygg-font-mono);
+    font-size: 0.875rem;
+    text-align: center;
+}
+.affine-input:focus {
+    border-color: var(--ygg-primary);
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem var(--ygg-accent-soft);
+}
+.nifti-metadata-box .affine-info { color: var(--ygg-text-muted); }
+
 @media (max-width: 900px) {
     .side-panel { position: static; }
 }

@@ -112,6 +112,7 @@ body.has-maintenance-banner main.landing {
 
 /* Full-width navbar: brand flush-left, profile flush-right (drop max-width). */
 .ygg-nav-inner { max-width: none; }
+.ygg-topbar { z-index: 100; }
 
 /* Tree logo beside the wordmark in the navbar. */
 .ygg-brand-logo { height: 1.6rem; width: auto; display: block; }

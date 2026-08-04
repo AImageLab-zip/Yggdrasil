@@ -60,19 +60,31 @@
             <div class="viewer-toolbar__group" id="cbctControls" {% if patient.has_ios_scans %}style="display: none;"{% endif %}>
                 <span class="viewer-toolbar__label">Tools</span>
                 <button type="button" class="icon-btn" id="resetCBCTView" title="Reset view"><i class="fas fa-house" aria-hidden="true"></i></button>
-                <div class="ygg-dropdown">
-                    <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Windowing"><i class="fas fa-sliders" aria-hidden="true"></i></button>
-                    <div class="ygg-dropdown-menu" style="min-width: 260px;">
-                        <div class="mb-2 px-2">
-                            <label class="form-label-sm mb-1">Min (%) <span id="windowMinValue" class="ms-1">0</span></label>
-                            <input type="range" class="form-range w-100" id="windowMinRange" min="0" max="100" step="1" value="0">
-                        </div>
-                        <div class="px-2">
-                            <label class="form-label-sm mb-1">Max (%) <span id="windowMaxValue" class="ms-1">100</span></label>
-                            <input type="range" class="form-range w-100" id="windowMaxRange" min="0" max="100" step="1" value="100">
-                        </div>
-                    </div>
+                <div class="cbct-window-controls" aria-label="CBCT contrast controls">
+                    <label class="cbct-range-control" for="windowLevelRange">
+                        <span>Level <output id="windowLevelValue" for="windowLevelRange">50</output></span>
+                        <input type="range" id="windowLevelRange" min="0" max="100" step="1" value="50">
+                    </label>
+                    <label class="cbct-range-control" for="windowWidthRange">
+                        <span>Window <output id="windowWidthValue" for="windowWidthRange">100</output></span>
+                        <input type="range" id="windowWidthRange" min="1" max="100" step="1" value="100">
+                    </label>
                 </div>
+                <div class="viewer-toolbar__divider"></div>
+                <button type="button" class="cbct-3d-toggle" id="toggleCBCT3DOnly" aria-pressed="false" title="Load and focus the 3D renderer">
+                    <i class="fas fa-cube" aria-hidden="true"></i><span>3D only</span>
+                </button>
+                <label class="cbct-render-select" for="cbctRenderMode">
+                    <span>Render</span>
+                    <select id="cbctRenderMode">
+                        <option value="mip">MIP</option>
+                        <option value="amip" selected>Attenuated MIP</option>
+                        <option value="shaded">Shaded Volume</option>
+                    </select>
+                </label>
+                <button type="button" class="icon-btn cbct-render-action" id="resetCBCT3DCamera" title="Reset 3D camera"><i class="fas fa-arrows-rotate" aria-hidden="true"></i></button>
+                <button type="button" class="cbct-render-action cbct-exit-focus" id="exitCBCT3DFocus" hidden>Exit 3D</button>
+                <span class="cbct-render-status" id="cbctRenderStatus" role="status" aria-live="polite"></span>
             </div>
         </div>
 
@@ -188,19 +200,20 @@
                         <div class="viewer-window" data-window-index="0"><div class="drop-hint"><i class="fas fa-brain"></i><p>Axial</p></div></div>
                         <div class="viewer-window" data-window-index="1"><div class="drop-hint"><i class="fas fa-brain"></i><p>Sagittal</p></div></div>
                         <div class="viewer-window" data-window-index="2"><div class="drop-hint"><i class="fas fa-brain"></i><p>Coronal</p></div></div>
-                        <div class="viewer-window" data-window-index="3"><div class="drop-hint"><i class="fas fa-square"></i><p>Empty</p></div></div>
+                        <div class="viewer-window" data-window-index="3"><div class="drop-hint"><i class="fas fa-cube"></i><p>3D loads on demand</p></div></div>
                     </div>
                     <div class="cbct-inline-panoramic" id="cbctInlinePanoramic">
-                        <div class="cbct-inline-panoramic-header"><i class="fas fa-panorama me-2"></i>Panoramic</div>
+                        <div class="cbct-inline-panoramic-header">
+                            <span><i class="fas fa-panorama me-2"></i>Panoramic</span>
+                            <button type="button" class="panoramic-edit-arch" id="editSavedPanoramic" hidden>
+                                <i class="fas fa-pen-to-square" aria-hidden="true"></i> Edit arch
+                            </button>
+                        </div>
                         <div class="panoramic-variant-controls" data-panoramic-variant-controls data-panoramic-target="inline" role="group" aria-label="Panoramic variant" hidden>
                             <div class="panoramic-projection-toggle" role="group" aria-label="Panoramic projection">
-                                <button type="button" class="panoramic-mode-btn" data-panoramic-mode="mean" aria-pressed="false">MIP</button>
+                                <button type="button" class="panoramic-mode-btn" data-panoramic-mode="mean" aria-pressed="false">Average</button>
                                 <button type="button" class="panoramic-mode-btn" data-panoramic-mode="raysum" aria-pressed="false">X-ray</button>
                             </div>
-                            <label class="panoramic-z-control">
-                                <span>Z <output data-panoramic-z-label>0</output></span>
-                                <input type="range" min="-40" max="40" step="20" value="0" data-panoramic-z-slider aria-label="Panoramic Z offset">
-                            </label>
                         </div>
                         <div class="cbct-inline-panoramic-body">
                             <div class="panoramic-loading" id="cbctPanoramicLoading" style="display: none;">
@@ -222,6 +235,7 @@
                             </div>
                         </div>
                     </div>
+                    {% include 'maxillo/sections/cbct_panorex_editor.html' %}
                 {% endif %}
             </div>
 
@@ -272,13 +286,9 @@
             <div id="panoramic-viewer" class="viewer-container" {% if default_modality_slug != 'panoramic' %}style="display: none;"{% endif %}>
                 <div class="panoramic-variant-controls" data-panoramic-variant-controls data-panoramic-target="standalone" role="group" aria-label="Panoramic variant" hidden>
                     <div class="panoramic-projection-toggle" role="group" aria-label="Panoramic projection">
-                        <button type="button" class="panoramic-mode-btn" data-panoramic-mode="mean" aria-pressed="false">MIP</button>
+                        <button type="button" class="panoramic-mode-btn" data-panoramic-mode="mean" aria-pressed="false">Average</button>
                         <button type="button" class="panoramic-mode-btn" data-panoramic-mode="raysum" aria-pressed="false">X-ray</button>
                     </div>
-                    <label class="panoramic-z-control">
-                        <span>Z <output data-panoramic-z-label>0</output></span>
-                        <input type="range" min="-40" max="40" step="20" value="0" data-panoramic-z-slider aria-label="Panoramic Z offset">
-                    </label>
                 </div>
                 <div class="panoramic-loading" id="panoramicLoading" style="display: none;">
                     <div class="text-center py-4">
@@ -448,14 +458,21 @@
                                         <li><strong>Left-click + drag:</strong> Pan/move the view</li>
                                         <li><strong>Scroll wheel:</strong> Scroll through slices</li>
                                         <li><strong>Shift + scroll:</strong> Faster scrolling</li>
-                                        <li><strong>Ctrl + scroll:</strong> Zoom in/out</li>
-                                        <li><strong>Ruler tool:</strong> Click the ruler above the 4-window grid, then click two points (can be on different slices/views). Hover a point or line to see the 3D Euclidean distance in mm.</li>
-                                    </ul>
-                                </div>
-                                <div class="instruction-group">
-                                    <h6 class="text-success mb-2"><i class="fas fa-palette me-1"></i>Rendering Options</h6>
-                                    This is still a work in progress and the rendering options are not yet implemented.
-                                </div>
+                                         <li><strong>Ctrl + scroll:</strong> Zoom in/out</li>
+                                         <li><strong>Ruler tool:</strong> Click the ruler above the 4-window grid, then click two points (can be on different slices/views). Hover a point or line to see the 3D Euclidean distance in mm.</li>
+                                         <li><strong>Level / Window:</strong> Adjust contrast live across every loaded CBCT view.</li>
+                                     </ul>
+                                 </div>
+                                 <div class="instruction-group">
+                                     <h6 class="text-success mb-2"><i class="fas fa-palette me-1"></i>Rendering Options</h6>
+                                     <ul class="list-unstyled instruction-list">
+                                         <li><strong>3D only:</strong> Lazily load the renderer and expand it without discarding slice state. Select it again, use Exit 3D, or press Escape to return.</li>
+                                         <li><strong>Attenuated MIP:</strong> Default projection with front-to-back attenuation for depth cues.</li>
+                                         <li><strong>MIP:</strong> Show the maximum intensity encountered along each ray.</li>
+                                         <li><strong>Shaded Volume:</strong> Gradient-lit volume rendering. A native NiiVue fallback is used when the custom shader is unavailable.</li>
+                                         <li><strong>Reset 3D camera:</strong> Restore the initial front-facing camera.</li>
+                                     </ul>
+                                 </div>
                             </div>
                         </div>
                     </div>
