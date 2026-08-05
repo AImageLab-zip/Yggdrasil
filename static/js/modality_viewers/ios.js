@@ -772,6 +772,20 @@ function renderLandmarks() {
             });
         });
     });
+    syncLandmarkVisibility();
+}
+
+// Hide landmark markers for a jaw whose mesh is hidden, so toggling the
+// upper/lower arch buttons also toggles that jaw's landmarks.
+function syncLandmarkVisibility() {
+    if (!landmarkMarkers1) return;
+    landmarkMarkers1.children.forEach(marker => {
+        const key = marker.userData.landmark && marker.userData.landmark.key;
+        if (!key) return;
+        const isUpper = /^(\d+)_upper_FDI_/.test(key);
+        const mesh = isUpper ? upperMesh1 : lowerMesh1;
+        marker.visible = !mesh || mesh.visible;
+    });
 }
 
 function raycastLandmarkEvent(event, objects) {
@@ -1010,6 +1024,7 @@ function viewUpper() {
     
     // Update button states
     updateButtonStates();
+    syncLandmarkVisibility();
 }
 
 // View lower scan - hide upper, show lower, camera positioned for axis 0 left, axis 1 down, axis 2 out from screen
@@ -1032,6 +1047,7 @@ function viewLower() {
     
     // Update button states
     updateButtonStates();
+    syncLandmarkVisibility();
 }
 
 // Animation loop
@@ -1068,6 +1084,7 @@ function toggleMesh(type) {
     } else if (type === 'lower' && lowerMesh1) {
         lowerMesh1.visible = !lowerMesh1.visible;
     }
+    syncLandmarkVisibility();
 }
 
 function resetView() {
@@ -1188,6 +1205,7 @@ function init3DControls() {
                     }
                 }
                 console.debug('Upper jaw visibility toggled to:', upperMesh1.visible);
+                syncLandmarkVisibility();
             } else {
                 console.warn('Upper mesh not loaded yet');
             }
@@ -1215,6 +1233,7 @@ function init3DControls() {
                     }
                 }
                 console.debug('Lower jaw visibility toggled to:', lowerMesh1.visible);
+                syncLandmarkVisibility();
             } else {
                 console.warn('Lower mesh not loaded yet');
             }
