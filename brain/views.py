@@ -20,6 +20,7 @@ from common.demo import landing_demo_url
 from common.domains import landing_cards, order_projects_for_landing
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
+from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
 from common.permissions import (
@@ -199,6 +200,10 @@ def patient_detail(request, patient_id):
         "is_admin_user": is_admin_user,
         "modality_files": modality_files,
         "segmentation_file": segmentation_file,
+        "rerunnable_step_slugs": [
+            m["slug"] for m in patient_modalities
+            if m.get("slug") not in ("rawzip", "braintumor-mri-seg")
+        ],
         "allowed_modalities": allowed_modalities,
         "allowed_modality_slugs": [m.slug for m in allowed_modalities],
         # report_language now provided globally by common.context_processors.user_prefs
@@ -314,6 +319,7 @@ def patient_list(request):
             "available_modalities": [m.slug for m in patient.modalities.all()],
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
+            "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list),
             "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())),
         })
 
@@ -350,6 +356,14 @@ def patient_list(request):
             for m in allowed_modalities
             if m.slug != "rawzip"
         ],
+        "rerun_step_labels": rerun_step_labels(
+            None,
+            [
+                {"slug": m.slug, "name": m.name, "label": m.label or "", "status": None}
+                for m in allowed_modalities
+                if m.slug != "rawzip"
+            ],
+        ),
     }
     return render_with_fallback(request, "patient_list", context)
 

@@ -13,6 +13,8 @@
     .btn-rerun-processing, .btn-delete-scan, #bulkToolbar(Card), #selectedCount,
     #moveFolderSelect, #btnMoveSelected/#btnDeleteSelected/#btnBulkRerunSelected/
     #btnClearSelection, the folder/rerun modal ids, and handlePageJumpSubmit.
+    The rerun button carries data-available-steps (ProcessingStep slugs possible
+    for that patient, computed in the view); patient_list.js reads it.
 
   Selection uses document-wide .row-select queries, so each patient must only
   be rendered once.
@@ -223,7 +225,7 @@
                     <div class="actions">
                         <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="icon-btn btn-open" title="View" aria-label="View"><i class="fas fa-eye" aria-hidden="true"></i></a>
                         {% if user_profile.is_admin %}
-                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-modalities="{% for ms in item.modality_status_list %}{% if ms.slug != 'rawzip' and ms.slug != 'voice' and ms.status != 'absent' %}{% if not forloop.first %},{% endif %}{{ ms.slug }}{% endif %}{% endfor %}" title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
+                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-steps="{% for s in item.rerunnable_steps %}{% if not forloop.first %},{% endif %}{{ s.slug }}{% endfor %}" title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
                         {% endif %}
                         {% if item.can_delete %}
                         <button class="icon-btn icon-btn--danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" aria-label="Delete"><i class="fas fa-trash" aria-hidden="true"></i></button>
@@ -324,7 +326,7 @@
       <div class="modal-body">
         <p class="modal-sub" id="rerunScanSubtitle"></p>
         <div id="rerunModalityOptions"></div>
-        <p class="modal-note">This will set existing jobs to pending. No new jobs will be created.</p>
+        <p class="modal-note">Select the processing steps to re-run. Missing pipeline jobs are created automatically.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="ygg-btn ygg-btn--ghost" data-ygg-dismiss="modal">Cancel</button>
@@ -337,11 +339,11 @@
   </div>
 </div>
 
-{# Slug -> human label map consumed by patient_list.js (window.rerunModalityLabels). #}
+{# Slug -> human label map consumed by patient_list.js (window.rerunModalityLabels).
+   Labels are ProcessingStep names (admin/common/processingstep), falling back to
+   modality labels when a domain declares no processing steps. #}
 <script id="rerun-modality-labels" type="application/json">{
-{% for m in modality_filter_specs %}
-  "{{ m.slug }}": "{% if m.slug == 'voice' %}All voice transcriptions{% elif m.slug == 'ios' %}IOS processing{% else %}{{ m.label|default:m.name }}{% endif %}"{% if not forloop.last %},{% endif %}
-{% endfor %}
+{% for slug, label in rerun_step_labels.items %}"{{ slug }}": "{{ label }}"{% if not forloop.last %},{% endif %}{% endfor %}
 }</script>
 
 <div class="modal" id="bulkRerunProcessingModal" tabindex="-1" aria-labelledby="bulkRerunProcessingModalLabel" aria-hidden="true">
@@ -354,7 +356,7 @@
       <div class="modal-body">
         <p class="modal-sub" id="bulkRerunScanSubtitle"></p>
         <div id="bulkRerunModalityOptions"></div>
-        <p class="modal-note">This reruns only the latest existing job per selected modality per patient. No new jobs are created.</p>
+        <p class="modal-note">This reruns only the latest existing job per selected processing step per patient. Missing pipeline jobs are created automatically.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="ygg-btn ygg-btn--ghost" data-ygg-dismiss="modal">Cancel</button>

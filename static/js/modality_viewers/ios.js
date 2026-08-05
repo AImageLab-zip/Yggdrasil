@@ -97,6 +97,16 @@ THREE.STLLoader.prototype = {
 // 3D VIEWER IMPLEMENTATION
 // =====================================================
 
+// Scene background follows the sitewide data-theme stamp on <html> (set pre-paint
+// in base.html, toggled by static/js/nav.js). Light matches --ygg-surface-sunken
+// (#eef1f5-ish, kept as the historical 0xf0f0f0); dark matches the dark value of
+// the same token (#152036) so the WebGL canvas blends into #scan-viewer.
+function iosThemeBackgroundColor() {
+    return document.documentElement.getAttribute('data-theme') === 'dark'
+        ? new THREE.Color(0x152036)
+        : new THREE.Color(0xf0f0f0);
+}
+
 // Global variables for 3D scene
 let scene1, camera1, renderer1;
 let controls1;
@@ -169,7 +179,7 @@ function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
     
     // Create scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f0f0);
+    scene.background = iosThemeBackgroundColor();
     
     // Create camera
     const camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.1, 1000);
@@ -222,6 +232,17 @@ function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
     cameraLight1 = cameraLight;
     landmarkMarkers1 = new THREE.Group();
     scene.add(landmarkMarkers1);
+
+    // Keep the scene background in sync when the user toggles the theme.
+    if (!window.__iosThemeObserver) {
+        window.__iosThemeObserver = new MutationObserver(function () {
+            if (scene1) scene1.background = iosThemeBackgroundColor();
+        });
+        window.__iosThemeObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-theme']
+        });
+    }
     
     // Create grid helper (hidden by default)
     createGrid(9); // Default to 9x9 grid
@@ -738,7 +759,7 @@ function renderLandmarks() {
                 if (!Array.isArray(value) || value.length !== 3) return;
                 const marker = new THREE.Mesh(
                     new THREE.SphereGeometry(0.65, 16, 12),
-                    new THREE.MeshBasicMaterial({ color: landmarkColors1[type] || 0xffffff, depthTest: false, transparent: true, opacity: 0.92 })
+                    new THREE.MeshBasicMaterial({ color: landmarkColors1[type] || 0xffffff, depthTest: true, transparent: true, opacity: 0.92 })
                 );
                 marker.position.copy(mesh.localToWorld(new THREE.Vector3(value[0], value[1], value[2])));
                 marker.userData.landmark = { key, type, index: ['cusps', 'planar'].includes(type) ? index : null, tooth: match[3] };

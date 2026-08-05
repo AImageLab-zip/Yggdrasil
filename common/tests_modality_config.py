@@ -168,6 +168,185 @@ class RawFileHiddenTests(TestCase):
 
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
+class RerunnableStepsTests(TestCase):
+    """rerunnable_steps_for_patient resolves the enabled ProcessingStep DAG a
+    patient's raw inputs unlock (IOS -> IOS Landmarks -> IOS Bite Classification)."""
+
+    def _ios_pipeline(self):
+        """Real-world IOS chain: root 'ios', then landmarks, then bite."""
+        ios = _modality("ios")
+        cbct = _modality("cbct")
+        ios_step = _step(ios, slug="ios", name="IOS Orientation")
+        cbct_step = _step(cbct, slug="cbct", name="CBCT Segmentation")
+        landmarks = _step(ios, slug="ios-landmarks", name="IOS Landmarks")
+        landmarks.depends_on.add(ios_step)
+        bite = _step(ios, slug="ios-bite-classification", name="IOS Bite Classification")
+        bite.depends_on.add(landmarks)
+        return ios_step, cbct_step, landmarks, bite
+
+    def _raw(self, patient, file_type, path):
+        from common.models import FileRegistry
+        return FileRegistry.objects.create(
+            file_type=file_type, file_path=path, file_size=1, file_hash="h",
+            patient=patient, domain="maxillo",
+        )
+
+    def test_ios_patient_exposes_full_step_chain(self):
+        from maxillo.models import Patient
+        self._ios_pipeline()
+        patient = Patient.objects.create()
+        self._raw(patient, "ios_raw_upper", "p/upper.stl")
+        self._raw(patient, "ios_raw_lower", "p/lower.stl")
+
+        steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
+        self.assertEqual(
+            [s["slug"] for s in steps],
+            ["ios", "ios-landmarks", "ios-bite-classification"],
+        )
+        self.assertEqual(
+            [s["name"] for s in steps],
+            ["IOS Orientation", "IOS Landmarks", "IOS Bite Classification"],
+        )
+
+    def test_no_ios_input_means_no_ios_steps(self):
+        from maxillo.models import Patient
+        self._ios_pipeline()
+        patient = Patient.objects.create()
+
+        steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
+        self.assertEqual(steps, [])
+
+    def test_cbct_patient_exposes_only_cbct(self):
+        from maxillo.models import Patient
+        self._ios_pipeline()
+        patient = Patient.objects.create()
+        self._raw(patient, "cbct_raw", "p/vol.nii")
+
+        steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
+        self.assertEqual([s["slug"] for s in steps], ["cbct"])
+        self.assertEqual(steps[0]["name"], "CBCT Segmentation")
+
+    def test_disabled_downstream_step_is_skipped(self):
+        from maxillo.models import Patient
+        ios_step, _cbct_step, landmarks, _bite = self._ios_pipeline()
+        landmarks.is_enabled = False
+        landmarks.save()
+        patient = Patient.objects.create()
+        self._raw(patient, "ios_raw_upper", "p/upper.stl")
+        self._raw(patient, "ios_raw_lower", "p/lower.stl")
+
+        steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
+        self.assertEqual([s["slug"] for s in steps], ["ios"])
+
+    def test_disabled_root_blocks_dependents(self):
+        from maxillo.models import Patient
+        ios_step, _cbct_step, _landmarks, _bite = self._ios_pipeline()
+        ios_step.is_enabled = False
+        ios_step.save()
+        patient = Patient.objects.create()
+        self._raw(patient, "ios_raw_upper", "p/upper.stl")
+        self._raw(patient, "ios_raw_lower", "p/lower.stl")
+
+        steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
+        self.assertEqual(steps, [])
+
+    def test_falls_back_to_legacy_modalities_when_no_steps(self):
+        # No ProcessingStep rows at all -> legacy per-modality behavior.
+        steps = mc.rerunnable_steps_for_patient(
+            [],
+            [{"slug": "cbct", "name": "CBCT", "label": "", "status": "processed"}],
+        )
+        self.assertEqual(steps, [{"slug": "cbct", "name": "CBCT"}])
+
+        steps = mc.rerunnable_steps_for_patient(
+            [],
+            [
+                {"slug": "cbct", "name": "CBCT", "label": "", "status": "absent"},
+                {"slug": "ios", "name": "IOS", "label": "IOS", "status": "processed"},
+            ],
+        )
+        self.assertEqual(steps, [{"slug": "ios", "name": "IOS"}])
+
+    def test_rerun_step_labels_prefers_step_names(self):
+        self._ios_pipeline()
+        labels = mc.rerun_step_labels([], [])
+        self.assertEqual(labels["ios"], "IOS Orientation")
+        self.assertEqual(labels["ios-landmarks"], "IOS Landmarks")
+        self.assertEqual(labels["ios-bite-classification"], "IOS Bite Classification")
+        self.assertEqual(labels["cbct"], "CBCT Segmentation")
+
+
+@override_settings(RUNNER_QUEUE_BY_MODALITY=None)
+@patch("common.signals.celery_app.send_task")
+class EnsureStepJobsTests(TestCase):
+    """ensure_step_jobs_for_patient creates missing downstream jobs (with
+    dependency wiring) so newly-registered steps run on existing patients."""
+
+    def _ios_pipeline(self):
+        ios = _modality("ios")
+        ios_step = _step(ios, slug="ios", name="IOS Orientation")
+        landmarks = _step(ios, slug="ios-landmarks", name="IOS Landmarks")
+        landmarks.depends_on.add(ios_step)
+        bite = _step(ios, slug="ios-bite-classification", name="IOS Bite Classification")
+        bite.depends_on.add(landmarks)
+        return ios_step, landmarks, bite
+
+    def test_creates_missing_downstream_jobs_for_new_step(self, _send_task):
+        from common.models import Job
+        from maxillo.models import Patient
+        from common.uploads import ensure_step_jobs_for_patient
+
+        self._ios_pipeline()
+        patient = Patient.objects.create()
+        # In-flight (not completed) so the created dependents stay 'dependency'.
+        ios_job = Job.objects.create(
+            modality_slug="ios", status="processing", patient=patient, domain="maxillo"
+        )
+
+        created = ensure_step_jobs_for_patient(patient, ["ios-bite-classification"])
+        self.assertEqual(
+            sorted(j.modality_slug for j in created),
+            ["ios-bite-classification", "ios-landmarks"],
+        )
+
+        by_slug = {j.modality_slug: j for j in created}
+        landmarks = by_slug["ios-landmarks"]
+        bite = by_slug["ios-bite-classification"]
+        self.assertEqual(landmarks.status, "dependency")
+        self.assertEqual(bite.status, "dependency")
+        self.assertIn(ios_job, landmarks.dependencies.all())
+        self.assertIn(landmarks, bite.dependencies.all())
+
+    def test_idempotent_when_jobs_already_exist(self, _send_task):
+        from common.models import Job
+        from maxillo.models import Patient
+        from common.uploads import ensure_step_jobs_for_patient
+
+        self._ios_pipeline()
+        patient = Patient.objects.create()
+        Job.objects.create(
+            modality_slug="ios", status="completed", patient=patient, domain="maxillo"
+        )
+
+        first = ensure_step_jobs_for_patient(patient, ["ios-landmarks"])
+        second = ensure_step_jobs_for_patient(patient, ["ios-landmarks"])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
+        self.assertEqual(
+            Job.objects.filter(patient=patient, modality_slug="ios-landmarks").count(),
+            1,
+        )
+
+    def test_unknown_slugs_are_ignored(self, _send_task):
+        from maxillo.models import Patient
+        from common.uploads import ensure_step_jobs_for_patient
+
+        self._ios_pipeline()
+        patient = Patient.objects.create()
+        self.assertEqual(ensure_step_jobs_for_patient(patient, ["does-not-exist"]), [])
+
+
+@override_settings(RUNNER_QUEUE_BY_MODALITY=None)
 class CreateStepJobsTests(TestCase):
     """create_step_jobs spawns the downstream ProcessingStep pipeline, including
     cross-modality dependents (the generalized ios -> bite wiring)."""

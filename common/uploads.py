@@ -124,6 +124,99 @@ def create_step_jobs(source_job):
     return created
 
 
+def ensure_step_jobs_for_patient(patient, requested_slugs):
+    """Create missing pipeline jobs for a patient so the requested steps can run.
+
+    ``rerun_processing``/``bulk_rerun_processing`` call this before resetting
+    jobs to pending: it walks the prerequisite closure of each requested step
+    slug and creates a ``dependency``-status Job for every non-root step that has
+    no job yet (the root/source jobs come from uploads and are never synthesized
+    here). Newly-created jobs are wired to their prerequisites' jobs exactly like
+    ``create_step_jobs`` does at upload time, so steps added after a patient was
+    uploaded (e.g. a newly-registered IOS Bite Classification step) get a real
+    job on the next rerun.
+
+    Idempotent. Returns the list of newly-created ``Job`` objects (empty when
+    nothing was missing).
+    """
+    from common.models import Job, ProcessingStep
+
+    entity_kwargs = entity_fk_kwargs(patient)
+    domain = entity_kwargs["domain"]
+    patient_fk = next(k for k, v in entity_kwargs.items() if k != "domain" and v is not None)
+
+    steps = list(
+        ProcessingStep.objects.filter(is_enabled=True)
+        .select_related("modality")
+        .prefetch_related("depends_on")
+    )
+    step_by_slug = {step.slug: step for step in steps}
+    requested = [str(s or "").strip() for s in requested_slugs]
+    requested = [slug for slug in requested if slug in step_by_slug]
+    if not requested:
+        return []
+
+    # Prerequisite closure in topological order (roots first).
+    closure = []
+    visited = set()
+    def visit(slug):
+        step = step_by_slug.get(slug)
+        if step is None or step.slug in visited:
+            return
+        for dep in step.depends_on.all():
+            visit(dep.slug)
+        visited.add(step.slug)
+        closure.append(step)
+    for slug in requested:
+        visit(slug)
+
+    # Seed with the newest existing job per step slug / step id.
+    existing = (
+        Job.objects.filter(**{patient_fk: patient, "domain": domain})
+        .order_by("-created_at")
+        .prefetch_related("step")
+    )
+    job_by_step = {}
+    for job in existing:
+        job_by_step.setdefault(job.modality_slug, job)
+        if job.step_id is not None:
+            job_by_step.setdefault(job.step_id, job)
+    newest = {}
+    created = []
+
+    priority = next(
+        (getattr(job, "priority", 0) or 0 for job in job_by_step.values()), 0
+    )
+    for step in closure:
+        slug = step.slug
+        job = job_by_step.get(slug) or job_by_step.get(step.id)
+        if job is not None:
+            newest[slug] = job
+            continue
+        deps = list(step.depends_on.all())
+        if not deps:
+            # Root step with no source job: nothing to run without the raw input.
+            continue
+        dep_jobs = [newest.get(d.slug) for d in deps]
+        if any(dep_job is None for dep_job in dep_jobs):
+            continue
+        job = Job.objects.create(
+            step=step,
+            modality_slug=slug,
+            status="dependency",
+            input_files={},
+            priority=priority,
+            **entity_kwargs,
+        )
+        for d, dep_job in zip(deps, dep_jobs):
+            job.add_dependency(dep_job)
+        job_by_step[slug] = job
+        job_by_step[step.id] = job
+        newest[slug] = job
+        created.append(job)
+    return created
+
+
 def project_slug_from_patient(patient) -> str:
     domain = domain_for_patient(patient)
     if domain == "laparoscopy":

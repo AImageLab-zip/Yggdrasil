@@ -64,7 +64,7 @@
                 fetch('/' + window.projectNamespace + '/patient/' + patientId + '/rerun-processing/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
-                    body: JSON.stringify({ jobs: window.__patientHeaderModalitySlugs || [] })
+                    body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
                 }).then(function (r) { return r.json(); }).then(function (data) {
                     if (data.success) { window.location.reload(); }
                     else if (window.appNotify) { window.appNotify('error', data.error || 'Failed to rerun jobs'); }
@@ -92,9 +92,11 @@
     </script>
     {% endif %}
 </div>
-{# Modality slugs for the header's "rerun all" action (excludes rawzip). #}
+{# Processing step slugs for the header's "rerun all" action (possible for this
+   patient, computed in the patient_detail view; excludes nothing at the root,
+   downstream steps included). #}
 <script>
-window.__patientHeaderModalitySlugs = [
-{% for m in patient_modalities %}{% if m.slug != 'rawzip' %}"{{ m.slug }}"{% if not forloop.last %},{% endif %}{% endif %}{% endfor %}
+window.__patientHeaderStepSlugs = [
+{% for s in rerunnable_step_slugs %}"{{ s }}"{% if not forloop.last %},{% endif %}{% endfor %}
 ];
 </script>

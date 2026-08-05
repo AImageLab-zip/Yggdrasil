@@ -613,6 +613,17 @@ def patient_detail(request, patient_id):
         'allowClearWindow': False,
     }
 
+    # Processing steps possible for this patient's rerun ("Rerun" header action).
+    try:
+        from common.modality_config import rerunnable_steps_for_patient
+        _rerunnable = rerunnable_steps_for_patient(list(patient.files.all()), [])
+        rerunnable_step_slugs = [step['slug'] for step in _rerunnable]
+    except Exception:
+        logger.warning("Failed to compute rerunnable steps for patient %s", patient.patient_id, exc_info=True)
+        rerunnable_step_slugs = [
+            m.get('slug') for m in patient_modalities if m.get('slug') != 'rawzip'
+        ]
+
     context = {
         'patient': patient,
         'ai_classification': ai_classification,
@@ -631,6 +642,7 @@ def patient_detail(request, patient_id):
         'is_admin_user': is_admin_user,
         'can_create_caption': can_create_caption,
         'modality_files': modality_files,
+        'rerunnable_step_slugs': rerunnable_step_slugs,
         'viewer_grid_data': viewer_grid_data,
     }
     # Allowed modalities for current project (to conditionally show upload controls)

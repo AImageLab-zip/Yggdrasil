@@ -10,6 +10,7 @@ from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as 
 from .helpers import render_with_fallback
 from common.demo import landing_demo_url
 from common.domains import landing_cards, order_projects_for_landing
+from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
 from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
@@ -353,6 +354,11 @@ def patient_list(request):
 
             modality_status_list.append({'slug': slug, 'name': name, 'icon': icon, 'label': label, 'status': status})
 
+        # Processing steps possible for this patient, given its input files and
+        # the admin-declared ProcessingStep DAG (e.g. IOS patients -> IOS
+        # Orientation, IOS Landmarks, IOS Bite Classification).
+        rerunnable_steps = rerunnable_steps_for_patient(patient_files, modality_status_list)
+
         patient_data = {
             'patient': patient,
             'manual_classification': manual_classification,
@@ -370,6 +376,7 @@ def patient_list(request):
             'available_modalities': [m.slug for m in available_modality_objs],
             'modality_statuses': {ms['slug']: ms['status'] for ms in modality_status_list},
             'modality_status_list': modality_status_list,
+            'rerunnable_steps': rerunnable_steps,
             'can_delete': bool(
                 is_admin
                 or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
@@ -410,6 +417,10 @@ def patient_list(request):
             'label': label,
             'value': status_filters.get(slug, ''),
         })
+
+    # Step slug -> ProcessingStep.name map for the rerun modal checkboxes
+    # (falls back to modality labels when the domain declares no steps).
+    rerun_step_labels_map = rerun_step_labels(None, modality_filter_specs)
 
     # Apply dynamic status filters if active (slow path only)
     if has_status_filters:
@@ -481,6 +492,7 @@ def patient_list(request):
         'allowed_modalities': allowed_modalities,
         'status_filters': status_filters,
         'modality_filter_specs': modality_filter_specs,
+        'rerun_step_labels': rerun_step_labels_map,
     }
     # Prefer app-specific template via fallback helper
     return render_with_fallback(request, 'patient_list', context)

@@ -288,7 +288,7 @@ function initAdminActions() {
         if (!rerunModalityOptionsEl) return;
         rerunModalityOptionsEl.innerHTML = '';
         if (!modalitySlugs.length) {
-            rerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable modalities available for this patient.</p>';
+            rerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable processing steps available for this patient.</p>';
             return;
         }
 
@@ -317,12 +317,11 @@ function initAdminActions() {
             const scanName = this.dataset.scanName || `Scan #${rerunTargetScanId}`;
             const subtitle = document.getElementById('rerunScanSubtitle');
             if (subtitle) subtitle.textContent = scanName;
-            rerunSelectedSlugs = (this.dataset.availableModalities || '')
+            rerunSelectedSlugs = (this.dataset.availableSteps || '')
                 .split(',')
                 .map(s => s.trim())
                 .filter(Boolean)
-                .filter((slug, idx, arr) => arr.indexOf(slug) === idx)
-                .filter(slug => slug !== 'rawzip');
+                .filter((slug, idx, arr) => arr.indexOf(slug) === idx);
             renderRerunOptions(rerunSelectedSlugs);
             if (rerunModal) rerunModal.show();
         });
@@ -587,17 +586,15 @@ function initBulkSelection() {
         return Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value, 10)).filter(Number.isFinite);
     }
 
-    function collectAvailableModalitiesForSelectedRows() {
+    function collectAvailableStepsForSelectedRows() {
         const selectedRows = Array.from(document.querySelectorAll('.row-select:checked'))
             .map(cb => cb.closest('.patient-row') || cb.closest('.scan-row'))
             .filter(Boolean);
         const slugSet = new Set();
         selectedRows.forEach(row => {
-            row.querySelectorAll('.status-pill[data-modality-slug]').forEach(pill => {
-                const slug = (pill.dataset.modalitySlug || '').trim();
-                if (!slug || slug === 'rawzip' || slug === 'voice') return;
-                if (pill.classList.contains('status-absent')) return;
-                slugSet.add(slug);
+            (row.dataset.availableSteps || '').split(',').forEach(slug => {
+                slug = String(slug || '').trim();
+                if (slug) slugSet.add(slug);
             });
         });
         return Array.from(slugSet).sort((a, b) => a.localeCompare(b));
@@ -607,7 +604,7 @@ function initBulkSelection() {
         if (!bulkRerunModalityOptionsEl) return;
         bulkRerunModalityOptionsEl.innerHTML = '';
         if (!modalitySlugs.length) {
-            bulkRerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable modalities available for the selected scans.</p>';
+            bulkRerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable processing steps available for the selected scans.</p>';
             return;
         }
         modalitySlugs.forEach((slug, index) => {
@@ -629,7 +626,7 @@ function initBulkSelection() {
         bulkRerunBtn.addEventListener('click', function() {
             const ids = getSelectedPatientIds();
             if (!ids.length) return;
-            const modalities = collectAvailableModalitiesForSelectedRows();
+            const modalities = collectAvailableStepsForSelectedRows();
             renderBulkRerunOptions(modalities);
             if (bulkRerunSubtitleEl) {
                 bulkRerunSubtitleEl.textContent = `${ids.length} selected patient${ids.length === 1 ? '' : 's'}`;

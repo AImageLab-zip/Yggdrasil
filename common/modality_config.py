@@ -196,3 +196,111 @@ def raw_file_hidden(file_obj):
     if step.is_blocking and not _processed_exists_for(file_obj, slug):
         return True
     return False
+
+
+def _available_steps_for_files(patient_files):
+    """Enabled ProcessingSteps reachable from a patient's raw inputs.
+
+    Mirrors the upload-time pipeline in ``common.uploads.create_step_jobs``:
+    a *root* step (no ``depends_on``) is available when the patient has any
+    input file for its modality, and every other step is available only once
+    all of its prerequisites are available. This is what makes e.g. IOS
+    Landmarks impossible for a patient without an IOS scan, and IOS Bite
+    Classification impossible without IOS Landmarks, purely from the
+    admin-declared ``depends_on`` DAG.
+
+    Returns a list of ``ProcessingStep`` objects in topological order
+    (prerequisites before dependents).
+    """
+    from common.models import ProcessingStep
+
+    steps = list(
+        ProcessingStep.objects.filter(is_enabled=True)
+        .select_related("modality")
+        .prefetch_related("depends_on")
+    )
+    if not steps:
+        return []
+
+    files_by_modality = {}
+    for file_obj in patient_files or []:
+        slug = _modality_slug_for_file(file_obj)
+        if slug:
+            files_by_modality.setdefault(slug, []).append(file_obj)
+
+    available = {}
+    progressed = True
+    while progressed:
+        progressed = False
+        for step in steps:
+            if step.slug in available:
+                continue
+            deps = list(step.depends_on.all())
+            if deps:
+                if all(d.slug in available for d in deps):
+                    available[step.slug] = step
+                    progressed = True
+            elif files_by_modality.get(step.modality.slug):
+                available[step.slug] = step
+                progressed = True
+
+    ordered = []
+    added = set()
+    pending = dict(available)
+    while pending:
+        progressed = False
+        for slug in list(pending):
+            step = pending[slug]
+            if all(d.slug in added for d in step.depends_on.all()):
+                ordered.append(step)
+                added.add(step.slug)
+                del pending[slug]
+                progressed = True
+        if not progressed:
+            break
+    return ordered
+
+
+def rerunnable_steps_for_patient(patient_files, modality_status_list=None):
+    """Processing steps possible for a patient, for the rerun job picker.
+
+    Returns ``[{"slug": ..., "name": ...}, ...]`` from the admin ``ProcessingStep``
+    table (name column) in dependency order. When the domain declares no enabled
+    steps, falls back to the historical per-modality list so non-pipeline apps
+    (e.g. brain) keep showing their existing rerunnable modalities.
+    """
+    steps = _available_steps_for_files(patient_files)
+    if steps:
+        return [{"slug": step.slug, "name": step.name} for step in steps]
+
+    fallback = []
+    for entry in modality_status_list or []:
+        slug = str(entry.get("slug", "") or "").strip()
+        if slug in {"rawzip", "voice"} or entry.get("status") == "absent":
+            continue
+        fallback.append({
+            "slug": slug,
+            "name": entry.get("label") or entry.get("name") or slug,
+        })
+    return fallback
+
+
+def rerun_step_labels(patient_files, modality_status_list=None):
+    """Slug -> display-name map for the rerun modal checkboxes.
+
+    Prefers admin ProcessingStep names (the *Name* column), falling back to the
+    legacy modality labels when no steps are configured.
+    """
+    from common.models import ProcessingStep
+
+    step_labels = dict(
+        ProcessingStep.objects.filter(is_enabled=True).values_list("slug", "name")
+    )
+    if step_labels:
+        return step_labels
+    return {
+        entry["slug"]: (entry.get("label") or entry.get("name") or entry["slug"])
+        for entry in modality_status_list or []
+        if entry.get("slug") not in {"rawzip", "voice"}
+        and entry.get("status") != "absent"
+    }

@@ -47,6 +47,12 @@ def rerun_processing(request, patient_id):
                 {"success": False, "error": "No jobs selected"}, status=400
             )
 
+        # Ensure jobs exist for the requested steps (and their prerequisite
+        # closure) so newly-registered steps get a job on existing patients.
+        from common.uploads import ensure_step_jobs_for_patient
+        created_jobs = ensure_step_jobs_for_patient(patient, requested_jobs)
+        created = sorted({job.modality_slug for job in created_jobs})
+
         updated = []
         not_found = []
 
@@ -86,6 +92,8 @@ def rerun_processing(request, patient_id):
                 not_found.append(modality_slug)
 
         msg_parts = []
+        if created:
+            msg_parts.append(f"Created missing job for: {', '.join(created)}")
         if updated:
             msg_parts.append(f"Updated: {', '.join(updated)}")
         if not_found:
@@ -102,6 +110,7 @@ def rerun_processing(request, patient_id):
                 "success": True,
                 "message": message,
                 "updated": updated,
+                "created": created,
                 "not_found": not_found,
             }
         )
@@ -170,6 +179,9 @@ def bulk_rerun_processing(request):
         not_found_pairs = 0
         updated_by_modality = {}
         not_found_by_modality = {}
+        created_slugs = set()
+
+        from common.uploads import ensure_step_jobs_for_patient
 
         for patient in patients:
             job_filter_base = (
@@ -179,6 +191,12 @@ def bulk_rerun_processing(request):
             )
 
             for modality_slug in normalized_jobs:
+                # Ensure the step's job exists (and its prerequisites) before
+                # resetting, so newly-registered steps run on existing patients.
+                created_slugs.update(
+                    job.modality_slug
+                    for job in ensure_step_jobs_for_patient(patient, [modality_slug])
+                )
                 job = (
                     Job.objects.filter(modality_slug=modality_slug, **job_filter_base)
                     .order_by("-created_at")
@@ -215,6 +233,7 @@ def bulk_rerun_processing(request):
                 "requested_modalities": normalized_jobs,
                 "updated_pairs": updated_pairs,
                 "not_found_pairs": not_found_pairs,
+                "created_slugs": sorted(created_slugs),
                 "updated_by_modality": updated_by_modality,
                 "not_found_by_modality": not_found_by_modality,
             }
