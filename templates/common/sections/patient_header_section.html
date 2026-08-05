@@ -92,9 +92,9 @@
     </script>
     {% endif %}
 </div>
-{# Processing step slugs for the header's "rerun all" action (possible for this
-   patient, computed in the patient_detail view; excludes nothing at the root,
-   downstream steps included). #}
+{% comment %} Processing step slugs for the header's "rerun all" action (possible for this
+patient, computed in the patient_detail view; excludes nothing at the root,
+downstream steps included). {% endcomment %}
 <script>
 window.__patientHeaderStepSlugs = [
 {% for s in rerunnable_step_slugs %}"{{ s }}"{% if not forloop.last %},{% endif %}{% endfor %}

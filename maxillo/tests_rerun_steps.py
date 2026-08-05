@@ -87,6 +87,13 @@ class RerunButtonStepsTests(MaxilloRerunStepsBase):
         self.assertContains(response, '"ios-bite-classification": "IOS Bite Classification"')
         self.assertContains(response, '"cbct": "CBCT Segmentation"')
 
+    def test_no_django_comment_text_leaks_into_page(self):
+        # Multi-line {# ... #} comments are not supported on Django 5.x and would
+        # render as literal text; the rerun labels comment must stay hidden.
+        response = self.client.get(reverse("maxillo:patient_list"))
+        self.assertNotContains(response, "{#")
+        self.assertNotContains(response, "human label map consumed")
+
 
 @patch("common.signals.celery_app.send_task")
 class RerunProcessingCreatesJobsTests(MaxilloRerunStepsBase):

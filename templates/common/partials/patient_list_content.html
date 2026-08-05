@@ -339,9 +339,9 @@
   </div>
 </div>
 
-{# Slug -> human label map consumed by patient_list.js (window.rerunModalityLabels).
-   Labels are ProcessingStep names (admin/common/processingstep), falling back to
-   modality labels when a domain declares no processing steps. #}
+{% comment %} Slug -> human label map consumed by patient_list.js (window.rerunModalityLabels).
+Labels are ProcessingStep names (admin/common/processingstep), falling back to modality
+labels when a domain declares no processing steps. {% endcomment %}
 <script id="rerun-modality-labels" type="application/json">{
 {% for slug, label in rerun_step_labels.items %}"{{ slug }}": "{{ label }}"{% if not forloop.last %},{% endif %}{% endfor %}
 }</script>
