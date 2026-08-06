@@ -106,7 +106,7 @@ def select_project(request, project_id: int):
 @login_required
 def patient_list(request):
     namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-    is_admin = user_is_project_admin(request.user, namespace)
+    is_admin = user_is_project_admin(request.user, request)
     Patient, Folder, Tag = _get_domain_models(request)
     
     # Import Job model early for use in prefetch
@@ -357,7 +357,7 @@ def patient_list(request):
         # Processing steps possible for this patient, given its input files and
         # the admin-declared ProcessingStep DAG (e.g. IOS patients -> IOS
         # Orientation, IOS Landmarks, IOS Bite Classification).
-        rerunnable_steps = rerunnable_steps_for_patient(patient_files, modality_status_list)
+        rerunnable_steps = rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient)
 
         patient_data = {
             'patient': patient,
@@ -384,7 +384,7 @@ def patient_list(request):
         }
         patients_with_status.append(patient_data)
     
-    folders = Folder.objects.filter(parent__isnull=True).order_by('name')
+    folders = Folder.objects.filter(parent__isnull=True, project_id=current_project_id).order_by('name')
     folders = filter_folders_for_user(request.user, folders, namespace)
     
     # Add patient counts for each folder

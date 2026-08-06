@@ -28,7 +28,10 @@ RAWZIP_SLUG = 'rawzip'
 
 
 def _project_domain(project_slug):
-    return 'maxillo'
+    try:
+        return Project.objects.get(slug=project_slug).domain
+    except Project.DoesNotExist:
+        return 'maxillo'
 
 
 def _project_models(project_slug):
@@ -71,7 +74,7 @@ def project_upload_api(request, project_slug):
         
         # Use the existing form logic from upload_scan view
         PatientUploadForm = _upload_form_class(project_slug)
-        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
+        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user, current_project=project)
         
         # Validate CBCT folder uploads before creating the patient so invalid
         # folder selections do not leave behind empty patient rows.
@@ -95,13 +98,14 @@ def project_upload_api(request, project_slug):
         patient = patient_upload_form.save(commit=False)
         patient.uploaded_by = request.user
         
-        # Handle folder assignment
+        # Project + folder come from the form (both mandatory).
+        patient.project = project
         folder = patient_upload_form.cleaned_data.get('folder')
         if folder:
             patient.folder = folder
 
         if not user_is_project_admin(request.user, project):
-            if not folder or not user_can_write_annotations(request.user, folder, _project_domain(project_slug)):
+            if not folder or not user_can_write_annotations(request.user, folder, project):
                 return JsonResponse({'error': 'You do not have permission to upload into this folder'}, status=403)
         
         patient.save()
@@ -299,8 +303,8 @@ def get_project_folders(request, project_slug):
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Authentication required'}, status=401)
         
-        # Get all folders - we'll get all folders as they can be used across projects
-        folders = Folder.objects.filter(parent__isnull=True).order_by('name')
+        # Folders are project-scoped now.
+        folders = Folder.objects.filter(parent__isnull=True, project=project).order_by('name')
         folders = filter_folders_for_user(request.user, folders, _project_domain(project_slug))
         
         folders_data = []

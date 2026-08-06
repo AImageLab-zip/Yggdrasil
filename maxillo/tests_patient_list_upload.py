@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from common.models import FileRegistry, Project, ProjectAccess
-from maxillo.models import Classification, Patient
+from maxillo.models import Classification, Folder, Patient
 
 
 class MaxilloPatientListFiltersTests(TestCase):
@@ -11,13 +11,16 @@ class MaxilloPatientListFiltersTests(TestCase):
         self.project, _ = Project.objects.get_or_create(slug="maxillo", defaults={"name": "Maxillo"})
         self.user = User.objects.create_user(username="maxillo-list-admin", password="x")
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
+        self.folder = Folder.objects.create(name="General", project=self.project)
         self.client.force_login(self.user)
         session = self.client.session
         session["current_project_id"] = self.project.id
         session.save()
 
     def test_defaults_to_ten_rows_without_count_card_or_avatar_controls(self):
-        Patient.objects.bulk_create([Patient(name=f"Patient {index}") for index in range(11)])
+        Patient.objects.bulk_create(
+            [Patient(name=f"Patient {index}", project=self.project, folder=self.folder) for index in range(11)]
+        )
 
         response = self.client.get(reverse("maxillo:patient_list"))
 
@@ -29,9 +32,9 @@ class MaxilloPatientListFiltersTests(TestCase):
         self.assertNotContains(response, "10 of 11 patients")
 
     def test_bite_classification_and_landmark_presence_filters(self):
-        classified = Patient.objects.create(name="Classified")
-        landmarked = Patient.objects.create(name="Landmarked")
-        Patient.objects.create(name="Neither")
+        classified = Patient.objects.create(name="Classified", project=self.project, folder=self.folder)
+        landmarked = Patient.objects.create(name="Landmarked", project=self.project, folder=self.folder)
+        Patient.objects.create(name="Neither", project=self.project, folder=self.folder)
         Classification.objects.create(
             patient=classified,
             classifier="manual",
@@ -63,16 +66,20 @@ class MaxilloPatientListFiltersTests(TestCase):
 
 class MaxilloUploadValidationTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(slug="maxillo", defaults={"name": "Maxillo"})
+        self.project, _ = Project.objects.get_or_create(slug="maxillo", defaults={"name": "Maxillo", "domain": "maxillo"})
         self.user = User.objects.create_user(username="maxillo-upload-admin", password="x")
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
+        self.folder = Folder.objects.create(name="General", project=self.project)
         self.client.force_login(self.user)
         session = self.client.session
         session["current_project_id"] = self.project.id
         session.save()
 
     def test_empty_upload_does_not_create_patient(self):
-        response = self.client.post(reverse("maxillo:upload_patient"), {"name": "Empty"})
+        response = self.client.post(
+            reverse("maxillo:upload_patient"),
+            {"name": "Empty", "project": str(self.project.id), "folder": str(self.folder.id)},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Add at least one file before uploading.")

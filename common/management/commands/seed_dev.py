@@ -75,35 +75,45 @@ class Command(BaseCommand):
 
     def _seed_maxillo(self, admin_user):
         from maxillo.models import Folder, Patient
+        from common.models import Project
 
+        project = Project.objects.filter(slug="maxillo").first()
         folder, _ = Folder.objects.get_or_create(
-            name="Demo", parent=None, defaults={"created_by": admin_user}
+            name="Demo", parent=None, project=project,
+            defaults={"created_by": admin_user},
         )
         patient, created = Patient.objects.get_or_create(
-            name="Demo Patient", folder=folder
+            name="Demo Patient", folder=folder, project=project
         )
         if created:
             self.stdout.write(f"Created maxillo demo patient {patient.patient_id}.")
 
     def _seed_brain(self, admin_user):
         from brain.models import Folder, Patient
+        from common.models import Project
 
+        project = Project.objects.filter(slug="brain").first()
         folder, _ = Folder.objects.get_or_create(
-            name="Demo", parent=None, defaults={"created_by": admin_user}
+            name="Demo", parent=None, project=project,
+            defaults={"created_by": admin_user},
         )
-        patient, created = Patient.objects.get_or_create(name="Demo Patient")
-        patient.folders.add(folder)
+        patient, created = Patient.objects.get_or_create(
+            name="Demo Patient", folder=folder, project=project
+        )
         if created:
             self.stdout.write(f"Created brain demo patient {patient.patient_id}.")
 
     def _seed_laparoscopy(self, admin_user):
         from laparoscopy.models import Folder, Patient
+        from common.models import Project
 
+        project = Project.objects.filter(slug="laparoscopy").first()
         folder, _ = Folder.objects.get_or_create(
-            name="Demo", parent=None, defaults={"created_by": admin_user}
+            name="Demo", parent=None, project=project,
+            defaults={"created_by": admin_user},
         )
         patient, created = Patient.objects.get_or_create(
-            name="Demo Patient", folder=folder
+            name="Demo Patient", folder=folder, project=project
         )
         if created:
             self.stdout.write(f"Created laparoscopy demo patient {patient.patient_id}.")

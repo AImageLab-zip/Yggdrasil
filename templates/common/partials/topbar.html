@@ -26,6 +26,10 @@
                 <button type="submit" class="ygg-icon-btn" title="Exit demo / Log in">{% icon 'sign-in-alt' %}</button>
             </form>
         {% elif user.is_authenticated %}
+            <button type="button" class="ygg-icon-btn" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">
+                <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
+                <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
+            </button>
             <div class="relative" data-dropdown>
                 <button type="button" class="btn btn-secondary btn-sm" data-dropdown-toggle aria-expanded="false">
                     <span class="ygg-avatar">{{ user.username|slice:':2' }}</span>

@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from common.models import FileRegistry, Modality, ProcessingStep, Project, ProjectAccess
-from maxillo.models import Patient
+from maxillo.models import Folder, Patient
 
 
 def _step(modality, slug, name):
@@ -27,6 +27,8 @@ class MaxilloRerunStepsBase(TestCase):
 
         self.ios_modality = Modality.objects.create(slug="ios", name="IOS")
         self.cbct_modality = Modality.objects.create(slug="cbct", name="CBCT")
+        self.project.modalities.add(self.ios_modality, self.cbct_modality)
+        self.folder = Folder.objects.create(name="General", project=self.project)
         self.ios_step = _step(self.ios_modality, "ios", "IOS Orientation")
         self.cbct_step = _step(self.cbct_modality, "cbct", "CBCT Segmentation")
         self.landmarks_step = _step(self.ios_modality, "ios-landmarks", "IOS Landmarks")
@@ -35,7 +37,7 @@ class MaxilloRerunStepsBase(TestCase):
         self.bite_step.depends_on.add(self.landmarks_step)
 
     def _ios_patient(self):
-        patient = Patient.objects.create(name="IOS Scan")
+        patient = Patient.objects.create(name="IOS Scan", project=self.project, folder=self.folder)
         FileRegistry.objects.create(
             patient=patient,
             domain="maxillo",
@@ -71,7 +73,7 @@ class RerunButtonStepsTests(MaxilloRerunStepsBase):
         )
 
     def test_non_ios_patient_has_no_available_steps(self):
-        patient = Patient.objects.create(name="Plain")
+        patient = Patient.objects.create(name="Plain", project=self.project, folder=self.folder)
 
         response = self.client.get(reverse("maxillo:patient_list"))
         self.assertContains(

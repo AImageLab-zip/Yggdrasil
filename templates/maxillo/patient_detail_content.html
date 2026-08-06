@@ -52,12 +52,14 @@
                 <div class="viewer-toolbar__divider"></div>
                 <div class="viewer-toolbar__group" id="iosLandmarkControls">
                     <span class="viewer-toolbar__label">Landmarks</span>
+                    {% if 'ios_landmarks' in allowed_annotations or not allowed_annotations %}
                     <button type="button" class="icon-btn" id="toggleLandmarkVisibility" title="Show/hide saved landmarks" aria-pressed="false"><i class="fas fa-eye" aria-hidden="true"></i></button>
                     <div class="ygg-dropdown">
                         <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Landmark visibility per type" aria-label="Filter landmark types"><i class="fas fa-sliders" aria-hidden="true"></i></button>
                         <div class="ygg-dropdown-menu ygg-dropdown-menu--landmark-vis" id="iosLandmarkVisibilityDropdown" aria-label="Landmark type visibility"></div>
                     </div>
                     <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Open landmark annotation tools" aria-controls="iosLandmarkWorkbench" aria-expanded="false" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
+                    {% endif %}
                 </div>
 
             </div>
@@ -382,8 +384,10 @@
         </div>
         <div class="side-panel__body">
             <div class="side-tab-pane is-active" data-tab-pane="classification">
+                {% if 'bite_classification' in allowed_annotations or 'classification' in allowed_annotations %}
                 {% include 'maxillo/sections/bite_classification_section.html' %}
-                {% if has_intraoral_modality %}
+                {% endif %}
+                {% if has_intraoral_modality and 'intraoral_segmentation' in allowed_annotations %}
                 {% include 'maxillo/sections/intraoral_segmentation_section.html' %}
                 {% endif %}
             </div>

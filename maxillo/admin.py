@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Count
 from django.contrib.auth.models import User
 from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
-from common.models import Project, Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation
+from common.models import Project, Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation, AnnotationMethod
 from .models import Tag, Folder
 
 
@@ -41,11 +41,19 @@ class PatientAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Project)
 class ProjectAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
-    list_filter = ['is_active', 'created_at']
+    list_display = ['name', 'domain', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
+    list_filter = ['domain', 'is_active', 'created_at']
     search_fields = ['name', 'description', 'slug']
     prepopulated_fields = {"slug": ("name",)}
-    filter_horizontal = ['modalities']
+    filter_horizontal = ['modalities', 'annotation_methods']
+
+
+@admin.register(AnnotationMethod)
+class AnnotationMethodAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ['name', 'slug', 'domain', 'is_active', 'created_at']
+    list_filter = ['domain', 'is_active']
+    search_fields = ['name', 'slug', 'description']
+    prepopulated_fields = {"slug": ("name",)}
 
 
 class ProcessingStepInline(admin.TabularInline):
@@ -70,7 +78,7 @@ class ModalityAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 @admin.register(ProjectAccess)
 class ProjectAccessAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ['user', 'project', 'role', 'created_at']
-    list_filter = ['role', 'created_at']
+    list_filter = ['role', 'created_at', 'project__domain']
     search_fields = ['user__username', 'project__name']
 
 

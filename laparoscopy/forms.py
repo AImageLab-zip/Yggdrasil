@@ -1,7 +1,10 @@
 from django import forms
 
+from common.models import Project, ProjectAccess
 from common.permissions import filter_folders_for_user
 from .models import Classification, Dataset, Folder, Patient, Tag
+
+LAPAROSCOPY_DOMAIN = 'laparoscopy'
 
 
 class PatientForm(forms.ModelForm):
@@ -22,9 +25,16 @@ class PatientUploadForm(forms.ModelForm):
         ),
     )
 
+    project = forms.ModelChoiceField(
+        queryset=Project.objects.none(),
+        required=True,
+        label='Project',
+        widget=forms.Select(attrs={'class': 'form-control'}),
+    )
     folder = forms.ModelChoiceField(
-        queryset=Folder.objects.all().order_by('name'),
-        required=False,
+        queryset=Folder.objects.none(),
+        required=True,
+        label='Folder',
         widget=forms.Select(attrs={'class': 'form-control'}),
     )
     tags_text = forms.CharField(
@@ -35,39 +45,56 @@ class PatientUploadForm(forms.ModelForm):
 
     class Meta:
         model = Patient
-        fields = ['name', 'folder']
+        fields = ['name', 'project', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Patient X'}),
-            #'visibility': forms.Select(attrs={'class': 'form-control'}),
         }
         labels = {
             'name': 'Patient Name',
-            #'visibility': 'Visibility',
             'folder': 'Folder',
         }
 
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, current_project=None, domain=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['folder'].required = True
         if user:
-            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
-            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'laparoscopy')
+            projects_qs = Project.objects.filter(domain=LAPAROSCOPY_DOMAIN, is_active=True)
+            if not user.is_staff:
+                accessible = ProjectAccess.objects.filter(user=user).values_list('project_id', flat=True)
+                projects_qs = projects_qs.filter(id__in=accessible)
+            self.fields['project'].queryset = projects_qs.order_by('name')
+
+            project_id = None
+            if self.data:
+                project_id = self.data.get('project') or self.data.get('project_id')
+            if not project_id and current_project:
+                project_id = getattr(current_project, 'id', current_project)
+            if project_id:
+                self.fields['folder'].queryset = (
+                    Folder.objects.filter(project_id=project_id, parent__isnull=True).order_by('name')
+                )
+                self.fields['project'].initial = project_id
         else:
+            self.fields['project'].queryset = Project.objects.none()
             self.fields['folder'].queryset = Folder.objects.none()
-        '''if user and hasattr(user, 'profile'):
-            if user.profile.is_student_developer():
-                self.fields['visibility'].choices = [('debug', 'Debug')]
-                self.fields['visibility'].initial = 'debug'
-                self.fields['visibility'].widget.attrs['readonly'] = True
-            elif user.profile.is_admin():
-                self.fields['visibility'].choices = Patient.VISIBILITY_CHOICES
-            else:
-                self.fields['visibility'].choices = [
-                    ('public', 'Public'),
-                    ('private', 'Private'),
-                ]'''
+
+    def clean(self):
+        cleaned_data = super().clean()
+        project = cleaned_data.get('project')
+        folder = cleaned_data.get('folder')
+        if project and folder and folder.project_id != project.id:
+            raise forms.ValidationError(
+                'The selected folder does not belong to the selected project.'
+            )
+        if not folder:
+            raise forms.ValidationError('A folder is required.')
+        return cleaned_data
 
     def save(self, commit=True):
         instance = super().save(commit)
+        project = self.cleaned_data.get('project')
+        if project:
+            instance.project = project
         tags_text = self.cleaned_data.get('tags_text', '') or ''
         tag_names = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
         if commit and tag_names:

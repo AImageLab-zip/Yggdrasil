@@ -8,7 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from common.models import Modality, Project
-from maxillo.models import Patient
+from maxillo.models import Folder, Patient
 from maxillo.file_utils import (
     _validate_and_extract_nifti_orientation,
     save_cbct_to_dataset,
@@ -33,9 +33,12 @@ def _make_nifti_uploaded_file(name="scan.nii.gz", qform_code=1, sform_code=1, af
 
 class CBCTUploadContractTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(slug="maxillo", name="Maxillo")
+        self.project, _ = Project.objects.get_or_create(slug="maxillo", name="Maxillo", domain="maxillo")
         self.modality, _ = Modality.objects.get_or_create(slug="cbct", name="CBCT")
-        self.patient = Patient.objects.create(name="CBCT Contract Patient")
+        self.folder = Folder.objects.create(name="General", project=self.project)
+        self.patient = Patient.objects.create(
+            name="CBCT Contract Patient", project=self.project, folder=self.folder
+        )
 
     def test_valid_nii_gz_with_metadata_passes_validation(self):
         uploaded = _make_nifti_uploaded_file("volume.nii.gz", qform_code=1, sform_code=1)

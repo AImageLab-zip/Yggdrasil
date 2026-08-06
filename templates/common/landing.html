@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="{% static 'css/landing.css' %}">
 {% endblock %}
 
-{# Landing brings its own chrome (top bar + footer) per the design handoff. #}
+{# Landing brings its own chrome (top bar); the shared app footer (base.html)
+   is used verbatim so the landing footer matches the rest of the platform. #}
 {% block chrome %}{% endblock %}
-{% block footer %}{% endblock %}
 {% block main_class %}landing{% endblock %}
 {% block theme_default_dark %}true{% endblock %}
 
@@ -133,13 +133,6 @@
         </div>
     {% endif %}
 </div>
-
-<footer class="landing-foot">
-    Powered by <a href="https://aimagelab.ing.unimore.it" target="_blank" rel="noopener">AImageLab</a>
-    <span class="landing-foot__dot">·</span> Yggdrasil v{{ app_version }}
-    <span class="landing-foot__dot">·</span>
-    <a href="https://github.com/AImageLab-zip/Yggdrasil" target="_blank" rel="noopener" class="landing-foot__gh">{% icon 'github' %} GitHub</a>
-</footer>
 {% endblock %}
 
 {% block extra_js %}

@@ -48,9 +48,12 @@ class ResubmitJobsTests(TestCase):
     def setUpTestData(cls):
         BF = apps.get_model("brain", "Folder")
         BP = apps.get_model("brain", "Patient")
-        cls.folder = BF.objects.create(name="F")
-        cls.patient = BP.objects.create(name="P")
-        cls.patient.folders.add(cls.folder)
+        Project = apps.get_model("common", "Project")
+        cls.project = Project.objects.get_or_create(
+            slug="brain", defaults={"name": "Brain", "domain": "brain"}
+        )[0]
+        cls.folder = BF.objects.create(name="F", project=cls.project)
+        cls.patient = BP.objects.create(name="P", project=cls.project, folder=cls.folder)
         cls.modality = Modality.objects.create(slug="braintumor_mri_flair", name="FLAIR")
         FileRegistry.objects.create(
             domain="brain", brain_patient=cls.patient, modality=cls.modality,

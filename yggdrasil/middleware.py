@@ -87,7 +87,17 @@ class ProjectSessionMiddleware(MiddlewareMixin):
         if url_start not in ['maxillo', 'brain', 'laparoscopy']:
             return None
 
-        project = Project.objects.get(name=url_start)
+        # Multiple projects live under one domain; default to the first active
+        # project of the domain the user can access.
+        accessible = ProjectAccess.objects.filter(user=request.user).values_list('project_id', flat=True)
+        project = (
+            Project.objects.filter(domain=url_start, is_active=True)
+            .filter(id__in=accessible)
+            .order_by('name')
+            .first()
+        ) or Project.objects.filter(domain=url_start, is_active=True).order_by('name').first()
+        if project is None:
+            return None
         request.session['current_project_id'] = project.id
         
         return None
@@ -124,8 +134,24 @@ class ActiveProfileMiddleware(MiddlewareMixin):
             return None
 
         try:
-            # Look up the project by slug
-            project = Project.objects.get(slug__iexact=app_key)
+            # Resolve the project the user is working in: the session project
+            # when it belongs to this domain, else the first active project of
+            # the domain.
+            pid = request.session.get('current_project_id')
+            project = None
+            if pid:
+                project = Project.objects.filter(
+                    id=pid, domain=app_key, is_active=True
+                ).first()
+            if project is None:
+                project = (
+                    Project.objects.filter(domain=app_key, is_active=True)
+                    .order_by('name')
+                    .first()
+                )
+            if project is None:
+                logger.warning(f"ActiveProfileMiddleware: No project for domain '{app_key}'")
+                return redirect('/')
 
             # Get ProjectAccess for this user and project
             access = ProjectAccess.objects.select_related('project').get(
@@ -141,7 +167,7 @@ class ActiveProfileMiddleware(MiddlewareMixin):
             request.user_project_access = access
 
         except Project.DoesNotExist:
-            logger.warning(f"ActiveProfileMiddleware: Project not found for app '{app_key}'")
+            logger.warning(f"ActiveProfileMiddleware: Project not found for domain '{app_key}'")
             return redirect('/')
         except ProjectAccess.DoesNotExist:
             logger.debug(f"ActiveProfileMiddleware: No ProjectAccess for user {request.user.id} in project '{app_key}'")

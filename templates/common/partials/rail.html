@@ -30,11 +30,6 @@
 
     <div class="ygg-rail-spacer"></div>
 
-    <button type="button" class="ygg-rail-item" data-theme-toggle title="Toggle theme">
-        <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
-        <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
-    </button>
-
     {% if user.is_authenticated and not is_demo_guest %}
         {% include 'common/partials/notifications_bell.html' with rail=True %}
     {% endif %}

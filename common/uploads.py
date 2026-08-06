@@ -90,6 +90,23 @@ def create_step_jobs(source_job):
     patient = source_job.get_patient()
     if patient is None:
         return created
+
+    # Project scoping: only dispatch steps whose modality the patient's project
+    # enables. Absent a project (or when the project declares no modalities) we
+    # keep the historical behavior and run everything.
+    project = getattr(patient, "project", None)
+    allowed_slugs = None
+    if project is not None:
+        allowed_slugs = set(
+            project.modalities.values_list("slug", flat=True)
+        )
+        if not allowed_slugs:
+            allowed_slugs = None
+    if allowed_slugs is not None:
+        if modality_slug not in allowed_slugs:
+            return created
+        all_steps = [s for s in all_steps if s.modality.slug in allowed_slugs]
+
     entity_kwargs = entity_fk_kwargs(patient)
     priority = getattr(source_job, "priority", 0) or 0
 
@@ -145,11 +162,22 @@ def ensure_step_jobs_for_patient(patient, requested_slugs):
     domain = entity_kwargs["domain"]
     patient_fk = next(k for k, v in entity_kwargs.items() if k != "domain" and v is not None)
 
+    # Project scoping (same rule as create_step_jobs): steps whose modality the
+    # patient's project does not enable are skipped.
+    project = getattr(patient, "project", None)
+    allowed_slugs = None
+    if project is not None:
+        allowed_slugs = set(project.modalities.values_list("slug", flat=True))
+        if not allowed_slugs:
+            allowed_slugs = None
+
     steps = list(
         ProcessingStep.objects.filter(is_enabled=True)
         .select_related("modality")
         .prefetch_related("depends_on")
     )
+    if allowed_slugs is not None:
+        steps = [s for s in steps if s.modality.slug in allowed_slugs]
     step_by_slug = {step.slug: step for step in steps}
     requested = [str(s or "").strip() for s in requested_slugs]
     requested = [slug for slug in requested if slug in step_by_slug]

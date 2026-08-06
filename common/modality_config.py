@@ -198,7 +198,7 @@ def raw_file_hidden(file_obj):
     return False
 
 
-def _available_steps_for_files(patient_files):
+def _available_steps_for_files(patient_files, patient=None):
     """Enabled ProcessingSteps reachable from a patient's raw inputs.
 
     Mirrors the upload-time pipeline in ``common.uploads.create_step_jobs``:
@@ -208,6 +208,9 @@ def _available_steps_for_files(patient_files):
     Landmarks impossible for a patient without an IOS scan, and IOS Bite
     Classification impossible without IOS Landmarks, purely from the
     admin-declared ``depends_on`` DAG.
+
+    When ``patient`` is given, steps whose modality the patient's project does
+    not enable are excluded (project processing scoping).
 
     Returns a list of ``ProcessingStep`` objects in topological order
     (prerequisites before dependents).
@@ -221,6 +224,14 @@ def _available_steps_for_files(patient_files):
     )
     if not steps:
         return []
+
+    project = getattr(patient, "project", None) if patient is not None else None
+    if project is not None:
+        allowed_slugs = set(project.modalities.values_list("slug", flat=True))
+        if allowed_slugs:
+            steps = [s for s in steps if s.modality.slug in allowed_slugs]
+        if not steps:
+            return []
 
     files_by_modality = {}
     for file_obj in patient_files or []:
@@ -261,7 +272,7 @@ def _available_steps_for_files(patient_files):
     return ordered
 
 
-def rerunnable_steps_for_patient(patient_files, modality_status_list=None):
+def rerunnable_steps_for_patient(patient_files, modality_status_list=None, patient=None):
     """Processing steps possible for a patient, for the rerun job picker.
 
     Returns ``[{"slug": ..., "name": ...}, ...]`` from the admin ``ProcessingStep``
@@ -269,7 +280,7 @@ def rerunnable_steps_for_patient(patient_files, modality_status_list=None):
     steps, falls back to the historical per-modality list so non-pipeline apps
     (e.g. brain) keep showing their existing rerunnable modalities.
     """
-    steps = _available_steps_for_files(patient_files)
+    steps = _available_steps_for_files(patient_files, patient=patient)
     if steps:
         return [{"slug": step.slug, "name": step.name} for step in steps]
 

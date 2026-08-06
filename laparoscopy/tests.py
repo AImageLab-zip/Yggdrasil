@@ -67,14 +67,17 @@ class LaparoscopyExportBaseTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.user = User.objects.create_user(username="lap-admin", password="pw")
-        self.project = Project.objects.create(name="laparoscopy", slug="laparoscopy")
+        self.project = Project.objects.get_or_create(
+            slug="laparoscopy", defaults={"name": "Laparoscopy", "domain": "laparoscopy"}
+        )[0]
         self.video_modality = Modality.objects.create(name="Video", slug="video")
         self.project.modalities.add(self.video_modality)
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
-        self.folder = Folder.objects.create(name="Case Batch")
+        self.folder = Folder.objects.create(name="Case Batch", project=self.project)
 
     def create_patient(self, name="Patient", folder=None):
-        return Patient.objects.create(name=name, folder=folder or self.folder)
+        folder = folder or self.folder
+        return Patient.objects.create(name=name, folder=folder, project=folder.project)
 
     def create_subsampled_video(self, patient, file_path=None, file_size=128):
         return FileRegistry.objects.create(
@@ -287,44 +290,46 @@ class LaparoscopyExportProcessorTests(LaparoscopyExportBaseTestCase):
         processor_cls.return_value.process_export.assert_called_once_with()
 
 
-class LaparoscopyFolderAccessTests(TestCase):
-    """Folder-level ACL for laparoscopy (mirrors maxillo/brain behavior)."""
+class LaparoscopyProjectAccessTests(TestCase):
+    """Project-level ACL for laparoscopy (mirrors maxillo/brain behavior)."""
 
     def setUp(self):
         super().setUp()
-        self.project = Project.objects.create(name="laparoscopy", slug="laparoscopy")
+        self.project = Project.objects.get_or_create(
+            slug="laparoscopy", defaults={"name": "Laparoscopy", "domain": "laparoscopy"}
+        )[0]
         self.admin = User.objects.create_user(username="lap-acl-admin", password="pw")
         ProjectAccess.objects.create(user=self.admin, project=self.project, role="admin")
         self.member = User.objects.create_user(username="lap-acl-member", password="pw")
-        ProjectAccess.objects.create(user=self.member, project=self.project, role="standard")
-        self.scoped = User.objects.create_user(username="lap-acl-scoped", password="pw")
-        ProjectAccess.objects.create(user=self.scoped, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=self.member, project=self.project, role="viewer")
+        self.outsider = User.objects.create_user(username="lap-acl-outsider", password="pw")
 
-        self.folder_a = Folder.objects.create(name="Folder A")
-        self.folder_b = Folder.objects.create(name="Folder B")
-        self.patient_a = Patient.objects.create(name="PA", folder=self.folder_a)
-        self.patient_b = Patient.objects.create(name="PB", folder=self.folder_b)
-        FolderAccess.objects.create(user=self.scoped, folder=self.folder_a, role="standard")
+        self.folder_a = Folder.objects.create(name="Folder A", project=self.project)
+        self.folder_b = Folder.objects.create(name="Folder B", project=self.project)
+        self.patient_a = Patient.objects.create(name="PA", folder=self.folder_a, project=self.project)
+        self.patient_b = Patient.objects.create(name="PB", folder=self.folder_b, project=self.project)
 
-    def test_member_without_folder_access_sees_no_folders(self):
+    def test_member_without_project_access_sees_no_folders(self):
+        qs = filter_folders_for_user(self.outsider, Folder.objects.all(), "laparoscopy")
+        self.assertEqual(qs.count(), 0)
+
+    def test_member_without_project_access_sees_no_patients(self):
+        qs = filter_patients_for_user(self.outsider, Patient.objects.all(), "laparoscopy")
+        self.assertEqual(qs.count(), 0)
+
+    def test_project_member_sees_folders(self):
         qs = filter_folders_for_user(self.member, Folder.objects.all(), "laparoscopy")
-        self.assertEqual(qs.count(), 0)
+        self.assertIn(self.folder_a, qs)
+        self.assertIn(self.folder_b, qs)
 
-    def test_member_without_folder_access_sees_no_patients(self):
+    def test_project_member_sees_patients(self):
         qs = filter_patients_for_user(self.member, Patient.objects.all(), "laparoscopy")
-        self.assertEqual(qs.count(), 0)
-
-    def test_scoped_member_sees_only_granted_folder(self):
-        qs = filter_folders_for_user(self.scoped, Folder.objects.all(), "laparoscopy")
-        self.assertEqual(list(qs), [self.folder_a])
-
-    def test_scoped_member_sees_only_patients_in_granted_folder(self):
-        qs = filter_patients_for_user(self.scoped, Patient.objects.all(), "laparoscopy")
-        self.assertEqual(list(qs), [self.patient_a])
+        self.assertEqual(qs.count(), 2)
 
     def test_project_admin_sees_all_folders(self):
         qs = filter_folders_for_user(self.admin, Folder.objects.all(), "laparoscopy")
-        self.assertEqual(qs.count(), 2)
+        self.assertIn(self.folder_a, qs)
+        self.assertIn(self.folder_b, qs)
 
     def test_project_admin_sees_all_patients(self):
         qs = filter_patients_for_user(self.admin, Patient.objects.all(), "laparoscopy")

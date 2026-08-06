@@ -35,21 +35,24 @@ def upload_patient(request):
         messages.error(request, 'You are not allowed to upload in this project.')
         return redirect_with_namespace(request, 'patient_list')
 
-    folders = filter_folders_for_user(
-        request.user,
-        Folder.objects.filter(parent__isnull=True).order_by('name'),
-        namespace,
-    )
+    current_project = None
     allowed_modalities = []
     if current_project_id:
         try:
-            project = Project.objects.prefetch_related('modalities').get(id=current_project_id)
-            allowed_modalities = list(project.modalities.filter(is_active=True).exclude(slug='rawzip'))
+            current_project = Project.objects.prefetch_related('modalities').get(id=current_project_id)
+            allowed_modalities = list(current_project.modalities.filter(is_active=True).exclude(slug='rawzip'))
         except Project.DoesNotExist:
             pass
+    allowed_modality_slugs = {m.slug for m in allowed_modalities}
+
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True, project_id=current_project_id).order_by('name') if current_project_id else Folder.objects.none(),
+        namespace,
+    )
     
     if request.method == 'POST':
-        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
+        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user, current_project=current_project, domain=namespace)
         patient_form = PatientForm()
 
         # Validate CBCT folder uploads before creating the patient so invalid
@@ -92,31 +95,16 @@ def upload_patient(request):
             # Create and populate Patient from the form
             patient = patient_upload_form.save(commit=False)
             patient.uploaded_by = request.user
-            
-            # Assign folder if provided
-            folder = patient_upload_form.cleaned_data.get('folder')
-            if folder:
-                allowed_folder_ids = set(
-                    filter_folders_for_user(
-                        request.user,
-                        Folder.objects.filter(parent__isnull=True).only('id'),
-                        namespace,
-                    ).values_list('id', flat=True)
-                )
-                if folder.id not in allowed_folder_ids:
-                    messages.error(request, 'You do not have permission to upload to the selected folder.')
-                    allowed_folders = filter_folders_for_user(
-                        request.user,
-                        Folder.objects.filter(parent__isnull=True).order_by('name'),
-                        namespace,
-                    )
-                    return render(request, 'common/upload/upload.html', {
-                        'patient_form': patient_form,
-                        'patient_upload_form': patient_upload_form,
-                        'folders': allowed_folders,
-                        'allowed_modalities': allowed_modalities,
-                    })
-                patient.folder = folder
+
+            # Project scoping: a modality the project does not enable is never
+            # saved even if the client POSTs it (defense in depth; the UI only
+            # renders enabled modalities). Empty project config keeps the
+            # historical permissive behavior.
+            def _mod_allowed(slug):
+                return not allowed_modality_slugs or slug in allowed_modality_slugs
+
+            # Project + folder are assigned by the form (both mandatory).
+            patient.folder = patient_upload_form.cleaned_data.get('folder')
             patient.save()
 
             # The form's save() handles tags
@@ -133,7 +121,7 @@ def upload_patient(request):
             # Handle CBCT (single file or folder)
             cbct_file = request.FILES.get('cbct')
             cbct_error = None
-            if cbct_file or cbct_folder_files:
+            if (cbct_file or cbct_folder_files) and _mod_allowed('cbct'):
                 try:
                     modality = Modality.objects.get(slug='cbct')
                     patient.modalities.add(modality)
@@ -166,7 +154,7 @@ def upload_patient(request):
             # Handle IOS (upper + lower)
             ios_upper = request.FILES.get('ios_upper')
             ios_lower = request.FILES.get('ios_lower')
-            if ios_upper and ios_lower:
+            if (ios_upper and ios_lower) and _mod_allowed('ios'):
                 try:
                     modality = Modality.objects.get(slug='ios')
                     patient.modalities.add(modality)
@@ -185,7 +173,7 @@ def upload_patient(request):
             from ..file_utils import save_generic_modality_file
             for slug, label in (('teleradiography', 'Teleradiography'), ('panoramic', 'Panoramic')):
                 generic_file = request.FILES.get(slug)
-                if generic_file:
+                if generic_file and _mod_allowed(slug):
                     try:
                         modality = Modality.objects.get(slug=slug)
                         patient.modalities.add(modality)
@@ -200,7 +188,7 @@ def upload_patient(request):
 
             # Handle Intraoral Photos (multiple files)
             intraoral_photos = request.FILES.getlist('intraoral-photos')
-            if intraoral_photos:
+            if intraoral_photos and _mod_allowed('intraoral-photo'):
                 try:
                     modality = Modality.objects.get(slug='intraoral-photo')
                     patient.modalities.add(modality)
@@ -224,7 +212,7 @@ def upload_patient(request):
             # Generic video modality
             video_file = request.FILES.get('video')
             video_error = None
-            if video_file:
+            if video_file and _mod_allowed('video'):
                 try:
                     modality = Modality.objects.get(slug='video')
                     patient.modalities.add(modality)
@@ -277,7 +265,7 @@ def upload_patient(request):
             return redirect_with_namespace(request, 'patient_list')
     else:
         patient_form = PatientForm()
-        patient_upload_form = PatientUploadForm(user=request.user)
+        patient_upload_form = PatientUploadForm(user=request.user, current_project=current_project, domain=namespace)
     
     context = {
         'patient_form': patient_form,

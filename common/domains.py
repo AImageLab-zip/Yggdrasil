@@ -6,6 +6,8 @@ routing. This module centralizes them so adding a domain is a one-line change
 here (plus the per-domain FK columns on Job/ProcessingJob/FileRegistry).
 """
 
+from common.icons import resolve as resolve_icon
+
 # Order matters: first entry is the historical default.
 DOMAIN_CHOICES = [
     ("maxillo", "Maxillo"),
@@ -45,10 +47,10 @@ def order_projects_for_landing(queryset):
     """
     from django.db.models import Case, IntegerField, Value, When
 
-    whens = [When(slug=slug, then=Value(i)) for i, (slug, _) in enumerate(DOMAIN_CHOICES)]
+    whens = [When(domain=slug, then=Value(i)) for i, (slug, _) in enumerate(DOMAIN_CHOICES)]
     return queryset.annotate(
         _landing_rank=Case(*whens, default=Value(len(DOMAIN_CHOICES)), output_field=IntegerField())
-    ).order_by("_landing_rank", "name")
+    ).order_by("_landing_rank", "domain", "name")
 
 
 # Fallback copy for domains whose Project row has no description set.
@@ -66,23 +68,24 @@ _DOMAIN_ICONS = {
 }
 
 
-def patient_count_for(slug):
-    """Return the patient count for a domain, or None if it can't be determined.
+def patient_count_for(project):
+    """Return the patient count for a Project, or None if it can't be determined.
 
-    Patients live in per-app tables with no FK back to Project, so this resolves
-    the domain's Patient model by app label. Best-effort: the landing page must
-    never 500 because a count failed.
+    Patients live in per-app tables with a ``project`` FK, so this resolves the
+    project's domain Patient model and counts by project id. Best-effort: the
+    landing page must never 500 because a count failed.
     """
     from django.apps import apps
 
     try:
-        return apps.get_model(slug, "Patient").objects.count()
+        Patient = apps.get_model(project.domain, "Patient")
+        return Patient.objects.filter(project_id=project.id).count()
     except Exception:  # noqa: BLE001 - unknown/legacy domain, or table absent
         return None
 
 
 def landing_cards(projects):
-    """Build the landing page's domain cards from real Project rows.
+    """Build the landing page's project cards from real Project rows.
 
     Returns dicts of {project, slug, name, icon, blurb, stat}. `stat` is a true
     patient count (never a placeholder); it is omitted when unavailable so the
@@ -91,7 +94,7 @@ def landing_cards(projects):
     cards = []
     for project in projects:
         slug = project.slug or ""
-        count = patient_count_for(slug)
+        count = patient_count_for(project)
         if count is None:
             stat = ""
         elif count == 1:
@@ -103,8 +106,11 @@ def landing_cards(projects):
                 "project": project,
                 "slug": slug,
                 "name": project.name,
-                "icon": project.icon or _DOMAIN_ICONS.get(slug, "fas fa-folder-open"),
-                "blurb": project.description or _DOMAIN_BLURBS.get(slug, ""),
+                # Normalise legacy stored values (e.g. "fa-brain" without a
+                # family prefix) into a renderable Font Awesome class string, so
+                # templates can use the raw class directly.
+                "icon": resolve_icon(project.icon or _DOMAIN_ICONS.get(project.domain, "fas fa-folder-open")),
+                "blurb": project.description or _DOMAIN_BLURBS.get(project.domain, ""),
                 "stat": stat,
             }
         )

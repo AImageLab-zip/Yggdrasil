@@ -135,10 +135,9 @@ class MaxilloCbctFolderUploadTests(TestCase):
         self.project.modalities.add(self.cbct)
 
         self.user = User.objects.create_user(username='uploader', password='x')
-        ProjectAccess.objects.create(user=self.user, project=self.project, role='standard')
+        ProjectAccess.objects.create(user=self.user, project=self.project, role='annotator')
 
-        self.folder = Folder.objects.create(name='Cases')
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role='annotator')
+        self.folder = Folder.objects.create(name='Cases', project=self.project)
 
     def _nii_gz_upload(self, name='volume.nii.gz'):
         return SimpleUploadedFile(
@@ -156,6 +155,7 @@ class MaxilloCbctFolderUploadTests(TestCase):
             reverse('maxillo:upload_patient'),
             data={
                 'name': 'CBCT Patient',
+                'project': str(self.project.id),
                 'folder': str(self.folder.id),
                 'cbct': self._nii_gz_upload(),
             },
@@ -165,6 +165,7 @@ class MaxilloCbctFolderUploadTests(TestCase):
         save_cbct.assert_called_once()
         patient = Patient.objects.get(name='CBCT Patient')
         self.assertEqual(patient.folder, self.folder)
+        self.assertEqual(patient.project, self.project)
         self.assertIn(self.cbct, patient.modalities.all())
 
     @patch('maxillo.file_utils.save_cbct_to_dataset')
@@ -176,6 +177,7 @@ class MaxilloCbctFolderUploadTests(TestCase):
             reverse('api:api_project_upload', kwargs={'project_slug': 'maxillo'}),
             data={
                 'name': 'API CBCT Patient',
+                'project': str(self.project.id),
                 'folder': str(self.folder.id),
                 'cbct': self._nii_gz_upload(),
             },
@@ -194,6 +196,7 @@ class MaxilloCbctFolderUploadTests(TestCase):
             reverse('api:api_project_upload', kwargs={'project_slug': 'maxillo'}),
             data={
                 'name': 'Invalid CBCT Patient',
+                'project': str(self.project.id),
                 'folder': str(self.folder.id),
                 'cbct': SimpleUploadedFile('scan.dcm', b'raw dicom', content_type='application/dicom'),
             },

@@ -16,9 +16,11 @@
                 <button id="laparoscopy-tour-btn" class="btn btn-sm btn-outline-info d-none" type="button">
                     <i class="fas fa-route me-1"></i>Start tutorial
                 </button>
+                {% if 'video_regions' in allowed_annotations %}
                 <button id="annotation-toggle-btn" class="btn btn-sm btn-outline-warning d-none">
                     <i class="fas fa-draw-polygon me-1"></i>Enter Annotation Mode
                 </button>
+                {% endif %}
             </div>
 
             <!-- Annotation toolbar (hidden until annotation mode) -->
@@ -404,8 +406,7 @@
 
     var playerWrap  = document.getElementById('video-player-wrap');
     var placeholder = document.getElementById('video-placeholder');
-    var toggleBtn   = document.getElementById('annotation-toggle-btn');
-    var frameNavBar = document.getElementById('frame-nav-bar');
+    var toggleBtn   = document.getElementById('annotation-toggle-btn');    var frameNavBar = document.getElementById('frame-nav-bar');
     var temporalBar = document.getElementById('temporal-classification-bar');
     var quadrantTypesPanel = document.getElementById('quadrant-types-panel');
     var regionPanel = document.getElementById('region-types-panel');
@@ -438,7 +439,7 @@
     zoomInner.appendChild(subsampledPreviewVideo);
     {% endif %}
 
-    toggleBtn.classList.remove('d-none');
+    if (toggleBtn) toggleBtn.classList.remove('d-none');
     frameNavBar.classList.remove('d-none');
     temporalBar.classList.remove('d-none');
     if (quadrantTypesPanel) quadrantTypesPanel.classList.remove('d-none');

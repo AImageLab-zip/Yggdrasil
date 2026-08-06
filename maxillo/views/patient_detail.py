@@ -14,9 +14,9 @@ from common.object_storage import get_object_storage
 from common.permissions import (
     get_user_folder_role,
     user_can_edit_caption,
-    user_can_read_folder,
+    user_can_read_patient,
     user_can_view_caption_content,
-    user_can_write_annotations,
+    user_can_write_patient_annotations,
     user_is_project_admin,
 )
 
@@ -244,8 +244,8 @@ def patient_detail(request, patient_id):
 
     patient = get_object_or_404(Patient, patient_id=patient_id)
     user_profile = request.user.profile
-    can_view = bool(patient.folder and user_can_read_folder(request.user, patient.folder, request))
-    if user_is_project_admin(request.user, request):
+    can_view = bool(patient.project and user_can_read_patient(request.user, patient))
+    if user_is_project_admin(request.user, patient.project):
         can_view = True
 
     if not can_view:
@@ -282,8 +282,8 @@ def patient_detail(request, patient_id):
     except Exception as e:
         logger.warning(f"Error checking uploaded panoramic availability: {e}")
     
-    can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-    if user_is_project_admin(request.user, request):
+    can_modify = bool(patient.project and user_can_write_patient_annotations(request.user, patient))
+    if user_is_project_admin(request.user, patient.project):
         can_modify = True
     
     if request.method == 'POST' and can_modify:
@@ -437,6 +437,33 @@ def patient_detail(request, patient_id):
     except Exception:
         patient_modalities = []
 
+    # Project scoping: only show modalities the patient's project enables
+    # (patients cannot carry modalities outside their project's set).
+    try:
+        if getattr(patient, 'project', None) is not None:
+            _allowed_mod_slugs = set(
+                patient.project.modalities.filter(is_active=True).values_list('slug', flat=True)
+            )
+            if _allowed_mod_slugs:
+                patient_modalities = [
+                    m for m in patient_modalities if m.get('slug') in _allowed_mod_slugs
+                ]
+    except Exception:
+        pass
+
+    # Annotation methods enabled by the patient's project; the templates hide
+    # annotation tools whose method is not enabled (server endpoints re-check).
+    allowed_annotations = []
+    try:
+        if getattr(patient, 'project', None) is not None:
+            allowed_annotations = list(
+                patient.project.annotation_methods
+                .filter(is_active=True)
+                .values_list('slug', flat=True)
+            )
+    except Exception:
+        allowed_annotations = []
+
     has_panoramic = has_uploaded_panoramic or has_cbct
     if not has_panoramic:
         patient_modalities = [m for m in patient_modalities if m.get('slug') != 'panoramic']
@@ -546,12 +573,12 @@ def patient_detail(request, patient_id):
 
 
     # Voice captions
-    # Admins, standard users, and project managers see all captions.
-    # Annotators can only see their own captions (to avoid bias during annotation).
+    # Viewers and admins see all captions; annotators see only their own (to
+    # avoid bias during annotation).
     voice_captions = patient.voice_captions.all()
-    is_admin_user = user_is_project_admin(request.user, request)
+    is_admin_user = user_is_project_admin(request.user, patient.project)
     folder_role = get_user_folder_role(request.user, patient.folder) if patient.folder else None
-    can_see_all_captions = is_admin_user or folder_role in ('standard', 'project_manager')
+    can_see_all_captions = is_admin_user or folder_role == 'viewer'
     for caption in voice_captions:
         caption.can_view_content = bool(can_see_all_captions or caption.user_id == request.user.id)
         caption.can_edit_content = user_can_edit_caption(request.user, caption)
@@ -616,7 +643,7 @@ def patient_detail(request, patient_id):
     # Processing steps possible for this patient's rerun ("Rerun" header action).
     try:
         from common.modality_config import rerunnable_steps_for_patient
-        _rerunnable = rerunnable_steps_for_patient(list(patient.files.all()), [])
+        _rerunnable = rerunnable_steps_for_patient(list(patient.files.all()), [], patient=patient)
         rerunnable_step_slugs = [step['slug'] for step in _rerunnable]
     except Exception:
         logger.warning("Failed to compute rerunnable steps for patient %s", patient.patient_id, exc_info=True)
@@ -636,6 +663,7 @@ def patient_detail(request, patient_id):
         'can_modify_segmentation': can_modify,
         'patient_modalities': patient_modalities,
         'default_modality_slug': default_modality_slug,
+        'allowed_annotations': allowed_annotations,
         'django_data': django_data,
         'patient_files': patient_files,
         'voice_captions': voice_captions,
@@ -761,8 +789,8 @@ def update_patient_name(request, patient_id):
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
         
-        can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-        if user_is_project_admin(request.user, request):
+        can_modify = bool(patient.project and user_can_write_patient_annotations(request.user, patient))
+        if user_is_project_admin(request.user, patient.project):
             can_modify = True
         
         if not can_modify:

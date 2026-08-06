@@ -9,7 +9,7 @@ from common.models import Project, ProjectAccess
 def set_maxillo(request):
     proj = Project.objects.filter(slug='maxillo').first() or Project.objects.filter(name__iexact='maxillo').first()
     if not proj:
-        proj = Project.objects.create(name='maxillo', slug='maxillo')
+        proj = Project.objects.create(name='Maxillo', slug='maxillo', domain='maxillo')
 
     # Check if user has access to Maxillo project
     if not request.user.profile.is_admin():

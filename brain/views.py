@@ -28,8 +28,8 @@ from common.permissions import (
     filter_patients_for_user,
     user_can_delete_single_patient,
     user_can_edit_caption,
-    user_can_read_folder,
-    user_can_write_annotations,
+    user_can_write_patient_annotations,
+    user_has_project_access,
     user_is_project_admin,
 )
 
@@ -91,8 +91,8 @@ def select_project(request, project_id):
 @login_required
 def patient_detail(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view = bool(any(user_can_read_folder(request.user, f, request) for f in patient.folders.all()))
-    if user_is_project_admin(request.user, "brain"):
+    can_view = bool(patient.project and user_has_project_access(request.user, patient.project))
+    if user_is_project_admin(request.user, patient.project):
         can_view = True
     if not can_view:
         messages.error(request, "You do not have permission to view this scan.")
@@ -100,8 +100,8 @@ def patient_detail(request, patient_id):
 
     management_form = PatientManagementForm(instance=patient, user=request.user)
 
-    can_modify = bool(any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all()))
-    if user_is_project_admin(request.user, "brain"):
+    can_modify = bool(patient.project and user_can_write_patient_annotations(request.user, patient))
+    if user_is_project_admin(request.user, patient.project):
         can_modify = True
 
     if request.method == "POST" and can_modify:
@@ -158,7 +158,7 @@ def patient_detail(request, patient_id):
             patient_files["other"].append(file_data)
 
     voice_captions = patient.voice_captions.all()
-    is_admin_user = user_is_project_admin(request.user, "brain")
+    is_admin_user = user_is_project_admin(request.user, patient.project)
     for caption in voice_captions:
         caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
         caption.can_edit_content = bool(is_admin_user or caption.user_id == request.user.id)
@@ -243,10 +243,10 @@ def patient_list(request):
     folder_id = request.GET.get("folder")
     if folder_id and folder_id != "all":
         if folder_id == "root":
-            patients = patients.filter(folders__isnull=True)
+            patients = patients.filter(folder__isnull=True)
         else:
             try:
-                patients = patients.filter(folders__id=int(folder_id)).distinct()
+                patients = patients.filter(folder_id=int(folder_id))
             except ValueError:
                 pass
 
@@ -274,7 +274,7 @@ def patient_list(request):
                 status_filters[slug] = value
 
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, "brain")
+    is_admin = user_is_project_admin(request.user, request)
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -315,12 +315,12 @@ def patient_list(request):
             "voice_caption_count": len(voice_captions),
             "voice_annotators": list({vc.user.username for vc in voice_captions}),
             "tags": patient.tag_names(),
-            "folder": patient.folders.first(),
+            "folder": patient.folder,
             "available_modalities": [m.slug for m in patient.modalities.all()],
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
-            "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list),
-            "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())),
+            "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient),
+            "can_delete": bool(is_admin or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))),
         })
 
     if status_filters:
@@ -336,14 +336,21 @@ def patient_list(request):
     if per_page not in {10, 20, 50, 100}:
         per_page = 10
     page_obj = Paginator(patients_with_status, per_page).get_page(request.GET.get("page"))
-    folders = filter_folders_for_user(request.user, Folder.objects.filter(parent__isnull=True).order_by("name"), "brain")
+    project_id = current_project_id
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True)
+        .filter(project_id=project_id if project_id else None)
+        .order_by("name"),
+        "brain",
+    )
     context = {
         "page_obj": page_obj,
         "current_project_id": current_project_id,
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,
-        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folders=folder).count()} for folder in folders],
+        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folder=folder).count()} for folder in folders],
         "all_tags": Tag.objects.all().order_by("name"),
         "per_page": per_page,
         "user_profile": request.user.profile,
@@ -381,13 +388,15 @@ def upload_patient(request):
         messages.error(request, "You do not have permission to upload scans.")
         return redirect_with_namespace(request, "patient_list")
 
+    current_project_id = request.session.get("current_project_id")
     folders = filter_folders_for_user(
         request.user,
-        Folder.objects.filter(parent__isnull=True).order_by("name"),
+        Folder.objects.filter(parent__isnull=True)
+        .filter(project_id=current_project_id if current_project_id else None)
+        .order_by("name"),
         namespace,
     )
     allowed_modalities = []
-    current_project_id = request.session.get("current_project_id")
     if current_project_id:
         try:
             project = Project.objects.prefetch_related("modalities").get(id=current_project_id)
@@ -396,7 +405,9 @@ def upload_patient(request):
             pass
 
     if request.method == "POST":
-        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
+        patient_upload_form = PatientUploadForm(
+            request.POST, request.FILES, user=request.user, current_project=project
+        )
         patient_form = PatientForm()
 
         brain_upload_fields = {
@@ -443,8 +454,13 @@ def upload_patient(request):
             patient_upload_form.instance = patient
             patient_upload_form.save(commit=True)
 
+            # Project scope is mandatory: assign the current project + folder.
+            project = Project.objects.filter(id=current_project_id).first() if current_project_id else None
+            if project:
+                patient.project = project
             if folder:
-                patient.folders.set([folder])
+                patient.folder = folder
+            patient.save()
 
             uploaded_modalities = []
             processing_job_ids = []
@@ -488,7 +504,7 @@ def upload_patient(request):
             return redirect_with_namespace(request, "patient_list")
     else:
         patient_form = PatientForm()
-        patient_upload_form = PatientUploadForm(user=request.user)
+        patient_upload_form = PatientUploadForm(user=request.user, current_project=project)
 
     return render(request, "common/upload/upload.html", {
         "patient_form": patient_form,
@@ -510,8 +526,9 @@ def _with_brain_export_mappings(view_func):
 @require_POST
 def update_patient_name(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not user_is_project_admin(request.user, "brain") and not (
-        any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
+    if not (
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
@@ -531,8 +548,8 @@ def update_patient_name(request, patient_id):
 def delete_patient(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     can_delete = bool(
-        user_is_project_admin(request.user, "brain")
-        or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())
+        user_is_project_admin(request.user, patient.project)
+        or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))
     )
     if not can_delete:
         return JsonResponse(
@@ -812,7 +829,10 @@ def move_patients_to_folder(request):
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        patient.folders.set([folder] if folder else [])
+        patient.folder = folder
+        if folder:
+            patient.project = folder.project
+        patient.save(update_fields=["folder", "project"])
         updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
@@ -836,7 +856,9 @@ def add_patients_to_folder(request):
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        patient.folders.add(folder)
+        patient.folder = folder
+        patient.project = folder.project
+        patient.save(update_fields=["folder", "project"])
         updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
@@ -860,7 +882,13 @@ def remove_patients_from_folder(request):
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        patient.folders.remove(folder)
+        if patient.folder_id != folder.id:
+            continue
+        # Folders are mandatory: removing a folder falls back to the project's
+        # default folder rather than leaving the patient folderless.
+        default_folder = Folder.objects.filter(project=patient.project, parent__isnull=True).first()
+        patient.folder = default_folder or folder
+        patient.save(update_fields=["folder"])
         updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
@@ -870,8 +898,8 @@ def remove_patients_from_folder(request):
 def add_patient_tag(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
-        user_is_project_admin(request.user, "brain")
-        or any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
@@ -891,8 +919,8 @@ def add_patient_tag(request, patient_id):
 def remove_patient_tag(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
-        user_is_project_admin(request.user, "brain")
-        or any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
@@ -914,11 +942,8 @@ def remove_patient_tag(request, patient_id):
 def upload_text_caption(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
-        user_is_project_admin(request.user, "brain")
-        or any(
-            user_can_write_annotations(request.user, folder, "brain")
-            for folder in patient.folders.all()
-        )
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
@@ -960,7 +985,7 @@ def delete_voice_caption(request, patient_id, caption_id):
     caption = get_object_or_404(patient.voice_captions, id=caption_id)
 
     is_owner = caption.user_id == request.user.id
-    is_admin = user_is_project_admin(request.user, "brain")
+    is_admin = user_is_project_admin(request.user, caption.patient.project)
     if not is_owner and not is_admin:
         return JsonResponse(
             {

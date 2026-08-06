@@ -7,7 +7,7 @@ from django.utils import timezone
 from .models import (
     Patient, Classification, Dataset
 )
-from common.models import Invitation
+from common.models import Invitation, Project, ProjectAccess
 from common.permissions import filter_folders_for_user
 from .models import Tag, Folder
 
@@ -26,6 +26,9 @@ class PatientUploadForm(forms.ModelForm):
     - Teleradiography (single image)
     - Intraoral photos (multiple images - NOT in form, handled in view)
     - Panoramic (single image)
+
+    Project and folder are both mandatory: patients always live inside a
+    project, and folders belong to a project.
     """
     # CBCT fields
     cbct = forms.FileField(
@@ -79,10 +82,17 @@ class PatientUploadForm(forms.ModelForm):
     # Note: intraoral-photo is multiple files, handled in view with request.FILES.getlist('intraoral-photos')
     
     # Organization fields
+    project = forms.ModelChoiceField(
+        queryset=Project.objects.none(),
+        required=True,
+        label='Project',
+        widget=forms.Select(attrs={'class': 'form-control'}),
+    )
     folder = forms.ModelChoiceField(
-        queryset=Folder.objects.all().order_by('name'), 
-        required=False, 
-        widget=forms.Select(attrs={'class': 'form-control'})
+        queryset=Folder.objects.none(),
+        required=True,
+        label='Folder',
+        widget=forms.Select(attrs={'class': 'form-control'}),
     )
     tags_text = forms.CharField(
         required=False, 
@@ -92,7 +102,7 @@ class PatientUploadForm(forms.ModelForm):
     
     class Meta:
         model = Patient
-        fields = ['name', 'folder']
+        fields = ['name', 'project', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Patient X'}),
         }
@@ -101,18 +111,44 @@ class PatientUploadForm(forms.ModelForm):
             'folder': 'Folder',
         }
     
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, current_project=None, domain=None, **kwargs):
         super().__init__(*args, **kwargs)
-
+        self.fields['folder'].required = True
         if user:
-            folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
-            self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'maxillo')
+            projects_qs = Project.objects.filter(is_active=True)
+            if domain:
+                projects_qs = projects_qs.filter(domain=domain)
+            if not user.is_staff:
+                accessible = ProjectAccess.objects.filter(user=user).values_list('project_id', flat=True)
+                projects_qs = projects_qs.filter(id__in=accessible)
+            self.fields['project'].queryset = projects_qs.order_by('name')
+
+            project_id = None
+            if self.data:
+                project_id = self.data.get('project') or self.data.get('project_id')
+            if not project_id and current_project:
+                project_id = getattr(current_project, 'id', current_project)
+            if project_id:
+                self.fields['folder'].queryset = (
+                    Folder.objects.filter(project_id=project_id, parent__isnull=True).order_by('name')
+                )
+                self.fields['project'].initial = project_id
         else:
+            self.fields['project'].queryset = Project.objects.none()
             self.fields['folder'].queryset = Folder.objects.none()
     
     def clean(self):
         cleaned_data = super().clean()
-        
+
+        project = cleaned_data.get('project')
+        folder = cleaned_data.get('folder')
+        if project and folder and folder.project_id != project.id:
+            raise forms.ValidationError(
+                'The selected folder does not belong to the selected project.'
+            )
+        if not folder:
+            raise forms.ValidationError('A folder is required.')
+
         # IOS validation: if one is provided, both must be provided
         ios_upper = cleaned_data.get('ios_upper')
         ios_lower = cleaned_data.get('ios_lower')
@@ -126,7 +162,11 @@ class PatientUploadForm(forms.ModelForm):
    
     def save(self, commit=True):
         instance = super().save(commit)
-        
+
+        project = self.cleaned_data.get('project')
+        if project:
+            instance.project = project
+
         # Parse tags and assign
         tags_text = self.cleaned_data.get('tags_text', '') or ''
         tag_names = [t.strip() for t in tags_text.split(',') if t.strip()]
@@ -174,8 +214,12 @@ class PatientManagementForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['dataset'].empty_label = "No Dataset"
         self.fields['dataset'].required = False
+        # Folders must belong to the patient's project.
+        scope_project_id = getattr(self.instance, 'project_id', None)
         if user:
             folders_qs = Folder.objects.filter(parent__isnull=True).order_by('name')
+            if scope_project_id:
+                folders_qs = folders_qs.filter(project_id=scope_project_id)
             self.fields['folder'].queryset = filter_folders_for_user(user, folders_qs, 'maxillo')
         else:
             self.fields['folder'].queryset = Folder.objects.none()

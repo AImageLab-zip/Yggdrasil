@@ -10,7 +10,7 @@ from laparoscopy import views as laparo_views
 def set_laparoscopy(request):
     proj = Project.objects.filter(slug='laparoscopy').first()
     if not proj:
-        proj = Project.objects.create(name='laparoscopy', slug='laparoscopy')
+        proj = Project.objects.create(name='Laparoscopy', slug='laparoscopy', domain='laparoscopy')
 
     if not (request.user.profile.is_admin or request.user.profile.is_student_developer()):
         has_access = ProjectAccess.objects.filter(user=request.user, project=proj).exists()
