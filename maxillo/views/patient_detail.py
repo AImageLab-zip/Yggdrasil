@@ -13,6 +13,7 @@ from common.file_access import exists as artifact_exists
 from common.object_storage import get_object_storage
 from common.permissions import (
     get_user_folder_role,
+    project_allows_annotation,
     user_can_edit_caption,
     user_can_read_patient,
     user_can_view_caption_content,
@@ -290,6 +291,12 @@ def patient_detail(request, patient_id):
         action = request.POST.get('action')
         
         if action == 'accept_ai' and ai_classification:
+            if not (
+                project_allows_annotation(patient, 'classification')
+                or project_allows_annotation(patient, 'bite_classification')
+            ):
+                messages.error(request, 'Occlusion classification is disabled for this project.')
+                return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
             Classification.objects.create(
                 patient=patient,
                 classifier='manual',
@@ -463,6 +470,20 @@ def patient_detail(request, patient_id):
             )
     except Exception:
         allowed_annotations = []
+
+    # Sidebar tabs: occlusion and captions panes are hidden when the project
+    # does not enable their annotation methods; the first visible tab is active.
+    occlusion_enabled = bool(
+        set(allowed_annotations)
+        & {'classification', 'bite_classification', 'intraoral_segmentation'}
+    )
+    captions_enabled = 'voice_caption' in allowed_annotations
+    if occlusion_enabled:
+        default_tab = 'classification'
+    elif captions_enabled:
+        default_tab = 'captions'
+    else:
+        default_tab = 'files'
 
     has_panoramic = has_uploaded_panoramic or has_cbct
     if not has_panoramic:
@@ -664,6 +685,9 @@ def patient_detail(request, patient_id):
         'patient_modalities': patient_modalities,
         'default_modality_slug': default_modality_slug,
         'allowed_annotations': allowed_annotations,
+        'occlusion_enabled': occlusion_enabled,
+        'captions_enabled': captions_enabled,
+        'default_tab': default_tab,
         'django_data': django_data,
         'patient_files': patient_files,
         'voice_captions': voice_captions,

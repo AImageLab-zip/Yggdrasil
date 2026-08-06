@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 import os
 from django.utils import timezone
 from django.utils.text import slugify
-from common.models import Modality, ProjectAccess, Job, FileRegistry, Invitation
+from common.models import Modality, Project, ProjectAccess, Job, FileRegistry, Invitation
 from common.base_models import (
     ActivePatientManager,
     DatasetBase,
@@ -98,6 +98,20 @@ class Dataset(DatasetBase):
 
     def patient_count(self):
         return self.patients.count()
+
+
+class MaxilloProject(Project):
+    """Project proxy bound to the maxillo domain.
+
+    Lets Django admin show maxillo projects under the Maxillo section (the
+    concrete Project model lives in common, so without a proxy it would appear
+    under Common). The admin forces ``domain='maxillo'`` on create/change.
+    """
+
+    class Meta:
+        proxy = True
+        verbose_name = 'Maxillo project'
+        verbose_name_plural = 'Maxillo projects'
 
 
 class Folder(FolderBase):

@@ -14,7 +14,12 @@ from django.views.decorators.http import require_POST
 from PIL import Image
 
 from common.file_access import exists as artifact_exists, open_binary
-from common.permissions import user_can_read_folder, user_can_write_annotations, user_is_project_admin
+from common.permissions import (
+    project_allows_annotation,
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 from common.models import Job
 
 from ..models import IntraoralToothSegmentation
@@ -452,6 +457,8 @@ def update_patient_intraoral_segmentation(request, patient_id):
 
     if not _can_modify(user_profile, patient):
         return JsonResponse({'error': 'Permission denied'}, status=403)
+    if not project_allows_annotation(patient, 'intraoral_segmentation'):
+        return JsonResponse({'error': 'Intraoral segmentation is disabled for this project'}, status=403)
 
     try:
         payload = json.loads(request.body or '{}')

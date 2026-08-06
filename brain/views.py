@@ -29,6 +29,7 @@ from common.permissions import (
     user_can_delete_single_patient,
     user_can_edit_caption,
     user_can_write_patient_annotations,
+    project_allows_annotation,
     user_has_project_access,
     user_is_project_admin,
 )
@@ -208,6 +209,21 @@ def patient_detail(request, patient_id):
         "allowed_modality_slugs": [m.slug for m in allowed_modalities],
         # report_language now provided globally by common.context_processors.user_prefs
     }
+
+    # Annotation methods + sidebar default tab (captions pane hides when the
+    # project disables voice_caption).
+    allowed_annotations = []
+    if getattr(patient, "project", None) is not None:
+        allowed_annotations = list(
+            patient.project.annotation_methods
+            .filter(is_active=True)
+            .values_list("slug", flat=True)
+        )
+    captions_enabled = "voice_caption" in allowed_annotations
+    context["allowed_annotations"] = allowed_annotations
+    context["captions_enabled"] = captions_enabled
+    context["default_tab"] = "captions" if captions_enabled else "files"
+    context["occlusion_enabled"] = False
 
     # Record for the landing "Continue where you left off" strip (best-effort).
     from common.activity import record_recent
@@ -953,6 +969,8 @@ def upload_text_caption(request, patient_id):
         or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "voice_caption"):
+        return JsonResponse({"error": "Voice captions are disabled for this project"}, status=403)
     try:
         data = _json.loads(request.body) if request.body else request.POST
     except _json.JSONDecodeError:

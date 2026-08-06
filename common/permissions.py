@@ -146,6 +146,19 @@ def user_can_write_patient_annotations(user, patient):
     return user_can_write_annotations(user, getattr(patient, "folder", None), patient.project)
 
 
+def project_allows_annotation(patient, method_slug):
+    """Whether the patient's project enables an annotation method.
+
+    Absent a project (legacy rows) we stay permissive so nothing breaks; once a
+    project exists the annotation-method set is authoritative (UI hides the
+    tools and the write endpoints reject them).
+    """
+    project = getattr(patient, "project", None)
+    if project is None:
+        return True
+    return project.allows_annotation(method_slug)
+
+
 def user_can_delete_single_patient(user, folder, project_or_app_context=None):
     return user_can_write_annotations(user, folder, project_or_app_context)
 

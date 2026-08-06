@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.db.models import Count
 from django.contrib.auth.models import User
-from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation
-from common.models import Project, Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation, AnnotationMethod
+from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation, MaxilloProject
+from common.models import Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation, AnnotationMethod
 from .models import Tag, Folder
 
 
@@ -39,13 +39,28 @@ class PatientAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         return qs
 
 
-@admin.register(Project)
-class ProjectAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['name', 'domain', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
-    list_filter = ['domain', 'is_active', 'created_at']
+@admin.register(MaxilloProject)
+class MaxilloProjectAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    """Maxillo projects, shown under the Maxillo admin section (domain forced)."""
+    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
+    list_filter = ['is_active', 'created_at']
     search_fields = ['name', 'description', 'slug']
     prepopulated_fields = {"slug": ("name",)}
-    filter_horizontal = ['modalities', 'annotation_methods']
+    filter_horizontal = ['modalities', 'annotation_methods', 'disabled_steps']
+    readonly_fields = ['domain']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(domain='maxillo')
+
+    def save_model(self, request, obj, form, change):
+        obj.domain = 'maxillo'
+        super().save_model(request, obj, form, change)
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if 'domain' in form.base_fields:
+            form.base_fields['domain'].initial = 'maxillo'
+        return form
 
 
 @admin.register(AnnotationMethod)

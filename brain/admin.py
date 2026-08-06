@@ -1,6 +1,24 @@
 from django.contrib import admin
 
-from .models import Dataset, Export, Folder, Patient, Tag, VoiceCaption
+from .models import BrainProject, Dataset, Export, Folder, Patient, Tag, VoiceCaption
+
+
+@admin.register(BrainProject)
+class BrainProjectAdmin(admin.ModelAdmin):
+    """Brain projects, shown under the Brain admin section (domain forced)."""
+    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name', 'description', 'slug']
+    prepopulated_fields = {'slug': ('name',)}
+    filter_horizontal = ['modalities', 'annotation_methods', 'disabled_steps']
+    readonly_fields = ['domain']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(domain='brain')
+
+    def save_model(self, request, obj, form, change):
+        obj.domain = 'brain'
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Dataset)

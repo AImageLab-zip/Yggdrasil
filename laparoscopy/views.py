@@ -21,6 +21,7 @@ from laparoscopy.models import (
     RegionType,
     RegionTypeUserColor,
 )
+from common.permissions import project_allows_annotation
 
 
 logger = logging.getLogger(__name__)
@@ -486,6 +487,8 @@ def patient_quadrant_markers(request, patient_id):
 
     if not can_modify:
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "video_regions"):
+        return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
 
     try:
         data = _parse_json_body(request)
@@ -524,6 +527,8 @@ def patient_region_annotations(request, patient_id):
 
     if not can_modify:
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "video_regions"):
+        return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
 
     try:
         data = _parse_json_body(request)
@@ -602,11 +607,15 @@ def region_annotation_detail(request, annotation_id):
     if request.method == "DELETE":
         if not can_modify:
             return JsonResponse({"error": "Permission denied"}, status=403)
+        if not project_allows_annotation(patient, "video_regions"):
+            return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
         annotation.delete()
         return HttpResponse(status=204)
 
     if not can_modify:
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "video_regions"):
+        return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
 
     try:
         data = _parse_json_body(request)

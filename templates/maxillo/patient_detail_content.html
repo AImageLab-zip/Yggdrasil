@@ -373,17 +373,21 @@
     <!-- Tabbed sidebar -->
     <div class="side-panel">
         <div class="side-panel__tabs" role="tablist">
-            <button type="button" class="side-tab is-active" data-tab-target="classification">Occlusion</button>
-            <button type="button" class="side-tab" data-tab-target="captions">Captions</button>
-            <button type="button" class="side-tab" data-tab-target="files">Files</button>
-            {% if patient.has_cbct_scan %}
-            <button type="button" class="side-tab" data-tab-target="metadata">Metadata</button>
+            {% if occlusion_enabled %}
+            <button type="button" class="side-tab {% if default_tab == 'classification' %}is-active{% endif %}" data-tab-target="classification">Occlusion</button>
             {% endif %}
-            <button type="button" class="side-tab" data-tab-target="settings">Settings</button>
-            <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
+            {% if captions_enabled %}
+            <button type="button" class="side-tab {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-target="captions">Captions</button>
+            {% endif %}
+            <button type="button" class="side-tab {% if default_tab == 'files' %}is-active{% endif %}" data-tab-target="files">Files</button>
+            {% if patient.has_cbct_scan %}
+            <button type="button" class="side-tab {% if default_tab == 'metadata' %}is-active{% endif %}" data-tab-target="metadata">Metadata</button>
+            {% endif %}
+            <button type="button" class="side-tab {% if default_tab == 'settings' %}is-active{% endif %}" data-tab-target="settings">Settings</button>
+            <button type="button" class="side-tab {% if default_tab == 'activity' %}is-active{% endif %}" data-tab-target="activity">Activity</button>
         </div>
         <div class="side-panel__body">
-            <div class="side-tab-pane is-active" data-tab-pane="classification">
+            <div class="side-tab-pane {% if default_tab == 'classification' %}is-active{% endif %}" data-tab-pane="classification">
                 {% if 'bite_classification' in allowed_annotations or 'classification' in allowed_annotations %}
                 {% include 'maxillo/sections/bite_classification_section.html' %}
                 {% endif %}
@@ -391,21 +395,21 @@
                 {% include 'maxillo/sections/intraoral_segmentation_section.html' %}
                 {% endif %}
             </div>
-            <div class="side-tab-pane" data-tab-pane="captions">
+            <div class="side-tab-pane {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-pane="captions">
                 {% include 'common/sections/vocal_caption_section.html' %}
             </div>
-            <div class="side-tab-pane" data-tab-pane="files">
+            <div class="side-tab-pane {% if default_tab == 'files' %}is-active{% endif %}" data-tab-pane="files">
                 {% include 'common/sections/file_management_section.html' %}
             </div>
             {% if patient.has_cbct_scan %}
-            <div class="side-tab-pane" data-tab-pane="metadata">
+            <div class="side-tab-pane {% if default_tab == 'metadata' %}is-active{% endif %}" data-tab-pane="metadata">
                 {% include 'common/sections/nifti_metadata_section.html' %}
             </div>
             {% endif %}
-            <div class="side-tab-pane" data-tab-pane="settings">
+            <div class="side-tab-pane {% if default_tab == 'settings' %}is-active{% endif %}" data-tab-pane="settings">
                 {% include 'common/sections/scan_settings_section.html' %}
             </div>
-            <div class="side-tab-pane" data-tab-pane="activity">
+            <div class="side-tab-pane {% if default_tab == 'activity' %}is-active{% endif %}" data-tab-pane="activity">
                 {% include 'common/sections/activity_section.html' %}
             </div>
         </div>

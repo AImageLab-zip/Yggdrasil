@@ -21,6 +21,7 @@ from PIL import Image
 from common.file_access import exists as artifact_exists, streaming_response
 from common.file_access import open_binary
 from common.permissions import (
+    project_allows_annotation,
     user_can_read_folder,
     user_can_write_annotations,
     user_is_project_admin,
@@ -695,6 +696,8 @@ def patient_ios_landmarks(request, patient_id):
         return JsonResponse({"error": "Method not allowed"}, status=405)
     if not _can_write_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "ios_landmarks"):
+        return JsonResponse({"error": "IOS landmarks are disabled for this project"}, status=403)
     try:
         body = json.loads(request.body.decode("utf-8"))
         landmarks = body.get("landmarks") if isinstance(body, dict) and "landmarks" in body else body

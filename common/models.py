@@ -71,6 +71,13 @@ class Project(models.Model):
 	# Annotation methods enabled for this project. Empty = none; the UI hides
 	# annotation tools whose method is not enabled here.
 	annotation_methods = models.ManyToManyField('AnnotationMethod', blank=True, related_name='projects')
+	# Processing steps explicitly disabled for this project. Empty = all steps
+	# enabled (modulo the project's modality set); a step checked here never
+	# dispatches a job for this project's patients (upload-time dispatch, rerun
+	# picker and viewer availability all respect it).
+	disabled_steps = models.ManyToManyField(
+		'ProcessingStep', blank=True, related_name='disabled_for_projects'
+	)
 
 	class Meta:
 		ordering = ['domain', 'name']
@@ -78,6 +85,12 @@ class Project(models.Model):
 
 	def __str__(self):
 		return self.name
+
+	def allows_annotation(self, method_slug):
+		"""Whether an annotation method (e.g. 'ios_landmarks') is enabled."""
+		return self.annotation_methods.filter(
+			slug=method_slug, is_active=True
+		).exists()
 
 	def save(self, *args, **kwargs):
 		if not self.slug:

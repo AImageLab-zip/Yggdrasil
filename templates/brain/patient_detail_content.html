@@ -46,8 +46,8 @@
     <!-- Tabbed sidebar -->
     <div class="side-panel">
         <div class="side-panel__tabs" role="tablist">
-            <button type="button" class="side-tab is-active" data-tab-target="captions">Captions</button>
-            <button type="button" class="side-tab" data-tab-target="files">Files</button>
+            <button type="button" class="side-tab {% if captions_enabled %}is-active{% endif %}" data-tab-target="captions">Captions</button>
+            <button type="button" class="side-tab {% if not captions_enabled %}is-active{% endif %}" data-tab-target="files">Files</button>
             {% if patient.has_cbct_scan %}
             <button type="button" class="side-tab" data-tab-target="metadata">Metadata</button>
             {% endif %}
@@ -55,11 +55,11 @@
             <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
         </div>
         <div class="side-panel__body">
-            <div class="side-tab-pane is-active" data-tab-pane="captions">
+            <div class="side-tab-pane {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-pane="captions">
                 {# Report Template renders inside the voice-caption panel (shared partial) #}
                 {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
             </div>
-            <div class="side-tab-pane" data-tab-pane="files">
+            <div class="side-tab-pane {% if default_tab == 'files' %}is-active{% endif %}" data-tab-pane="files">
                 {% include 'common/sections/file_management_section.html' %}
             </div>
             {% if patient.has_cbct_scan %}

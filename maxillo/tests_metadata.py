@@ -295,7 +295,7 @@ class NiftiMetadataTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertContains(response, 'class="side-tab" data-tab-target="metadata"')
+        self.assertContains(response, 'data-tab-target="metadata"')
         self.assertContains(response, 'data-tab-pane="metadata"')
         self.assertContains(response, 'id="niftiMetadataContent"')
         self.assertContains(response, 'id="niftiMetadataDisplay" hidden')

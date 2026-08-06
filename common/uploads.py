@@ -107,6 +107,18 @@ def create_step_jobs(source_job):
             return created
         all_steps = [s for s in all_steps if s.modality.slug in allowed_slugs]
 
+    # Project step kill-switch: a step explicitly disabled for the project never
+    # dispatches (e.g. disable the IOS Landmarks prediction job while keeping
+    # the manual IOS Landmarks annotation method enabled).
+    if project is not None:
+        disabled_slugs = set(
+            project.disabled_steps.values_list("slug", flat=True)
+        )
+        if disabled_slugs:
+            if modality_slug in disabled_slugs:
+                return created
+            all_steps = [s for s in all_steps if s.slug not in disabled_slugs]
+
     entity_kwargs = entity_fk_kwargs(patient)
     priority = getattr(source_job, "priority", 0) or 0
 
@@ -178,6 +190,12 @@ def ensure_step_jobs_for_patient(patient, requested_slugs):
     )
     if allowed_slugs is not None:
         steps = [s for s in steps if s.modality.slug in allowed_slugs]
+
+    # Project step kill-switch (same rule as create_step_jobs).
+    if project is not None:
+        disabled_slugs = set(project.disabled_steps.values_list("slug", flat=True))
+        if disabled_slugs:
+            steps = [s for s in steps if s.slug not in disabled_slugs]
     step_by_slug = {step.slug: step for step in steps}
     requested = [str(s or "").strip() for s in requested_slugs]
     requested = [slug for slug in requested if slug in step_by_slug]

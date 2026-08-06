@@ -5,6 +5,7 @@ from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 import json
 from common.permissions import (
+    project_allows_annotation,
     user_can_delete_caption,
     user_can_edit_caption,
     user_can_write_annotations,
@@ -79,6 +80,8 @@ def upload_text_caption(request, patient_id):
 
     if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
         return JsonResponse({'error': 'Permission denied'}, status=403)
+    if not project_allows_annotation(patient, 'voice_caption'):
+        return JsonResponse({'error': 'Voice captions are disabled for this project'}, status=403)
     
     # Check permissions
     if not request.user.is_authenticated:

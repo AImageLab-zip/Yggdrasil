@@ -6,7 +6,7 @@ from django.utils import timezone
 
 import logging
 
-from common.models import Modality
+from common.models import Modality, Project
 from common.base_models import (
     ActivePatientManager,
     DatasetBase,
@@ -45,6 +45,15 @@ class Dataset(DatasetBase):
     class Meta:
         db_table = 'laparoscopy_dataset'
         ordering = ['name']
+
+
+class LaparoscopyProject(Project):
+    """Project proxy bound to the laparoscopy domain (admin section + forced domain)."""
+
+    class Meta:
+        proxy = True
+        verbose_name = 'Laparoscopy project'
+        verbose_name_plural = 'Laparoscopy projects'
 
 
 class Folder(FolderBase):

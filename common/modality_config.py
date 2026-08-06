@@ -230,6 +230,9 @@ def _available_steps_for_files(patient_files, patient=None):
         allowed_slugs = set(project.modalities.values_list("slug", flat=True))
         if allowed_slugs:
             steps = [s for s in steps if s.modality.slug in allowed_slugs]
+        disabled_slugs = set(project.disabled_steps.values_list("slug", flat=True))
+        if disabled_slugs:
+            steps = [s for s in steps if s.slug not in disabled_slugs]
         if not steps:
             return []
 

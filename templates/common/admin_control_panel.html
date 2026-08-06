@@ -114,7 +114,7 @@
 <div class="card-ygg card-ygg-body mb-6">
     <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold mb-0">Projects</h2>
-        <a href="/admin/common/project/add/" class="btn btn-secondary btn-sm">{% icon 'plus' %}<span>New project</span></a>
+        <a href="/admin/maxillo/maxilloproject/add/" class="btn btn-secondary btn-sm">{% icon 'plus' %}<span>New project</span></a>
     </div>
     {% if projects %}
     <div class="overflow-x-auto"><table class="table-ygg">
@@ -128,7 +128,7 @@
                 <td class="text-right mono">{{ p.member_count }}</td>
                 <td class="text-right mono">{{ p.modality_count }}</td>
                 <td class="text-right mono">{{ p.annotation_count }}</td>
-                <td><a class="text-primary" href="/admin/common/project/{{ p.id }}/change/">{% icon 'pen' 'ygg-icon-sm' %}<span class="sr-only">Edit</span></a></td>
+                <td><a class="text-primary" href="/admin/{{ p.domain }}/{{ p.domain }}project/{{ p.id }}/change/">{% icon 'pen' 'ygg-icon-sm' %}<span class="sr-only">Edit</span></a></td>
             </tr>
             {% endfor %}
         </tbody>
