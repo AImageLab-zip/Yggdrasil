@@ -170,8 +170,18 @@ class ActiveProfileMiddleware(MiddlewareMixin):
             logger.warning(f"ActiveProfileMiddleware: Project not found for domain '{app_key}'")
             return redirect('/')
         except ProjectAccess.DoesNotExist:
-            logger.debug(f"ActiveProfileMiddleware: No ProjectAccess for user {request.user.id} in project '{app_key}'")
-            return redirect('/')
+            if getattr(request.user, 'is_staff', False):
+                # Staff (lab developers) are admins everywhere: auto-provision the
+                # ProjectAccess row instead of bouncing them out of the app.
+                access = ProjectAccess.objects.create(
+                    user=request.user, project=project, role='admin'
+                )
+                request.user.profile = access
+                request.user_role = access.role
+                request.user_project_access = access
+            else:
+                logger.debug(f"ActiveProfileMiddleware: No ProjectAccess for user {request.user.id} in project '{app_key}'")
+                return redirect('/')
         except Exception as e:
             logger.error(f"ActiveProfileMiddleware: Unexpected error for user {request.user.id} in app '{app_key}': {e}")
             return redirect('/')
