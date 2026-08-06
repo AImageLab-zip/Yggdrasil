@@ -21,8 +21,8 @@ from django.views.decorators.http import require_http_methods
 from common.file_access import streaming_response
 from common.models import FileRegistry, Job
 from common.permissions import (
-    user_can_read_folder,
     user_can_view_caption_content,
+    user_has_project_access,
     user_is_project_admin,
 )
 
@@ -38,11 +38,9 @@ def health_check(request):
 def _user_can_read_brain_patient(user, patient):
     if patient is None or getattr(patient, "deleted", False):
         return False
-    if user_is_project_admin(user, "brain"):
+    if user_is_project_admin(user, patient.project):
         return True
-    return any(
-        user_can_read_folder(user, f, "brain") for f in patient.folders.all()
-    )
+    return user_has_project_access(user, patient.project)
 
 
 @login_required

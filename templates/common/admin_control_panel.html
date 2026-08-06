@@ -110,6 +110,32 @@
     {% else %}<p class="text-content-muted mb-0">No modalities found.</p>{% endif %}
 </div>
 
+<!-- Projects -->
+<div class="card-ygg card-ygg-body mb-6">
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold mb-0">Projects</h2>
+        <a href="/admin/maxillo/project/add/" class="btn btn-secondary btn-sm">{% icon 'plus' %}<span>New project</span></a>
+    </div>
+    {% if projects %}
+    <div class="overflow-x-auto"><table class="table-ygg">
+        <thead><tr><th>Project</th><th>Domain</th><th class="text-right">Patients</th><th class="text-right">Members</th><th class="text-right">Modalities</th><th class="text-right">Annotation methods</th><th></th></tr></thead>
+        <tbody>
+            {% for p in projects %}
+            <tr>
+                <td><strong>{{ p.name }}</strong> <code class="mono text-xs">{{ p.slug }}</code></td>
+                <td>{{ p.domain }}</td>
+                <td class="text-right mono">{{ p.patient_count }}</td>
+                <td class="text-right mono">{{ p.member_count }}</td>
+                <td class="text-right mono">{{ p.modality_count }}</td>
+                <td class="text-right mono">{{ p.annotation_count }}</td>
+                <td><a class="text-primary" href="/admin/maxillo/project/{{ p.id }}/change/">{% icon 'pen' 'ygg-icon-sm' %}<span class="sr-only">Edit</span></a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="alert-ygg alert-info">No projects found.</div>{% endif %}
+</div>
+
 <!-- Users -->
 <div class="grid gap-6 lg:grid-cols-2">
     <div class="card-ygg card-ygg-body">

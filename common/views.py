@@ -135,12 +135,42 @@ def admin_control_panel(request):
     # MySQL backup status (reuses the status-page helpers).
     from .models import SystemCheck
 
+    # Project overview (admin tooling for the Project-first layout).
+    from django.db.models import Count as _Count
+
+    projects = (
+        Project.objects.filter(is_active=True)
+        .annotate(
+            member_count=_Count("access_list"),
+            modality_count=_Count("modalities"),
+            annotation_count=_Count("annotation_methods"),
+        )
+        .order_by("domain", "name")
+    )
+    project_rows = []
+    for project in projects:
+        from .domains import patient_count_for as _patient_count_for
+
+        project_rows.append(
+            {
+                "id": project.id,
+                "name": project.name,
+                "domain": project.domain,
+                "slug": project.slug,
+                "member_count": project.member_count,
+                "modality_count": project.modality_count,
+                "annotation_count": project.annotation_count,
+                "patient_count": _patient_count_for(project) or 0,
+            }
+        )
+
     context = {
         "system_health": system_health,
         "job_counts": job_counts,
         "pending_by_modality": pending_by_modality,
         "user_count": user_count,
         "project_user_list": project_user_list,
+        "projects": project_rows,
         "backup": _backup_health(),
         "backup_inventory": _backup_inventory(),
         "recent_backups": SystemCheck.objects.filter(name="database_backup")[:8],

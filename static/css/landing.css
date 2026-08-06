@@ -1,19 +1,15 @@
 /*
  * Yggdrasil landing page — rebuilt to the design handoff ("Yggdrasil Landing").
  *
- * The landing carries its own chrome (top bar + footer) instead of the app rail,
- * and defaults to dark. Everything resolves --ygg-* tokens, so the theme toggle
- * flips it with no extra rules.
+ * The landing carries its own top bar (the shared app footer comes from
+ * base.html), and defaults to dark. Everything resolves --ygg-* tokens, so the
+ * theme toggle flips it with no extra rules.
  *
  * Per-domain accents come from --ygg-{maxillo,brain,laparoscopy}(-grad) in
  * tokens.css. The runic wordmark is the ONE place gold is allowed.
  *
  * Landing-only: never reaches app pages or viewers.
  */
-
-/* Landing renders its own footer, so drop the space theme.css reserves for the
-   fixed app footer. */
-body { padding-bottom: 0; }
 
 /* ---- Shell ------------------------------------------------------------- */
 main.landing {
@@ -42,9 +38,16 @@ main.landing {
 }
 .landing-bar__brand { display: flex; align-items: center; gap: 11px; }
 .landing-bar__logo { width: 26px; height: 26px; object-fit: contain; }
-:root[data-theme="dark"] .landing-bar__logo,
-:root[data-theme="dark"] .landing-tree {
-    filter: brightness(1.35) saturate(0.85);
+
+/* ---- Theme-locked accents ------------------------------------------------
+ * The landing keeps its light-mode brand colors (blue / green / orange) and the
+ * "drasil" green in BOTH themes: dark mode must not recolor them. Scoped to the
+ * landing stage so app pages still get their dark-mode accent variants. */
+:root[data-theme="dark"] main.landing {
+    --ygg-maxillo: #5b8def;
+    --ygg-brain: #14a38b;
+    --ygg-laparoscopy: #e0785f;
+    --ygg-accent2: var(--ygg-green-600);
 }
 .landing-bar__word { font-weight: 700; font-size: 15px; letter-spacing: 0.01em; }
 .landing-bar__ver {
@@ -266,13 +269,12 @@ main.landing {
     pointer-events: none;
 }
 /* The brain glyph's ink sits lower in its em-box than the tooth/video
-   glyphs, so the shared bottom offset above crops off the part that
-   actually reads as a brain, leaving only disconnected gyri bumps. Lift
-   and shrink it slightly so the hemisphere silhouette stays in frame. */
+   glyphs (almost no padding below it), so the shared -18px bottom offset
+   crops into the actual silhouette instead of just trimming empty space.
+   Nudge it up just enough to clear the ink; keep the same size/corner
+   anchor as the other watermarks so it reads with the same visual weight. */
 .domain--brain .domain__watermark {
-    bottom: 28px;
-    right: -4px;
-    font-size: 120px;
+    bottom: -3px;
 }
 .domain__tile {
     width: 52px;
@@ -409,23 +411,6 @@ main.landing {
     line-height: 1.5;
 }
 .landing-warn i { margin-right: 8px; }
-
-/* ---- Footer ------------------------------------------------------------ */
-.landing-foot {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 16px 24px;
-    font-size: 12px;
-    color: var(--ygg-text-muted);
-    border-top: 1px solid var(--ygg-border);
-}
-.landing-foot a { color: var(--ygg-primary); text-decoration: none; }
-.landing-foot__dot { opacity: 0.4; }
-.landing-foot__gh { color: var(--ygg-text-muted); }
-.landing-foot__gh:hover { color: var(--ygg-text); }
 
 @media (prefers-reduced-motion: reduce) {
     .landing-hero { animation: none; }

@@ -214,6 +214,13 @@
     background: var(--pano-sunken);
 }
 
+/* Reserve the bar's space even while idle so showing/hiding it during
+   generation/save never shifts the surrounding layout up or down. */
+.panorex-editor__progress[hidden] {
+    display: block;
+    visibility: hidden;
+}
+
 .panorex-editor__progress > div {
     width: 0;
     height: 100%;

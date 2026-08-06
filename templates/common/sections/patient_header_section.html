@@ -34,6 +34,7 @@
                     <span class="patient-header__pill"><i class="{{ m.icon|default:'fas fa-cube' }}" aria-hidden="true"></i>{% if m.label %}{{ m.label }}{% else %}{{ m.name }}{% endif %}</span>
                     {% endif %}
                 {% endfor %}
+                {% if patient.project %}<span class="patient-header__folder"><i class="fas fa-briefcase" aria-hidden="true"></i> {{ patient.project.name }}</span>{% endif %}
                 {% if patient.folder %}<span class="patient-header__folder">{{ patient.folder.name }}</span>{% endif %}
                 {% if patient.uploaded_by %}<span class="patient-header__uploader">uploaded by {{ patient.uploaded_by.username }}</span>{% endif %}
             </div>

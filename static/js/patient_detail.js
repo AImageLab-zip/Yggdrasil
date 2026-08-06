@@ -7,6 +7,12 @@ function closeClassificationDropdown(dropdown, restoreFocus) {
     if (!dropdown) return;
 
     dropdown.classList.remove('show');
+    dropdown.classList.remove('open-up');
+    dropdown.style.position = '';
+    dropdown.style.left = '';
+    dropdown.style.top = '';
+    dropdown.style.bottom = '';
+    dropdown.style.width = '';
     const button = dropdown.previousElementSibling;
     if (button) {
         button.setAttribute('aria-expanded', 'false');
@@ -53,7 +59,29 @@ function toggleDropdown(button) {
         if (!willShow) return;
 
         setSelectedClassificationOption(button, dropdown);
-        
+
+        // The side-panel card clips absolutely-positioned dropdowns (overflow
+        // hidden/auto), so pin the menu to the viewport at the button's rect and
+        // flip it upward when there is no room below.
+        const rect = button.getBoundingClientRect();
+        const menuWidth = dropdown.offsetWidth || Math.max(rect.width, 160);
+        const menuHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
+        const gap = 6;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const openUp = menuHeight > 0 && spaceBelow < menuHeight + gap && rect.top > menuHeight + gap + 12;
+        const left = Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8));
+        dropdown.classList.toggle('open-up', openUp);
+        dropdown.style.position = 'fixed';
+        dropdown.style.left = left + 'px';
+        dropdown.style.width = Math.max(rect.width, Math.min(menuWidth, window.innerWidth - 16)) + 'px';
+        if (openUp) {
+            dropdown.style.top = 'auto';
+            dropdown.style.bottom = (window.innerHeight - rect.top + gap) + 'px';
+        } else {
+            dropdown.style.top = (rect.bottom + gap) + 'px';
+            dropdown.style.bottom = 'auto';
+        }
+
         dropdown.querySelectorAll('.dropdown-option').forEach(option => {
             option.onclick = function() {
                 updateClassification(button, option);
@@ -386,6 +414,18 @@ function initViewerToggle() {
     const cbctControls = document.getElementById('cbctControls');
     const toggleGroup = document.getElementById('modalityToggleGroup');
 
+    // Image modalities (panoramic/intraoral/teleradiography) hide both control
+    // groups; collapse the toolbar bar so it does not render as an empty strip
+    // between the modality selector and the viewer.
+    const updateToolbarVisibility = function() {
+        const toolbar = document.querySelector('.viewer-toolbar');
+        if (!toolbar) return;
+        const anyVisible = [iosControls, cbctControls].some(function(group) {
+            return group && group.style.display !== 'none';
+        });
+        toolbar.style.display = anyVisible ? '' : 'none';
+    };
+
     const ensureCbctViewerReady = function(modality) {
         if (typeof window.CBCTViewer === 'undefined') {
             return;
@@ -555,6 +595,7 @@ function initViewerToggle() {
                     ensureCbctViewerReady(modality);
                 }
             }
+            updateToolbarVisibility();
         });
 
         // Ensure a default selection is applied if radios rendered without checked
@@ -585,6 +626,7 @@ function initViewerToggle() {
         if (cbctContainer) cbctContainer.style.display = 'none';
         if (iosControls) iosControls.style.display = 'flex';
         if (cbctControls) cbctControls.style.display = 'none';
+        updateToolbarVisibility();
         return;
     }
 
@@ -598,6 +640,7 @@ function initViewerToggle() {
             ensureCbctViewerReady('cbct');
             loadCbctInlinePanoramic();
         }, 100);
+        updateToolbarVisibility();
         return;
     }
 

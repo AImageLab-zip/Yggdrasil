@@ -216,7 +216,11 @@ window.PanoramicViewer = {
                     if (error) error.style.display = 'block';
                 };
 
-                img.onclick = null;
+                img.onclick = () => {
+                    if (requestToken === config.requestToken) {
+                        this.showFullscreenImage(img.src, 'Panoramic');
+                    }
+                };
 
                 const cacheToken = data.generation_uuid || (
                     data.revision !== undefined ? data.revision : this.refreshRevision
@@ -257,5 +261,20 @@ window.PanoramicViewer = {
         });
     },
     
-    showFullscreenImage: function() {}
+    showFullscreenImage: function(src, title) {
+        const modal = document.getElementById('fullscreenImageModal');
+        const modalTitle = document.getElementById('fullscreenImageModalLabel');
+        const fullscreenImg = document.getElementById('fullscreenImage');
+
+        if (modalTitle) modalTitle.textContent = title || 'Image Viewer';
+
+        if (modal) {
+            const bsModal = new bootstrap.Modal(modal);
+            bsModal.show();
+            if (fullscreenImg) {
+                fullscreenImg.onload = null;
+                fullscreenImg.src = src;
+            }
+        }
+    }
 };
