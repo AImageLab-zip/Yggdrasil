@@ -99,7 +99,6 @@ def select_project(request, project_id: int):
             return redirect('home')
     
     request.session['current_project_id'] = project.id
-    messages.success(request, f"Project set to {project.name}")
     return redirect_with_namespace(request, 'patient_list')
 
 

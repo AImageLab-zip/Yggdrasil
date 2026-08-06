@@ -85,7 +85,6 @@ def select_project(request, project_id):
             messages.error(request, f"You don't have access to the {project.name} project.")
             return redirect("home")
     request.session["current_project_id"] = project.id
-    messages.success(request, f"Project set to {project.name}")
     return redirect("brain:patient_list")
 
 
