@@ -301,3 +301,47 @@ folders inside those projects**:
 7. **ProjectAccess roles**: extend to `standard`/`annotator`/`admin` (adds
    read-only vs annotate distinction — needed to preserve today's
    `FolderAccess.standard` read-only semantics)?
+
+---
+
+## Implementation status (2026-08-06)
+
+DONE:
+- [x] Landmark visibility toggles (eye button + per-type toggles in toolbar
+      dropdown and workbench Display section)
+- [x] Project.domain + AnnotationMethod registry + Project.annotation_methods
+- [x] ProjectAccess/Invitation roles -> viewer/annotator/admin (data migration
+      maps legacy roles)
+- [x] Folder.project + Patient.project FKs (all three apps); brain M2M
+      collapsed to single folder FK
+- [x] Data migration: top-level folders become Projects, subfolders flattened,
+      FolderAccess folds into ProjectAccess, catch-all domain project absorbs
+      folderless patients. Validated against 2026-07-04 prod dump (4076 maxillo
+      / 782 brain / 10 lap patients; 0 orphans)
+- [x] Project-scoped permissions (permissions.py), middleware (session project
+      by domain), job API ACL
+- [x] Upload: project + folder mandatory (forms + server-side), modality gating
+      (UI + hard server guard), folder cascade JS
+- [x] Processing gating: step DAG dispatch filtered by project modalities
+      (create_step_jobs, ensure_step_jobs_for_patient, rerun picker)
+- [x] Annotation gating: patient-detail sections + laparoscopy annotation mode
+      by project.annotation_methods
+- [x] Admin: Project CRUD (modalities + annotation_methods + domain),
+      AnnotationMethod admin, ProjectAccess admin, admin-panel Projects table
+- [x] UI: landing cards -> select_project, patient header project/folder,
+      folder modal roles viewer/annotator/admin, folder endpoints project-scoped
+- [x] seed_dev, legacy import role mapping, urls.py hacks (domain on create)
+- [x] 303 tests green (dev stack); smoke: landing/upload/patients/patient/admin 200
+
+DELIBERATE DEVIATIONS from plan:
+- Patient.folder / Patient.project stay NULLABLE in the DB; mandatory is
+  enforced at form + view level (avoids CASCADE data loss if a project/folder
+  is ever deleted). on_delete stays SET_NULL/CASCADE with the nullable column.
+- FolderAccess tables and Folder.parent column kept (no data loss), no longer
+  read for authorization.
+- Object storage prefixes unchanged (domain-based), per decision 4.
+
+OPEN:
+- Run migrations on the live prod DB (deploy step; entrypoint runs migrate).
+- Browser check of the new landmark toggles + upload cascade on a running dev
+  server (smoke-tested via test client only).
