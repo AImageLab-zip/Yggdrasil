@@ -52,7 +52,12 @@
                 <div class="viewer-toolbar__divider"></div>
                 <div class="viewer-toolbar__group" id="iosLandmarkControls">
                     <span class="viewer-toolbar__label">Landmarks</span>
-                    <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Show landmark tools" aria-controls="iosLandmarkWorkbench" aria-expanded="false" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn" id="toggleLandmarkVisibility" title="Show/hide saved landmarks" aria-pressed="false"><i class="fas fa-eye" aria-hidden="true"></i></button>
+                    <div class="ygg-dropdown">
+                        <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Landmark visibility per type" aria-label="Filter landmark types"><i class="fas fa-sliders" aria-hidden="true"></i></button>
+                        <div class="ygg-dropdown-menu ygg-dropdown-menu--landmark-vis" id="iosLandmarkVisibilityDropdown" aria-label="Landmark type visibility"></div>
+                    </div>
+                    <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Open landmark annotation tools" aria-controls="iosLandmarkWorkbench" aria-expanded="false" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
                 </div>
 
             </div>
@@ -147,6 +152,28 @@
                                 <span class="ios-landmark-section__label">Landmark type</span>
                                 <div class="ios-landmark-types" id="iosLandmarkTypes" aria-label="Select landmark type"></div>
                                 <small>Hold Shift and left-click the matching jaw surface to place.</small>
+                            </div>
+                            <div class="ios-landmark-section ios-landmark-section--display">
+                                <span class="ios-landmark-section__label">Display</span>
+                                <div class="ios-landmark-display">
+                                    <div class="ios-landmark-display__block">
+                                        <span class="ios-landmark-section__label">Landmark visibility</span>
+                                        <div class="ios-landmark-vis-grid" id="iosLandmarkVisibilityWorkbench" aria-label="Landmark type visibility"></div>
+                                    </div>
+                                    <label class="ios-landmark-display__item">
+                                        <span>Landmark size</span>
+                                        <input type="range" id="landmarkSizeRange" min="0.2" max="2" step="0.05" value="0.65" aria-label="Landmark marker size">
+                                        <output id="landmarkSizeValue" for="landmarkSizeRange">0.65</output>
+                                    </label>
+                                    <label class="ios-landmark-display__item ios-landmark-display__check">
+                                        <input type="checkbox" id="toggleAxis" checked aria-label="Show 3D axes">
+                                        <span>3D axes</span>
+                                    </label>
+                                    <label class="ios-landmark-display__item ios-landmark-display__check">
+                                        <input type="checkbox" id="toggleWhiteBackground" aria-label="Use a white background">
+                                        <span>White background</span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -344,7 +371,7 @@
     <!-- Tabbed sidebar -->
     <div class="side-panel">
         <div class="side-panel__tabs" role="tablist">
-            <button type="button" class="side-tab is-active" data-tab-target="classification">Classification</button>
+            <button type="button" class="side-tab is-active" data-tab-target="classification">Occlusion</button>
             <button type="button" class="side-tab" data-tab-target="captions">Captions</button>
             <button type="button" class="side-tab" data-tab-target="files">Files</button>
             {% if patient.has_cbct_scan %}

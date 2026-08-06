@@ -100,11 +100,16 @@ THREE.STLLoader.prototype = {
 // Scene background follows the sitewide data-theme stamp on <html> (set pre-paint
 // in base.html, toggled by static/js/nav.js). Light matches --ygg-surface-sunken
 // (#eef1f5-ish, kept as the historical 0xf0f0f0); dark matches the dark value of
-// the same token (#152036) so the WebGL canvas blends into #scan-viewer.
+// the same token (#152036) so the WebGL canvas blends into #scan-viewer. The
+// "white background" display toggle overrides this with a pure white scene.
 function iosThemeBackgroundColor() {
     return document.documentElement.getAttribute('data-theme') === 'dark'
         ? new THREE.Color(0x152036)
         : new THREE.Color(0xf0f0f0);
+}
+
+function iosSceneBackgroundColor() {
+    return landmarkState1.whiteBackground ? new THREE.Color(0xffffff) : iosThemeBackgroundColor();
 }
 
 // Global variables for 3D scene
@@ -113,17 +118,31 @@ let controls1;
 let upperMesh1, lowerMesh1;
 let cameraLight1;
 let gridOverlay1;
+let referenceAxis1;
 let landmarkMarkers1;
 const landmarkState1 = {
     active: false,
+    // View-only visibility of saved landmarks (eye button), independent of the
+    // annotation workbench. Markers render when showLandmarks OR active.
+    showLandmarks: false,
+    // Per-type visibility map (all types visible by default). Keys are filled
+    // lazily from landmarkTypes1; undefined reads as visible.
+    visibleTypes: {},
     selectedTooth: '',
     selectedType: null,
     tool: 'place',
     selectedMarker: null,
     landmarks: {},
     dirty: false,
-    undoStack: []
+    undoStack: [],
+    markerSize: 0.65,
+    showAxis: true,
+    whiteBackground: false
 };
+
+function isLandmarkTypeVisible(type) {
+    return landmarkState1.visibleTypes[type] !== false;
+}
 const landmarkTypes1 = [
     'incisal', 'outer', 'bracket', 'gingival', 'mesial', 'distal', 'inner', 'facial', 'cusps', 'planar'
 ];
@@ -179,7 +198,7 @@ function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
     
     // Create scene
     const scene = new THREE.Scene();
-    scene.background = iosThemeBackgroundColor();
+    scene.background = iosSceneBackgroundColor();
     
     // Create camera
     const camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.1, 1000);
@@ -222,8 +241,9 @@ function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
     controls.handleResize();
     
     // Add reference frame axis
-    addReferenceAxis(scene);
-    
+    referenceAxis1 = addReferenceAxis(scene);
+    referenceAxis1.visible = landmarkState1.showAxis;
+
     // Store references
     scene1 = scene;
     camera1 = camera;
@@ -236,7 +256,7 @@ function initViewer(containerId, upperStlUrl, lowerStlUrl, retryCount = 0) {
     // Keep the scene background in sync when the user toggles the theme.
     if (!window.__iosThemeObserver) {
         window.__iosThemeObserver = new MutationObserver(function () {
-            if (scene1) scene1.background = iosThemeBackgroundColor();
+            if (scene1) scene1.background = iosSceneBackgroundColor();
         });
         window.__iosThemeObserver.observe(document.documentElement, {
             attributes: true,
@@ -306,6 +326,7 @@ function addReferenceAxis(scene) {
     addAxisLabels(axisGroup, axisLength);
     
     scene.add(axisGroup);
+    return axisGroup;
 }
 
 // Add text labels for the axes
@@ -673,6 +694,61 @@ function updateLandmarkControls() {
     renderLandmarkTeeth();
 }
 
+function toggleLandmarkVisibility() {
+    landmarkState1.showLandmarks = !landmarkState1.showLandmarks;
+    const button = document.getElementById('toggleLandmarkVisibility');
+    if (button) {
+        button.classList.toggle('active', landmarkState1.showLandmarks);
+        button.setAttribute('aria-pressed', String(landmarkState1.showLandmarks));
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.classList.toggle('fa-eye', landmarkState1.showLandmarks);
+            icon.classList.toggle('fa-eye-slash', !landmarkState1.showLandmarks);
+        }
+    }
+    if (landmarkState1.showLandmarks) setLandmarkStatus('Showing saved landmarks');
+    renderLandmarks();
+}
+
+function setLandmarkTypeVisibility(type, visible) {
+    landmarkState1.visibleTypes[type] = visible;
+    // Keep both toggle surfaces (workbench + toolbar dropdown) in sync.
+    document.querySelectorAll('.ios-landmark-vis[data-landmark-type="' + type + '"]').forEach(input => {
+        input.checked = visible;
+    });
+    syncLandmarkVisibility();
+}
+
+function initLandmarkVisibilityControls() {
+    ['iosLandmarkVisibilityWorkbench', 'iosLandmarkVisibilityDropdown'].forEach(id => {
+        const container = document.getElementById(id);
+        if (!container || container.dataset.initialized) return;
+        container.dataset.initialized = 'true';
+        landmarkTypes1.forEach(type => {
+            const label = document.createElement('label');
+            label.className = 'ios-landmark-vis-item';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.className = 'ios-landmark-vis';
+            input.dataset.landmarkType = type;
+            input.checked = isLandmarkTypeVisible(type);
+            input.setAttribute('aria-label', 'Show ' + (landmarkTypeLabels1[type] || type) + ' landmarks');
+            const dot = document.createElement('span');
+            dot.className = 'ios-landmark-vis-dot';
+            dot.style.setProperty('--landmark-color', '#' + landmarkColors1[type].toString(16).padStart(6, '0'));
+            const text = document.createElement('span');
+            text.textContent = landmarkTypeLabels1[type] || type;
+            input.addEventListener('change', function() {
+                setLandmarkTypeVisibility(type, input.checked);
+            });
+            label.appendChild(input);
+            label.appendChild(dot);
+            label.appendChild(text);
+            container.appendChild(label);
+        });
+    });
+}
+
 function initLandmarkControls() {
     const teeth = document.getElementById('iosLandmarkTeeth');
     const types = document.getElementById('iosLandmarkTypes');
@@ -711,6 +787,9 @@ function initLandmarkControls() {
         });
         types.appendChild(button);
     });
+    const visButton = document.getElementById('toggleLandmarkVisibility');
+    if (visButton) visButton.addEventListener('click', toggleLandmarkVisibility);
+    initLandmarkVisibilityControls();
     document.getElementById('toggleLandmarkMode').addEventListener('click', function() {
         landmarkState1.active = !landmarkState1.active;
         landmarkState1.selectedMarker = null;
@@ -733,8 +812,38 @@ function initLandmarkControls() {
     document.getElementById('undoLandmark').addEventListener('click', undoLandmarkChange);
     document.getElementById('deleteLandmark').addEventListener('click', deleteSelectedLandmark);
     document.getElementById('saveLandmarks').addEventListener('click', saveLandmarks);
+    initLandmarkDisplayControls();
     document.addEventListener('keydown', onLandmarkKeyDown);
     updateLandmarkControls();
+}
+
+function initLandmarkDisplayControls() {
+    const sizeRange = document.getElementById('landmarkSizeRange');
+    const sizeValue = document.getElementById('landmarkSizeValue');
+    if (sizeRange) {
+        sizeRange.value = String(landmarkState1.markerSize);
+        sizeRange.addEventListener('input', function() {
+            landmarkState1.markerSize = parseFloat(this.value);
+            if (sizeValue) sizeValue.textContent = this.value;
+            renderLandmarks();
+        });
+    }
+    const axisToggle = document.getElementById('toggleAxis');
+    if (axisToggle) {
+        axisToggle.checked = landmarkState1.showAxis;
+        axisToggle.addEventListener('change', function() {
+            landmarkState1.showAxis = this.checked;
+            if (referenceAxis1) referenceAxis1.visible = this.checked;
+        });
+    }
+    const whiteToggle = document.getElementById('toggleWhiteBackground');
+    if (whiteToggle) {
+        whiteToggle.checked = landmarkState1.whiteBackground;
+        whiteToggle.addEventListener('change', function() {
+            landmarkState1.whiteBackground = this.checked;
+            if (scene1) scene1.background = iosSceneBackgroundColor();
+        });
+    }
 }
 
 function renderLandmarks() {
@@ -744,7 +853,7 @@ function renderLandmarks() {
         marker.geometry.dispose();
         marker.material.dispose();
     });
-    if (!landmarkState1.active || (!upperMesh1 && !lowerMesh1)) return;
+    if ((!landmarkState1.active && !landmarkState1.showLandmarks) || (!upperMesh1 && !lowerMesh1)) return;
     if (upperMesh1) upperMesh1.updateWorldMatrix(true, false);
     if (lowerMesh1) lowerMesh1.updateWorldMatrix(true, false);
     Object.entries(landmarkState1.landmarks || {}).forEach(([key, entry]) => {
@@ -758,7 +867,7 @@ function renderLandmarks() {
             values.forEach((value, index) => {
                 if (!Array.isArray(value) || value.length !== 3) return;
                 const marker = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.65, 16, 12),
+                    new THREE.SphereGeometry(landmarkState1.markerSize, 16, 12),
                     new THREE.MeshBasicMaterial({ color: landmarkColors1[type] || 0xffffff, depthTest: true, transparent: true, opacity: 0.92 })
                 );
                 marker.position.copy(mesh.localToWorld(new THREE.Vector3(value[0], value[1], value[2])));
@@ -776,15 +885,17 @@ function renderLandmarks() {
 }
 
 // Hide landmark markers for a jaw whose mesh is hidden, so toggling the
-// upper/lower arch buttons also toggles that jaw's landmarks.
+// upper/lower arch buttons also toggles that jaw's landmarks. Also applies the
+// view-only visibility flag and the per-type visibility toggles.
 function syncLandmarkVisibility() {
     if (!landmarkMarkers1) return;
+    const anyVisible = landmarkState1.active || landmarkState1.showLandmarks;
     landmarkMarkers1.children.forEach(marker => {
-        const key = marker.userData.landmark && marker.userData.landmark.key;
-        if (!key) return;
-        const isUpper = /^(\d+)_upper_FDI_/.test(key);
+        const data = marker.userData.landmark;
+        if (!data || !data.key) return;
+        const isUpper = /^(\d+)_upper_FDI_/.test(data.key);
         const mesh = isUpper ? upperMesh1 : lowerMesh1;
-        marker.visible = !mesh || mesh.visible;
+        marker.visible = anyVisible && (!mesh || mesh.visible) && isLandmarkTypeVisible(data.type);
     });
 }
 

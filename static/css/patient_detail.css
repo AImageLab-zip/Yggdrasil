@@ -1666,6 +1666,86 @@
 }
 .ios-landmark-type:disabled, .ios-landmark-tooth:disabled { cursor: not-allowed; opacity: 0.55; }
 .ios-landmark-section small { display: block; margin-top: 7px; color: var(--ygg-text-faint); font-size: 10px; }
+.ios-landmark-section--display { grid-column: 1 / -1; border-top: 1px solid var(--ygg-border); padding-top: 10px; }
+.ios-landmark-display {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.ios-landmark-display__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ygg-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+.ios-landmark-display__item input[type="range"] {
+    accent-color: var(--ygg-primary);
+}
+.ios-landmark-display__item output {
+    min-width: 34px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: var(--ygg-surface-alt);
+    color: var(--ygg-text);
+    font-family: var(--ygg-font-mono);
+    font-size: 10px;
+    text-align: center;
+}
+.ios-landmark-display__check {
+    cursor: pointer;
+    user-select: none;
+}
+.ios-landmark-display__check input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--ygg-primary);
+    cursor: pointer;
+}
+.ios-landmark-display__block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    margin-bottom: 2px;
+}
+.ios-landmark-vis-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 4px 14px;
+}
+.ios-landmark-vis-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--ygg-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.ios-landmark-vis-item input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--ygg-primary);
+    cursor: pointer;
+}
+.ios-landmark-vis-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 999px;
+    background: var(--landmark-color);
+}
+.ygg-dropdown-menu--landmark-vis {
+    min-width: 210px;
+    padding: 8px;
+}
+.ygg-dropdown-menu--landmark-vis .ios-landmark-vis-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .ios-landmark-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .ios-landmark-action {
     display: inline-flex;
