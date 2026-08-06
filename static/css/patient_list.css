@@ -105,6 +105,11 @@
     color: var(--ygg-text-muted);
     margin: 10px 0 6px;
 }
+.side-card__empty {
+    font-size: 12px;
+    color: var(--ygg-text-faint);
+    padding: 4px 2px;
+}
 
 /* Folders */
 .folder-item { border-radius: 8px; }

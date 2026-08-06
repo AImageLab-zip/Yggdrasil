@@ -7,9 +7,9 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
-from .helpers import render_with_fallback
+from .helpers import redirect_with_namespace, render_with_fallback
 from common.demo import landing_demo_url
-from common.domains import landing_cards, order_projects_for_landing
+from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
 from common.models import Project, ProjectAccess
 from common.permissions import (
@@ -75,7 +75,7 @@ def home(request):
         
         return render(request, 'common/landing.html', {
             'projects': projects,
-            'landing_cards': landing_cards(projects),
+            'landing_cards': landing_domain_cards(),
             'current_project_id': current_project_id,
             'current_project_name': current_project_name,
             'continue_url': continue_url,
@@ -100,7 +100,7 @@ def select_project(request, project_id: int):
     
     request.session['current_project_id'] = project.id
     messages.success(request, f"Project set to {project.name}")
-    return redirect('patient_list')
+    return redirect_with_namespace(request, 'patient_list')
 
 
 @login_required
@@ -471,9 +471,18 @@ def patient_list(request):
         paginator = Paginator(patients_with_status, per_page)
         page_obj = paginator.get_page(page_number)
     
+    # Projects of this domain the user can access (sidebar project switcher).
+    projects_for_sidebar = Project.objects.filter(domain=namespace, is_active=True)
+    if not request.user.is_staff:
+        accessible_project_ids = ProjectAccess.objects.filter(
+            user=request.user
+        ).values_list('project_id', flat=True)
+        projects_for_sidebar = projects_for_sidebar.filter(id__in=accessible_project_ids)
+
     context = {
         'page_obj': page_obj,
         'current_project_id': current_project_id,
+        'projects': projects_for_sidebar.order_by('name'),
         'search_query': search_query,
         'has_ios_filter': has_ios_filter,
         'has_cbct_filter': has_cbct_filter,

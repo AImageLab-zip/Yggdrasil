@@ -8,15 +8,18 @@ from laparoscopy import views as laparo_views
 
 @login_required
 def set_laparoscopy(request):
-    proj = Project.objects.filter(slug='laparoscopy').first()
-    if not proj:
+    accessible = ProjectAccess.objects.filter(user=request.user).values_list('project_id', flat=True)
+    proj = (
+        Project.objects.filter(domain='laparoscopy', is_active=True)
+        .filter(id__in=accessible)
+        .order_by('name')
+        .first()
+        or Project.objects.filter(domain='laparoscopy', is_active=True).order_by('name').first()
+    )
+    if proj is None:
+        proj = Project.objects.filter(slug='laparoscopy').first()
+    if proj is None:
         proj = Project.objects.create(name='Laparoscopy', slug='laparoscopy', domain='laparoscopy')
-
-    if not (request.user.profile.is_admin or request.user.profile.is_student_developer()):
-        has_access = ProjectAccess.objects.filter(user=request.user, project=proj).exists()
-        if not has_access:
-            messages.error(request, "You don't have access to the laparoscopy project.")
-            return redirect('home')
 
     request.session['current_project_id'] = proj.id
     return redirect('laparoscopy:patient_list')

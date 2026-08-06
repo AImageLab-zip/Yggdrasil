@@ -40,6 +40,20 @@
 
         <!-- Sidebar -->
         <aside class="patients-side">
+            <!-- Projects (domain-level selector; folders live inside a project) -->
+            <div class="side-card">
+                <div class="side-card__label">Projects</div>
+                {% for p in projects %}
+                <div class="folder-item {% if current_project_id|stringformat:'s' == p.id|stringformat:'s' %}active{% endif %}">
+                    <a href="{% url request.resolver_match.namespace|add:':select_project' p.id %}">
+                        <span><i class="fas fa-briefcase folder-item__icon" aria-hidden="true"></i>{{ p.name }}</span>
+                    </a>
+                </div>
+                {% empty %}
+                <div class="side-card__empty">No projects</div>
+                {% endfor %}
+            </div>
+
             <!-- Folders -->
             <div class="side-card">
                 <div class="side-card__label">Folders</div>

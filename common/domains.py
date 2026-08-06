@@ -115,3 +115,38 @@ def landing_cards(projects):
             }
         )
     return cards
+
+
+def landing_domain_cards():
+    """The landing page's three domain cards (one per domain, not per project).
+
+    Projects are chosen inside the domain (patient-list sidebar), so the first
+    screen stays a compact domain chooser. Stat = aggregate patient count for
+    the domain; omitted when it cannot be computed.
+    """
+    from django.apps import apps
+
+    cards = []
+    for slug, label in DOMAIN_CHOICES:
+        count = None
+        try:
+            Patient = apps.get_model(slug, "Patient")
+            count = Patient.objects.filter(project__domain=slug).count()
+        except Exception:  # noqa: BLE001 - unknown/legacy domain, or table absent
+            count = None
+        if count is None:
+            stat = ""
+        elif count == 1:
+            stat = "1 patient"
+        else:
+            stat = "{:,} patients".format(count)
+        cards.append(
+            {
+                "slug": slug,
+                "name": label,
+                "icon": resolve_icon(_DOMAIN_ICONS.get(slug, "fas fa-folder-open")),
+                "blurb": _DOMAIN_BLURBS.get(slug, ""),
+                "stat": stat,
+            }
+        )
+    return cards

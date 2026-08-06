@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
 from common.demo import landing_demo_url
-from common.domains import landing_cards, order_projects_for_landing
+from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
@@ -66,7 +66,7 @@ def home(request):
         ordered_projects = order_projects_for_landing(projects)
         return render(request, "common/landing.html", {
             "projects": ordered_projects,
-            "landing_cards": landing_cards(ordered_projects),
+            "landing_cards": landing_domain_cards(),
             "current_project_id": current_project_id,
             "current_project_name": current_project_name,
             "continue_url": "/brain/" if current_project_name else None,
@@ -344,9 +344,16 @@ def patient_list(request):
         .order_by("name"),
         "brain",
     )
+    projects_for_sidebar = Project.objects.filter(domain="brain", is_active=True)
+    if not request.user.is_staff:
+        accessible_project_ids = ProjectAccess.objects.filter(
+            user=request.user
+        ).values_list("project_id", flat=True)
+        projects_for_sidebar = projects_for_sidebar.filter(id__in=accessible_project_ids)
     context = {
         "page_obj": page_obj,
         "current_project_id": current_project_id,
+        "projects": projects_for_sidebar.order_by("name"),
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,

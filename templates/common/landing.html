@@ -76,7 +76,7 @@
             <!-- Domain chooser -->
             <div class="domains">
                 {% for c in landing_cards %}
-                <a class="domain domain--{{ c.project.domain }}" href="{% url c.project.domain|add:':select_project' c.project.id %}">
+                <a class="domain domain--{{ c.slug }}" href="/{{ c.slug }}/">
                     <span class="domain__bar" aria-hidden="true"></span>
                     <i class="{{ c.icon }} domain__watermark" aria-hidden="true"></i>
                     <span class="domain__tile">{% icon c.icon %}</span>
