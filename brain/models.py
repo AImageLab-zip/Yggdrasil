@@ -42,12 +42,18 @@ class Folder(FolderBase):
         blank=True,
         related_name='brain_folders_created',
     )
+    # Mandatory project scope (see maxillo.Folder).
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='brain_folders',
+    )
 
     class Meta:
         db_table = 'brain_folder'
-        unique_together = ('name', 'parent')
+        unique_together = ('project', 'name', 'parent')
         ordering = ['name']
         indexes = [
+            models.Index(fields=['project']),
             models.Index(fields=['parent']),
             models.Index(fields=['name']),
         ]
@@ -93,7 +99,14 @@ class Patient(models.Model):
         related_name='brain_patients',
         help_text='Modalities available for this patient',
     )
-    folders = models.ManyToManyField('Folder', blank=True, related_name='patients')
+    # Single folder per patient (was a M2M; collapsed by the folder->project
+    # migration, first folder wins).
+    folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
+    # Mandatory project scope (backfilled by the folder->project migration).
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='brain_patients',
+    )
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
 
     visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
@@ -115,6 +128,8 @@ class Patient(models.Model):
         indexes = [
             models.Index(fields=['visibility']),
             models.Index(fields=['uploaded_at']),
+            models.Index(fields=['folder']),
+            models.Index(fields=['project']),
             models.Index(fields=['name']),
             models.Index(fields=['visibility', 'uploaded_at']),
         ]

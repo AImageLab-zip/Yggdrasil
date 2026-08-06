@@ -55,17 +55,57 @@ class DomainFKAccessorMixin:
 
 
 class Project(models.Model):
-	name = models.CharField(max_length=50, unique=True)
+	# Unique per domain: two domains may both have a "Demo" project.
+	name = models.CharField(max_length=50)
 	slug = models.SlugField(max_length=60, unique=True, blank=True)
 	description = models.TextField(blank=True)
 	icon = models.CharField(max_length=100, blank=True)
+	# Domain this project belongs to (maxillo/brain/laparoscopy). Projects are
+	# scoped under one domain app: folders and patients inside the project live
+	# in that domain's tables.
+	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
 	modalities = models.ManyToManyField('Modality', blank=True, related_name='projects')
+	# Annotation methods enabled for this project. Empty = none; the UI hides
+	# annotation tools whose method is not enabled here.
+	annotation_methods = models.ManyToManyField('AnnotationMethod', blank=True, related_name='projects')
 
 	class Meta:
-		ordering = ['name']
+		ordering = ['domain', 'name']
+		unique_together = [('domain', 'name')]
+
+	def __str__(self):
+		return self.name
+
+	def save(self, *args, **kwargs):
+		if not self.slug:
+			self.slug = slugify(self.name)
+		super().save(*args, **kwargs)
+
+
+class AnnotationMethod(models.Model):
+	"""An annotation tool a Project may enable (e.g. 'ios_landmarks').
+
+	``domain`` is blank for a method available in every domain (e.g. voice
+	captions) or set to one domain slug for a domain-specific tool (e.g.
+	'ios_landmarks' only makes sense under maxillo).
+	"""
+	name = models.CharField(max_length=100, unique=True)
+	slug = models.SlugField(max_length=60, unique=True, blank=True)
+	description = models.TextField(blank=True)
+	icon = models.CharField(max_length=100, blank=True)
+	domain = models.CharField(
+		max_length=20, choices=DOMAIN_CHOICES, blank=True, default='',
+		help_text="Leave blank for a method available in every domain.",
+	)
+	is_active = models.BooleanField(default=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+
+	class Meta:
+		ordering = ['domain', 'name']
 
 	def __str__(self):
 		return self.name
@@ -209,13 +249,14 @@ class UserSession(models.Model):
 
 class ProjectAccess(models.Model):
 	ROLE_CHOICES = [
-		('standard', 'Standard User'),
+		('viewer', 'Viewer'),
+		('annotator', 'Annotator'),
 		('admin', 'Administrator'),
 	]
 
 	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='project_access')
 	project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='access_list')
-	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='standard')
+	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='viewer')
 	created_at = models.DateTimeField(auto_now_add=True)
 
 	class Meta:
@@ -225,7 +266,7 @@ class ProjectAccess(models.Model):
 		return f"{self.user.username} -> {self.project.name}"
 
 	def is_annotator(self):
-		return self.role == 'admin'
+		return self.role in ['annotator', 'admin']
 
 	def is_project_manager(self):
 		return False
@@ -237,13 +278,13 @@ class ProjectAccess(models.Model):
 		return False
 
 	def can_upload_scans(self):
-		return self.role in ['admin', 'standard']
+		return self.role in ['admin', 'annotator']
 
 	def can_see_debug_scans(self):
 		return self.role == 'admin'
 
 	def can_see_public_private_scans(self):
-		return self.role in ['admin', 'standard']
+		return True
 
 	def can_modify_scan_settings(self):
 		return self.role == 'admin'
@@ -266,13 +307,14 @@ class ProjectAccess(models.Model):
 
 class Invitation(models.Model):
 	ROLE_CHOICES = [
-		('standard', 'Standard User'),
+		('viewer', 'Viewer'),
+		('annotator', 'Annotator'),
 		('admin', 'Administrator'),
 	]
 
 	code = models.CharField(max_length=64, unique=True)
 	email = models.EmailField(blank=True, null=True)
-	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='standard')
+	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='viewer')
 	projects = models.ManyToManyField(Project, related_name='invitations_multi', help_text='Projects the user will have access to')
 	project = models.ForeignKey(Project, on_delete=models.CASCADE, null=False, blank=False, related_name='invitations', help_text='Project the user will have access to')
 	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)

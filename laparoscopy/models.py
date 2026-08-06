@@ -55,12 +55,18 @@ class Folder(FolderBase):
         blank=True,
         related_name='laparoscopy_folders_created',
     )
+    # Mandatory project scope (see maxillo.Folder).
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='laparoscopy_folders',
+    )
 
     class Meta:
         db_table = 'laparoscopy_folder'
-        unique_together = ('name', 'parent')
+        unique_together = ('project', 'name', 'parent')
         ordering = ['name']
         indexes = [
+            models.Index(fields=['project']),
             models.Index(fields=['parent']),
             models.Index(fields=['name']),
         ]
@@ -114,6 +120,11 @@ class Patient(models.Model):
         help_text='Modalities available for this patient',
     )
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
+    # Mandatory project scope (backfilled by the folder->project migration).
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='laparoscopy_patients',
+    )
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
 
     upper_scan_raw = models.FileField(upload_to=laparoscopy_scan_upload_path, blank=True, null=True)
@@ -155,6 +166,7 @@ class Patient(models.Model):
             models.Index(fields=['visibility']),
             models.Index(fields=['uploaded_at']),
             models.Index(fields=['folder']),
+            models.Index(fields=['project']),
             models.Index(fields=['name']),
             models.Index(fields=['visibility', 'uploaded_at']),
             models.Index(fields=['folder', 'visibility']),
@@ -162,11 +174,6 @@ class Patient(models.Model):
 
     def __str__(self):
         return f"Patient {self.patient_id} - {self.name}"
-
-    @property
-    def project(self):
-        from common.models import Project
-        return Project.objects.filter(slug='laparoscopy').first()
 
     @property
     def project_id(self):
