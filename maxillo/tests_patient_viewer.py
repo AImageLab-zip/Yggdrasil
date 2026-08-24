@@ -14,7 +14,9 @@ class IOSViewerFilePreferenceTests(TestCase):
         self.user = User.objects.create_user(username="viewer-admin", password="x")
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
         self.client.force_login(self.user)
-        self.patient = Patient.objects.create(name="Viewer Patient")
+        self.patient = Patient.objects.create(
+            name="Viewer Patient", project=self.project
+        )
         self.modality = Modality.objects.create(name="IOS", slug="ios")
         self.step = ProcessingStep.objects.create(
             modality=self.modality,

@@ -16,6 +16,21 @@
         return name.endsWith('.dcm') || name.endsWith('.dicom') || !name.includes('.');
     }
 
+    /**
+     * Whether a buffer carries the DICOM 'DICM' marker at byte 128.
+     *
+     * `isDicomFile` has to classify by name (files are not read yet), and it
+     * treats every extensionless file as DICOM so that DICOM directories work.
+     * Once the bytes are in hand this confirms it, so a folder of unrelated
+     * extensionless files reports "not DICOM" instead of the misleading
+     * "No valid DICOM slices could be parsed".
+     */
+    function isDicomBuffer(arrayBuffer) {
+        if (!arrayBuffer || arrayBuffer.byteLength < 132) return false;
+        var marker = new Uint8Array(arrayBuffer, 128, 4);
+        return marker[0] === 0x44 && marker[1] === 0x49 && marker[2] === 0x43 && marker[3] === 0x4d;
+    }
+
     function isMetaImageFile(file) {
         var name = (file.name || '').toLowerCase();
         return name.endsWith('.mha');
@@ -116,9 +131,18 @@
                 onProgress(10, 'Reading DICOM files (' + dicomFiles.length + ')...');
                 Promise.all(dicomFiles.map(readFileAsArrayBuffer))
                     .then(function (buffers) {
+                        var dicomBuffers = buffers.filter(isDicomBuffer);
+                        if (!dicomBuffers.length) {
+                            throw new Error(
+                                'None of the ' + buffers.length + ' selected file(s) are DICOM ' +
+                                '(no DICM marker). Select a DICOM folder, or a .nii.gz / .nii / .mha volume.'
+                            );
+                        }
                         onProgress(40, 'Converting DICOM series to NIfTI...');
-                        var transferable = buffers.slice();
-                        worker.postMessage({ type: 'CONVERT_DICOM_SERIES', buffers: buffers }, transferable);
+                        worker.postMessage(
+                            { type: 'CONVERT_DICOM_SERIES', buffers: dicomBuffers },
+                            dicomBuffers.slice()
+                        );
                     })
                     .catch(function (err) {
                         cleanup();
@@ -156,6 +180,7 @@
     return {
         convertFiles: convertFiles,
         isDicomFile: isDicomFile,
+        isDicomBuffer: isDicomBuffer,
         isMetaImageFile: isMetaImageFile,
         isNiftiFile: isNiftiFile
     };

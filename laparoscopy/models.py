@@ -66,7 +66,7 @@ class Folder(FolderBase):
     )
     # Mandatory project scope (see maxillo.Folder).
     project = models.ForeignKey(
-        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        'common.Project', on_delete=models.CASCADE,
         related_name='laparoscopy_folders',
     )
 
@@ -129,9 +129,9 @@ class Patient(models.Model):
         help_text='Modalities available for this patient',
     )
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
-    # Mandatory project scope (backfilled by the folder->project migration).
+    # Mandatory project scope (see maxillo.Patient).
     project = models.ForeignKey(
-        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        'common.Project', on_delete=models.CASCADE,
         related_name='laparoscopy_patients',
     )
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')

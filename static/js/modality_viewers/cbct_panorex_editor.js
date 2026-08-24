@@ -21,6 +21,10 @@
     var generationRequested = false;
     var restoreSavedOnInit = false;
     var volumeReadyBound = false;
+    // Silent default generation: build the MIP panoramic from the auto Z + auto
+    // spline and save it without ever showing the editor. Set only while that
+    // unattended pass is in flight; entering edit mode clears it.
+    var autoMode = false;
     var MIN_CONTROL_POINT_X_SEPARATION = 1;
     var ALGORITHM_VERSION = 'panorex-js-v2-mip';
     var state = {
@@ -157,6 +161,15 @@
             setBusy(false);
             if (overlayLayer) overlayLayer.listening(false);
             setProgress(null);
+            if (autoMode) {
+                // Most often the CBCT segmentation does not exist yet (the cbct
+                // job is still running), which is not an error the reader should
+                // see. Give up quietly; the next visit tries again.
+                autoMode = false;
+                console.debug('Default panoramic not generated yet:', error.message);
+                announceDefaultSaved('skipped', error.message);
+                return;
+            }
             setError(error.message || 'Unable to initialize the panoramic editor.', true);
             if (root) root.hidden = false;
         });
@@ -176,11 +189,17 @@
                 initStarted = false;
                 if (worker) worker.terminate();
                 worker = null;
-                if (root) root.hidden = false;
+                if (!autoMode && root) root.hidden = false;
             }
             setBusy(false);
             if (overlayLayer) overlayLayer.listening(false);
             setProgress(null);
+            if (autoMode) {
+                autoMode = false;
+                console.debug('Default panoramic generation failed:', message.message);
+                announceDefaultSaved('failed', message.message);
+                return;
+            }
             setError(message.message, initFailure);
             return;
         }
@@ -212,6 +231,11 @@
                 state.mode = source.state.defaultMode === 'raysum' ? 'raysum' : 'mip';
                 updateZControls();
                 requestGeometry(source.state.geometrySource === 'auto' ? null : source.state.spline);
+            } else if (autoMode) {
+                // Auto Z (already applied above) + auto spline: the default geometry.
+                state.mode = 'mip';
+                generationRequested = true;
+                requestGeometry(null);
             }
             return;
         }
@@ -235,11 +259,17 @@
         var saveButton = element('panorexSave');
         if (saveButton) saveButton.disabled = true;
         updateZControls();
-        drawAxialEditor();
+        // The axial stage needs Konva and a laid-out container; the unattended
+        // pass has neither on screen, and painting it would flash the editor.
+        if (!autoMode) {
+            drawAxialEditor();
+        }
         setBusy(false);
-        if (root) root.hidden = false;
-        var savedViewer = element('cbctInlinePanoramic');
-        if (savedViewer) savedViewer.hidden = true;
+        if (!autoMode) {
+            if (root) root.hidden = false;
+            var savedViewer = element('cbctInlinePanoramic');
+            if (savedViewer) savedViewer.hidden = true;
+        }
         if (generationRequested) {
             generationRequested = false;
             generatePanoramics();
@@ -560,12 +590,14 @@
                 raysum: makeImageCanvas(raysum, width, height)
             };
             state.generationUuid = createUuid();
-            showSelectedOutput();
+            // The unattended pass has no visible preview to paint.
+            if (!autoMode) showSelectedOutput();
             setBusy(false);
             setProgress(null);
             setStatus('Ready | Z ' + state.z + ' | ' + width + ' columns | 41-ray slab');
             var saveButton = element('panorexSave');
             if (saveButton) saveButton.disabled = false;
+            if (autoMode) save();
         }
         window.setTimeout(chunk, 0);
     }
@@ -593,8 +625,16 @@
 
     function save() {
         if (!state.outputCanvases || state.busy) return;
+        // Captured up front: autoMode is cleared the moment a reader opens the
+        // editor, but this save must keep behaving the way it started.
+        var silent = autoMode;
         var csrf = csrfToken();
         if (!csrf) {
+            if (silent) {
+                autoMode = false;
+                console.debug('Default panoramic not saved: missing CSRF token.');
+                return;
+            }
             setError('The security token is missing. Reload the page and try again.');
             return;
         }
@@ -637,6 +677,11 @@
             });
         }).then(function(response) {
             return response.json().catch(function() { return {}; }).then(function(data) {
+                if (response.status === 409 && silent) {
+                    // Another tab (or an earlier visit) already wrote the default
+                    // for this exact source. Nothing to do; show what it saved.
+                    return { conflicted: true };
+                }
                 if (!response.ok) throw new Error(data.error || data.detail || ('Save failed (HTTP ' + response.status + ').'));
                 return data;
             });
@@ -648,18 +693,58 @@
             var savedButton = element('panorexSave');
             if (savedButton) savedButton.disabled = true;
             if (window.PanoramicViewer && typeof window.PanoramicViewer.refreshAfterSave === 'function') {
-                window.PanoramicViewer.refreshAfterSave(data);
+                window.PanoramicViewer.refreshAfterSave(data.conflicted ? {} : data);
             }
             var savedViewer = element('cbctInlinePanoramic');
             if (savedViewer) savedViewer.hidden = false;
+            if (silent) {
+                autoMode = false;
+                // The editor was never shown; leave it hidden.
+                announceDefaultSaved(data.conflicted ? 'existing' : 'created');
+                return;
+            }
             if (root) root.hidden = true;
         }).catch(function(error) {
             setBusy(false);
             setProgress(null);
+            if (silent) {
+                autoMode = false;
+                console.debug('Default panoramic not saved:', error.message);
+                announceDefaultSaved('failed', error.message);
+                return;
+            }
             setError(error.message || 'Unable to save the generated panoramic images.');
             var failedButton = element('panorexSave');
             if (failedButton) failedButton.disabled = false;
         });
+    }
+
+    /**
+     * Report the outcome of an unattended default generation.
+     *
+     * Fires a DOM event for anything on the page, and posts to the parent frame
+     * so an admin batch warm-up driving this page in an iframe knows when to
+     * advance to the next patient.
+     */
+    function announceDefaultSaved(outcome, detail) {
+        var payload = {
+            type: 'panoramic-default',
+            outcome: outcome,
+            patientId: window.scanId || null,
+            detail: detail || null
+        };
+        try {
+            window.dispatchEvent(new CustomEvent('panoramicdefault', { detail: payload }));
+        } catch (error) {
+            console.debug('Could not dispatch panoramicdefault event', error);
+        }
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage(payload, window.location.origin);
+            } catch (error) {
+                console.debug('Could not notify the parent window', error);
+            }
+        }
     }
 
     function setZ(nextZ) {
@@ -715,6 +800,9 @@
 
     function activateEditor(restoreSaved) {
         if (!root || !source) return;
+        // A reader took over: whatever the unattended pass is doing, from here the
+        // editor is on screen and driven by hand.
+        autoMode = false;
         var savedViewer = element('cbctInlinePanoramic');
         if (savedViewer) savedViewer.hidden = true;
         restoreSavedOnInit = Boolean(restoreSaved && source.state);
@@ -742,25 +830,79 @@
         start();
     }
 
-    function init() {
-        root = element('cbctPanorexEditor');
-        if (!root || root.dataset.canEdit !== 'true' || !window.canEdit || !window.Worker || !window.Konva || !window.Seg2PanoCore) return;
-        if (!window.ViewerGrid || typeof window.ViewerGrid.getPanorexSourceDescriptor !== 'function') return;
-        source = window.ViewerGrid.getPanorexSourceDescriptor();
-        if (!source || !source.volumeFileId || !source.volumeFileKey || !source.segmentationFileId || !source.segmentationFileKey) return;
-        if (
+    /** Whether a panoramic generated by the current algorithm is already stored. */
+    function hasSavedPanoramic() {
+        return Boolean(
             Number(source.revision) > 0 &&
             source.state &&
             source.state.algorithmVersion === ALGORITHM_VERSION
-        ) {
-            root.hidden = true;
+        );
+    }
+
+    /**
+     * Generate and store the default panoramic without showing the editor:
+     * MIP projection, auto axial slice, auto arch spline. Runs once per page for
+     * a patient that has no panoramic yet, so a .png exists in the patient's
+     * files (and in exports) without anyone editing a spline by hand.
+     */
+    function autoGenerateDefault() {
+        if (autoMode || initStarted) return;
+        autoMode = true;
+        state.mode = 'mip';
+        generationRequested = true;
+        if (!volumeReadyBound) {
+            window.addEventListener('viewergridvolumeready', start);
+            volumeReadyBound = true;
+        }
+        start();
+    }
+
+    function init() {
+        root = element('cbctPanorexEditor');
+        // Every early return announces an outcome: the admin batch warm-up drives
+        // this page in a frame and would otherwise wait out its timeout for every
+        // patient that has nothing to generate.
+        if (!root || root.dataset.canEdit !== 'true' || !window.canEdit || !window.Worker || !window.Konva || !window.Seg2PanoCore) {
+            announceDefaultSaved('skipped', 'the panoramic editor is unavailable on this page');
+            return;
+        }
+        if (!window.ViewerGrid || typeof window.ViewerGrid.getPanorexSourceDescriptor !== 'function') {
+            announceDefaultSaved('skipped', 'no viewer grid');
+            return;
+        }
+        source = window.ViewerGrid.getPanorexSourceDescriptor();
+        if (!source || !source.volumeFileId || !source.volumeFileKey || !source.segmentationFileId || !source.segmentationFileKey) {
+            announceDefaultSaved('skipped', 'no paired CBCT volume and segmentation');
             return;
         }
 
-        activateEditor(false);
+        // The editor is never opened on load: the patient view shows the saved
+        // panoramic, and editing starts from the Edit button. When no panoramic
+        // exists yet, generate the default one silently instead.
+        root.hidden = true;
+        if (hasSavedPanoramic()) {
+            announceDefaultSaved('existing');
+            return;
+        }
+        autoGenerateDefault();
     }
 
-    window.CBCTPanorexEditor = { enterEditMode: function() { activateEditor(true); } };
+    function panoramicLocked() {
+        // The Edit arch button is not even rendered for a locked patient; this
+        // guards the programmatic entry point, which the admin warm-up harness
+        // and the console both reach.
+        const section = root || element('cbctPanorexEditor');
+        return Boolean(section) && section.dataset.panoramicLocked === 'true';
+    }
+
+    window.CBCTPanorexEditor = {
+        enterEditMode: function() {
+            if (panoramicLocked()) return false;
+            activateEditor(true);
+            return true;
+        },
+        hasSavedPanoramic: function() { return Boolean(source) && hasSavedPanoramic(); }
+    };
 
     document.addEventListener('DOMContentLoaded', init);
     window.addEventListener('pagehide', function(event) {
@@ -772,6 +914,10 @@
     });
     window.addEventListener('pageshow', function(event) {
         if (!event.persisted || worker) return;
+        // Only resume for an editor that is actually on screen: pagehide tore the
+        // worker down, and restarting it for a hidden editor would burn a CPU core
+        // rebuilding geometry nobody asked for.
+        if (!root || root.hidden) return;
         initStarted = false;
         start();
     });

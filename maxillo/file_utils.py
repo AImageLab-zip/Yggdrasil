@@ -575,15 +575,20 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
 
 
 def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
-    """
-    Deprecated: CBCT folder upload via backend API.
-    Raises ValidationError directing caller to upload .nii.gz files.
+    """A DICOM folder never reaches the server as a folder.
+
+    The upload page converts a selected DICOM directory to a single .nii.gz in
+    the browser (static/js/cbct_convert.js) and submits that instead, because the
+    server-side path has no DICOM reader. Reaching here means that conversion did
+    not run -- almost always JavaScript being unavailable -- so say that rather
+    than "deprecated", which told the user nothing actionable.
     """
     from django.core.exceptions import ValidationError
 
     raise ValidationError(
-        "CBCT folder uploads via API are deprecated. "
-        "Please convert DICOM folders to .nii.gz before uploading."
+        "A DICOM folder is converted in your browser before upload, and that "
+        "conversion did not run. Enable JavaScript and try again, or convert the "
+        "folder to a single .nii.gz file and upload that."
     )
 
 

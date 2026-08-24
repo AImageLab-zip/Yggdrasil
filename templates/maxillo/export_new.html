@@ -3,23 +3,24 @@
 
 {% block title %}New Export - Yggdrasil{% endblock %}
 
-
 {% block content %}
 <div class="container mt-4">
-    <!-- Back Button -->
-    <div class="mb-3">
+    <div class="mb-3 d-flex justify-content-between align-items-center">
         <a href="{% url ns|default:'maxillo'|add:':export_list' %}" class="btn btn-outline-secondary">
             <i class="fas fa-arrow-left me-2"></i>Back to Export History
         </a>
+        <span class="text-muted small">
+            <i class="fas fa-folder-tree me-1"></i>{{ project.name }}
+        </span>
     </div>
 
     <div class="row">
-        <!-- Left Panel: Export Controls (70%) -->
+        <!-- Left Panel: Export Controls -->
         <div class="col-lg-8">
             <form id="exportForm" method="post" action="{% url ns|default:'maxillo'|add:':export_new' %}">
                 {% csrf_token %}
-                
-                <!-- Folder Selection Card -->
+
+                <!-- Folders (project-scoped, including sub-folders) -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <strong><i class="fas fa-folder me-2"></i>Folders</strong>
@@ -29,99 +30,88 @@
                     </div>
                     <div id="folderSelectionCollapse" class="collapse show">
                         <div class="card-body">
-                            <p class="text-muted small mb-3">Select folders to export from:</p>
-                            {% for folder_data in folders %}
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input folder-checkbox" type="checkbox" name="folder_ids" value="{{ folder_data.folder.id }}" id="folder_{{ folder_data.folder.id }}">
-                                    <label class="form-check-label" for="folder_{{ folder_data.folder.id }}">
-                                        {{ folder_data.folder.name }}
-                                        <span class="badge bg-secondary ms-2">{{ folder_data.patient_count }}</span>
+                            <p class="text-muted small mb-3">
+                                Folders of <strong>{{ project.name }}</strong>. Selecting a folder includes its sub-folders.
+                            </p>
+                            {% for entry in folders %}
+                                <div class="form-check mb-2" style="margin-left: {{ entry.depth }}rem;">
+                                    <input class="form-check-input folder-checkbox" type="checkbox" name="folder_ids" value="{{ entry.folder.id }}" id="folder_{{ entry.folder.id }}">
+                                    <label class="form-check-label" for="folder_{{ entry.folder.id }}">
+                                        {% if entry.depth %}<i class="fas fa-angle-right text-muted me-1"></i>{% endif %}{{ entry.folder.name }}
+                                        <span class="badge bg-secondary ms-2">{{ entry.patient_count }}</span>
                                     </label>
                                 </div>
                             {% empty %}
-                                <p class="text-muted">No folders available.</p>
+                                <p class="text-muted">This project has no folders.</p>
                             {% endfor %}
                         </div>
                     </div>
                 </div>
 
-                <!-- Modality Selection Card -->
+                <!-- Artifacts: what to export, per modality of this project -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <strong><i class="fas fa-layer-group me-2"></i>Modalities to Export</strong>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#modalitySelectionCollapse" aria-expanded="true" aria-controls="modalitySelectionCollapse">
+                        <strong><i class="fas fa-layer-group me-2"></i>What to export</strong>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#artifactSelectionCollapse" aria-expanded="true" aria-controls="artifactSelectionCollapse">
                             <i class="fas fa-chevron-up"></i>
                         </button>
                     </div>
-                    <div id="modalitySelectionCollapse" class="collapse show">
+                    <div id="artifactSelectionCollapse" class="collapse show">
                         <div class="card-body">
-                            <p class="text-muted small mb-3">Select which modalities to include for all matching patients:</p>
-                            <div class="mb-2">
-                                <button type="button" class="btn btn-sm btn-outline-primary" id="selectAllModalities">Select All</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="deselectAllModalities">Deselect All</button>
+                            <p class="text-muted small mb-3">
+                                Only what <strong>{{ project.name }}</strong> collects. Counts are for the folders above;
+                                greyed-out entries have nothing stored yet.
+                            </p>
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="selectAllArtifacts">Select all available</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="deselectAllArtifacts">Deselect all</button>
                             </div>
-                            {% for modality in modalities %}
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input modality-checkbox" type="checkbox" name="modality_slugs" value="{{ modality.slug }}" id="modality_{{ modality.slug }}">
-                                    <label class="form-check-label" for="modality_{{ modality.slug }}">
-                                        {% if modality.icon %}
-                                            <i class="{{ modality.icon }} me-1"></i>
+                            {% if panoramic_warmup_url %}
+                            <p class="small text-muted">
+                                <i class="fas fa-circle-info me-1"></i>Panoramic images are reconstructed in
+                                the browser, so patients uploaded before anyone opened them may not have one yet.
+                                <a href="{{ panoramic_warmup_url }}">Generate the missing default panoramics</a>.
+                            </p>
+                            {% endif %}
+
+                            {% for group in artifact_groups %}
+                            <fieldset class="mb-3 pb-2 border-bottom">
+                                <legend class="h6 mb-2">
+                                    {% if group.icon %}<i class="{{ group.icon }} me-1"></i>{% endif %}{{ group.name }}
+                                </legend>
+                                {% for bucket in group.buckets %}
+                                <div class="mb-2">
+                                    <div class="text-muted text-uppercase small mb-1">{{ bucket.label }}</div>
+                                    {% for artifact in bucket.artifacts %}
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input artifact-checkbox" type="checkbox"
+                                               name="artifacts" value="{{ artifact.key }}"
+                                               id="artifact_{{ artifact.key|slugify }}"
+                                               data-available="{{ artifact.available|yesno:'1,0' }}"
+                                               {% if not artifact.available %}disabled{% endif %}>
+                                        <label class="form-check-label" for="artifact_{{ artifact.key|slugify }}">
+                                            {{ artifact.label }}
+                                            {% if artifact.count is not None %}
+                                            <span class="badge {% if artifact.available %}bg-secondary{% else %}bg-dark{% endif %} ms-1">{{ artifact.count }}</span>
+                                            {% endif %}
+                                        </label>
+                                        {% if artifact.description %}
+                                        <small class="text-muted d-block ms-4">{{ artifact.description }}</small>
                                         {% endif %}
-                                        {{ modality.name }}
-                                    </label>
+                                    </div>
+                                    {% endfor %}
                                 </div>
+                                {% endfor %}
+                            </fieldset>
                             {% empty %}
-                                <p class="text-muted">No modalities available.</p>
+                            <p class="text-muted">This project has no modalities configured.</p>
                             {% endfor %}
+                            <small class="text-muted d-block">Select at least one item.</small>
                         </div>
                     </div>
                 </div>
 
-                <!-- Content Type Card -->
-                <div class="card mb-3">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <strong><i class="fas fa-check-square me-2"></i>Content Type</strong>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#contentTypeCollapse" aria-expanded="true" aria-controls="contentTypeCollapse">
-                            <i class="fas fa-chevron-up"></i>
-                        </button>
-                    </div>
-                    <div id="contentTypeCollapse" class="collapse show">
-                        <div class="card-body">
-                            <p class="text-muted small mb-3">Choose which file versions to export for selected modalities:</p>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input content-checkbox" type="checkbox" name="include_raw" id="include_raw" value="1" checked>
-                                <label class="form-check-label" for="include_raw">
-                                    Raw files
-                                </label>
-                            </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input content-checkbox" type="checkbox" name="include_processed" id="include_processed" value="1" checked>
-                                <label class="form-check-label" for="include_processed">
-                                    Processed files
-                                </label>
-                            </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input content-checkbox" type="checkbox" name="include_reports" id="include_reports" value="1">
-                                <label class="form-check-label" for="include_reports">
-                                    <i class="fas fa-file-alt me-1"></i>
-                                    Reports
-                                </label>
-                                <small class="text-muted d-block ms-4 mt-1">Voice caption reports for each selected modality, saved in <code>&lt;modality&gt;/reports/</code> folders.</small>
-                            </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input content-checkbox" type="checkbox" name="include_bite_classification" id="include_bite_classification" value="1">
-                                <label class="form-check-label" for="include_bite_classification">
-                                    <i class="fas fa-tooth me-1"></i>
-                                    Bite Classification
-                                </label>
-                                <small class="text-muted d-block ms-4 mt-1">Manual and AI-predicted bite classification (sagittal, vertical, transverse, midline) per patient, saved as <code>bite_classification/classification.json</code>. Not tied to any modality selection above.</small>
-                            </div>
-                            <small class="text-muted d-block">Select at least one content type.</small>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Filters Card -->
+                <!-- Filters, derived from the project -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <strong><i class="fas fa-filter me-2"></i>Filters</strong>
@@ -131,35 +121,46 @@
                     </div>
                     <div id="filtersCollapse" class="collapse">
                         <div class="card-body">
-                            <p class="text-muted small mb-3">Apply filters to narrow down patients (all filters use AND logic):</p>
-                            
-                            <h6 class="mt-3 mb-2">Modality Presence</h6>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input filter-checkbox" type="checkbox" name="filter_has_cbct" id="filter_has_cbct" value="1">
-                                <label class="form-check-label" for="filter_has_cbct">Has CBCT</label>
-                            </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input filter-checkbox" type="checkbox" name="filter_has_ios" id="filter_has_ios" value="1">
-                                <label class="form-check-label" for="filter_has_ios">Has IOS</label>
-                            </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input filter-checkbox" type="checkbox" name="filter_has_bite_classification" id="filter_has_bite_classification" value="1">
-                                <label class="form-check-label" for="filter_has_bite_classification">Has Bite Classification</label>
-                            </div>
-
-                            <h6 class="mt-3 mb-2">Report Presence</h6>
-                            <p class="text-muted small">Only shown for modalities present in selected folders</p>
-                            {% for modality in modalities %}
-                                <div class="form-check mb-2 filter-report-{{ modality.slug }}" style="display: none;">
-                                    <input class="form-check-input filter-checkbox" type="checkbox" name="filter_has_reports_{{ modality.slug }}" id="filter_has_reports_{{ modality.slug }}" value="1">
-                                    <label class="form-check-label" for="filter_has_reports_{{ modality.slug }}">Has Reports for {{ modality.name }}</label>
+                            <p class="text-muted small mb-3">Narrow down which patients are exported (all filters use AND logic).</p>
+                            {% for group in filter_groups %}
+                            <h6 class="mt-3 mb-2">{{ group.group }}</h6>
+                            {% for spec in group.filters %}
+                                {% if spec.kind == 'bool' %}
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input filter-checkbox" type="checkbox"
+                                           name="filter_{{ spec.id }}" id="filter_{{ spec.id }}" value="1">
+                                    <label class="form-check-label" for="filter_{{ spec.id }}">{{ spec.label }}</label>
                                 </div>
+                                {% elif spec.kind == 'choice' %}
+                                <div class="mb-2 row align-items-center">
+                                    <label class="col-sm-5 col-form-label col-form-label-sm" for="filter_{{ spec.id }}">{{ spec.label }}</label>
+                                    <div class="col-sm-7">
+                                        <select class="form-select form-select-sm filter-input" name="filter_{{ spec.id }}" id="filter_{{ spec.id }}">
+                                            <option value="">Any</option>
+                                            {% for value, label in spec.choices %}
+                                            <option value="{{ value }}">{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                {% else %}
+                                <div class="mb-2 row align-items-center">
+                                    <label class="col-sm-5 col-form-label col-form-label-sm" for="filter_{{ spec.id }}">{{ spec.label }}</label>
+                                    <div class="col-sm-7">
+                                        <input class="form-control form-control-sm filter-input"
+                                               type="{% if spec.kind == 'date' %}date{% else %}text{% endif %}"
+                                               name="filter_{{ spec.id }}" id="filter_{{ spec.id }}">
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                            {% empty %}
+                            <p class="text-muted">No filters available for this project.</p>
                             {% endfor %}
                         </div>
                     </div>
                 </div>
 
-                <!-- Create Export Button -->
                 <div class="d-grid">
                     <button type="submit" class="btn btn-primary btn-lg" id="createExportBtn" disabled>
                         <i class="fas fa-download me-2"></i>Create Export
@@ -168,53 +169,39 @@
             </form>
         </div>
 
-        <!-- Right Panel: Statistics (30%) -->
+        <!-- Right Panel: Statistics -->
         <div class="col-lg-4">
             <div class="card border-primary mb-3">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">
-                        <i class="fas fa-users me-1"></i>Patients
-                    </h6>
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-users me-1"></i>Patients</h6>
                     <h2 class="card-title mb-0 text-primary" id="stat-patients">0</h2>
                     <small class="text-muted">Patients matching criteria</small>
                 </div>
             </div>
-
             <div class="card border-info mb-3">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">
-                        <i class="fas fa-folder me-1"></i>Folders
-                    </h6>
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-folder me-1"></i>Folders</h6>
                     <h2 class="card-title mb-0 text-info" id="stat-folders">0</h2>
                     <small class="text-muted">Folders selected</small>
                 </div>
             </div>
-
             <div class="card border-success mb-3">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">
-                        <i class="fas fa-layer-group me-1"></i>Modalities
-                    </h6>
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-layer-group me-1"></i>Items</h6>
                     <h2 class="card-title mb-0 text-success" id="stat-modalities">0</h2>
-                    <small class="text-muted">Modalities to export</small>
+                    <small class="text-muted">Artifacts to export</small>
                 </div>
             </div>
-
             <div class="card border-warning mb-3">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">
-                        <i class="fas fa-hdd me-1"></i>Size Estimate
-                    </h6>
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-hdd me-1"></i>Size Estimate</h6>
                     <h2 class="card-title mb-0 text-warning" id="stat-size">-</h2>
                     <small class="text-muted">Estimated export size</small>
                 </div>
             </div>
-
             <div class="card border-secondary mb-3">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-muted">
-                        <i class="fas fa-file me-1"></i>Files
-                    </h6>
+                    <h6 class="card-subtitle mb-2 text-muted"><i class="fas fa-file me-1"></i>Files</h6>
                     <h2 class="card-title mb-0 text-secondary" id="stat-files">0</h2>
                     <small class="text-muted">Files to export</small>
                 </div>
@@ -226,13 +213,11 @@
 
 {% block extra_js %}
 <script>
-    // Set URLs for JavaScript
     window.exportPreviewUrl = '{% url ns|default:"maxillo"|add:":export_preview" %}';
 </script>
 <script src="{% static 'js/export.js' %}"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize export page
         initExportPage();
     });
 </script>

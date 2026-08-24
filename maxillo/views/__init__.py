@@ -14,7 +14,10 @@ from .auth import register, invitation_list, delete_invitation
 from .patient_list import home, select_project, patient_list
 
 # Patient upload
-from .patient_upload import upload_patient
+from .patient_upload import bulk_upload_patients, upload_patient
+
+# Batch default-panoramic generation
+from .panoramic_warmup import panoramic_warmup, panoramic_warmup_pending
 
 # Classification
 from .classification import update_classification
@@ -104,6 +107,9 @@ __all__ = [
     'patient_list',
     # Upload
     'upload_patient',
+    'bulk_upload_patients',
+    'panoramic_warmup',
+    'panoramic_warmup_pending',
     # Detail
     'patient_detail',
     'update_patient_name',

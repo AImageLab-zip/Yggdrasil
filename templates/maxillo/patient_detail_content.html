@@ -234,9 +234,15 @@
                     <div class="cbct-inline-panoramic" id="cbctInlinePanoramic">
                         <div class="cbct-inline-panoramic-header">
                             <span><i class="fas fa-panorama me-2"></i>Panoramic</span>
+                            {% if panoramic_locked %}
+                            <span class="panoramic-arch-locked" title="The arch is fixed because annotations have already been produced for this patient.">
+                                <i class="fas fa-lock" aria-hidden="true"></i> Arch locked
+                            </span>
+                            {% else %}
                             <button type="button" class="panoramic-edit-arch" id="editSavedPanoramic" hidden>
                                 <i class="fas fa-pen-to-square" aria-hidden="true"></i> Edit arch
                             </button>
+                            {% endif %}
                         </div>
                         <div class="panoramic-variant-controls" data-panoramic-variant-controls data-panoramic-target="inline" role="group" aria-label="Panoramic variant" hidden>
                             <div class="panoramic-projection-toggle" role="group" aria-label="Panoramic projection">

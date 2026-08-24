@@ -388,6 +388,22 @@
 .panoramic-edit-arch:hover { border-color: var(--ygg-primary); color: var(--ygg-primary); }
 .panoramic-edit-arch[hidden] { display: none; }
 
+/* Replaces the Edit arch button once annotations freeze the panoramic. Sized to
+   match it so the header does not shift between a locked and unlocked patient. */
+.panoramic-arch-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 36px;
+  padding: 0 0.7rem;
+  border: 1px dashed var(--ygg-border);
+  border-radius: 6px;
+  color: var(--ygg-text-muted, var(--ygg-text));
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: default;
+}
+
 .panoramic-variant-controls {
   display: flex;
   align-items: center;

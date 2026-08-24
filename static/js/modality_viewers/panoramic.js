@@ -182,10 +182,11 @@ window.PanoramicViewer = {
                 this.selectedVariant = data.selected_variant || null;
                 this.updateVariantControls();
                 if (config === this.targets.inline && editButton) {
+                    // Independent of whether a panoramic exists yet: the editor is
+                    // only ever opened from this button, so hiding it for a patient
+                    // with no panoramic would leave no way in at all.
                     editButton.hidden = !(
-                        data.generation_uuid &&
-                        window.canEdit &&
-                        document.getElementById('cbctPanorexEditor')
+                        window.canEdit && document.getElementById('cbctPanorexEditor')
                     );
                 }
                 const container = img.parentElement;
@@ -234,7 +235,11 @@ window.PanoramicViewer = {
                 if (requestToken !== config.requestToken) return;
                 if (loading) loading.style.display = 'none';
                 if (error) error.style.display = 'block';
-                if (config === this.targets.inline && editButton) editButton.hidden = true;
+                if (config === this.targets.inline && editButton) {
+                    editButton.hidden = !(
+                        window.canEdit && document.getElementById('cbctPanorexEditor')
+                    );
+                }
             });
     },
 

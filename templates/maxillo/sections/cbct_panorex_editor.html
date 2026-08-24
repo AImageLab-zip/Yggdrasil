@@ -1,4 +1,4 @@
-<section class="panorex-editor" id="cbctPanorexEditor" data-can-edit="{% if can_modify_segmentation %}true{% else %}false{% endif %}" aria-labelledby="panorexEditorTitle" hidden>
+<section class="panorex-editor" id="cbctPanorexEditor" data-can-edit="{% if can_modify_segmentation %}true{% else %}false{% endif %}" data-panoramic-locked="{% if panoramic_locked %}true{% else %}false{% endif %}" aria-labelledby="panorexEditorTitle" hidden>
     <div hidden>{% csrf_token %}</div>
     <header class="panorex-editor__header">
         <div>

@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 
+from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.models import FileRegistry, Job, Modality
 from common.models import Project
 from common.permissions import user_can_write_annotations, user_is_project_admin
@@ -133,6 +134,21 @@ def _upload_file_to_storage(storage_key, uploaded_file):
             pass
 
 
+def _raw_lock_response(patient):
+    """409 when annotations already exist, so the raw inputs must stay as they are.
+
+    Deliberately unconditional: unlike the Django admin, nothing in the app --
+    project admin or otherwise -- can talk its way past an annotated case.
+    """
+    reasons = annotation_lock_reasons(patient)
+    if not reasons:
+        return None
+    return JsonResponse(
+        {"success": False, "error": lock_message(reasons), "raw_locked": True},
+        status=409,
+    )
+
+
 @login_required
 @require_POST
 def add_raw_file(request, patient_id):
@@ -145,6 +161,10 @@ def add_raw_file(request, patient_id):
         can_modify = True
     if not can_modify:
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    locked = _raw_lock_response(patient)
+    if locked:
+        return locked
 
     file_type = (request.POST.get("file_type") or "").strip()
     uploaded = request.FILES.get("file")
@@ -222,6 +242,10 @@ def delete_raw_file(request, patient_id, file_id):
         can_modify = True
     if not can_modify:
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    locked = _raw_lock_response(patient)
+    if locked:
+        return locked
 
     try:
         raw_file = get_object_or_404(FileRegistry, id=file_id)

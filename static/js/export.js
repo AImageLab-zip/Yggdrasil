@@ -21,58 +21,49 @@ function debounce(func, wait) {
 }
 
 // Update statistics panel
-function updateStatistics() {
-    const folderCheckboxes = document.querySelectorAll('.folder-checkbox:checked');
-    const modalityCheckboxes = document.querySelectorAll('.modality-checkbox:checked');
-    const filterCheckboxes = document.querySelectorAll('.filter-checkbox:checked');
-    const includeRaw = document.getElementById('include_raw')?.checked ?? true;
-    const includeProcessed = document.getElementById('include_processed')?.checked ?? true;
-    const includeReports = document.getElementById('include_reports')?.checked ?? false;
-    const includeBiteClassification = document.getElementById('include_bite_classification')?.checked ?? false;
-
-    const folderIds = Array.from(folderCheckboxes).map(cb => cb.value);
-    const modalitySlugs = Array.from(modalityCheckboxes).map(cb => cb.value);
+//
+// The selection is now (folders x artifacts x filters): the fixed
+// raw/processed/reports/bite checkboxes are gone, replaced by explicit artifact
+// keys from common.export_catalog. `filters` carries every filter_* control,
+// including the select and text/date inputs the old version could not express.
+function collectSelection() {
+    const folderIds = Array.from(document.querySelectorAll('.folder-checkbox:checked'))
+        .map(cb => cb.value);
+    const artifacts = Array.from(document.querySelectorAll('.artifact-checkbox:checked'))
+        .map(cb => cb.value);
 
     const filters = {};
-    filterCheckboxes.forEach(cb => {
-        if (cb.name.startsWith('filter_')) {
-            const filterName = cb.name.replace('filter_', '');
-            filters[filterName] = true;
-        }
+    document.querySelectorAll('.filter-checkbox:checked').forEach(cb => {
+        filters[cb.name.replace(/^filter_/, '')] = true;
+    });
+    document.querySelectorAll('.filter-input').forEach(input => {
+        const value = (input.value || '').trim();
+        if (value) filters[input.name.replace(/^filter_/, '')] = value;
     });
 
-    // Don't make request if no folders selected, no modality/bite-classification
-    // selected, or no content type selected. Bite classification isn't
-    // modality-gated, so it can stand in for a modality selection on its own.
-    if (folderIds.length === 0 ||
-        (modalitySlugs.length === 0 && !includeBiteClassification) ||
-        (!includeRaw && !includeProcessed && !includeReports && !includeBiteClassification)) {
-        // Reset statistics
-        document.getElementById('stat-patients').textContent = '0';
-        document.getElementById('stat-folders').textContent = '0';
-        document.getElementById('stat-modalities').textContent = '0';
-        document.getElementById('stat-size').textContent = '-';
-        document.getElementById('stat-files').textContent = '0';
+    return { folderIds, artifacts, filters };
+}
 
-        // Disable create button
-        const createBtn = document.getElementById('createExportBtn');
-        if (createBtn) {
-            createBtn.disabled = true;
-        }
+function resetStatistics() {
+    document.getElementById('stat-patients').textContent = '0';
+    document.getElementById('stat-folders').textContent = '0';
+    document.getElementById('stat-modalities').textContent = '0';
+    document.getElementById('stat-size').textContent = '-';
+    document.getElementById('stat-files').textContent = '0';
+}
+
+function updateStatistics() {
+    const { folderIds, artifacts, filters } = collectSelection();
+    const createBtn = document.getElementById('createExportBtn');
+
+    if (folderIds.length === 0 || artifacts.length === 0) {
+        resetStatistics();
+        if (createBtn) createBtn.disabled = true;
         return;
     }
-    
-    // Enable create button
-    const createBtn = document.getElementById('createExportBtn');
-    if (createBtn) {
-        createBtn.disabled = false;
-    }
-    
-    // Get CSRF token
-    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || 
-                     document.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
-    
-    // Make AJAX request
+    if (createBtn) createBtn.disabled = false;
+
+    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
     const previewUrl = window.exportPreviewUrl || '/maxillo/export/preview/';
     fetch(previewUrl, {
         method: 'POST',
@@ -82,21 +73,16 @@ function updateStatistics() {
         },
         body: JSON.stringify({
             folder_ids: folderIds,
-            modality_slugs: modalitySlugs,
+            artifacts: artifacts,
             filters: filters,
-            include_raw: includeRaw,
-            include_processed: includeProcessed,
-            include_reports: includeReports,
-            include_bite_classification: includeBiteClassification,
         }),
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Update statistics cards
             document.getElementById('stat-patients').textContent = data.patient_count || 0;
             document.getElementById('stat-folders').textContent = data.folder_count || 0;
-            document.getElementById('stat-modalities').textContent = data.modality_count || 0;
+            document.getElementById('stat-modalities').textContent = data.artifact_count || 0;
             document.getElementById('stat-size').textContent = data.estimated_size || '-';
             document.getElementById('stat-files').textContent = data.file_count || 0;
         } else {
@@ -113,71 +99,47 @@ const debouncedUpdateStatistics = debounce(updateStatistics, 500);
 
 // Initialize export page
 function initExportPage() {
-    // Listen for changes to checkboxes
-    const folderCheckboxes = document.querySelectorAll('.folder-checkbox');
-    const modalityCheckboxes = document.querySelectorAll('.modality-checkbox');
-    const filterCheckboxes = document.querySelectorAll('.filter-checkbox');
-    const contentCheckboxes = document.querySelectorAll('.content-checkbox');
-    
-    folderCheckboxes.forEach(cb => {
-        cb.addEventListener('change', debouncedUpdateStatistics);
-    });
-    
-    modalityCheckboxes.forEach(cb => {
-        cb.addEventListener('change', debouncedUpdateStatistics);
-    });
-    
-    filterCheckboxes.forEach(cb => {
-        cb.addEventListener('change', debouncedUpdateStatistics);
+    const artifactCheckboxes = document.querySelectorAll('.artifact-checkbox');
+
+    document.querySelectorAll(
+        '.folder-checkbox, .artifact-checkbox, .filter-checkbox'
+    ).forEach(cb => cb.addEventListener('change', debouncedUpdateStatistics));
+    document.querySelectorAll('.filter-input').forEach(input => {
+        input.addEventListener('change', debouncedUpdateStatistics);
+        input.addEventListener('input', debouncedUpdateStatistics);
     });
 
-    contentCheckboxes.forEach(cb => {
-        cb.addEventListener('change', debouncedUpdateStatistics);
-    });
-    
-    // Select All / Deselect All for modalities
-    const selectAllBtn = document.getElementById('selectAllModalities');
-    const deselectAllBtn = document.getElementById('deselectAllModalities');
-    
+    const selectAllBtn = document.getElementById('selectAllArtifacts');
+    const deselectAllBtn = document.getElementById('deselectAllArtifacts');
+
     if (selectAllBtn) {
         selectAllBtn.addEventListener('click', function() {
-            modalityCheckboxes.forEach(cb => cb.checked = true);
+            // Only what actually exists: a disabled artifact has nothing stored.
+            artifactCheckboxes.forEach(cb => {
+                if (!cb.disabled) cb.checked = true;
+            });
             debouncedUpdateStatistics();
         });
     }
-    
+
     if (deselectAllBtn) {
         deselectAllBtn.addEventListener('click', function() {
-            modalityCheckboxes.forEach(cb => cb.checked = false);
+            artifactCheckboxes.forEach(cb => cb.checked = false);
             debouncedUpdateStatistics();
         });
     }
-    
-    // Show/hide report filters based on selected modalities
-    modalityCheckboxes.forEach(cb => {
-        cb.addEventListener('change', function() {
-            const modalitySlug = this.value;
-            const reportFilter = document.querySelector(`.filter-report-${modalitySlug}`);
-            if (reportFilter) {
-                reportFilter.style.display = this.checked ? 'block' : 'none';
-            }
-        });
-    });
-    
-    // Form submission handler
+
     const exportForm = document.getElementById('exportForm');
     if (exportForm) {
-        exportForm.addEventListener('submit', function(e) {
+        exportForm.addEventListener('submit', function() {
             const createBtn = document.getElementById('createExportBtn');
             if (createBtn) {
                 createBtn.disabled = true;
                 createBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating Export...';
             }
-            // Form will submit normally
         });
     }
-    
-    // Initial statistics update
+
     debouncedUpdateStatistics();
 }
 

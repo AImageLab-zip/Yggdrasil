@@ -29,7 +29,9 @@ class NiftiMetadataTests(TestCase):
             user=self.user, project=self.project, role="admin"
         )
         self.client.force_login(self.user)
-        self.patient = Patient.objects.create(name="Metadata patient")
+        self.patient = Patient.objects.create(
+            name="Metadata patient", project=self.project
+        )
         self.modality = Modality.objects.create(name="Metadata CBCT", slug="cbct")
         self.patient.modalities.add(self.modality)
         self.affine = np.eye(4)

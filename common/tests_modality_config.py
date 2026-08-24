@@ -21,6 +21,29 @@ def _step(modality, slug=None, **kwargs):
     )
 
 
+def _project(domain="maxillo"):
+    """A throwaway project for the domain. Patients are project-scoped."""
+    from common.models import Project
+
+    project, _ = Project.objects.get_or_create(
+        slug=f"modality-config-{domain}",
+        defaults={"name": f"Modality Config {domain}", "domain": domain},
+    )
+    return project
+
+
+def _patient(**kwargs):
+    from maxillo.models import Patient
+
+    return Patient.objects.create(project=_project(), **kwargs)
+
+
+def _brain_patient(**kwargs):
+    from brain.models import Patient
+
+    return Patient.objects.create(project=_project("brain"), **kwargs)
+
+
 class ModalityConfigAccessorTests(TestCase):
     # Neutralize any local .env env-routing so fallbacks are deterministic.
     @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
@@ -116,30 +139,26 @@ class RawFileHiddenTests(TestCase):
         )
 
     def test_no_step_never_hidden(self):
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
         self.assertFalse(mc.raw_file_hidden(self._raw(patient)))
 
     def test_non_raw_file_never_hidden(self):
         m = _modality("panoramic")
         _step(m, discard_raw=True, is_blocking=True)
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
         self.assertFalse(mc.raw_file_hidden(self._processed(patient)))
 
     def test_discard_raw_hides_even_when_processed_exists(self):
         m = _modality("panoramic")
         _step(m, discard_raw=True)
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
         self._processed(patient)
         self.assertTrue(mc.raw_file_hidden(self._raw(patient)))
 
     def test_blocking_hides_raw_until_processed_exists(self):
         m = _modality("panoramic")
         _step(m, is_blocking=True, discard_raw=False)
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
         raw = self._raw(patient)
         # No processed output yet -> blocked/hidden.
         self.assertTrue(mc.raw_file_hidden(raw))
@@ -150,15 +169,13 @@ class RawFileHiddenTests(TestCase):
     def test_nonblocking_non_discard_shows_raw(self):
         m = _modality("panoramic")
         _step(m, is_blocking=False, discard_raw=False)
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
         self.assertFalse(mc.raw_file_hidden(self._raw(patient)))
 
     def test_discard_raw_recognizes_ios_arch_file_types(self):
         m = _modality("ios")
         _step(m, discard_raw=True)
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
 
         upper = self._raw(patient, "ios_raw_upper", "p/upper.stl")
         lower = self._raw(patient, "ios_raw_lower", "p/lower.stl")
@@ -192,9 +209,8 @@ class RerunnableStepsTests(TestCase):
         )
 
     def test_ios_patient_exposes_full_step_chain(self):
-        from maxillo.models import Patient
         self._ios_pipeline()
-        patient = Patient.objects.create()
+        patient = _patient()
         self._raw(patient, "ios_raw_upper", "p/upper.stl")
         self._raw(patient, "ios_raw_lower", "p/lower.stl")
 
@@ -209,17 +225,15 @@ class RerunnableStepsTests(TestCase):
         )
 
     def test_no_ios_input_means_no_ios_steps(self):
-        from maxillo.models import Patient
         self._ios_pipeline()
-        patient = Patient.objects.create()
+        patient = _patient()
 
         steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
         self.assertEqual(steps, [])
 
     def test_cbct_patient_exposes_only_cbct(self):
-        from maxillo.models import Patient
         self._ios_pipeline()
-        patient = Patient.objects.create()
+        patient = _patient()
         self._raw(patient, "cbct_raw", "p/vol.nii")
 
         steps = mc.rerunnable_steps_for_patient(list(patient.files.all()), [])
@@ -227,11 +241,10 @@ class RerunnableStepsTests(TestCase):
         self.assertEqual(steps[0]["name"], "CBCT Segmentation")
 
     def test_disabled_downstream_step_is_skipped(self):
-        from maxillo.models import Patient
         ios_step, _cbct_step, landmarks, _bite = self._ios_pipeline()
         landmarks.is_enabled = False
         landmarks.save()
-        patient = Patient.objects.create()
+        patient = _patient()
         self._raw(patient, "ios_raw_upper", "p/upper.stl")
         self._raw(patient, "ios_raw_lower", "p/lower.stl")
 
@@ -239,11 +252,10 @@ class RerunnableStepsTests(TestCase):
         self.assertEqual([s["slug"] for s in steps], ["ios"])
 
     def test_disabled_root_blocks_dependents(self):
-        from maxillo.models import Patient
         ios_step, _cbct_step, _landmarks, _bite = self._ios_pipeline()
         ios_step.is_enabled = False
         ios_step.save()
-        patient = Patient.objects.create()
+        patient = _patient()
         self._raw(patient, "ios_raw_upper", "p/upper.stl")
         self._raw(patient, "ios_raw_lower", "p/lower.stl")
 
@@ -293,11 +305,10 @@ class EnsureStepJobsTests(TestCase):
 
     def test_creates_missing_downstream_jobs_for_new_step(self, _send_task):
         from common.models import Job
-        from maxillo.models import Patient
         from common.uploads import ensure_step_jobs_for_patient
 
         self._ios_pipeline()
-        patient = Patient.objects.create()
+        patient = _patient()
         # In-flight (not completed) so the created dependents stay 'dependency'.
         ios_job = Job.objects.create(
             modality_slug="ios", status="processing", patient=patient, domain="maxillo"
@@ -319,11 +330,10 @@ class EnsureStepJobsTests(TestCase):
 
     def test_idempotent_when_jobs_already_exist(self, _send_task):
         from common.models import Job
-        from maxillo.models import Patient
         from common.uploads import ensure_step_jobs_for_patient
 
         self._ios_pipeline()
-        patient = Patient.objects.create()
+        patient = _patient()
         Job.objects.create(
             modality_slug="ios", status="completed", patient=patient, domain="maxillo"
         )
@@ -338,11 +348,10 @@ class EnsureStepJobsTests(TestCase):
         )
 
     def test_unknown_slugs_are_ignored(self, _send_task):
-        from maxillo.models import Patient
         from common.uploads import ensure_step_jobs_for_patient
 
         self._ios_pipeline()
-        patient = Patient.objects.create()
+        patient = _patient()
         self.assertEqual(ensure_step_jobs_for_patient(patient, ["does-not-exist"]), [])
 
 
@@ -362,11 +371,10 @@ class CreateStepJobsTests(TestCase):
     @patch("common.signals.celery_app.send_task")
     def test_ios_source_job_spawns_bite_dependency(self, _send):
         from common.models import Job
-        from maxillo.models import Patient
         from common.uploads import create_step_jobs
 
         self._ios_bite()
-        patient = Patient.objects.create()
+        patient = _patient()
         # In-flight (not completed) so the dependent stays in 'dependency' status.
         ios_job = Job.objects.create(
             modality_slug="ios", status="processing", patient=patient, domain="maxillo"
@@ -386,11 +394,10 @@ class CreateStepJobsTests(TestCase):
     @patch("common.signals.celery_app.send_task")
     def test_modality_without_steps_creates_nothing(self, _send):
         from common.models import Job
-        from maxillo.models import Patient
         from common.uploads import create_step_jobs
 
         _modality("ios")  # no steps declared
-        patient = Patient.objects.create()
+        patient = _patient()
         ios_job = Job.objects.create(
             modality_slug="ios", status="processing", patient=patient, domain="maxillo"
         )
@@ -401,11 +408,10 @@ class CreateStepJobsTests(TestCase):
         """The core new capability: a completed prerequisite's output_files
         become the dependent step's input_files when it unblocks."""
         from common.models import Job
-        from maxillo.models import Patient
         from common.uploads import create_step_jobs
 
         self._ios_bite()
-        patient = Patient.objects.create()
+        patient = _patient()
         ios_job = Job.objects.create(
             modality_slug="ios", status="pending", patient=patient, domain="maxillo"
         )
@@ -426,15 +432,13 @@ class ProcessingStatusBlockingTests(TestCase):
 
     def _maxillo_patient_with_job(self, slug, status="pending"):
         from common.models import Job
-        from maxillo.models import Patient
-        patient = Patient.objects.create()
+        patient = _patient()
         Job.objects.create(modality_slug=slug, status=status, patient=patient, domain="maxillo")
         return patient
 
     def _brain_patient_with_job(self, slug, status="pending"):
         from common.models import Job
-        from brain.models import Patient as BrainPatient
-        patient = BrainPatient.objects.create()
+        patient = _brain_patient()
         Job.objects.create(modality_slug=slug, status=status, brain_patient=patient, domain="brain")
         return patient
 

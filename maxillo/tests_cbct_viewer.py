@@ -2,14 +2,20 @@ from unittest import mock
 
 from django.test import TestCase
 
-from common.models import FileRegistry, Job, Modality
+from common.models import FileRegistry, Job, Modality, Project
 from maxillo.models import Patient
 from maxillo.views.patient_detail import _cbct_viewer_files
 
 
 class CBCTViewerFilePairingTests(TestCase):
     def setUp(self):
-        self.patient = Patient.objects.create(name="CBCT Viewer Patient")
+        # Patients are project-scoped.
+        self.project = Project.objects.create(
+            name="CBCT Viewer", slug="cbct-viewer", domain="maxillo"
+        )
+        self.patient = Patient.objects.create(
+            name="CBCT Viewer Patient", project=self.project
+        )
         self.modality = Modality.objects.create(name="CBCT Viewer", slug="cbct")
 
     def _file(self, file_type, path, *, job=None, subtype="", metadata=None):

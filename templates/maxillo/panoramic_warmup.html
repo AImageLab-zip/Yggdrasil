@@ -1,0 +1,88 @@
+{% extends 'common/base_app.html' %}
+{% load static %}
+
+{% block title %}Default panoramics - Yggdrasil{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="mb-3">
+        <a href="{% url ns|default:'maxillo'|add:':patient_list' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to patients
+        </a>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <strong><i class="fas fa-panorama me-2"></i>Generate default panoramics</strong>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Panoramic reconstruction runs in this browser, so a patient's default panoramic
+                normally appears the first time someone opens it. This page does that pass for a
+                whole folder of <strong>{{ project.name }}</strong>, so already-uploaded patients
+                get a panoramic to export.
+            </p>
+            <p class="text-muted small">
+                Each patient loads its CBCT volume before generating, so this is slow and needs
+                this tab to stay open and in the foreground. Up to {{ batch_limit }} patients per run.
+            </p>
+
+            <div class="row g-2 align-items-end">
+                <div class="col-sm-6">
+                    <label class="form-label" for="warmupFolder">Folder</label>
+                    <select class="form-select" id="warmupFolder">
+                        {% for folder in folders %}
+                        <option value="{{ folder.id }}">{{ folder.get_full_path }}</option>
+                        {% empty %}
+                        <option value="">No folders in this project</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-sm-3">
+                    <button type="button" class="btn btn-outline-primary w-100" id="warmupScan">
+                        <i class="fas fa-magnifying-glass me-1"></i>Find missing
+                    </button>
+                </div>
+                <div class="col-sm-3">
+                    <button type="button" class="btn btn-primary w-100" id="warmupStart" disabled>
+                        <i class="fas fa-play me-1"></i>Generate
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3" id="warmupStatusCard" hidden>
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong id="warmupStatus">Idle</strong>
+                <span class="text-muted small" id="warmupCount">0/0</span>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div class="progress-bar" id="warmupBar" role="progressbar" style="width: 0%"></div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-danger" id="warmupStop" hidden>
+                    <i class="fas fa-stop me-1"></i>Stop
+                </button>
+            </div>
+            <ul class="list-unstyled mt-3 mb-0 small" id="warmupLog"></ul>
+        </div>
+    </div>
+
+    {# The patient view is loaded here; cbct_panorex_editor.js generates and
+       saves the default panoramic, then posts the outcome to this page. #}
+    <iframe id="warmupFrame" title="Panoramic generation worker"
+            style="width: 1px; height: 1px; border: 0; position: absolute; left: -9999px;"></iframe>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    window.panoramicWarmup = {
+        pendingUrl: '{% url ns|default:"maxillo"|add:":panoramic_warmup_pending" %}',
+        patientUrlTemplate: '{% url ns|default:"maxillo"|add:":patient_detail" 0 %}'
+    };
+</script>
+<script src="{% static 'js/panoramic_warmup.js' %}"></script>
+{% endblock %}

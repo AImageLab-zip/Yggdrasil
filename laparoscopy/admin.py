@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
+from common.annotation_lock import raw_data_is_locked
+
 from .models import (
     Classification,
     Dataset,
@@ -49,9 +51,11 @@ class DatasetAdmin(admin.ModelAdmin):
 
 @admin.register(Folder)
 class FolderAdmin(admin.ModelAdmin):
-    list_display = ['name', 'parent', 'is_demo', 'created_at', 'created_by']
-    list_filter = ['is_demo']
+    # See maxillo.FolderAdmin: `project` is shown so a mis-filed folder is visible.
+    list_display = ['name', 'project', 'parent', 'is_demo', 'created_at', 'created_by']
+    list_filter = ['project', 'is_demo']
     list_editable = ['is_demo']
+    list_select_related = ['project', 'parent']
     search_fields = ['name']
 
 
@@ -63,10 +67,30 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
-    list_display = ['patient_id', 'name', 'visibility', 'folder', 'uploaded_at', 'uploaded_by']
-    list_filter = ['visibility', 'uploaded_at']
+    # See maxillo.PatientAdmin: `project` is shown so a mis-filed patient is visible.
+    list_display = ['patient_id', 'name', 'project', 'visibility', 'folder', 'raw_locked', 'uploaded_at', 'uploaded_by']
+    list_filter = ['project', 'visibility', 'uploaded_at']
+    list_select_related = ['project', 'folder']
     search_fields = ['patient_id', 'name']
     inlines = [QuadrantClassificationMarkerInline]
+
+    # Laparoscopy is the one domain that still keeps raw scans in FileFields on
+    # the patient itself rather than in FileRegistry, so the freeze has to be
+    # applied here as well. The `_norm` fields are pipeline output, not raw.
+    RAW_FILE_FIELDS = ['upper_scan_raw', 'lower_scan_raw', 'cbct']
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        # Superusers keep the admin-side override for genuine data repair.
+        if obj is None or request.user.is_superuser:
+            return readonly
+        if raw_data_is_locked(obj):
+            readonly += [f for f in self.RAW_FILE_FIELDS if f not in readonly]
+        return readonly
+
+    @admin.display(description='Raw locked', boolean=True)
+    def raw_locked(self, obj):
+        return raw_data_is_locked(obj)
 
 
 @admin.register(Classification)

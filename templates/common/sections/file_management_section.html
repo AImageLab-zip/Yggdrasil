@@ -13,7 +13,12 @@
                         <h6 class="text-primary mb-2 small">
                             <i class="fas fa-file-import me-1"></i>Raw Files
                         </h6>
-                        {% if can_modify_segmentation %}
+                        {% if raw_data_locked %}
+                        <div class="alert alert-secondary py-2 px-2 mb-2 small d-flex align-items-start" role="status">
+                            <i class="fas fa-lock me-2 mt-1"></i>
+                            <div>{{ raw_lock_message }}</div>
+                        </div>
+                        {% elif can_modify_segmentation %}
                         <div class="card border-0 bg-light mb-2">
                             <div class="card-body py-2 px-2">
                                 <div class="row g-2 align-items-end">
@@ -61,7 +66,7 @@
                                        download>
                                         <i class="fas fa-download"></i>
                                     </a>
-                                    {% if can_modify_segmentation %}
+                                    {% if can_modify_segmentation and not raw_data_locked %}
                                     <button
                                         type="button"
                                         class="btn btn-outline-danger btn-sm btn-delete-raw-file"

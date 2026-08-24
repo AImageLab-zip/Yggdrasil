@@ -11,12 +11,14 @@
  * Depends on the vendored nifti-reader.js (global `nifti`).
  */
 
+/* global nifti */
+
 (function(root, factory) {
     'use strict';
-    var api = factory();
+    var api = factory(root);
     if (typeof module === 'object' && module.exports) module.exports = api;
     root.VolumeMetadata = api;
-}(typeof window !== 'undefined' ? window : globalThis, function() {
+}(typeof window !== 'undefined' ? window : globalThis, function(root) {
     'use strict';
 
     var AXIS_PAIRS = [['L', 'R'], ['P', 'A'], ['I', 'S']];
@@ -125,7 +127,14 @@
             return result;
         }
 
-        var niftiLib = (typeof window !== 'undefined' && window.nifti) || null;
+        // Resolve the vendored reader from this module's own global, not from
+        // `window`: inside a Web Worker there is no `window`, and a window-only
+        // lookup made every header parse fail with 'nifti-reader-unavailable'.
+        // Callers read that as "no orientation metadata" and would then rewrite a
+        // perfectly good affine with a canonical diagonal one.
+        var niftiLib = (root && root.nifti)
+            || (typeof nifti !== 'undefined' ? nifti : null)
+            || null;
         if (!niftiLib) {
             result.error = 'nifti-reader-unavailable';
             return result;

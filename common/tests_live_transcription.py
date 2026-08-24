@@ -52,7 +52,7 @@ class LiveTranscriptionConsumerTests(TransactionTestCase):
         self.user = User.objects.create_user(username="transcriber", password="x")
         self.outsider = User.objects.create_user(username="outsider", password="x")
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
-        self.patient = Patient.objects.create(name="P")
+        self.patient = Patient.objects.create(name="P", project=self.project)
 
     def communicator(self, user, query="lang=it"):
         communicator = WebsocketCommunicator(

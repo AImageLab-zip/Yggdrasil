@@ -11,6 +11,7 @@ import hashlib
 
 from common.file_access import exists as artifact_exists
 from common.object_storage import get_object_storage
+from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.permissions import (
     get_user_folder_role,
     project_allows_annotation,
@@ -672,8 +673,16 @@ def patient_detail(request, patient_id):
             m.get('slug') for m in patient_modalities if m.get('slug') != 'rawzip'
         ]
 
+    # Raw inputs freeze once annotation work exists; the panoramic freezes on
+    # everything except its own state (see common.annotation_lock).
+    raw_lock_reasons = annotation_lock_reasons(patient)
+    panoramic_lock_reasons = annotation_lock_reasons(patient, include_panoramic=False)
+
     context = {
         'patient': patient,
+        'raw_data_locked': bool(raw_lock_reasons),
+        'raw_lock_message': lock_message(raw_lock_reasons),
+        'panoramic_locked': bool(panoramic_lock_reasons),
         'ai_classification': ai_classification,
         'manual_classification': manual_classification,
         'user_profile': user_profile,

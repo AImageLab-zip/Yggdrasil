@@ -122,8 +122,7 @@ def project_upload_api(request, project_slug):
         
         # Get allowed modalities for this project
         allowed_slugs = set(project.modalities.values_list('slug', flat=True))
-        logger.error(f"Allowed slugs: {allowed_slugs}")
-        logger.error(f"Candidate slugs: {candidate_slugs}")
+        logger.debug("Allowed slugs: %s; candidate slugs: %s", allowed_slugs, candidate_slugs)
         # Add modalities to patient
         if candidate_slugs:
             try:
@@ -137,7 +136,7 @@ def project_upload_api(request, project_slug):
                         m = _Modality.objects.filter(slug=_slugify(slug)).first()
                     if m and (not allowed_slugs or m.slug in allowed_slugs):
                         patient.modalities.add(m)
-                        logger.error(f"Added modality {m.slug} to patient {patient.patient_id}")
+                        logger.debug("Added modality %s to patient %s", m.slug, patient.patient_id)
             except Exception:
                 pass
         

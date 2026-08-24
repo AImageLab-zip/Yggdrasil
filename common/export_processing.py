@@ -11,6 +11,7 @@ import time
 import zipfile
 from pathlib import Path
 
+from common import export_catalog
 from common.file_access import exists as artifact_exists
 from common.file_access import iter_bytes as iter_artifact_bytes
 from common.object_storage import get_object_storage
@@ -65,86 +66,58 @@ def build_patient_classification_blob(patient, classifications):
 class ExportProcessor:
     """Processes export jobs by querying patients, collecting files, and creating ZIP archives."""
 
-    # Map modality slugs to raw/processed file types.
-    MODALITY_TO_FILE_TYPES = {
-        "cbct": {
-            "raw": ["cbct_raw"],
-            "processed": ["cbct_processed"],
-        },
-        "ios": {
-            "raw": ["ios_raw_upper", "ios_raw_lower"],
-            # Legacy: ios_processed_upper/_lower. New completions: ios_processed
-            # (with subtype='upper'/'lower'). Both listed so exports include either.
-            "processed": ["ios_processed_upper", "ios_processed_lower", "ios_processed"],
-        },
-        "audio": {
-            "raw": ["audio_raw"],
-            "processed": ["audio_processed"],
-        },
-        "bite_classification": {
-            "raw": [],
-            "processed": ["bite_classification"],
-        },
-        "intraoral-photo": {
-            "raw": ["intraoral_raw"],
-            "processed": ["intraoral-photo_processed"],
-        },
-        "teleradiography": {
-            "raw": ["teleradiography_raw"],
-            "processed": ["teleradiography_processed"],
-        },
-        "panoramic": {
-            "raw": ["panoramic_raw"],
-            "processed": ["panoramic_processed"],
-        },
-        "rawzip": {
-            "raw": ["generic_raw"],
-            "processed": ["generic_processed"],
-        },
-    }
-
     def __init__(self, export, domain="maxillo"):
         """Initialize processor with export instance."""
         self.export = export
         self.domain = domain
-        # Domain-specific modality->file-type map and FileRegistry patient FK.
-        if domain == "brain":
-            from brain.export_config import BRAIN_EXPORT_MODALITY_FILE_TYPES
-
-            self.modality_map = BRAIN_EXPORT_MODALITY_FILE_TYPES
-            self.patient_fk = "brain_patient"
-        else:
-            self.modality_map = self.MODALITY_TO_FILE_TYPES
-            self.patient_fk = "patient"
+        # Which of FileRegistry's parallel patient FK columns this domain uses.
+        # The modality -> file_type mapping that used to live here (and in two
+        # other copies) is now common.export_catalog.
+        self.patient_fk = "brain_patient" if domain == "brain" else "patient"
         self.query_params = export.query_params
         self.folder_ids = self.query_params.get("folder_ids", [])
-        # Strip legacy "reports" pseudo-slug from modality list
-        raw_slugs = self.query_params.get("modality_slugs", [])
-        self.modality_slugs = [s for s in raw_slugs if s != "reports"]
-        self.filters = self.query_params.get("filters", {})
-        self.has_content_selection = (
-            "include_raw" in self.query_params
-            or "include_processed" in self.query_params
-        )
-        if self.has_content_selection:
-            self.include_raw = self._coerce_bool(
-                self.query_params.get("include_raw"), default=False
-            )
-            self.include_processed = self._coerce_bool(
-                self.query_params.get("include_processed"), default=False
-            )
+        self.project_id = self.query_params.get("project_id")
+
+        # Artifact selection (common.export_catalog) is the single source of
+        # truth for what an export contains. Rows written before artifacts
+        # existed carry modality_slugs + include_* flags instead, and are
+        # translated so they keep re-running identically.
+        self.artifact_keys = list(self.query_params.get("artifacts") or [])
+        if self.artifact_keys:
+            self.artifacts = export_catalog.resolve_artifacts(domain, self.artifact_keys)
         else:
-            # Legacy exports created before content selection existed.
-            self.include_raw = True
-            self.include_processed = True
-        # include_reports: explicit flag, or legacy "reports" pseudo-slug
-        self.include_reports = self._coerce_bool(
-            self.query_params.get("include_reports"),
-            default="reports" in raw_slugs,
+            self.artifacts = self._legacy_artifacts()
+        self.modality_slugs = sorted(export_catalog.modality_slugs_for(self.artifacts))
+        self.collectors = export_catalog.collectors_for(self.artifacts)
+        self.filters = export_catalog.normalize_filters(
+            self.query_params.get("filters", {})
         )
-        # include_bite_classification: independent flag, not modality-gated.
-        self.include_bite_classification = self._coerce_bool(
-            self.query_params.get("include_bite_classification"), default=False
+
+    def _legacy_artifacts(self):
+        """Artifacts for an Export row predating the artifact selection."""
+        raw_slugs = self.query_params.get("modality_slugs", [])
+        declares_content = (
+            "include_raw" in self.query_params or "include_processed" in self.query_params
+        )
+        if declares_content:
+            include_raw = self._coerce_bool(self.query_params.get("include_raw"))
+            include_processed = self._coerce_bool(self.query_params.get("include_processed"))
+        else:
+            # Older still: content selection did not exist, everything was in.
+            include_raw = include_processed = True
+        return export_catalog.artifacts_from_legacy_selection(
+            self.domain,
+            [slug for slug in raw_slugs if slug != "reports"],
+            include_raw=include_raw,
+            include_processed=include_processed,
+            # "reports" used to be a pseudo modality slug before it was a flag.
+            include_reports=self._coerce_bool(
+                self.query_params.get("include_reports"),
+                default="reports" in raw_slugs,
+            ),
+            include_bite_classification=self._coerce_bool(
+                self.query_params.get("include_bite_classification")
+            ),
         )
 
     @staticmethod
@@ -158,59 +131,6 @@ class ExportProcessor:
             return bool(value)
         return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
-    def _modality_file_type_groups(self, modality_slug):
-        return self.modality_map.get(
-            modality_slug, {"raw": [], "processed": []}
-        )
-
-    def _modality_requested_file_types(self, modality_slug):
-        groups = self._modality_file_type_groups(modality_slug)
-        file_types = []
-        if self.include_raw:
-            file_types.extend(groups.get("raw", []))
-        if self.include_processed:
-            file_types.extend(groups.get("processed", []))
-        return file_types
-
-    def _file_type_matches_requested_content(self, file_type):
-        is_raw = file_type.endswith("_raw") or file_type.startswith("ios_raw_")
-        is_processed = (
-            file_type.endswith("_processed")
-            or file_type.startswith("ios_processed_")
-            or file_type == "bite_classification"
-        )
-
-        if self.include_raw and is_raw:
-            return True
-        if self.include_processed and is_processed:
-            return True
-        return False
-
-    @staticmethod
-    def _content_bucket(file_type):
-        """Map a file_type to its ZIP content-type subfolder (raw vs processed)."""
-        file_type = file_type or ""
-        if file_type.endswith("_raw") or file_type.startswith("ios_raw_"):
-            return "raw"
-        return "processed"
-
-    @staticmethod
-    def _infer_modality_slug_from_path(file_path):
-        path = (file_path or "").lower()
-        if "/raw/ios/" in path or "/processed/ios/" in path:
-            return "ios"
-        if "/raw/cbct/" in path or "/processed/cbct/" in path:
-            return "cbct"
-        if "/raw/audio/" in path or "/processed/audio/" in path:
-            return "audio"
-        if "/raw/intraoral/" in path or "/processed/intraoral/" in path:
-            return "intraoral-photo"
-        if "/raw/teleradiography/" in path or "/processed/teleradiography/" in path:
-            return "teleradiography"
-        if "/raw/panoramic/" in path or "/processed/panoramic/" in path:
-            return "panoramic"
-        return None
-
     def _patient_file_queryset(self, patients):
         from common.models import FileRegistry
 
@@ -219,51 +139,33 @@ class ExportProcessor:
         )
 
     def _build_no_files_found_error(self, patients):
-        selected_content = []
-        if self.include_raw:
-            selected_content.append("raw")
-        if self.include_processed:
-            selected_content.append("processed")
-        if self.include_reports:
-            selected_content.append("reports")
-        if self.include_bite_classification:
-            selected_content.append("bite classification")
+        """Explain an empty export in terms of what was actually asked for."""
+        if not self.artifacts:
+            return (
+                "No export content selected. Choose at least one artifact "
+                "(raw files, processed outputs, reports, ...)."
+            )
 
-        if not selected_content:
-            return "No export content selected. Enable at least one of Raw files, Processed files, or Reports."
-
-        patient_qs = self._patient_file_queryset(patients)
-        modality_summaries = []
-        for modality_slug in self.modality_slugs:
-            groups = self._modality_file_type_groups(modality_slug)
-            parts = []
-            if self.include_raw:
-                raw_types = groups.get("raw", [])
-                raw_count = (
-                    patient_qs.filter(file_type__in=raw_types).count()
-                    if raw_types
-                    else 0
-                )
-                parts.append(f"raw={raw_count}")
-            if self.include_processed:
-                processed_types = groups.get("processed", [])
-                processed_count = (
-                    patient_qs.filter(file_type__in=processed_types).count()
-                    if processed_types
-                    else 0
-                )
-                parts.append(f"processed={processed_count}")
-            if parts:
-                modality_summaries.append(f"{modality_slug}({', '.join(parts)})")
+        rows = self._patient_file_queryset(patients)
+        availability = []
+        for artifact in self.artifacts:
+            if not artifact.is_file_backed:
+                availability.append(f"{artifact.key}(database)")
+                continue
+            count = rows.filter(artifact.registry_q()).count()
+            availability.append(f"{artifact.key}({count})")
 
         message = (
             f"No files found for {patients.count()} matching patient(s). "
-            f"Requested content: {', '.join(selected_content)}."
+            f"Requested: {', '.join(a.key for a in self.artifacts)}."
         )
-        if modality_summaries:
-            message += f" Availability by modality: {'; '.join(modality_summaries)}."
-        if self.include_processed and not self.include_raw:
-            message += " Tip: enable Raw files if post-processing has not finished yet."
+        if availability:
+            message += f" Availability: {'; '.join(availability)}."
+        processed_only = all(
+            artifact.bucket != export_catalog.BUCKET_RAW for artifact in self.artifacts
+        )
+        if processed_only:
+            message += " Tip: include a raw artifact if processing has not finished yet."
         return message
 
     def _domain_models(self):
@@ -277,14 +179,38 @@ class ExportProcessor:
     def _filter_patients_by_folders(self, Patient):
         """Base patient queryset restricted to the requested folders.
 
-        maxillo links a patient to a single folder via the `folder` FK, while
-        brain uses a `folders` many-to-many relationship.
+        Selecting a folder includes its sub-folders: folders nest, and picking a
+        parent while silently dropping everything under it would be a
+        surprising, hard-to-notice hole in the export.
+
+        Every domain links a patient to one folder via the `folder` FK. Brain used
+        to use a `folders` many-to-many, and this method still queried it long
+        after the folder->project migration collapsed it to a single FK -- which
+        made every brain export fail with a FieldError.
         """
         if not self.folder_ids:
             return Patient.objects.none()
-        if self.domain == "brain":
-            return Patient.objects.filter(folders__id__in=self.folder_ids).distinct()
-        return Patient.objects.filter(folder_id__in=self.folder_ids)
+        return Patient.objects.filter(folder_id__in=self._folder_closure(Patient))
+
+    def _folder_closure(self, Patient):
+        """The selected folders plus every descendant, as a list of ids."""
+        folder_model = Patient._meta.get_field("folder").related_model
+        selected = [int(folder_id) for folder_id in self.folder_ids]
+        closure = set(selected)
+        frontier = selected
+        # Folder trees here are shallow; a handful of breadth-first queries beats
+        # a recursive CTE for readability, and the loop is bounded by depth.
+        while frontier:
+            children = list(
+                folder_model.objects.filter(parent_id__in=frontier)
+                .exclude(id__in=closure)
+                .values_list("id", flat=True)
+            )
+            if not children:
+                break
+            closure.update(children)
+            frontier = children
+        return sorted(closure)
 
     def _update_progress(self, message, percent=None):
         """Update progress on the Export record for live feedback."""
@@ -296,495 +222,279 @@ class ExportProcessor:
         Export.objects.filter(pk=self.export.pk).update(**update_kw)
 
     def query_patients(self):
-        """Query patients based on folder_ids and filters. Apply AND logic for all filters."""
-        Patient, VoiceCaption = self._domain_models()
+        """Patients in the requested folders, narrowed by the active filters.
 
-        from common.models import FileRegistry, Modality
+        Filter application lives in ``common.export_catalog.apply_filters`` so the
+        preview endpoint counts exactly what the ZIP will contain.
+        """
+        Patient, _VoiceCaption = self._domain_models()
 
-        # Start with folder filter (FK for maxillo, M2M for brain)
         patients = self._filter_patients_by_folders(Patient)
-
         if not patients.exists():
             return patients
 
-        # Apply modality presence filters (checking for processed files)
-        if self.filters.get("has_cbct"):
-            cbct_file_types = self._modality_requested_file_types("cbct")
-            if not cbct_file_types:
-                return patients.none()
-            file_filter = {"file_type__in": cbct_file_types, "domain": self.domain}
-            cbct_patients = Patient.objects.filter(
-                files__file_type__in=cbct_file_types
-            ).distinct()
-            patients = patients.filter(
-                patient_id__in=cbct_patients.values_list("patient_id", flat=True)
-            )
-
-        if self.filters.get("has_ios"):
-            ios_file_types = self._modality_requested_file_types("ios")
-            if not ios_file_types:
-                return patients.none()
-            ios_patients = Patient.objects.filter(
-                files__file_type__in=ios_file_types
-            ).distinct()
-            patients = patients.filter(
-                patient_id__in=ios_patients.values_list("patient_id", flat=True)
-            )
-
-        # Bite classification presence filter (DB-only; NOT modality/FileRegistry
-        # based, so it must be excluded from the generic dynamic loop below —
-        # the stale "bite_classification" entry in MODALITY_TO_FILE_TYPES only
-        # covers the pipeline's FileRegistry JSON, not manual classifications).
-        if self.filters.get("has_bite_classification") and self.domain != "brain":
-            from maxillo.models import Classification
-
-            bc_patient_ids = Classification.objects.filter(
-                patient_id__in=patients.values_list("patient_id", flat=True)
-            ).values_list("patient_id", flat=True).distinct()
-            patients = patients.filter(patient_id__in=bc_patient_ids)
-
-        # Dynamic modality presence filters
-        for key, value in self.filters.items():
-            if (
-                key.startswith("has_")
-                and not key.startswith("has_reports_")
-                and key != "has_bite_classification"
-                and value
-            ):
-                modality_slug = key.replace("has_", "")
-                file_types = self._modality_requested_file_types(modality_slug)
-                if file_types:
-                    modality_patients = Patient.objects.filter(
-                        files__file_type__in=file_types
-                    ).distinct()
-                    patients = patients.filter(
-                        patient_id__in=modality_patients.values_list(
-                            "patient_id", flat=True
-                        )
-                    )
-
-        # Report presence filters
-        for key, value in self.filters.items():
-            if key.startswith("has_reports_") and value:
-                modality_slug = key.replace("has_reports_", "")
-                report_patients = (
-                    Patient.objects.filter(
-                        voice_captions__modality=modality_slug,
-                        voice_captions__text_caption__isnull=False,
-                    )
-                    .exclude(voice_captions__text_caption="")
-                    .distinct()
-                )
-                patients = patients.filter(
-                    patient_id__in=report_patients.values_list(
-                        "patient_id", flat=True
-                    )
-                )
-
-        return patients.distinct()
+        return export_catalog.apply_filters(
+            patients, self.domain, self.filters, artifacts=self.artifacts
+        )
 
     def collect_files(self, patients):
-        """Collect files from FileRegistry for each patient and selected modalities."""
-        _Patient, VoiceCaption = self._domain_models()
+        """Resolve the selected artifacts into concrete ZIP entries.
 
-        from common.models import FileRegistry, Modality
+        One pass per patient. File-backed artifacts are matched against the
+        patient's FileRegistry rows (including outputs nested in a bundle row's
+        ``metadata['files']``, which is how CBCT completions publish the volume,
+        the segmentation and the inference stats); database-backed artifacts are
+        produced by the collectors below.
+        """
+        from common.models import FileRegistry
 
-        files_to_export = []
+        file_artifacts = [a for a in self.artifacts if a.is_file_backed]
+        collector_artifacts = [a for a in self.artifacts if a.collector]
+
+        entries = []
         total_size = 0
 
-        # Get file types for selected modalities
-        file_types = []
-        for modality_slug in self.modality_slugs:
-            file_types.extend(self._modality_requested_file_types(modality_slug))
-        file_types = list(set(file_types))
+        registry_query = None
+        for artifact in file_artifacts:
+            registry_query = (
+                artifact.registry_q() if registry_query is None
+                else registry_query | artifact.registry_q()
+            )
 
         logger.info(
-            f"Collecting files for modalities: {self.modality_slugs}, file_types: {file_types}"
+            "Collecting %d artifact(s) for %d patient(s): %s",
+            len(self.artifacts), patients.count(),
+            ", ".join(a.key for a in self.artifacts) or "none",
         )
-
-        # Also check by modality relationship
-        modality_objects = Modality.objects.filter(slug__in=self.modality_slugs)
-        logger.info(f"Found {modality_objects.count()} modality objects")
 
         for patient in patients:
-            # Collect files from FileRegistry (only processed files)
-            # Build query to match file_type in our list OR (modality match AND file is processed)
-            from django.db.models import Q
-
-            # Base query: match by file_type (this catches files even if modality is None)
-            query = Q(file_type__in=file_types)
-
-            # Resilience for legacy/mis-typed rows: include IOS paths when IOS raw is requested,
-            # even if file_type was stored incorrectly.
-            if self.include_raw and "ios" in self.modality_slugs:
-                query |= Q(file_path__icontains="/raw/ios/")
-
-            # For modality-based matching, also include files that match by modality relationship
-            # and selected content types (raw and/or processed)
-            if modality_objects.exists():
-                content_query = Q()
-                if self.include_raw:
-                    content_query |= Q(file_type__endswith="_raw") | Q(
-                        file_type__startswith="ios_raw_"
+            if registry_query is not None:
+                rows = (
+                    FileRegistry.objects.filter(
+                        domain=self.domain, **{self.patient_fk: patient}
                     )
-                if self.include_processed:
-                    content_query |= (
-                        Q(file_type__endswith="_processed")
-                        | Q(file_type__startswith="ios_processed_")
-                        | Q(file_type="bite_classification")
-                    )
-                if content_query:
-                    query |= Q(modality__in=modality_objects) & content_query
-
-            patient_files = (
-                FileRegistry.objects.filter(
-                    domain=self.domain, **{self.patient_fk: patient}
+                    .filter(registry_query)
+                    .distinct()
                 )
-                .filter(query)
-                .distinct()
+                for row in rows:
+                    for artifact in file_artifacts:
+                        if not artifact.matches(row):
+                            continue
+                        entry, size = self._file_entry(patient, artifact, row)
+                        if entry is not None:
+                            entries.append(entry)
+                            total_size += size
+
+            for artifact in collector_artifacts:
+                for entry, size in self._collect_documents(patient, artifact):
+                    entries.append(entry)
+                    total_size += size
+
+        logger.info("Total entries collected: %d, total size: %d bytes", len(entries), total_size)
+        return entries, total_size
+
+    def _file_entry(self, patient, artifact, row):
+        """Build one ZIP entry for a FileRegistry row, or (None, 0) if unusable."""
+        output = artifact.resolve_output(row)
+        path = output["path"] if output else None
+        size = output["size"] if output else 0
+
+        if not path:
+            logger.warning(
+                "FileRegistry %s (%s) has no path for artifact %s",
+                row.id, row.file_type, artifact.key,
             )
-            logger.info(
-                f"Patient {patient.patient_id}: found {patient_files.count()} files matching query"
+            return None, 0
+        if not artifact_exists(path):
+            logger.warning("File not found for artifact %s: %s", artifact.key, path)
+            return None, 0
+
+        return {
+            "type": "file",
+            "patient": patient,
+            "artifact": artifact,
+            "file_registry": row,
+            "path": path,
+        }, size
+
+    def _collect_documents(self, patient, artifact):
+        """Yield ``(entry, size)`` for a database-backed artifact."""
+        producer = {
+            "captions": self._collect_captions,
+            "occlusion": self._collect_occlusion,
+            "tooth_segmentation": self._collect_tooth_segmentation,
+        }.get(artifact.collector)
+        if producer is None:
+            logger.warning("No collector registered for artifact %s", artifact.key)
+            return
+        yield from producer(patient, artifact)
+
+    def _collect_captions(self, patient, artifact):
+        _Patient, VoiceCaption = self._domain_models()
+        captions = VoiceCaption.objects.filter(
+            patient=patient, text_caption__isnull=False
+        ).exclude(text_caption="")
+        # Restrict to the modalities being exported when the selection names
+        # any, so an IOS-only export does not carry CBCT dictations.
+        if self.modality_slugs:
+            captions = captions.filter(modality__in=self.modality_slugs)
+        for caption in captions:
+            content = caption.text_caption
+            yield (
+                {
+                    "type": "document",
+                    "patient": patient,
+                    "artifact": artifact,
+                    "content": content,
+                    "filename": f"{caption.modality or 'patient'}_{caption.user_id or 'unknown'}_{caption.id}.txt",
+                },
+                len(content.encode("utf-8")),
             )
 
-            for file_reg in patient_files:
-                logger.debug(
-                    f"  Processing file: {file_reg.file_type}, path: {file_reg.file_path}, modality: {file_reg.modality}"
-                )
-                # Double-check: only export files that are in the explicitly requested file_types
-                # list (handles ios_processed_upper / ios_processed_lower which don't end with
-                # '_processed'), or any other processed/bite_classification file from a modality
-                # relationship match.
-                is_mapped_file_type = file_reg.file_type in file_types
-                inferred_modality_from_path = self._infer_modality_slug_from_path(
-                    file_reg.file_path
-                )
-                is_modality_fallback = (
-                    (
-                        (
-                            file_reg.modality is not None
-                            and file_reg.modality.slug in self.modality_slugs
-                        )
-                        or (
-                            inferred_modality_from_path is not None
-                            and inferred_modality_from_path in self.modality_slugs
-                        )
-                    )
-                    and self._file_type_matches_requested_content(file_reg.file_type)
-                )
-                if is_mapped_file_type or is_modality_fallback:
-                    # Determine modality slug for file organization
-                    if file_reg.modality:
-                        modality_slug = file_reg.modality.slug
-                    elif inferred_modality_from_path:
-                        modality_slug = inferred_modality_from_path
-                    else:
-                        # Infer from file_type if modality is not set
-                        if file_reg.file_type.startswith("ios_"):
-                            modality_slug = "ios"
-                        elif file_reg.file_type.startswith("cbct_"):
-                            modality_slug = "cbct"
-                        elif file_reg.file_type.startswith("audio_"):
-                            modality_slug = "audio"
-                        elif file_reg.file_type.startswith("intraoral_"):
-                            modality_slug = "intraoral-photo"
-                        elif file_reg.file_type.startswith("teleradiography_"):
-                            modality_slug = "teleradiography"
-                        elif file_reg.file_type.startswith("panoramic_"):
-                            modality_slug = "panoramic"
-                        else:
-                            modality_slug = None
+    def _collect_occlusion(self, patient, artifact):
+        if self.domain != "maxillo":
+            return
+        from maxillo.models import Classification
 
-                    logger.debug(
-                        f"    Modality slug: {modality_slug}, file_path: {file_reg.file_path}, exists: {artifact_exists(file_reg.file_path) if file_reg.file_path else False}"
-                    )
-
-                    # Special handling for CBCT processed: files are stored in metadata['files']
-                    if (
-                        file_reg.file_type == "cbct_processed"
-                        and file_reg.metadata
-                        and "files" in file_reg.metadata
-                    ):
-                        # Export only the CBCT segmentation artifact from metadata.
-                        cbct_files = file_reg.metadata.get("files", {})
-                        for file_type_key, file_data in cbct_files.items():
-                            if file_type_key != "segmentation_nifti":
-                                continue
-                            if isinstance(file_data, dict) and "path" in file_data:
-                                file_path = file_data["path"]
-                                if artifact_exists(file_path):
-                                    files_to_export.append(
-                                        {
-                                            "type": "file",
-                                            "patient": patient,
-                                            "file_registry": file_reg,
-                                            "path": file_path,
-                                            "modality_slug": modality_slug,
-                                            "cbct_file_type": file_type_key,
-                                        }
-                                    )
-                                    # Use individual file size from metadata
-                                    file_size = file_data.get("size", 0)
-                                    total_size += file_size
-                                else:
-                                    logger.warning(
-                                        f"CBCT processed file not found: {file_path}"
-                                    )
-                    elif file_reg.file_path and artifact_exists(file_reg.file_path):
-                        # Standard single-file export
-                        logger.info(
-                            f"  Adding file: {file_reg.file_type} (modality: {modality_slug}) from {file_reg.file_path}"
-                        )
-                        files_to_export.append(
-                            {
-                                "type": "file",
-                                "patient": patient,
-                                "file_registry": file_reg,
-                                "path": file_reg.file_path,
-                                "modality_slug": modality_slug,
-                            }
-                        )
-                        total_size += int(file_reg.file_size or 0)
-                    elif not file_reg.file_path:
-                        logger.warning(
-                            f"FileRegistry {file_reg.id} ({file_reg.file_type}) has no file_path and no metadata files"
-                        )
-                    else:
-                        logger.warning(
-                            f"File not found: {file_reg.file_path} (file_type: {file_reg.file_type}, patient: {patient.patient_id})"
-                        )
-                else:
-                    logger.debug(
-                        f"  Skipping file {file_reg.file_type}: not in expected mapped types and not eligible modality fallback"
-                    )
-
-            # Collect VoiceCaption text files for reports
-            if self.include_reports and self.modality_slugs:
-                for modality_slug in self.modality_slugs:
-                    voice_captions = VoiceCaption.objects.filter(
-                        patient=patient,
-                        modality=modality_slug,
-                        text_caption__isnull=False,
-                    ).exclude(text_caption="")
-
-                    for vc in voice_captions:
-                        files_to_export.append(
-                            {
-                                "type": "report",
-                                "patient": patient,
-                                "voice_caption": vc,
-                                "modality_slug": modality_slug,
-                                "content": vc.text_caption,
-                                "user_id": vc.user_id,
-                            }
-                        )
-                        total_size += len(vc.text_caption.encode("utf-8"))
-
-            # Collect Bite Classification data (DB-only content; independent of
-            # modality_slugs and not backed by any FileRegistry entry for the
-            # manual/clinician-corrected value).
-            if self.include_bite_classification and self.domain != "brain":
-                from maxillo.models import Classification
-
-                classifications = list(
-                    Classification.objects.filter(patient=patient).select_related(
-                        "annotator"
-                    )
-                )
-                blob = build_patient_classification_blob(patient, classifications)
-                if blob is not None:
-                    content = json.dumps(blob, indent=2)
-                    files_to_export.append(
-                        {
-                            "type": "classification",
-                            "patient": patient,
-                            "content": content,
-                        }
-                    )
-                    total_size += len(content.encode("utf-8"))
-
-        logger.info(
-            f"Total files collected: {len(files_to_export)}, total size: {total_size} bytes"
+        classifications = list(
+            Classification.objects.filter(patient=patient).select_related("annotator")
         )
-        return files_to_export, total_size
+        blob = build_patient_classification_blob(patient, classifications)
+        if blob is None:
+            return
+        content = json.dumps(blob, indent=2)
+        yield (
+            {
+                "type": "document",
+                "patient": patient,
+                "artifact": artifact,
+                "content": content,
+                "filename": artifact.filename or "classification.json",
+            },
+            len(content.encode("utf-8")),
+        )
 
-    def create_zip(self, files_to_export, export_path):
-        """Create ZIP file with structure: patient_{id}_{name}/modality/files and reports/."""
+    def _collect_tooth_segmentation(self, patient, artifact):
+        if self.domain != "maxillo":
+            return
+        from maxillo.models import IntraoralToothSegmentation
+
+        rows = IntraoralToothSegmentation.objects.filter(patient=patient).select_related(
+            "image_file"
+        )
+        for row in rows:
+            image_name = os.path.basename((row.image_file.file_path or "").rstrip("/")) or str(
+                row.image_file_id
+            )
+            blob = {
+                "patient_id": patient.patient_id,
+                "image_file_id": row.image_file_id,
+                "image": image_name,
+                "is_confirmed": row.is_confirmed,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "teeth": row.teeth or {},
+            }
+            content = json.dumps(blob, indent=2)
+            stem = os.path.splitext(image_name)[0]
+            yield (
+                {
+                    "type": "document",
+                    "patient": patient,
+                    "artifact": artifact,
+                    "content": content,
+                    "filename": f"{stem}.json",
+                },
+                len(content.encode("utf-8")),
+            )
+
+    @staticmethod
+    def _patient_folder(patient):
+        """`patient_<id>_<name>` with anything path-unsafe stripped."""
+        name = f"patient_{patient.patient_id}_{patient.name}" if patient.name else f"patient_{patient.patient_id}"
+        name = "".join(c for c in name if c.isalnum() or c in ("_", "-", " "))
+        return name.replace(" ", "_")
+
+    @staticmethod
+    def _entry_filename(entry):
+        """Name this entry takes inside the ZIP."""
+        artifact = entry["artifact"]
+        if entry["type"] == "document":
+            return entry["filename"]
+        # A bundled output (CBCT volume / segmentation / stats) is stored under an
+        # opaque object key, so the artifact supplies the readable name.
+        if artifact.nested_key and artifact.filename:
+            return artifact.filename
+        if artifact.filename:
+            return artifact.filename
+        return os.path.basename((entry["path"] or "").rstrip("/")) or "file"
+
+    def create_zip(self, entries, export_path):
+        """Write the ZIP: ``patient_<id>_<name>/<artifact directory>/<filename>``.
+
+        Directory layout comes from each artifact (``Artifact.zip_directory``), so
+        raw/processed stay where they always were while derived outputs get their
+        own readable folders (``panoramic/generated``, ``ios/landmarks``, ...).
+        """
         os.makedirs(os.path.dirname(export_path), exist_ok=True)
 
-        # Organize files by patient
-        patient_files = {}
-        for file_info in files_to_export:
-            patient = file_info["patient"]
-            patient_key = patient.patient_id
-
-            if patient_key not in patient_files:
-                patient_files[patient_key] = {
-                    "patient": patient,
-                    "files": [],
-                    "reports": {},
-                    "classification": None,
-                }
-
-            if file_info["type"] == "file":
-                patient_files[patient_key]["files"].append(file_info)
-            elif file_info["type"] == "report":
-                modality_slug = file_info["modality_slug"]
-                if modality_slug not in patient_files[patient_key]["reports"]:
-                    patient_files[patient_key]["reports"][modality_slug] = []
-                patient_files[patient_key]["reports"][modality_slug].append(file_info)
-            elif file_info["type"] == "classification":
-                patient_files[patient_key]["classification"] = file_info["content"]
-
-        # Count total ZIP entries for progress
-        total_entries = 0
-        for patient_data in patient_files.values():
-            modality_files = {}
-            for file_info in patient_data["files"]:
-                modality_slug = file_info.get("modality_slug") or "unknown"
-                modality_files.setdefault(modality_slug, []).append(file_info)
-            total_entries += sum(len(f) for f in modality_files.values())
-            total_entries += sum(len(r) for r in patient_data["reports"].values())
-            if patient_data.get("classification"):
-                total_entries += 1
-
-        progress_interval = max(
-            1, total_entries // 50
-        )  # ~50 updates over the ZIP phase
-        current_entry = [0]  # use list so inner closure can mutate
+        total_entries = len(entries)
+        progress_interval = max(1, total_entries // 50)  # ~50 updates over the ZIP phase
+        written = 0
+        # A patient can hold two artifacts that resolve to the same filename
+        # (e.g. both IOS arches under one name); keep the archive lossless.
+        used_paths = set()
 
         with zipfile.ZipFile(export_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # Add files to ZIP
-            for patient_key, patient_data in patient_files.items():
-                patient = patient_data["patient"]
+            for entry in entries:
+                artifact = entry["artifact"]
+                directory = f"{self._patient_folder(entry['patient'])}/{artifact.zip_directory()}"
+                filename = self._entry_filename(entry)
+                dest_path = self._unique_path(used_paths, directory, filename)
 
-                # Create patient folder name
-                if patient.name:
-                    patient_folder = f"patient_{patient.patient_id}_{patient.name}"
-                else:
-                    patient_folder = f"patient_{patient.patient_id}"
-                # Sanitize folder name (remove invalid characters)
-                patient_folder = "".join(
-                    c for c in patient_folder if c.isalnum() or c in ("_", "-", " ")
-                )
-                patient_folder = patient_folder.replace(" ", "_")
-
-                # Group files by modality
-                modality_files = {}
-                for file_info in patient_data["files"]:
-                    modality_slug = file_info.get("modality_slug") or "unknown"
-                    if modality_slug not in modality_files:
-                        modality_files[modality_slug] = []
-                    modality_files[modality_slug].append(file_info)
-
-                # Add files to ZIP organized by modality
-                for modality_slug, files in modality_files.items():
-                    for file_info in files:
-                        file_reg = file_info["file_registry"]
-                        source_path = file_info["path"]
-
+                try:
+                    if entry["type"] == "document":
+                        zipf.writestr(dest_path, entry["content"])
+                    else:
+                        source_path = entry["path"]
                         if not artifact_exists(source_path):
-                            logger.warning(f"Skipping missing file: {source_path}")
+                            logger.warning("Skipping missing file: %s", source_path)
                             continue
+                        with zipf.open(dest_path, mode="w", force_zip64=True) as handle:
+                            for chunk in iter_artifact_bytes(source_path):
+                                handle.write(chunk)
+                except Exception as exc:  # noqa: BLE001 - one bad file must not kill the export
+                    logger.error("Error adding %s to ZIP: %s", dest_path, exc)
+                    continue
 
-                        # For CBCT files, use a descriptive filename based on file type
-                        if modality_slug == "cbct" and "cbct_file_type" in file_info:
-                            cbct_file_type = file_info["cbct_file_type"]
-                            # Map CBCT file types to descriptive names
-                            cbct_filename_map = {
-                                "segmentation_nifti": "segmentation.nii.gz",
-                                "structures_mesh": "structures.stl",
-                            }
-                            # Handle multiple mesh files (structures_mesh_1, structures_mesh_2, etc.)
-                            if cbct_file_type.startswith("structures_mesh"):
-                                if cbct_file_type == "structures_mesh":
-                                    filename = "structures.stl"
-                                else:
-                                    # Extract number if present (e.g., structures_mesh_1 -> structures_1.stl)
-                                    suffix = cbct_file_type.replace(
-                                        "structures_mesh_", ""
-                                    )
-                                    filename = (
-                                        f"structures_{suffix}.stl"
-                                        if suffix
-                                        else "structures.stl"
-                                    )
-                            else:
-                                filename = cbct_filename_map.get(
-                                    cbct_file_type,
-                                    os.path.basename((source_path or "").rstrip("/"))
-                                    or "file",
-                                )
-                        else:
-                            # Standard filename from path
-                            filename = (
-                                os.path.basename((source_path or "").rstrip("/"))
-                                or "file"
-                            )
-
-                        # Create destination path:
-                        # patient_folder/modality/<raw|processed>/filename
-                        bucket = self._content_bucket(file_reg.file_type)
-                        dest_path = f"{patient_folder}/{modality_slug}/{bucket}/{filename}"
-
-                        try:
-                            with zipf.open(dest_path, mode="w", force_zip64=True) as zf:
-                                for chunk in iter_artifact_bytes(source_path):
-                                    zf.write(chunk)
-                        except Exception as e:
-                            logger.error(f"Error adding file {source_path} to ZIP: {e}")
-                        current_entry[0] += 1
-                        if total_entries and current_entry[0] % progress_interval == 0:
-                            pct = 20 + int(75 * current_entry[0] / total_entries)
-                            self._update_progress(
-                                f"Writing ZIP ({current_entry[0]}/{total_entries} files)",
-                                pct,
-                            )
-
-                # Add report files: patient_folder/modality/reports/
-                for modality_slug, reports in patient_data["reports"].items():
-                    for report_info in reports:
-                        content = report_info["content"]
-                        user_id = report_info.get("user_id", "unknown")
-                        vc_id = report_info["voice_caption"].id
-                        filename = f"{user_id}_{vc_id}.txt"
-                        dest_path = f"{patient_folder}/{modality_slug}/reports/{filename}"
-                        zipf.writestr(dest_path, content)
-                        current_entry[0] += 1
-                        if total_entries and current_entry[0] % progress_interval == 0:
-                            pct = 20 + int(75 * current_entry[0] / total_entries)
-                            self._update_progress(
-                                f"Writing ZIP ({current_entry[0]}/{total_entries} files)",
-                                pct,
-                            )
-
-                # Add bite classification blob: patient_folder/bite_classification/classification.json
-                if patient_data.get("classification"):
-                    dest_path = (
-                        f"{patient_folder}/bite_classification/classification.json"
+                written += 1
+                if total_entries and written % progress_interval == 0:
+                    percent = 20 + int(75 * written / total_entries)
+                    self._update_progress(
+                        f"Writing ZIP ({written}/{total_entries} files)", percent
                     )
-                    zipf.writestr(dest_path, patient_data["classification"])
-                    current_entry[0] += 1
-                    if total_entries and current_entry[0] % progress_interval == 0:
-                        pct = 20 + int(75 * current_entry[0] / total_entries)
-                        self._update_progress(
-                            f"Writing ZIP ({current_entry[0]}/{total_entries} files)",
-                            pct,
-                        )
 
         return os.path.getsize(export_path)
+
+    @staticmethod
+    def _unique_path(used_paths, directory, filename):
+        candidate = f"{directory}/{filename}"
+        if candidate not in used_paths:
+            used_paths.add(candidate)
+            return candidate
+        stem, extension = os.path.splitext(filename)
+        index = 2
+        while f"{directory}/{stem}_{index}{extension}" in used_paths:
+            index += 1
+        candidate = f"{directory}/{stem}_{index}{extension}"
+        used_paths.add(candidate)
+        return candidate
 
     def process_export(self):
         """Main processing method. Queries patients, collects files, creates ZIP, and updates export."""
         try:
-            if self.has_content_selection and not (
-                self.include_raw
-                or self.include_processed
-                or self.include_reports
-                or self.include_bite_classification
-            ):
+            if not self.artifacts:
                 self.export.mark_failed(
-                    "No export content selected. Please enable Raw files, Processed files, Reports, and/or Bite Classification."
+                    "No export content selected. Choose at least one artifact to export."
                 )
                 return
 
@@ -909,28 +619,6 @@ def start_export_processing(export_id, domain="maxillo"):
 # Shared export view-layer helpers (promoted from maxillo.views.export, Phase 5.1)
 # Domain-agnostic: they operate on a passed Export instance / request / id.
 # ---------------------------------------------------------------------------
-
-
-def coerce_bool(value, default=False):
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def resolve_content_selection(data, default_when_missing=True):
-    has_raw_key = "include_raw" in data
-    has_processed_key = "include_processed" in data
-
-    if not has_raw_key and not has_processed_key:
-        return (True, True) if default_when_missing else (False, False)
-
-    include_raw = coerce_bool(data.get("include_raw"), default=False)
-    include_processed = coerce_bool(data.get("include_processed"), default=False)
-    return include_raw, include_processed
 
 
 def build_shared_download_url(request, share_token):

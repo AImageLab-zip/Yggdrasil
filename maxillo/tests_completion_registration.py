@@ -14,7 +14,7 @@ from unittest import mock
 from django.test import TestCase
 
 from common.modality_config import _processed_exists_for
-from common.models import FileRegistry, Job, Modality, ProcessingStep
+from common.models import FileRegistry, Job, Modality, ProcessingStep, Project
 from maxillo.file_utils import get_file_type_for_modality, mark_job_completed
 from maxillo.views.patient_data import _normalize_loaded_landmarks
 from maxillo.models import Patient
@@ -144,7 +144,11 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
             return_value=mock.Mock(head=mock.Mock(side_effect=Exception("no storage in test"))),
         ).start()
 
-        self.patient = Patient.objects.create(name="Test Patient")
+        project, _ = Project.objects.get_or_create(
+            slug="completion-registration",
+            defaults={"name": "Completion Registration", "domain": "maxillo"},
+        )
+        self.patient = Patient.objects.create(name="Test Patient", project=project)
         for slug, name in (("cbct", "CBCT"), ("ios", "IOS"), ("video", "Video")):
             modality = Modality.objects.create(name=name, slug=slug)
             ProcessingStep.objects.create(modality=modality, name=name, slug=slug)

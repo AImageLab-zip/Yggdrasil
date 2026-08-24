@@ -10,6 +10,11 @@ urlpatterns = [
     path("patients/", views.patient_list, name="patient_list"),
     path("upload/", views.upload_patient, name="upload_patient"),
     path(
+        "upload/bulk/",
+        views.bulk_upload_patients,
+        name="bulk_upload_patients",
+    ),
+    path(
         "project/<int:project_id>/select/", views.select_project, name="select_project"
     ),
     path("patient/<int:patient_id>/", views.patient_detail, name="patient_detail"),
@@ -154,6 +159,16 @@ urlpatterns = [
         "api/patient/<int:patient_id>/panoramic/generated/",
         views.save_browser_panoramic,
         name="save_browser_panoramic",
+    ),
+    path(
+        "panoramic/warmup/",
+        views.panoramic_warmup,
+        name="panoramic_warmup",
+    ),
+    path(
+        "api/panoramic/warmup/pending/",
+        views.panoramic_warmup_pending,
+        name="panoramic_warmup_pending",
     ),
     path(
         "api/patient/<int:patient_id>/intraoral/",

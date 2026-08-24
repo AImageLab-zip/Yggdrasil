@@ -16,11 +16,14 @@ from django.http import JsonResponse, Http404, HttpResponseGone
 from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
+from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.demo import landing_demo_url
 from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
+from common import export_catalog, export_ui
+from common.project_filters import presence_filter_specs
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
 from common.permissions import (
@@ -38,11 +41,9 @@ from common.export_processing import (
     ExportProcessor,
     start_export_processing,
     build_shared_download_url as _build_shared_download_url,
-    coerce_bool as _coerce_bool,
     format_file_size,
     kill_export_processes as _kill_export_processes,
     recover_stuck_export as _recover_stuck_export,
-    resolve_content_selection as _resolve_content_selection,
 )
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
@@ -168,6 +169,8 @@ def patient_detail(request, patient_id):
     if not allowed_modalities:
         allowed_modalities = list(Modality.objects.filter(is_active=True))
 
+    _brain_raw_lock_reasons = annotation_lock_reasons(patient)
+
     context = {
         "patient": patient,
         "user_profile": request.user.profile,
@@ -196,6 +199,10 @@ def patient_detail(request, patient_id):
             "segmentationFile": segmentation_file,
         },
         "patient_files": patient_files,
+        # Brain has no add/remove raw controls of its own, but it renders the
+        # shared file-management section, so it carries the same lock banner.
+        "raw_data_locked": bool(_brain_raw_lock_reasons),
+        "raw_lock_message": lock_message(_brain_raw_lock_reasons),
         "voice_captions": voice_captions,
         "is_admin_user": is_admin_user,
         "modality_files": modality_files,
@@ -275,9 +282,15 @@ def patient_list(request):
 
     patients = patients.order_by("-uploaded_at")
     allowed_modalities = []
+    current_project = None
     if current_project_id:
-        project = Project.objects.filter(id=current_project_id).prefetch_related("modalities").first()
+        project = (
+            Project.objects.filter(id=current_project_id)
+            .prefetch_related("modalities", "annotation_methods")
+            .first()
+        )
         if project:
+            current_project = project
             allowed_modalities = list(project.modalities.filter(is_active=True))
 
     status_filters = {}
@@ -378,6 +391,12 @@ def patient_list(request):
         "user_profile": request.user.profile,
         "is_admin_user": is_admin,
         "has_reports_filter": has_reports_filter,
+        # Shared filter bar: only the annotations this project collects. Brain
+        # collects voice captions; the maxillo-only entries never apply here
+        # because their annotation methods are not enabled on brain projects.
+        "presence_filter_specs": presence_filter_specs(
+            request, current_project, {m.slug for m in allowed_modalities}
+        ),
         "allowed_modalities": allowed_modalities,
         "status_filters": status_filters,
         "modality_filter_specs": [
@@ -1168,121 +1187,128 @@ def export_list(request):
 @login_required
 @_with_brain_export_mappings
 def export_new(request):
-    """Create-export page. Reuses the maxillo template with ns='brain'."""
+    """Create-export page. Reuses the maxillo template with ns='brain'.
+
+    Same project-scoped model as maxillo: folders of the selected project
+    (including sub-folders), artifacts the project's own MRI channels can
+    produce, and filters derived from the project.
+    """
+    project = _current_export_project(request)
+    if project is None:
+        messages.error(request, "Select a project before creating an export.")
+        return redirect("brain:patient_list")
+
     if request.method == "POST":
         folder_ids = [int(fid) for fid in request.POST.getlist("folder_ids")]
-        modality_slugs = request.POST.getlist("modality_slugs")
+        artifact_keys = request.POST.getlist("artifacts")
+        filters = export_catalog.filters_from_form(request.POST)
 
         if not folder_ids:
             messages.error(request, "Please select at least one folder.")
             return redirect("brain:export_new")
-        if not modality_slugs:
-            messages.error(request, "Please select at least one modality.")
+
+        if Folder.objects.filter(id__in=folder_ids, project=project).count() != len(set(folder_ids)):
+            messages.error(request, "Select folders from the current project only.")
             return redirect("brain:export_new")
 
-        filters = {
-            key.replace("filter_", ""): True
-            for key in request.POST.keys()
-            if key.startswith("filter_")
-        }
-        include_raw, include_processed = _resolve_content_selection(
-            request.POST, default_when_missing=False
-        )
-        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
-
-        if not include_raw and not include_processed and not include_reports:
-            messages.error(
-                request,
-                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
-            )
+        allowed_keys = export_ui.allowed_artifact_keys("brain", project)
+        artifact_keys = [key for key in artifact_keys if key in allowed_keys]
+        if not artifact_keys:
+            messages.error(request, "Please select at least one artifact to export.")
             return redirect("brain:export_new")
 
+        artifacts = export_catalog.resolve_artifacts("brain", artifact_keys)
         query_params = {
             "domain": "brain",
+            "project_id": project.id,
             "folder_ids": folder_ids,
-            "modality_slugs": modality_slugs,
+            "artifacts": artifact_keys,
             "filters": filters,
-            "include_raw": include_raw,
-            "include_processed": include_processed,
-            "include_reports": include_reports,
+            "modality_slugs": sorted(export_catalog.modality_slugs_for(artifacts)),
         }
 
-        modality_names = list(
-            Modality.objects.filter(slug__in=modality_slugs).values_list("name", flat=True)
-        ) or modality_slugs
-        selected_content = [
-            label
-            for label, on in (
-                ("Raw", include_raw),
-                ("Processed", include_processed),
-                ("Reports", include_reports),
-            )
-            if on
-        ]
-        query_summary = ", ".join(
-            [
-                f"{len(folder_ids)} folder{'s' if len(folder_ids) != 1 else ''}",
-                " + ".join(modality_names),
-                f"Content: {' + '.join(selected_content)}",
-            ]
+        summary_parts = [f"{len(folder_ids)} folder{'s' if len(folder_ids) != 1 else ''}"]
+        summary_parts.append(", ".join(a.label for a in artifacts) or "nothing")
+        described = export_catalog.describe_filters(
+            "brain", project, [m.slug for m in export_ui.project_modalities(project)], filters
         )
+        if described:
+            summary_parts.append(", ".join(described))
 
         export = Export.objects.create(
             user=request.user,
             status="pending",
             query_params=query_params,
-            query_summary=query_summary,
+            query_summary=", ".join(summary_parts),
         )
 
         start_export_processing(export.id, "brain")
         messages.success(request, f"Export #{export.id} created and processing started.")
         return redirect("brain:export_list")
 
-    folders = filter_folders_for_user(
-        request.user,
-        Folder.objects.filter(parent__isnull=True).order_by("name"),
+    folders = export_ui.folder_tree(
+        filter_folders_for_user(
+            request.user,
+            Folder.objects.filter(project=project).order_by("name"),
+            "brain",
+        ),
+        Patient,
         "brain",
     )
-    folders_with_counts = [
-        {"folder": folder, "patient_count": folder.patients.count()} for folder in folders
-    ]
-    modalities = Modality.objects.filter(projects__slug="brain", is_active=True).order_by("name")
+    visible_folder_ids = [entry["folder"].id for entry in folders]
+    patients_in_scope = Patient.objects.filter(folder_id__in=visible_folder_ids)
+    modalities = export_ui.project_modalities(project)
+
     return render(
         request,
         "maxillo/export_new.html",
-        {"folders": folders_with_counts, "modalities": modalities, "ns": "brain"},
+        {
+            "project": project,
+            "folders": folders,
+            "modalities": modalities,
+            "artifact_groups": export_ui.artifact_groups(
+                "brain", project, patients_in_scope, patient_fk="brain_patient"
+            ),
+            "filter_groups": export_ui.grouped_filters(
+                "brain", project, [m.slug for m in modalities]
+            ),
+            "ns": "brain",
+        },
+    )
+
+
+def _current_export_project(request):
+    project_id = request.session.get("current_project_id")
+    if not project_id:
+        return None
+    return (
+        Project.objects.filter(id=project_id)
+        .prefetch_related("modalities", "annotation_methods", "disabled_steps")
+        .first()
     )
 
 
 @login_required
 @_with_brain_export_mappings
 def export_preview(request):
-    """AJAX export statistics. Reuses the generalized ExportProcessor for brain."""
+    """AJAX export statistics, run through the same ExportProcessor as the export."""
     try:
-        if request.method == "POST":
-            data = _json.loads(request.body) if request.body else {}
-        else:
-            data = request.GET
+        data = (_json.loads(request.body) if request.body else {}) if request.method == "POST" else request.GET
 
         folder_ids = data.get("folder_ids", [])
         if isinstance(folder_ids, str):
-            folder_ids = [int(fid) for fid in folder_ids.split(",") if fid]
-        else:
-            folder_ids = [int(fid) for fid in folder_ids if fid]
+            folder_ids = [fid for fid in folder_ids.split(",") if fid]
+        folder_ids = [int(fid) for fid in folder_ids if str(fid).strip()]
 
-        modality_slugs = data.get("modality_slugs", [])
-        if isinstance(modality_slugs, str):
-            modality_slugs = modality_slugs.split(",") if modality_slugs else []
+        artifact_keys = data.get("artifacts", [])
+        if isinstance(artifact_keys, str):
+            artifact_keys = [key for key in artifact_keys.split(",") if key]
 
-        include_raw, include_processed = _resolve_content_selection(data)
         query_params = {
             "domain": "brain",
             "folder_ids": folder_ids,
-            "modality_slugs": modality_slugs,
+            "artifacts": list(artifact_keys),
             "filters": data.get("filters", {}),
-            "include_raw": include_raw,
-            "include_processed": include_processed,
-            "include_reports": _coerce_bool(data.get("include_reports"), default=False),
         }
 
         proc = ExportProcessor(
@@ -1301,7 +1327,8 @@ def export_preview(request):
                 "success": True,
                 "patient_count": patient_count,
                 "folder_count": len(folder_ids),
-                "modality_count": len(modality_slugs),
+                "modality_count": len(proc.modality_slugs),
+                "artifact_count": len(proc.artifacts),
                 "file_count": file_count,
                 "estimated_size": format_file_size(total_size),
                 "estimated_size_bytes": total_size,

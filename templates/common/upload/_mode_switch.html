@@ -1,0 +1,21 @@
+{% comment %}
+  Upload-mode switch for the upload screens. Expects `ns` (URL namespace) and
+  `active` ('single' or 'bulk'). Renders nothing unless the caller supplied a
+  `bulk_upload_url`, which is administrator-only and domain-dependent, so
+  annotators and domains without a bulk route simply never see the control.
+{% endcomment %}
+{% if bulk_upload_url %}
+<nav class="upload-modes" aria-label="Upload mode">
+    <a class="upload-mode{% if active == 'single' %} is-active{% endif %}"
+       href="{% url ns|add:':upload_patient' %}"
+       {% if active == 'single' %}aria-current="page"{% endif %}>
+        <i class="fas fa-user" aria-hidden="true"></i>Single patient
+    </a>
+    <a class="upload-mode{% if active == 'bulk' %} is-active{% endif %}"
+       href="{{ bulk_upload_url }}"
+       title="One patient per file"
+       {% if active == 'bulk' %}aria-current="page"{% endif %}>
+        <i class="fas fa-layer-group" aria-hidden="true"></i>Bulk upload
+    </a>
+</nav>
+{% endif %}

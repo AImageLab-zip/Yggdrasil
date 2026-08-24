@@ -7,13 +7,14 @@
 
 {% block content %}
 <div class="upload-page">
+    {% firstof request.resolver_match.namespace 'maxillo' as ns %}
     <header class="upload-header">
         <div>
             <p class="upload-eyebrow">New patient</p>
             <h1>Upload patient data</h1>
             <p>Add files by modality. Drop them into a target or select them from your device.</p>
+            {% include 'common/upload/_mode_switch.html' with active='single' %}
         </div>
-        {% firstof request.resolver_match.namespace 'maxillo' as ns %}
         <a href="{% url ns|add:':patient_list' %}" class="upload-close" aria-label="Cancel upload" title="Cancel">
             <i class="fas fa-xmark" aria-hidden="true"></i>
         </a>

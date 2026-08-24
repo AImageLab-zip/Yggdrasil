@@ -7,10 +7,11 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
-from .helpers import redirect_with_namespace, render_with_fallback
+from .helpers import bulk_upload_url_for, redirect_with_namespace, render_with_fallback
 from common.demo import landing_demo_url
 from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
+from common.project_filters import presence_filter_specs
 from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
@@ -150,14 +151,14 @@ def patient_list(request):
     if current_project_id and any(field.name == 'project' for field in Patient._meta.fields):
         patients = patients.filter(project_id=current_project_id)
 
-    # Get filter parameters
+    # Get filter parameters. (has_ios / has_cbct / has_voice used to be read here
+    # and handed to the template, but no code ever applied them to the queryset;
+    # per-modality status filters replaced them.)
     search_query = request.GET.get('search', '').strip()
-    has_ios_filter = request.GET.get('has_ios', '')
-    has_cbct_filter = request.GET.get('has_cbct', '')
-    has_voice_filter = request.GET.get('has_voice', '')
     has_reports_filter = request.GET.get('has_reports', '')
     has_bite_classification_filter = request.GET.get('has_bite_classification', '')
     has_landmarks_filter = request.GET.get('has_landmarks', '')
+    has_segmentation_filter = request.GET.get('has_segmentation', '')
 
     folder_id = request.GET.get('folder')
     tags_selected = request.GET.getlist('tags')
@@ -196,6 +197,9 @@ def patient_list(request):
 
     if namespace == 'maxillo' and has_landmarks_filter == 'yes':
         patients = patients.filter(files__file_type='ios_landmarks').distinct()
+
+    if namespace == 'maxillo' and has_segmentation_filter == 'yes':
+        patients = patients.filter(intraoral_segmentations__isnull=False).distinct()
     
     patients = patients.order_by('-uploaded_at')
     
@@ -207,9 +211,13 @@ def patient_list(request):
     has_status_filters = False
     allowed_modalities = []
     status_filters = {}
+    current_project = None
     try:
         if current_project_id:
-            proj = Project.objects.prefetch_related('modalities').get(id=current_project_id)
+            proj = Project.objects.prefetch_related(
+                'modalities', 'annotation_methods'
+            ).get(id=current_project_id)
+            current_project = proj
             allowed_modalities = list(proj.modalities.filter(is_active=True))
             for m in allowed_modalities:
                 slug = getattr(m, 'slug', '') or ''
@@ -417,6 +425,15 @@ def patient_list(request):
             'value': status_filters.get(slug, ''),
         })
 
+    # Annotation-presence filters the project actually collects (see
+    # PRESENCE_FILTERS): an annotator on a CBCT-only project is not asked about
+    # IOS landmarks or bite classification.
+    presence_filters = presence_filter_specs(
+        request,
+        current_project,
+        {getattr(m, 'slug', '') for m in allowed_modalities},
+    )
+
     # Step slug -> ProcessingStep.name map for the rerun modal checkboxes
     # (falls back to modality labels when the domain declares no steps).
     rerun_step_labels_map = rerun_step_labels(None, modality_filter_specs)
@@ -478,18 +495,21 @@ def patient_list(request):
         ).values_list('project_id', flat=True)
         projects_for_sidebar = projects_for_sidebar.filter(id__in=accessible_project_ids)
 
+    # Administrator-only, project-scoped, and absent in some domains - the
+    # helper keeps the shared template from reversing a URL that does not exist.
+    bulk_upload_url = bulk_upload_url_for(request, namespace)
+
     context = {
         'page_obj': page_obj,
+        'bulk_upload_url': bulk_upload_url,
         'current_project_id': current_project_id,
         'projects': projects_for_sidebar.order_by('name'),
         'search_query': search_query,
-        'has_ios_filter': has_ios_filter,
-        'has_cbct_filter': has_cbct_filter,
-        'has_voice_filter': has_voice_filter,
         'has_reports_filter': has_reports_filter,
         'has_bite_classification_filter': has_bite_classification_filter,
         'has_landmarks_filter': has_landmarks_filter,
-        'show_maxillo_presence_filters': namespace == 'maxillo',
+        'has_segmentation_filter': has_segmentation_filter,
+        'presence_filter_specs': presence_filters,
         'folder_id': folder_id or 'all',
         'selected_tags': tags_selected,
         'folders': folders_with_counts,

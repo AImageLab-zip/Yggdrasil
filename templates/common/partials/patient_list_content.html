@@ -29,6 +29,12 @@
         <h1 class="patients-title">{% icon 'users' 'patients-title__icon' %}Patients</h1>
         <div class="patients-head__actions">
             {% if user.profile.can_upload_scans and not is_demo_guest %}
+            {% if bulk_upload_url %}
+            <a class="ygg-btn ygg-btn--ghost" href="{{ bulk_upload_url }}"
+               title="Create one patient per file">
+                <i class="fas fa-layer-group" aria-hidden="true"></i>Bulk upload
+            </a>
+            {% endif %}
             <a class="ygg-btn ygg-btn--primary" href="{% url request.resolver_match.namespace|add:':upload_patient' %}">
                 <i class="fas fa-upload" aria-hidden="true"></i>Upload
             </a>
@@ -108,23 +114,18 @@
                             {% endif %}
                         </button>
                         {% endfor %}
-                        <input type="hidden" id="reportsFilterValue" name="has_reports" value="{{ has_reports_filter }}">
-                        <button type="button" class="status-filter-btn" data-filter="reports"
-                                data-label="Reports" title="All Reports (no filter)" data-ygg-toggle="tooltip">
-                            <i class="fas fa-comment" aria-hidden="true"></i>
+                        {% comment %} Only the annotations this project collects: see
+                           PRESENCE_FILTERS in maxillo/views/patient_list.py. The legacy
+                           Reports button keeps its `reportsFilterValue` id, which
+                           patient_list.js special-cases. {% endcomment %}
+                        {% for f in presence_filter_specs %}
+                        <input type="hidden" id="{% if f.key == 'reports' %}reportsFilterValue{% else %}{{ f.key }}_value{% endif %}"
+                               name="{{ f.param }}" value="{{ f.value }}">
+                        <button type="button" class="status-filter-btn" data-filter="{{ f.key }}"
+                                data-label="{{ f.label }}" title="All {{ f.label }} (no filter)" data-ygg-toggle="tooltip">
+                            <i class="{{ f.icon }}" aria-hidden="true"></i>
                         </button>
-                        {% if show_maxillo_presence_filters %}
-                        <input type="hidden" id="presence_bite_classification_value" name="has_bite_classification" value="{{ has_bite_classification_filter }}">
-                        <button type="button" class="status-filter-btn" data-filter="presence_bite_classification"
-                                data-label="Bite classification" title="All bite classifications (no filter)" data-ygg-toggle="tooltip">
-                            <i class="fas fa-teeth" aria-hidden="true"></i>
-                        </button>
-                        <input type="hidden" id="presence_landmarks_value" name="has_landmarks" value="{{ has_landmarks_filter }}">
-                        <button type="button" class="status-filter-btn" data-filter="presence_landmarks"
-                                data-label="Landmarks" title="All landmarks (no filter)" data-ygg-toggle="tooltip">
-                            <i class="fas fa-location-dot" aria-hidden="true"></i>
-                        </button>
-                        {% endif %}
+                        {% endfor %}
                     </div>
                 </div>
 

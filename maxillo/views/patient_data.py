@@ -18,6 +18,7 @@ import io
 import uuid
 from PIL import Image
 
+from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.file_access import exists as artifact_exists, streaming_response
 from common.file_access import open_binary
 from common.permissions import (
@@ -357,6 +358,20 @@ def save_browser_panoramic(request, patient_id):
     if not _can_write_patient(request, patient):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
+    # Once annotations exist the panoramic is part of a record that has to stay
+    # reproducible, so it stops being editable. A patient annotated before any
+    # panoramic was produced would otherwise be left without one forever, so the
+    # silent automatic default is still allowed exactly once; anything the user
+    # drew by hand, and any replacement of an existing arch, is refused. The lock
+    # ignores this patient's own panoramic state, or the first edit would be the
+    # last one allowed.
+    lock_reasons = annotation_lock_reasons(patient, include_panoramic=False)
+    if lock_reasons and PanoramicState.objects.filter(patient=patient).exists():
+        return JsonResponse(
+            {"error": lock_message(lock_reasons, subject="panoramic arch"), "panoramic_locked": True},
+            status=409,
+        )
+
     try:
         content_length = int(request.META.get("CONTENT_LENGTH", ""))
     except (TypeError, ValueError):
@@ -389,6 +404,12 @@ def save_browser_panoramic(request, patient_id):
         return JsonResponse({"error": str(exc)}, status=409)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+
+    if lock_reasons and normalized["geometry_source"] != "auto":
+        return JsonResponse(
+            {"error": lock_message(lock_reasons, subject="panoramic arch"), "panoramic_locked": True},
+            status=409,
+        )
 
     fingerprint_data = dict(normalized)
     fingerprint_data["generation_uuid"] = str(normalized["generation_uuid"])

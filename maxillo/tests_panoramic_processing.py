@@ -29,7 +29,11 @@ class PanoramicProcessingTests(TestCase):
         storage.start()
         self.addCleanup(storage.stop)
 
-        self.patient = Patient.objects.create(name="Panoramic Patient")
+        project, _ = Project.objects.get_or_create(
+            slug="panoramic-processing",
+            defaults={"name": "Panoramic Processing", "domain": "maxillo"},
+        )
+        self.patient = Patient.objects.create(name="Panoramic Patient", project=project)
         self.modality = Modality.objects.create(name="Panoramic", slug="panoramic")
 
     def test_completion_registers_only_known_variants_with_shared_metadata(self):
@@ -82,7 +86,9 @@ class PanoramicVariantEndpointTests(TestCase):
         self.user = User.objects.create_user(username="panoramic-admin", password="x")
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
         self.client.force_login(self.user)
-        self.patient = Patient.objects.create(name="Panoramic Endpoint Patient")
+        self.patient = Patient.objects.create(
+            name="Panoramic Endpoint Patient", project=self.project
+        )
         self.modality = Modality.objects.create(name="Panoramic Endpoint", slug="panoramic")
 
     @mock.patch("maxillo.views.patient_data.artifact_exists", return_value=True)

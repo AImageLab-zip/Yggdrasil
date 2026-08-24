@@ -4,6 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 import json
+import logging
 from common.permissions import (
     project_allows_annotation,
     user_can_delete_caption,
@@ -13,6 +14,9 @@ from common.permissions import (
 )
 
 from .domain import get_domain_models
+
+logger = logging.getLogger(__name__)
+
 
 @login_required
 def delete_voice_caption(request, patient_id, caption_id):

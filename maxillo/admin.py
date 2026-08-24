@@ -1,7 +1,15 @@
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 from django.db.models import Count
 from django.contrib.auth.models import User
 from .models import Dataset, Patient, Classification, VoiceCaption, Export, IntraoralToothSegmentation, MaxilloProject
+from common.annotation_lock import (
+    annotation_lock_reasons,
+    is_raw_file_type,
+    lock_message,
+    raw_data_is_locked,
+)
 from common.models import Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation, AnnotationMethod
 from .models import Tag, Folder
 
@@ -29,8 +37,10 @@ class DatasetAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Patient)
 class PatientAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['patient_id', 'name', 'dataset', 'visibility', 'uploaded_at', 'uploaded_by']
-    list_filter = ['visibility', 'dataset', 'uploaded_at']
+    # `project` is shown and filterable for the same reason as on FolderAdmin: a
+    # patient in the wrong project is invisible in the app but looks fine here.
+    list_display = ['patient_id', 'name', 'project', 'folder', 'dataset', 'visibility', 'uploaded_at', 'uploaded_by']
+    list_filter = ['project', 'visibility', 'dataset', 'uploaded_at']
     search_fields = ['patient_id', 'name']
     readonly_fields = ['patient_id', 'uploaded_at']
     
@@ -261,9 +271,40 @@ class JobAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     clear_dependencies.short_description = "Clear all dependencies"
 
 
+class FileRegistryAdminForm(forms.ModelForm):
+    """Refuses to register a new raw file for an already-annotated patient.
+
+    The change form is closed off by ``has_change_permission``, but adding a
+    *new* raw row pointing at different bytes is a re-upload by another name, so
+    it needs its own gate. ``lock_bypass`` is set per-request by
+    ``FileRegistryAdmin.get_form``.
+    """
+
+    lock_bypass = False
+
+    class Meta:
+        model = FileRegistry
+        fields = '__all__'
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.lock_bypass:
+            return cleaned
+        # Only the maxillo `patient` FK is exposed by the fieldsets below, so an
+        # added row can only ever belong to a maxillo patient.
+        patient = cleaned.get('patient')
+        if patient is None or not is_raw_file_type(cleaned.get('file_type')):
+            return cleaned
+        reasons = annotation_lock_reasons(patient)
+        if reasons:
+            raise ValidationError(lock_message(reasons))
+        return cleaned
+
+
 @admin.register(FileRegistry)
 class FileRegistryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):  
-    list_display = ['id', 'file_type', 'patient', 'voice_caption', 'file_size_mb', 'created_at', 'modality']
+    form = FileRegistryAdminForm
+    list_display = ['id', 'file_type', 'patient', 'voice_caption', 'raw_locked', 'file_size_mb', 'created_at', 'modality']
     list_filter = ['file_type', 'created_at']
     search_fields = ['file_path', 'patient__patient_id', 'voice_caption__id']
     readonly_fields = ['created_at', 'file_hash', 'file_size', 'file_size_mb']
@@ -291,7 +332,47 @@ class FileRegistryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         if obj:  # Editing existing object
             return self.readonly_fields + ['file_type', 'file_path', 'patient', 'voice_caption', 'processing_job']
         return self.readonly_fields
-    
+
+    def _is_locked_raw(self, request, obj):
+        """Whether this row is a raw input frozen by existing annotation work.
+
+        Superusers are exempt: admin is the one place a genuine data-repair still
+        has to be possible. Everything else the app does is unconditional.
+        """
+        if obj is None or request.user.is_superuser:
+            return False
+        if not is_raw_file_type(obj.file_type):
+            return False
+        return raw_data_is_locked(obj.get_patient())
+
+    def has_change_permission(self, request, obj=None):
+        # Returning False makes Django render the read-only view form and drop
+        # the save row, rather than us having to enumerate every field.
+        if self._is_locked_raw(request, obj):
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        # `django.contrib.admin.utils.get_deleted_objects` consults this per
+        # object, so this covers the bulk "delete selected" action too.
+        if self._is_locked_raw(request, obj):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        # modelform_factory hands back a fresh subclass per call, so stamping the
+        # per-request bypass onto it cannot leak into another request.
+        form.lock_bypass = request.user.is_superuser
+        return form
+
+    @admin.display(description='Raw locked', boolean=True)
+    def raw_locked(self, obj):
+        """Visible on the changelist so the freeze is obvious before opening a row."""
+        if not is_raw_file_type(obj.file_type):
+            return False
+        return raw_data_is_locked(obj.get_patient())
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs
@@ -323,10 +404,13 @@ class TagAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(Folder)
 class FolderAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['name', 'parent', 'is_demo', 'created_at', 'created_by']
+    # `project` is shown and filterable: a folder in the wrong project (or, before
+    # it was required, in none at all) is invisible in the app but looks fine here.
+    list_display = ['name', 'project', 'parent', 'is_demo', 'created_at', 'created_by']
     list_editable = ['is_demo']
+    list_select_related = ['project', 'parent']
     search_fields = ['name']
-    list_filter = ['is_demo', 'created_at']
+    list_filter = ['project', 'is_demo', 'created_at']
 
 
 @admin.register(Export)

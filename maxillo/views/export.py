@@ -1,20 +1,27 @@
-"""Export views for administrator-only dataset export functionality."""
+"""Export views: build, run, share and download dataset exports.
 
-from django.shortcuts import render, get_object_or_404, redirect
-from django.contrib.auth.decorators import login_required, user_passes_test
+The export builder is project-scoped: folders, selectable artifacts and filters
+all come from the project selected in the sidebar (see
+``common.export_catalog``), so an annotator on a CBCT project is never shown MRI
+channels or IOS filters.
+"""
+
+from django.shortcuts import render
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from django.http import JsonResponse, Http404, HttpResponseGone
 from django.views.decorators.http import require_POST, require_http_methods
 from django.db import OperationalError
-from django.db.models import Q, Count, Sum
+from django.db.models import Sum
 from django.utils import timezone
 import os
 import json
 import logging
 import time
 
-from common.models import Modality, FileRegistry
+from common import export_catalog, export_ui
+from common.models import FileRegistry, Project
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
@@ -23,73 +30,28 @@ from .domain import get_domain_models, get_namespace
 from .helpers import redirect_with_namespace
 from common.export_processing import (
     build_shared_download_url as _build_shared_download_url,
-    coerce_bool as _coerce_bool,
     format_file_size,
     kill_export_processes as _kill_export_processes,
     recover_stuck_export as _recover_stuck_export,
-    resolve_content_selection as _resolve_content_selection,
 )
 
 logger = logging.getLogger(__name__)
 
 
-EXPORT_MODALITY_FILE_TYPES = {
-    "cbct": {
-        "raw": ["cbct_raw"],
-        "processed": ["cbct_processed"],
-    },
-    "ios": {
-        "raw": ["ios_raw_upper", "ios_raw_lower"],
-        # Legacy: ios_processed_upper/_lower. New completions: ios_processed
-        # (with subtype='upper'/'lower'). Both listed so exports include either.
-        "processed": ["ios_processed_upper", "ios_processed_lower", "ios_processed"],
-    },
-    "audio": {
-        "raw": ["audio_raw"],
-        "processed": ["audio_processed"],
-    },
-    "bite_classification": {
-        "raw": [],
-        "processed": ["bite_classification"],
-    },
-    "intraoral": {
-        "raw": ["intraoral_raw"],
-        "processed": ["intraoral_processed"],
-    },
-    "intraoral-photo": {
-        "raw": ["intraoral_raw"],
-        "processed": ["intraoral-photo_processed"],
-    },
-    "teleradiography": {
-        "raw": ["teleradiography_raw"],
-        "processed": ["teleradiography_processed"],
-    },
-    "panoramic": {
-        "raw": ["panoramic_raw"],
-        "processed": ["panoramic_processed"],
-    },
-    "rawzip": {
-        "raw": ["generic_raw"],
-        "processed": ["generic_processed"],
-    },
-}
+def _current_project(request):
+    """Project the export builder is scoped to (the one selected in the sidebar).
 
-
-def _file_type_map_for_selection(include_raw, include_processed):
-    file_type_map = {}
-    for modality_slug, groups in EXPORT_MODALITY_FILE_TYPES.items():
-        file_types = []
-        if include_raw:
-            file_types.extend(groups.get("raw", []))
-        if include_processed:
-            file_types.extend(groups.get("processed", []))
-        file_type_map[modality_slug] = file_types
-    return file_type_map
-
-
-def _get_export_for_request_or_404(request, export_id):
-    ExportModel = get_domain_models(request)["Export"]
-    return get_object_or_404(ExportModel.objects.all(), id=export_id)
+    Exports used to list every folder of the domain regardless of project, so a
+    staff user picking "General" could not tell which project it belonged to.
+    """
+    project_id = request.session.get("current_project_id")
+    if not project_id:
+        return None
+    return (
+        Project.objects.filter(id=project_id)
+        .prefetch_related("modalities", "annotation_methods", "disabled_steps")
+        .first()
+    )
 
 
 def _shared_export_availability(request, share_token):
@@ -115,8 +77,43 @@ def _shared_export_availability(request, share_token):
 
 
 def is_admin(user):
-    """Check if user is admin (staff or has admin role)."""
+    """Whether the user is a global administrator (staff or admin role).
+
+    Deliberately *not* the export gate: exports are project-scoped, so the
+    per-export views use ``_require_own_export`` (project export rights + owner)
+    instead. This stays only for the share-expiry "never expires" privilege.
+    """
     return user.is_staff or user.profile.is_admin()
+
+
+def _require_own_export(request, export_id, *, json_response=False):
+    """Resolve an export the caller may act on, or an error response.
+
+    Returns ``(export, None)`` on success and ``(None, response)`` otherwise.
+    The per-export views used to be gated on global staff/admin while
+    ``export_new``/``export_list`` used the project-scoped ``_can_use_exports``,
+    so a project administrator could create an export and then be refused its own
+    download.
+    """
+    def deny(message, status):
+        if json_response:
+            return JsonResponse({"success": False, "error": message}, status=status)
+        messages.error(request, message)
+        return redirect_with_namespace(request, "export_list")
+
+    if not _can_use_exports(request):
+        return None, deny("You do not have permission to access exports.", 403)
+
+    ExportModel = get_domain_models(request)["Export"]
+    export = ExportModel.objects.filter(id=export_id).first()
+    if export is None:
+        if json_response:
+            return None, JsonResponse({"success": False, "error": "Export not found."}, status=404)
+        raise Http404("Export not found.")
+
+    if export.user_id != request.user.id and not request.user.is_staff:
+        return None, deny("You do not have permission to access this export.", 403)
+    return export, None
 
 
 def _laparoscopy_export_query_summary(folder_count):
@@ -142,7 +139,7 @@ def _laparoscopy_export_new(request, ExportModel):
         query_params = {
             "domain": "laparoscopy",
             "export_variant": "video_masks_v1",
-            "folder_ids": [int(fid) for fid in folder_ids],
+            "folder_ids": folder_ids,
             "mask_format": "npz_multilayer",
             "include_all_frames": True,
             "video_subtype": "subsampled",
@@ -187,10 +184,21 @@ def _laparoscopy_export_preview(folder_ids):
         }
     )
 def _can_use_exports(request):
+    """Whether the user may use exports at all (a coarse gate).
+
+    Per-folder rights are still checked when an export is created. Folders nest
+    now, so this considers every folder rather than only the roots -- a user whose
+    access is to a sub-folder was previously refused outright -- and narrows to
+    the selected project when there is one.
+    """
     if user_is_project_admin(request.user, request):
         return True
     FolderModel = get_domain_models(request)["Folder"]
-    for folder in FolderModel.objects.filter(parent__isnull=True).only("id"):
+    folders = FolderModel.objects.all()
+    project_id = request.session.get("current_project_id")
+    if project_id:
+        folders = folders.filter(project_id=project_id)
+    for folder in folders.only("id", "project"):
         if user_can_create_export(request.user, folder, request):
             return True
     return False
@@ -247,7 +255,7 @@ def export_list(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def export_new(request):
-    """Create new export page with folder/modality selection."""
+    """Create new export page: project folders, artifacts, and project filters."""
     if not _can_use_exports(request):
         messages.error(request, "You do not have permission to create exports.")
         return redirect_with_namespace(request, "patient_list")
@@ -258,154 +266,119 @@ def export_new(request):
 
     FolderModel = domain_models["Folder"]
     PatientModel = domain_models["Patient"]
+    domain = get_namespace(request)
+    project = _current_project(request)
+
+    if project is None:
+        messages.error(request, "Select a project before creating an export.")
+        return redirect_with_namespace(request, "patient_list")
 
     if request.method == "POST":
-        # Get form data
-        folder_ids = request.POST.getlist("folder_ids")
-        modality_slugs = request.POST.getlist("modality_slugs")
-        include_raw, include_processed = _resolve_content_selection(
-            request.POST, default_when_missing=False
-        )
-        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
-        include_bite_classification = _coerce_bool(
-            request.POST.get("include_bite_classification"), default=False
-        )
+        try:
+            folder_ids = sorted({int(fid) for fid in request.POST.getlist("folder_ids")})
+        except (TypeError, ValueError):
+            messages.error(request, "Invalid folder selection.")
+            return redirect_with_namespace(request, "export_new")
+        artifact_keys = request.POST.getlist("artifacts")
+        filters = export_catalog.filters_from_form(request.POST)
 
-        # Get filters
-        filters = {}
-        for key in request.POST.keys():
-            if key.startswith("filter_"):
-                filter_name = key.replace("filter_", "")
-                filters[filter_name] = True
-
-        # Validate selections
         if not folder_ids:
             messages.error(request, "Please select at least one folder.")
             return redirect_with_namespace(request, "export_new")
 
-        FolderModel = domain_models["Folder"]
-        selected_folders = FolderModel.objects.filter(id__in=[int(fid) for fid in folder_ids])
+        selected_folders = FolderModel.objects.filter(id__in=folder_ids, project=project)
+        if selected_folders.count() != len(folder_ids):
+            messages.error(request, "Select folders from the current project only.")
+            return redirect_with_namespace(request, "export_new")
         for folder in selected_folders:
             if not user_can_create_export(request.user, folder, request):
                 messages.error(request, "You do not have permission to export from selected folders.")
                 return redirect_with_namespace(request, "export_new")
 
-        # Require at least one selection (can be a modality and/or reports only,
-        # or bite classification alone since it isn't modality-gated)
-        if not modality_slugs and not include_bite_classification:
-            messages.error(
-                request,
-                "Please select at least one modality, or enable Bite Classification.",
-            )
+        # Artifacts are validated against the project: a client cannot POST an
+        # artifact for a modality the project does not enable.
+        allowed_keys = export_ui.allowed_artifact_keys(domain, project)
+        artifact_keys = [key for key in artifact_keys if key in allowed_keys]
+        if not artifact_keys:
+            messages.error(request, "Please select at least one artifact to export.")
             return redirect_with_namespace(request, "export_new")
 
-        if not include_raw and not include_processed and not include_reports and not include_bite_classification:
-            messages.error(
-                request,
-                "Please select at least one content type: Raw files, Processed files, Reports, and/or Bite Classification.",
-            )
-            return redirect_with_namespace(request, "export_new")
-
-        # Create export record
+        artifacts = export_catalog.resolve_artifacts(domain, artifact_keys)
         query_params = {
-            "domain": get_namespace(request),
+            "domain": domain,
+            "project_id": project.id,
             "folder_ids": [int(fid) for fid in folder_ids],
-            "modality_slugs": modality_slugs,
+            "artifacts": artifact_keys,
             "filters": filters,
-            "include_raw": include_raw,
-            "include_processed": include_processed,
-            "include_reports": include_reports,
-            "include_bite_classification": include_bite_classification,
+            # Kept for tools that read query_params expecting the old shape.
+            "modality_slugs": sorted(export_catalog.modality_slugs_for(artifacts)),
         }
 
-        # Generate query summary
         folder_count = len(folder_ids)
-        modality_names = []
-        for slug in modality_slugs:
-            try:
-                modality = Modality.objects.get(slug=slug)
-                modality_names.append(modality.name)
-            except Modality.DoesNotExist:
-                modality_names.append(slug)
-
-        filter_parts = []
-        if filters.get("has_cbct"):
-            filter_parts.append("Has CBCT")
-        if filters.get("has_ios"):
-            filter_parts.append("Has IOS")
-        if filters.get("has_bite_classification"):
-            filter_parts.append("Has Bite Classification")
-        for key, value in filters.items():
-            if key.startswith("has_reports_") and value:
-                modality_slug = key.replace("has_reports_", "")
-                try:
-                    modality = Modality.objects.get(slug=modality_slug)
-                    filter_parts.append(f"Has Reports for {modality.name}")
-                except Modality.DoesNotExist:
-                    filter_parts.append(f"Has Reports for {modality_slug}")
-
-        query_summary_parts = [
-            f"{folder_count} folder{'s' if folder_count > 1 else ''}"
-        ]
-        if modality_names:
-            query_summary_parts.append(" + ".join(modality_names))
-        if filter_parts:
-            query_summary_parts.append(", ".join(filter_parts))
-
-        selected_content = []
-        if include_raw:
-            selected_content.append("Raw")
-        if include_processed:
-            selected_content.append("Processed")
-        if include_reports:
-            selected_content.append("Reports")
-        if include_bite_classification:
-            selected_content.append("Bite Classification")
-        query_summary_parts.append(f"Content: {' + '.join(selected_content)}")
-
-        query_summary = ", ".join(query_summary_parts)
+        summary_parts = [f"{folder_count} folder{'s' if folder_count != 1 else ''}"]
+        summary_parts.append(
+            ", ".join(artifact.label for artifact in artifacts) or "nothing"
+        )
+        described = export_catalog.describe_filters(
+            domain, project, [m.slug for m in export_ui.project_modalities(project)], filters
+        )
+        if described:
+            summary_parts.append(", ".join(described))
 
         export = ExportModel.objects.create(
             user=request.user,
             status="pending",
             query_params=query_params,
-            query_summary=query_summary,
+            query_summary=", ".join(summary_parts),
         )
 
-        # Start background processing
         from common.export_processing import start_export_processing
 
-        start_export_processing(export.id, get_namespace(request))
-
-        messages.success(
-            request, f"Export #{export.id} created and processing started."
-        )
+        start_export_processing(export.id, domain)
+        messages.success(request, f"Export #{export.id} created and processing started.")
         return redirect_with_namespace(request, "export_list")
 
-    # GET request - show form
-    folders = FolderModel.objects.filter(parent__isnull=True).order_by("name")
-    folders = filter_folders_for_user(request.user, folders, get_namespace(request))
+    # GET: build the form from the project.
+    folders = export_ui.folder_tree(
+        filter_folders_for_user(
+            request.user,
+            FolderModel.objects.filter(project=project).order_by("name"),
+            domain,
+        ),
+        PatientModel,
+        domain,
+    )
+    visible_folder_ids = [entry["folder"].id for entry in folders]
+    patients_in_scope = PatientModel.objects.filter(folder_id__in=visible_folder_ids)
+    modalities = export_ui.project_modalities(project)
 
-    # Get patient counts for folders
-    folders_with_counts = []
-    for folder in folders:
-        patient_count = PatientModel.objects.filter(folder=folder).count()
-        folders_with_counts.append(
-            {
-                "folder": folder,
-                "patient_count": patient_count,
-            }
-        )
+    # Panoramics are reconstructed in the browser, so already-uploaded patients
+    # may have none to export yet. Point administrators at the batch page rather
+    # than leaving an unexplained zero next to the panoramic artifacts.
+    warmup_url = None
+    if domain == "maxillo" and any(m.slug == "cbct" for m in modalities):
+        if user_is_project_admin(request.user, project):
+            from django.urls import NoReverseMatch, reverse
 
-    # Get all active modalities
-    modalities = Modality.objects.filter(is_active=True).order_by("name")
+            try:
+                warmup_url = reverse(f"{domain}:panoramic_warmup")
+            except NoReverseMatch:
+                warmup_url = None
 
     return render(
         request,
         "maxillo/export_new.html",
         {
-            "folders": folders_with_counts,
+            "project": project,
+            "folders": folders,
             "modalities": modalities,
+            "panoramic_warmup_url": warmup_url,
+            "artifact_groups": export_ui.artifact_groups(
+                domain, project, patients_in_scope
+            ),
+            "filter_groups": export_ui.grouped_filters(
+                domain, project, [m.slug for m in modalities]
+            ),
             "ns": get_namespace(request),
         },
     )
@@ -414,186 +387,49 @@ def export_new(request):
 @login_required
 @require_http_methods(["POST", "GET"])
 def export_preview(request):
-    """AJAX endpoint to get export statistics based on selected criteria."""
+    """AJAX endpoint: patient / file / size counts for the current selection.
+
+    Uses the same folder closure, artifact resolution and filter application as
+    the real export run, so the preview can never disagree with the ZIP.
+    """
     if not _can_use_exports(request):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
         domain_models = get_domain_models(request)
         PatientModel = domain_models["Patient"]
-        VoiceCaptionModel = domain_models["VoiceCaption"]
-        ClassificationModel = domain_models["Classification"]
+        FolderModel = domain_models["Folder"]
         domain = get_namespace(request)
 
-        # Get parameters from request
-        if request.method == "POST":
-            data = json.loads(request.body) if request.body else {}
-        else:
-            data = request.GET
+        data = (json.loads(request.body) if request.body else {}) if request.method == "POST" else request.GET
 
         folder_ids = data.get("folder_ids", [])
-        modality_slugs = data.get("modality_slugs", [])
-        filters = data.get("filters", {})
-        include_raw, include_processed = _resolve_content_selection(data)
-        include_reports = _coerce_bool(data.get("include_reports"), default=False)
-        include_bite_classification = _coerce_bool(
-            data.get("include_bite_classification"), default=False
-        )
-        file_type_map = _file_type_map_for_selection(include_raw, include_processed)
-
-        # Convert to proper types
         if isinstance(folder_ids, str):
-            folder_ids = [int(fid) for fid in folder_ids.split(",") if fid]
-        else:
-            folder_ids = [int(fid) for fid in folder_ids if fid]
+            folder_ids = [fid for fid in folder_ids.split(",") if fid]
+        folder_ids = [int(fid) for fid in folder_ids if str(fid).strip()]
 
         if domain == "laparoscopy":
             return _laparoscopy_export_preview(folder_ids)
 
-        if isinstance(modality_slugs, str):
-            modality_slugs = modality_slugs.split(",") if modality_slugs else []
+        artifact_keys = data.get("artifacts", [])
+        if isinstance(artifact_keys, str):
+            artifact_keys = [key for key in artifact_keys.split(",") if key]
+        artifacts = export_catalog.resolve_artifacts(domain, artifact_keys)
+        filters = export_catalog.normalize_filters(data.get("filters", {}))
 
-        # Query patients based on folders
-        patients = (
-            PatientModel.objects.filter(folder_id__in=folder_ids)
-            if folder_ids
-            else PatientModel.objects.none()
+        project = _current_project(request)
+        patients = _preview_patients(
+            PatientModel, FolderModel, domain, project, folder_ids, filters, artifacts
         )
 
-        # Apply filters (checking for processed files)
-        if filters.get("has_cbct"):
-            cbct_file_types = file_type_map.get("cbct", [])
-            if not cbct_file_types:
-                patients = PatientModel.objects.none()
-            # Patients with CBCT files for selected content
-            cbct_patient_ids = FileRegistry.objects.filter(
-                domain=domain, file_type__in=cbct_file_types
-            ).values_list("patient_id", flat=True)
-            cbct_patients = PatientModel.objects.filter(
-                patient_id__in=cbct_patient_ids
-            ).distinct()
-            patients = patients.filter(
-                patient_id__in=cbct_patients.values_list("patient_id", flat=True)
-            )
-
-        if filters.get("has_ios"):
-            ios_file_types = file_type_map.get("ios", [])
-            if not ios_file_types:
-                patients = PatientModel.objects.none()
-            # Patients with IOS files for selected content
-            ios_patient_ids = FileRegistry.objects.filter(
-                domain=domain,
-                file_type__in=ios_file_types,
-            ).values_list("patient_id", flat=True)
-            ios_patients = PatientModel.objects.filter(
-                patient_id__in=ios_patient_ids
-            ).distinct()
-            patients = patients.filter(
-                patient_id__in=ios_patients.values_list("patient_id", flat=True)
-            )
-
-        # Bite classification presence filter (DB-only; excluded from the
-        # generic dynamic loop below since it isn't FileRegistry/modality based
-        # — see the matching guard in ExportProcessor.query_patients()).
-        if filters.get("has_bite_classification") and domain != "brain":
-            bc_patient_ids = ClassificationModel.objects.filter(
-                patient_id__in=patients.values_list("patient_id", flat=True)
-            ).values_list("patient_id", flat=True).distinct()
-            patients = patients.filter(patient_id__in=bc_patient_ids)
-
-        # Dynamic modality presence filters
-        for key, value in filters.items():
-            if (
-                key.startswith("has_")
-                and not key.startswith("has_reports_")
-                and key != "has_bite_classification"
-                and value
-            ):
-                modality_slug = key.replace("has_", "")
-                # Map modality slug to file types
-                file_types = file_type_map.get(modality_slug, [])
-                if file_types:
-                    modality_patient_ids = FileRegistry.objects.filter(
-                        domain=domain, file_type__in=file_types
-                    ).values_list("patient_id", flat=True)
-                    modality_patients = PatientModel.objects.filter(
-                        patient_id__in=modality_patient_ids
-                    ).distinct()
-                    patients = patients.filter(
-                        patient_id__in=modality_patients.values_list(
-                            "patient_id", flat=True
-                        )
-                    )
-                else:
-                    patients = PatientModel.objects.none()
-
-        # Report presence filters
-        for key, value in filters.items():
-            if key.startswith("has_reports_") and value:
-                modality_slug = key.replace("has_reports_", "")
-                report_patients = (
-                    PatientModel.objects.filter(
-                        voice_captions__modality=modality_slug,
-                        voice_captions__text_caption__isnull=False,
-                    )
-                    .exclude(voice_captions__text_caption="")
-                    .distinct()
-                )
-                patients = patients.filter(
-                    patient_id__in=report_patients.values_list(
-                        "patient_id", flat=True
-                    )
-                )
-
         patient_count = patients.count()
-        folder_count = len(folder_ids) if folder_ids else 0
-        modality_count = len(modality_slugs) if modality_slugs else 0
+        file_count = 0
+        total_size = 0
+        if patient_count and artifacts:
+            file_count, total_size = _preview_totals(domain, patients, artifacts)
 
-        if patient_count > 0:
-            file_count = 0
-            total_size = 0
-            if modality_slugs and (include_raw or include_processed):
-                file_types = []
-                for slug in modality_slugs:
-                    file_types.extend(file_type_map.get(slug, []))
-                file_filter = {
-                    "domain": domain,
-                    "patient__in": patients,
-                    "file_type__in": file_types,
-                }
-                files = FileRegistry.objects.filter(**file_filter)
-                file_count = files.count()
-                total_size = files.aggregate(total=Sum("file_size"))["total"] or 0
-
-            if include_reports and modality_slugs:
-                voice_captions = VoiceCaptionModel.objects.filter(
-                    patient__in=patients,
-                    modality__in=modality_slugs,
-                    text_caption__isnull=False,
-                ).exclude(text_caption="")
-                file_count += voice_captions.count()
-                for vc in voice_captions:
-                    total_size += len(vc.text_caption.encode("utf-8"))
-
-            if include_bite_classification:
-                bc_count = (
-                    ClassificationModel.objects.filter(patient__in=patients)
-                    .values_list("patient_id", flat=True)
-                    .distinct()
-                    .count()
-                )
-                file_count += bc_count
-                # Fixed per-patient estimate: the manual+pipeline JSON blob is
-                # small and roughly constant-size, not worth an extra
-                # serialization pass per patient on a live-typing endpoint.
-                total_size += bc_count * 450
-        else:
-            file_count = 0
-            total_size = 0
-
-        # Format size
-        if total_size < 1024 * 1024:  # Less than 1MB
+        if total_size < 1024 * 1024:
             size_str = f"~{total_size / 1024:.1f} KB"
-        elif total_size < 1024 * 1024 * 1024:  # Less than 1GB
+        elif total_size < 1024 * 1024 * 1024:
             size_str = f"~{total_size / (1024 * 1024):.1f} MB"
         else:
             size_str = f"~{total_size / (1024 * 1024 * 1024):.2f} GB"
@@ -602,8 +438,9 @@ def export_preview(request):
             {
                 "success": True,
                 "patient_count": patient_count,
-                "folder_count": folder_count,
-                "modality_count": modality_count,
+                "folder_count": len(folder_ids),
+                "modality_count": len(export_catalog.modality_slugs_for(artifacts)),
+                "artifact_count": len(artifacts),
                 "file_count": file_count,
                 "estimated_size": size_str,
                 "estimated_size_bytes": total_size,
@@ -612,24 +449,106 @@ def export_preview(request):
 
     except Exception as e:
         logger.error(f"Error in export_preview: {e}", exc_info=True)
-        return JsonResponse(
-            {
-                "success": False,
-                "error": str(e),
-            },
-            status=500,
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+def _preview_patients(
+    PatientModel, FolderModel, domain, project, folder_ids, filters, artifacts
+):
+    """Patient queryset for a preview: same folder closure + filters as the run."""
+    if not folder_ids:
+        return PatientModel.objects.none()
+
+    # Folder selection includes sub-folders, exactly as the export does.
+    closure = set(folder_ids)
+    frontier = list(folder_ids)
+    while frontier:
+        children = list(
+            FolderModel.objects.filter(parent_id__in=frontier)
+            .exclude(id__in=closure)
+            .values_list("id", flat=True)
         )
+        if not children:
+            break
+        closure.update(children)
+        frontier = children
+
+    patients = PatientModel.objects.filter(folder_id__in=sorted(closure))
+    if project is not None:
+        patients = patients.filter(project=project)
+    return export_catalog.apply_filters(patients, domain, filters, artifacts=artifacts)
+
+
+def _preview_totals(domain, patients, artifacts):
+    """(file count, byte total) for the selected artifacts across these patients.
+
+    File-backed artifacts aggregate over FileRegistry. Database-backed ones are
+    counted per patient with a flat per-document estimate: the real serialization
+    is small and roughly constant, and this endpoint runs on every keystroke.
+    """
+    file_count = 0
+    total_size = 0
+    file_artifacts = [a for a in artifacts if a.is_file_backed]
+    if file_artifacts:
+        query = None
+        for artifact in file_artifacts:
+            query = artifact.registry_q() if query is None else query | artifact.registry_q()
+        rows = FileRegistry.objects.filter(
+            domain=domain, patient__in=patients
+        ).filter(query)
+        file_count += rows.count()
+        total_size += rows.aggregate(total=Sum("file_size"))["total"] or 0
+
+    for artifact in artifacts:
+        if artifact.collector == "captions":
+            captions = _caption_queryset(domain, patients, artifacts)
+            count = captions.count()
+            file_count += count
+            total_size += sum(
+                len(text.encode("utf-8"))
+                for text in captions.values_list("text_caption", flat=True)
+            )
+        elif artifact.collector == "occlusion" and domain == "maxillo":
+            from maxillo.models import Classification
+
+            count = (
+                Classification.objects.filter(patient__in=patients)
+                .values_list("patient_id", flat=True)
+                .distinct()
+                .count()
+            )
+            file_count += count
+            total_size += count * 450
+        elif artifact.collector == "tooth_segmentation" and domain == "maxillo":
+            from maxillo.models import IntraoralToothSegmentation
+
+            count = IntraoralToothSegmentation.objects.filter(patient__in=patients).count()
+            file_count += count
+            total_size += count * 2048
+
+    return file_count, total_size
+
+
+def _caption_queryset(domain, patients, artifacts):
+    from brain.models import VoiceCaption as BrainVoiceCaption
+    from maxillo.models import VoiceCaption as MaxilloVoiceCaption
+
+    model = BrainVoiceCaption if domain == "brain" else MaxilloVoiceCaption
+    captions = model.objects.filter(
+        patient__in=patients, text_caption__isnull=False
+    ).exclude(text_caption="")
+    modality_slugs = export_catalog.modality_slugs_for(artifacts)
+    if modality_slugs:
+        captions = captions.filter(modality__in=sorted(modality_slugs))
+    return captions
 
 
 @login_required
-@user_passes_test(is_admin)
 def export_status(request, export_id):
     """AJAX endpoint to get current export status."""
-    export = _get_export_for_request_or_404(request, export_id)
-
-    # Check permissions
-    if export.user != request.user and not request.user.is_staff:
-        return JsonResponse({"error": "Permission denied"}, status=403)
+    export, denied = _require_own_export(request, export_id, json_response=True)
+    if denied is not None:
+        return denied
 
     # Recover stuck exports: if still "processing" but ZIP exists and is old, mark completed
     export = _recover_stuck_export(export)
@@ -664,15 +583,11 @@ def export_status(request, export_id):
 
 
 @login_required
-@user_passes_test(is_admin)
 def export_download(request, export_id):
     """Download export ZIP file."""
-    export = _get_export_for_request_or_404(request, export_id)
-
-    # Check permissions
-    if export.user != request.user and not request.user.is_staff:
-        messages.error(request, "You do not have permission to download this export.")
-        return redirect_with_namespace(request, "export_list")
+    export, denied = _require_own_export(request, export_id)
+    if denied is not None:
+        return denied
 
     # Check status
     if export.status != "completed":
@@ -704,16 +619,12 @@ def export_download(request, export_id):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_POST
 def export_share_update(request, export_id):
     """Update share settings for a completed export."""
-    export = _get_export_for_request_or_404(request, export_id)
-
-    if export.user != request.user and not request.user.is_staff:
-        return JsonResponse(
-            {"success": False, "error": "Permission denied"}, status=403
-        )
+    export, denied = _require_own_export(request, export_id, json_response=True)
+    if denied is not None:
+        return denied
 
     if export.status != "completed":
         return JsonResponse(
@@ -845,17 +756,12 @@ def export_shared_download(request, share_token):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_POST
 def export_delete(request, export_id):
     """Delete export record and optionally the ZIP file."""
-    export = _get_export_for_request_or_404(request, export_id)
-
-    # Check permissions
-    if export.user != request.user and not request.user.is_staff:
-        return JsonResponse(
-            {"success": False, "error": "Permission denied"}, status=403
-        )
+    export, denied = _require_own_export(request, export_id, json_response=True)
+    if denied is not None:
+        return denied
 
     file_path = export.file_path
 
@@ -903,15 +809,12 @@ def export_delete(request, export_id):
 
 
 @login_required
-@user_passes_test(is_admin)
 @require_POST
 def export_stop(request, export_id):
     """Manually stop a processing export, kill worker, and delete partial ZIPs."""
-    ExportModel = get_domain_models(request)["Export"]
-    export = get_object_or_404(ExportModel, id=export_id)
-
-    if export.user != request.user and not request.user.is_staff:
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    export, denied = _require_own_export(request, export_id, json_response=True)
+    if denied is not None:
+        return denied
 
     if export.status not in {"processing", "pending"}:
         return JsonResponse(

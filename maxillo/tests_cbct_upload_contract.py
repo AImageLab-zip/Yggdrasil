@@ -66,7 +66,11 @@ class CBCTUploadContractTests(TestCase):
         self.assertEqual(reg.metadata.get("file_format"), "nifti_compressed")
         self.assertFalse(reg.metadata.get("needs_conversion"))
 
-    def test_save_cbct_folder_raises_validation_error(self):
+    def test_save_cbct_folder_explains_that_conversion_runs_in_the_browser(self):
+        # A DICOM folder is converted client-side before upload; reaching the
+        # server as a folder means that did not happen.
         with self.assertRaises(ValidationError) as ctx:
             save_cbct_folder_to_dataset(self.patient, [])
-        self.assertIn("deprecated", str(ctx.exception))
+        message = str(ctx.exception)
+        self.assertIn("converted in your browser", message)
+        self.assertIn(".nii.gz", message)

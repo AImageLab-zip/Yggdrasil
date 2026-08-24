@@ -28,13 +28,23 @@ class DemoIsolationTests(TestCase):
         Patient = apps.get_model("maxillo", "Patient")
         cls.Folder = Folder
         cls.Patient = Patient
-        cls.demo_folder = Folder.objects.create(name="Demo", is_demo=True)
-        cls.priv_folder = Folder.objects.create(name="Private", is_demo=False)
+        # Folders always belong to a project, so the project is created first.
+        cls.project, _ = Project.objects.get_or_create(
+            name="maxillo", defaults={"slug": "maxillo", "is_active": True}
+        )
+        cls.demo_folder = Folder.objects.create(
+            name="Demo", is_demo=True, project=cls.project
+        )
+        cls.priv_folder = Folder.objects.create(
+            name="Private", is_demo=False, project=cls.project
+        )
         cls.demo_patient = Patient.objects.create(
-            name="Demo Pt", folder=cls.demo_folder, visibility="public"
+            name="Demo Pt", folder=cls.demo_folder, project=cls.project,
+            visibility="public",
         )
         cls.priv_patient = Patient.objects.create(
-            name="Private Pt", folder=cls.priv_folder, visibility="private"
+            name="Private Pt", folder=cls.priv_folder, project=cls.project,
+            visibility="private",
         )
         cls.demo_file = FileRegistry.objects.create(
             patient=cls.demo_patient, file_path="raw/demo/x.png",
@@ -50,9 +60,6 @@ class DemoIsolationTests(TestCase):
         # test DB — so grant it here for the project this test uses.
         User = get_user_model()
         cls.guest = User.objects.get(username=settings.DEMO_GUEST_USERNAME)
-        cls.project, _ = Project.objects.get_or_create(
-            name="maxillo", defaults={"slug": "maxillo", "is_active": True}
-        )
         ProjectAccess.objects.get_or_create(
             user=cls.guest, project=cls.project, defaults={"role": "standard"}
         )

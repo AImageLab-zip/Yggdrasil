@@ -118,9 +118,12 @@ class Folder(FolderBase):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     # Mandatory project scope: folders live inside a Project (top-level folders
     # became Projects during the folder->project migration; remaining folders
-    # are flat within a project).
+    # are flat within a project). Non-null since migration 0028: while it was
+    # nullable, every ModelForm -- the Django admin's "add folder" page included
+    # -- treated it as optional, and a project-less folder is invisible to every
+    # project-scoped listing while still being reachable by id.
     project = models.ForeignKey(
-        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        'common.Project', on_delete=models.CASCADE,
         related_name='maxillo_folders',
     )
 
@@ -169,9 +172,11 @@ class Patient(models.Model):
     dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     modalities = models.ManyToManyField(Modality, blank=True, related_name='patients', help_text='Modalities available for this patient')
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
-    # Mandatory project scope (backfilled by the folder->project migration).
+    # Mandatory project scope (backfilled by the folder->project migration,
+    # required since 0029). `folder` stays optional because its on_delete is
+    # SET_NULL: deleting a folder legitimately leaves its patients folder-less.
     project = models.ForeignKey(
-        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        'common.Project', on_delete=models.CASCADE,
         related_name='maxillo_patients',
     )
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')

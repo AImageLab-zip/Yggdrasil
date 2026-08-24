@@ -29,9 +29,11 @@ class DatasetAdmin(admin.ModelAdmin):
 
 @admin.register(Folder)
 class FolderAdmin(admin.ModelAdmin):
-    list_display = ['name', 'parent', 'is_demo', 'created_at', 'created_by']
-    list_filter = ['is_demo']
+    # See maxillo.FolderAdmin: `project` is shown so a mis-filed folder is visible.
+    list_display = ['name', 'project', 'parent', 'is_demo', 'created_at', 'created_by']
+    list_filter = ['project', 'is_demo']
     list_editable = ['is_demo']
+    list_select_related = ['project', 'parent']
     search_fields = ['name']
 
 
@@ -43,8 +45,10 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
-    list_display = ['patient_id', 'name', 'visibility', 'uploaded_at', 'uploaded_by']
-    list_filter = ['visibility', 'uploaded_at']
+    # See maxillo.PatientAdmin: `project` is shown so a mis-filed patient is visible.
+    list_display = ['patient_id', 'name', 'project', 'folder', 'visibility', 'uploaded_at', 'uploaded_by']
+    list_filter = ['project', 'visibility', 'uploaded_at']
+    list_select_related = ['project', 'folder']
     search_fields = ['patient_id', 'name']
 
 
