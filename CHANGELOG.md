@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`annotations`, a new Django app: Yggdrasil's durable annotation model.** Thirteen
+  models behind a strict layering — `validators/` is pure (values in, `ValidationError`
+  out, no database), `adapters/` is pure translation, and `services/` is the only writer.
+  No Cornerstone runtime identifier is ever persisted: `SourceResource.identity_key` is
+  Yggdrasil's own durable name for annotatable content. Nothing is wired to a view yet;
+  the viewers are replaced one surface at a time in later phases.
+  - Three invariants are enforced in DDL because they fail invisibly:
+    `UniqueConstraint(annotation_set, revision_number)` *is* the optimistic-concurrency
+    primitive (a stale writer gets an `IntegrityError` → 409, with no read-then-write
+    window because the check is the write); "exactly one primary target" and "exactly one
+    canonical payload" use nullable slot columns rather than conditional constraints,
+    which MySQL compiles to nothing with no error; and a millimetre measurement requires
+    `is_calibrated`, so a length taken on an uncalibrated photograph is reported in
+    pixels rather than as a physical claim the image cannot support.
+  - Coordinate frames are named on every selector and every geometry row, with LPS and
+    RAS as separate values — they differ by two sign flips, so conflating them mirrors a
+    landmark across two planes with nothing in the record to say so. IOS landmarks get
+    `resource_local`, because they come from `worldToLocal` against a mesh and have no
+    patient frame.
+  - Times are integer milliseconds throughout.
+- Four conversion commands. `annotations_convert_legacy` converts the MySQL-resident
+  legacy annotations (idempotent, resumable, `--dry-run`);
+  `annotations_materialize_landmarks` handles the one surface that lives in object
+  storage; `annotations_normalize_coordinates` records each volume's grid facts from its
+  NIfTI header and counts the volumes whose orientation is inferred rather than read;
+  `annotations_crosscheck` is read-only and exits non-zero on any legacy row without a
+  converted counterpart, or any resource whose bytes changed after being annotated.
 - Frontend build toolchain for the Cornerstone3D v5 migration: npm + esbuild,
   **dev-only**, with the emitted bundle committed under
   `static/vendor/cornerstone/<build>/`. Deploys need no Node and make no network
@@ -23,11 +50,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Same view, same ACL; the filename segment never takes part in resolving the file.
 
 ### Changed
+- **The raw-data lock reads `AnnotationSet.ever_annotated`.** `common/annotation_lock.py`
+  keeps its module path and all five public signatures byte-identical, and gains
+  `annotations` as its first source: one indexed query instead of up to five per-domain
+  existence checks. The lock is now **monotonic** — deleting annotation work no longer
+  thaws the scan it was drawn on. Machine output still never locks a case, but the rule
+  now lives in the data (a prediction revision does not set the flag) rather than in
+  hardcoded exemptions. The legacy per-domain checks are retained alongside the new
+  source for one release as a cross-check, and go when those tables are dropped.
 - The Cornerstone bundle derives modality rescale (HU) from the raw NIfTI header itself
   rather than trusting `@cornerstonejs/nifti-volume-loader`, whose
   `modalityScaleNifti` skips the rescale whenever either factor is already neutral — so
   the ordinary `scl_slope=1, scl_inter=-1024` CBCT encoding would have been silently off
   by 1024 HU.
+
+### Fixed
+- **Two annotation gates that were missing.** `update_nifti_metadata` rewrote a raw
+  CBCT's qform/sform in place and restamped `FileRegistry.file_hash` without consulting
+  the annotation lock — every landmark, spline and polygon already drawn on that volume
+  kept its coordinates while the volume moved in patient space, with nothing in the
+  record to say so. It now refuses with 409 before any object-storage work.
+  `update_classification` was the one annotation write that never called
+  `project_allows_annotation`, so a project with occlusion classification switched off
+  still accepted instant updates from the sidebar.
 
 ### Removed
 - ~3,700 lines of dead viewer code: `volume_viewer.js` (which also shadowed the live

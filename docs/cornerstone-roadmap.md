@@ -189,13 +189,17 @@ middleware coverage.
 `@login_required` endpoint is instantly anonymous-public for demo folders.** The 2.0 roadmap's
 "fully separate, read-only surface" claim (Phase 7) is stale.
 
-**F11 — two pre-existing holes in the annotation lock.**
+**F11 — two pre-existing holes in the annotation lock.** ✅ **Fixed** in Phase 2
+(`47ede3b`), shipped alone as planned.
 `maxillo/views/metadata.py:228` `update_nifti_metadata` rewrites a raw CBCT's qform/sform in
 place and overwrites `FileRegistry.file_hash`/`file_size`
 (`_update_file_identities:143-170`) without consulting `common/annotation_lock.py` — silently
 re-basing every landmark and spline drawn on that volume, and the #1 `source_fingerprint`
 invalidation vector. And `maxillo/views/classification.py:19` `update_classification` never
-calls `project_allows_annotation`, unlike every other annotation write. Both fixed in Phase 2.
+calls `project_allows_annotation`, unlike every other annotation write. The affine rewrite now
+refuses with 409 *before any object-storage work*, and the classification endpoint accepts
+either the `classification` or `bite_classification` slug, matching the form-post path in
+`patient_detail`.
 
 **F12 — MySQL silently drops conditional constraints.** Django compiles
 `UniqueConstraint(condition=…)` to **nothing** on MySQL (no partial indexes, no error). Every
@@ -256,7 +260,7 @@ bytes actually taken. Filed alongside F1.
 | 0.4 | `release/3.0` cut from `release/2.0` @ `cda55df` | ✅ done |
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
-| 2 | `annotations/` Django app | ⬜ not started |
+| 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
 | 3 | CBCT + brain volume grid | ⬜ not started |
 | 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
 | 5 | Intraoral tooth segmentation | ⬜ not started |
@@ -385,6 +389,78 @@ laparoscopy `cbct_raw` count checked against the live database first; see F8.
 
 ## Phase 2 — `annotations/` Django app
 
+> **Shipped** (`47ede3b`, `6b6405d`, `8e70c6a`, `accbd09`, `e4edf84`, `156d2f5`,
+> `032e639`). What follows is the plan as designed; the corrections below record where
+> the shipped implementation differs, and why. Nothing is wired to a view — the surfaces
+> are replaced one at a time from Phase 3 on.
+>
+> - **The coordinate systems, enumerated.** The plan said "the nine, plus
+>   `resource_local`" without listing them. Shipped, in `annotations/constants.py`:
+>   `patient_lps_mm`, `patient_ras_mm`, `volume_voxel`, `image_pixel`,
+>   `image_normalized`, `slice_pixel`, `video_pixel`, `video_normalized`, `none`, plus
+>   `resource_local`. **LPS and RAS are separate values**, which is the one that matters:
+>   DICOM/Cornerstone is LPS and NIfTI's world frame is RAS, they differ by two sign
+>   flips, and a value stored in one and read as the other lands mirrored across the
+>   sagittal and coronal planes — F2's hazard, in the data model. `none` is for
+>   annotations that genuinely have no geometry (a classification, a caption); a blank
+>   would be indistinguishable from an omission.
+> - **The legacy conversion is a management command, not a `RunPython`.** The plan's
+>   "migrations touch MySQL only" reads as though the MySQL-resident conversion belongs
+>   in a migration. It does not: the row counts are unbounded, a migration converting
+>   them blocks the deploy and cannot resume after failing halfway.
+>   `annotations_convert_legacy` runs row by row in its own transaction, is idempotent on
+>   a `legacy:<app>.<table>:<pk>` marker stored in the revision note, and takes
+>   `--dry-run`/`--limit`/`--domain`/`--surface`. The schema half stays in migrations,
+>   where the additive-only rule and the rehearsal's `migrate --plan` check actually
+>   apply; the command emits no DDL. `annotations/migrations/0002` is the one data
+>   migration — it seeds the FDI permanent-dentition vocabulary, and `sqlmigrate` prints
+>   no DDL for it.
+> - **The lock unions both sources for one release**, rather than "the predicate becomes
+>   a query on `ever_annotated`" outright. Replacing the legacy checks in the same commit
+>   would unlock every patient between `migrate` and the conversion finishing, and would
+>   unlock permanently any surface the conversion turns out to miss. Decision #6 already
+>   keeps the legacy tables readable for one release as a cross-check; the union is what
+>   makes that window safe, and it costs one query. `_legacy_reasons` — and with it the
+>   last `from maxillo.models import PanoramicState` in `common` — goes in the release
+>   that drops those tables, gated on a clean production `annotations_crosscheck`
+>   (risk #19). **The five public signatures are byte-identical as specified**; all nine
+>   call sites are untouched.
+> - **`AnnotationItemBase.target` is nullable.** An occlusion classification or a voice
+>   caption is a statement about the study, and a patient may own no file for it to point
+>   at. Geometry and measurements still require one, enforced in
+>   `annotations/services/items.py` — coordinates with no resource behind them are
+>   numbers.
+> - **`MeasurementItem` also carries a nullable `spatial_3d_item` FK.** The plan named
+>   only `geometry_2d_item`. A volume ROI statistic in patient space attaches to a 3D
+>   shape, and Phase 3 produces those; adding the column now avoids a schema change then.
+>   Naming both on one row is refused as ambiguous.
+> - **`AnnotationPayload` gained a `variant` column.** "One payload per format per
+>   revision" is wrong for the panoramic, which bakes a MIP *and* a ray-sum strip from one
+>   arch. Uniqueness is on `(revision, format, variant)`.
+> - **A `study_notes` set kind was added.** `laparoscopy.Classification` shares a table
+>   name with maxillo's and nothing else — it holds free-text `notes` and no occlusion
+>   facets — so filing it under `occlusion_classification` would misdescribe a surgeon's
+>   remark in every export. During the cross-check release a laparoscopy patient can
+>   report both "study notes" (new) and "an occlusion classification" (the legacy
+>   branch's pre-existing mislabel); the second goes with that branch.
+> - **`annotations_normalize_coordinates` converts knowledge, not data.** It reads NIfTI
+>   headers and records shape, spacing, affine, orientation and the `scl_slope`/`scl_inter`
+>   pair on `SourceResource.descriptor`. It never moves a stored coordinate between
+>   frames: that is lossy, needs a decision per surface, and doing it silently inside a
+>   maintenance command is how a landmark ends up somewhere nobody chose. It also counts
+>   the volumes with neither `qform_code` nor `sform_code` set — the F2 population, whose
+>   orientation is inferred from pixel dimensions — so Phase 3 starts with a number
+>   instead of a hypothesis.
+> - **`serializers/` is the canonical JSON document**, with
+>   `assert_no_viewer_identifiers` walking it for `annotationUID`, `imageId`, `volumeId`,
+>   `segmentationId`, `cachedStats` and friends. The realistic way one gets in is a tool
+>   payload stored wholesale into `attributes`, so the check is a walk rather than a
+>   top-level key test.
+> - **Test count: 680, 0 failures** (from 462 after Phase 1), on MySQL 8 with live
+>   object storage. The DDL-level cases in `annotations/tests_model_constraints.py` exist
+>   because they would pass vacuously on a backend that ignores `CHECK` — `sqlmigrate`
+>   confirms every constraint is emitted, and the tests confirm MySQL enforces it.
+
 **Layout.** `models/ validators/ services/ adapters/ serializers/ management/commands/`.
 `validators/` is pure (dict in, `ValidationError` out — no DB, no I/O); `adapters/` is pure
 translation; **`services/` is the only writer.** A view that imports a model and calls
@@ -418,7 +494,7 @@ failure, so all bytes-reading work is a management command
 `ever_annotated`, replacing the hardcoded exemptions at `:88-90` and **removing
 `from maxillo.models import PanoramicState`**, so `common` stops importing a domain app.
 
-**Fix F11 in this phase, shipped alone.**
+**Fix F11 in this phase, shipped alone.** ✅ done (`47ede3b`).
 
 ## Phase 3 — CBCT + brain volume grid (largest, riskiest)
 
@@ -542,14 +618,26 @@ Baseline for comparison, measured on `release/2.0` at `232b40e` **without** obje
 Garage, via `docker compose -f docker-compose.dev.yml`): **444 tests, 0 failures** — all
 five of the above pass, confirming they are environmental and not latent bugs. After
 Phase 1: **462 tests, 0 failures** (+9 `common.tests_cornerstone_assets`,
-+9 `common.tests_file_serve_acl`), and 87 JS tests in one `npm test` invocation.
++9 `common.tests_file_serve_acl`), and 87 JS tests in one `npm test` invocation. After
+Phase 2: **680 tests, 0 failures** (+6 `maxillo.tests_annotation_gates`, +9
+`common.tests_raw_data_lock`, +203 across the eight `annotations.tests_*` modules), in
+~5.5 minutes.
 
 **Prod-clone rehearsal** (before Phases 2 and 8): restore the dump → read `migrate --plan` and
-confirm every operation is `CreateModel`/`AddField`/`RunPython` → `sqlmigrate common 0046`
-**must print no DDL** → migrate → `annotations_crosscheck` exits 0 → materialize landmarks →
-full suite green → **lock-state diff**: snapshot `raw_data_is_locked(p)` for every patient
-before and after, and require every newly-locked patient to be explained by an annotation that
-already existed. *That diff is the single most important check in the rehearsal.*
+confirm every operation is `CreateModel`/`AddField`/`AddIndex`/`AddConstraint`/`RunPython` →
+`sqlmigrate annotations 0002` **must print no DDL** → migrate → `annotations_crosscheck`
+reports the pre-conversion gap → `annotations_convert_legacy` → `annotations_materialize_landmarks`
+→ `annotations_crosscheck` exits 0 → full suite green → **lock-state diff**: snapshot
+`raw_data_is_locked(p)` for every patient before and after, and require every newly-locked
+patient to be explained by an annotation that already existed. *That diff is the single most
+important check in the rehearsal.* Note that the Phase-2 lock unions both sources, so the
+expected diff is **empty** — a patient that gains a lock has been locked by the conversion,
+which means the conversion assigned a human origin to something that is not human work.
+
+**Still to run against a production clone.** The rehearsal above has not been performed;
+Phase 2 was verified against the dev stack only. The conversion commands have never seen
+production row counts, and the F2 population size that `annotations_normalize_coordinates`
+reports is unknown.
 
 **Needs a live environment:** a real 400–800 instance DICOM series through ingest (wall clock,
 peak RSS, gunicorn headroom); Cornerstone in a real browser against real nginx (wasm MIME,

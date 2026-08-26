@@ -90,6 +90,38 @@ Templates load a surface with:
 
 Details and rationale: [docs/cornerstone-roadmap.md](docs/cornerstone-roadmap.md).
 
+## The `annotations` app: layering is enforced by review
+
+`annotations/` is the durable annotation model. Four layers, and the boundaries
+are the point:
+
+- **`validators/` is pure.** Values in, `ValidationError` out. No database, no
+  object storage, no model instances. That is what lets one rule run in a
+  service before a write, in a management command sweeping legacy rows, and in
+  a test with a literal dict.
+- **`adapters/` is pure translation.** A legacy row or an interchange document
+  in, descriptor dicts out. It never queries and never saves.
+- **`services/` is the only writer.** A view that imports an annotation model
+  and calls `.save()` is a review failure. Every write allocates a revision
+  number against the unique constraint, refreshes the monotonic
+  `ever_annotated` flag, fingerprints the targets and validates the items in
+  one transaction; a caller free to skip a step will eventually skip the flag,
+  and then a scan with landmarks on it becomes replaceable.
+- **`serializers/`** builds the canonical JSON document. No Cornerstone runtime
+  identifier may appear in it — `annotationUID`, `imageId`, `volumeId`,
+  `segmentationId`, `cachedStats` are session-scoped, and a document carrying
+  one looks durable while not being.
+
+Concurrency is `UniqueConstraint(annotation_set, revision_number)`. Pass the
+revision you loaded to `record_revision`; do **not** compute the next number
+from a `SELECT MAX(...)`, which reopens the race the constraint exists to close.
+
+Two schema rules look like style and are not. Conditional constraints
+(`UniqueConstraint(condition=...)`) compile to **nothing** on MySQL — no partial
+index, no error — so "exactly one" rules use a nullable slot column instead. And
+a millimetre measurement requires `is_calibrated`, enforced by a `CHECK`: an
+uncalibrated length is reported in pixels, never dressed up as a physical size.
+
 ## The runner HTTP API is frozen
 
 External processing runners speak the claim/complete/fail HTTP API
