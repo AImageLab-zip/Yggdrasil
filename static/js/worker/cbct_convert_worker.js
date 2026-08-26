@@ -10,8 +10,7 @@
 // global, so we create one before importing. Without this, importScripts throws
 // `ReferenceError: window is not defined`, *no* imported script executes, and the
 // first missing global reached later surfaces as the misleading
-// "VolumeMetadata is not defined". Same pattern as volume_worker.js /
-// seg2pano_worker.js.
+// "VolumeMetadata is not defined". Same pattern as seg2pano_worker.js.
 self.window = self;
 
 // Dependency load failures are recorded, not swallowed: every message handler

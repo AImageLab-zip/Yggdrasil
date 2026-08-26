@@ -845,25 +845,6 @@ document.addEventListener('DOMContentLoaded', function() {
     console.debug('Has CBCT:', window.hasCBCT);
     console.debug('Is CBCT processed:', window.isCBCTProcessed);
 
-    // Preload CBCT volume in background only for legacy CBCT pipeline.
-    // Fixed NiiVue grid has its own fetch/cache path and preloading here would duplicate work.
-    let useLegacyVolumePreload = true;
-    const viewerGridDataEl = document.getElementById('viewerGridData');
-    if (viewerGridDataEl) {
-        try {
-            const viewerGridData = JSON.parse(viewerGridDataEl.textContent || '{}');
-            if (viewerGridData.fixedMode) {
-                useLegacyVolumePreload = false;
-            }
-        } catch (e) {
-            console.warn('Unable to parse viewerGridData for preload gating:', e);
-        }
-    }
-
-    if (useLegacyVolumePreload && window.hasCBCT && window.isCBCTProcessed && typeof window.VolumeLoader !== 'undefined') {
-        window.VolumeLoader.preload('cbct');
-    }
-
     // Initialize modality viewers
     if (window.hasIOS && typeof window.IOSViewer !== 'undefined') {
         console.debug('Initializing IOS viewer');

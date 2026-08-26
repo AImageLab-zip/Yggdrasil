@@ -30,11 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by 1024 HU.
 
 ### Removed
-- ~2,700 lines of dead viewer code: `volume_viewer.js` (which also shadowed the live
+- ~3,700 lines of dead viewer code: `volume_viewer.js` (which also shadowed the live
   `window.CBCTViewer` with a duplicate), `slice_renderer.js`, `volume_interaction.js`,
   `windowing.js`, `maxillo_niivue_viewer.js`, `nifti-reader-min.js`, and
   `volume_renderer.js` with `static/shaders/volume_fragment.glsl` — the latter loaded on
   every patient-detail page and never called.
+- The legacy CBCT volume preload (`volume_loader.js`, `worker/volume_worker.js` and the
+  `useLegacyVolumePreload` branch in `patient_detail.js`). Unreachable for maxillo and
+  brain by code path, and confirmed unreachable for laparoscopy against production: no
+  laparoscopy patient owns a `cbct_raw` file.
 
 ## [2.0.0] - 2026-08-26
 

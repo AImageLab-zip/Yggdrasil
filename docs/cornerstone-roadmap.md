@@ -169,10 +169,12 @@ site (`static/js/patient_detail.js:863-864`) is
   Zero ⇒ delete both files with the rest. Non-zero ⇒ keep them, or drop the load to
   `{% if ns == 'maxillo' %}`-style gating first and re-check.
 
-  **Status: not yet run, so both files were kept in Phase 1.** They are still loaded at
-  `templates/common/patient_detail.html`. Phase 3 replaces their only call site
-  (`static/js/patient_detail.js:863-864`) regardless, so this is a tidy-up, not a
-  blocker — but the count should be checked before the deletion, not after.
+  **Status: run against production, count is 0, so both files were deleted in Phase 1.**
+  The gating logic went with them: with `window.VolumeLoader` gone, the
+  `useLegacyVolumePreload` branch in `static/js/patient_detail.js` could never fire, and
+  the `viewerGridData` parse there existed only to feed that gate. The analysis in this
+  finding is what made the deletion safe rather than hopeful — record the count if it is
+  ever re-checked.
 
 **F9 — the file-serving ACL defect.** ✅ **Fixed** on `release/2.0` (`232b40e`). Recorded here
 because the reachability analysis matters for Phase 8: `ActiveProfileMiddleware` only inspects
@@ -267,8 +269,9 @@ bytes actually taken. Filed alongside F1.
 ## Phase 1 — Build toolchain and vendored bundle
 
 > **Shipped.** What follows is the plan as designed; the corrections below record where
-> the shipped implementation differs, and why. All seven of the unconditionally-dead F8
-> files are gone; the *conditionally*-dead pair is not — see the end of this section.
+> the shipped implementation differs, and why. The whole F8 set is gone — including the
+> conditionally-dead pair, whose production `cbct_raw` count came back 0 (see the end of
+> this section).
 >
 > - **Actual emitted layout** (see `scripts/build_frontend.mjs` for the authority):
 >   the ICRPolySeg wasm lands in `app/workers/assets/`, not `<build>/assets/`, because
