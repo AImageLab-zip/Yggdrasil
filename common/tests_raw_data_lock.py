@@ -425,3 +425,103 @@ class PanoramicSaveLockTests(TestCase):
         response = self._post()
         self.assertNotIn("panoramic_locked", response.json())
         self.assertEqual(response.json()["error"], "No active CBCT source")
+
+
+class AnnotationSetLockTests(TestCase):
+    """The lock's second source: ``AnnotationSet.ever_annotated``.
+
+    The legacy per-domain checks and this one are unioned for one release
+    (decision #6), so what matters is that the new source locks on its own --
+    a patient with no legacy row at all -- and that the two together never
+    report the same reason twice.
+    """
+
+    def setUp(self):
+        self.project = _project("lock-sets", "maxillo")
+        self.folder = Folder.objects.create(name="F", project=self.project)
+        self.patient = Patient.objects.create(
+            project=self.project, folder=self.folder
+        )
+        self.user = User.objects.create_user(username="set-lock-tests", password="x")
+
+    def _set(self, kind, *, ever_annotated=True):
+        from annotations.models import AnnotationSet
+
+        annotation_set = AnnotationSet(kind=kind, ever_annotated=ever_annotated)
+        annotation_set.set_patient(self.patient)
+        annotation_set.save()
+        return annotation_set
+
+    def test_an_annotated_set_locks_a_patient_with_no_legacy_rows(self):
+        self._set("volume_segmentation")
+
+        self.assertTrue(raw_data_is_locked(self.patient))
+        self.assertIn("volume segmentation", annotation_lock_reasons(self.patient))
+
+    def test_a_set_that_has_never_been_annotated_does_not_lock(self):
+        """A prediction never sets the flag, so an empty or machine-filled set
+        leaves the case open -- the same rule the legacy half applies to
+        ``ios_landmarks_prediction`` and an ``auto`` panoramic geometry."""
+        self._set("ios_landmarks", ever_annotated=False)
+
+        self.assertFalse(raw_data_is_locked(self.patient))
+        self.assertEqual(annotation_lock_reasons(self.patient), [])
+
+    def test_the_lock_survives_deleting_the_work(self):
+        """Decision #18: monotonic. The flag stays; the revisions need not."""
+        annotation_set = self._set("intraoral_segmentation")
+        annotation_set.revisions.all().delete()
+
+        self.assertTrue(raw_data_is_locked(self.patient))
+
+    def test_a_migrated_patient_reports_each_reason_once(self):
+        VoiceCaption.objects.create(patient=self.patient, user=self.user, duration=1.0)
+        self._set("voice_caption")
+
+        reasons = annotation_lock_reasons(self.patient)
+
+        self.assertEqual(reasons.count("voice captions"), 1)
+
+    def test_an_annotated_arch_set_does_not_lock_the_panoramic_editor(self):
+        self._set("panoramic_arch")
+
+        self.assertTrue(raw_data_is_locked(self.patient))
+        self.assertFalse(panoramic_is_locked(self.patient))
+
+    def test_but_any_other_annotated_set_does(self):
+        self._set("panoramic_arch")
+        self._set("ios_landmarks")
+
+        self.assertTrue(panoramic_is_locked(self.patient))
+
+    def test_an_unmapped_kind_still_locks_and_names_itself(self):
+        """Failing to lock is a data-integrity problem; failing to phrase the
+        reason nicely is not, so an unknown kind reports its slug."""
+        self._set("measurements")
+        from annotations.models import AnnotationSet
+
+        AnnotationSet.objects.filter(patient=self.patient).update(kind="future_kind")
+
+        self.assertEqual(annotation_lock_reasons(self.patient), ["future_kind"])
+
+    def test_a_set_on_another_patient_does_not_leak_across(self):
+        other = Patient.objects.create(project=self.project, folder=self.folder)
+        self._set("volume_segmentation")
+
+        self.assertFalse(raw_data_is_locked(other))
+
+    def test_the_laparoscopy_domain_uses_its_own_patient_column(self):
+        from annotations.models import AnnotationSet
+
+        laparo_project = _project("lock-sets-laparo", "laparoscopy")
+        laparo = LaparoPatient.objects.create(
+            project=laparo_project,
+            folder=LaparoFolder.objects.create(name="F", project=laparo_project),
+        )
+        annotation_set = AnnotationSet(kind="video_regions", ever_annotated=True)
+        annotation_set.set_patient(laparo)
+        annotation_set.save()
+
+        self.assertEqual(annotation_set.laparoscopy_patient_id, laparo.pk)
+        self.assertTrue(raw_data_is_locked(laparo))
+        self.assertFalse(raw_data_is_locked(self.patient))
