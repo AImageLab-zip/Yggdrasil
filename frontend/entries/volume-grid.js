@@ -147,7 +147,14 @@ export {
 };
 
 import { createVolumeGrid, RENDERING_ENGINE_ID, PRIMARY_TOOLS } from '../imaging/grid/viewportManager.js';
-import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, ORIENTATIONS, GRID_WINDOWS } from '../imaging/grid/layout.js';
+import {
+    FIXED_CBCT_LAYOUT,
+    FREE_LAYOUT,
+    GRID_WINDOWS,
+    IMAGE_LOADER_SCHEME,
+    ORIENTATIONS,
+    VOLUME_ID_SCHEME,
+} from '../imaging/grid/layout.js';
 import { formatWindow, modalityWindowFromVoiRange, openingVoi, unitFor } from '../imaging/grid/voi.js';
 import {
     createGridState,
@@ -197,7 +204,13 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
     }
 
     await initImaging();
-    volumeLoader.registerVolumeLoader('nifti', cornerstoneNiftiImageLoader);
+    // The NIfTI loader is an **image** loader: it serves the per-frame
+    // `nifti:<url>?frame=N` ids. Registering it as a *volume* loader routes volume
+    // loading into it, where it looks up `imagePlaneModule` for an id that has no
+    // per-frame metadata and dies on `const { rows, columns } = imagePlaneModule`.
+    // The volume itself is built by the default streaming loader, which any
+    // unregistered volume-id scheme falls through to -- hence VOLUME_ID_SCHEME.
+    imageLoader.registerImageLoader(IMAGE_LOADER_SCHEME, cornerstoneNiftiImageLoader);
 
     return createVolumeGrid({
         cornerstone: {

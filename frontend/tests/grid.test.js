@@ -15,6 +15,8 @@ import {
     assertEnumsMatch,
     assertWindowIndex,
     isSliceOrientation,
+    IMAGE_LOADER_SCHEME,
+    VOLUME_ID_SCHEME,
     toolGroupIdFor,
     viewportId,
     viewportSpecFor,
@@ -138,7 +140,7 @@ test('two windows on the same file share one volume id, so the volume is cached 
     // decode and hold it in GPU memory twice.
     const url = 'https://h/api/processing/files/serve/5/v.nii.gz';
     assert.equal(volumeIdFor(url), volumeIdFor(url));
-    assert.equal(volumeIdFor(url), `nifti:${url}`);
+    assert.equal(volumeIdFor(url), `${VOLUME_ID_SCHEME}:${url}`);
     assert.notEqual(volumeIdFor(url), volumeIdFor(`${url}?x`));
     assert.throws(() => volumeIdFor(''), /needs the loader URL/);
 });
@@ -468,5 +470,65 @@ test('window/level is a primary tool, and pan/zoom/scroll deliberately are not',
     assert.ok(PRIMARY_TOOLS.includes('Length'));
     for (const navigation of ['Pan', 'Zoom', 'StackScroll']) {
         assert.ok(!PRIMARY_TOOLS.includes(navigation), `${navigation} must not be swappable`);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The volume-id scheme.
+//
+// The first real harness run errored on all 56 studies with a minified
+// "Cannot destructure property 'rows' of 'i' as it is undefined" and nothing pointing
+// at the cause. The cause was here: `loadVolumeFromVolumeLoader` picks the volume
+// loader by the scheme before the first ':' in the volume id, so a `nifti:`-prefixed
+// volume id routed *volume* loading into the *image* loader registered under that same
+// scheme. It then looked up `imagePlaneModule` for an id carrying no per-frame
+// metadata and destructured undefined.
+// ---------------------------------------------------------------------------
+
+test('the volume-id scheme is NOT the image-loader scheme', () => {
+    // The whole bug in one assertion.
+    assert.notEqual(VOLUME_ID_SCHEME, IMAGE_LOADER_SCHEME);
+    assert.equal(IMAGE_LOADER_SCHEME, 'nifti', 'the loader mints nifti:<url>?frame=N ids');
+    assert.ok(!volumeIdFor('https://h/v.nii.gz').startsWith(`${IMAGE_LOADER_SCHEME}:`));
+});
+
+test('the volume-id scheme falls through to the default streaming volume loader', async () => {
+    // `unknownVolumeLoader` is cornerstoneStreamingImageVolumeLoader and core registers
+    // no schemes of its own, so any scheme nobody registered gets the streaming loader
+    // -- which is exactly what should build a volume out of per-frame imageIds.
+    const loaderSrc = await readFile(
+        join(REPO, 'node_modules', '@cornerstonejs', 'core', 'dist', 'esm', 'loaders', 'volumeLoader.js'),
+        'utf8'
+    );
+    assert.match(
+        loaderSrc,
+        /let unknownVolumeLoader = cornerstoneStreamingImageVolumeLoader/,
+        'the fallback this design depends on has moved'
+    );
+    assert.match(
+        loaderSrc,
+        /const scheme = volumeId\.substring\(0, colonIndex\)/,
+        'volume loaders are still selected by the id scheme'
+    );
+});
+
+test('the entries register the NIfTI loader as an IMAGE loader, not a volume loader', async () => {
+    // Read as text: importing an entry needs a DOM. Pinning it anyway, because this is
+    // the line whose reversal produced 56 errored studies and an unreadable message.
+    for (const name of ['volume-grid.js', 'volume-validation.js']) {
+        const entry = await readFile(join(HERE, '..', 'entries', name), 'utf8');
+        assert.match(
+            entry,
+            /imageLoader\.registerImageLoader\(IMAGE_LOADER_SCHEME, cornerstoneNiftiImageLoader\)/,
+            `${name} must register the NIfTI loader as an image loader`
+        );
+        assert.ok(
+            !/registerVolumeLoader\(\s*['"]nifti['"]/.test(entry),
+            `${name} must not register it as a volume loader`
+        );
+        assert.ok(
+            !/volumeId = `nifti:/.test(entry),
+            `${name} must not mint a nifti:-schemed volume id`
+        );
     }
 });

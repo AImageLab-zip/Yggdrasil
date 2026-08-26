@@ -116,6 +116,30 @@ export function viewportId(windowIndex) {
 }
 
 /**
+ * The scheme Cornerstone's *image* loader for NIfTI frames is registered under.
+ *
+ * Per-slice imageIds look like `nifti:<url>?frame=N`, and the loader mints them itself.
+ */
+export const IMAGE_LOADER_SCHEME = 'nifti';
+
+/**
+ * The scheme our volume ids carry. Deliberately **not** {@link IMAGE_LOADER_SCHEME}.
+ *
+ * `loadVolumeFromVolumeLoader` (`@cornerstonejs/core/loaders/volumeLoader.js:15-25`)
+ * picks the volume loader by the text before the first `:` in the volume id, and falls
+ * back to `cornerstoneStreamingImageVolumeLoader` for any scheme nobody registered.
+ * That fallback is what we want: the streaming loader builds the volume out of the
+ * per-frame imageIds.
+ *
+ * Using `nifti:` here instead routes *volume* loading into the *image* loader, which
+ * then looks up `imagePlaneModule` for an id that has no per-frame metadata and dies on
+ * `const { rows, columns } = imagePlaneModule` — a minified "Cannot destructure
+ * property 'rows' of 'i'" with nothing pointing at the cause. That is not hypothetical:
+ * it is what the first real harness run produced, on all 56 studies.
+ */
+export const VOLUME_ID_SCHEME = 'ygg-volume';
+
+/**
  * Runtime volume id for one loaded volume.
  *
  * Keyed by the loader URL because that is what Cornerstone's cache is keyed by: two
@@ -129,7 +153,7 @@ export function volumeIdFor(url) {
     if (typeof url !== 'string' || url.length === 0) {
         throw new Error('A volume id needs the loader URL it is derived from.');
     }
-    return `nifti:${url}`;
+    return `${VOLUME_ID_SCHEME}:${url}`;
 }
 
 /** The tool group id. One group per orientation class -- see `toolGroupIdFor`. */

@@ -29,6 +29,7 @@ from django.http import HttpResponse
 from django.test import TestCase
 from django.urls import reverse
 
+from brain.models import Folder as BrainFolder, Patient as BrainPatient
 from common.models import FileRegistry, Project, ProjectAccess
 from maxillo.models import Folder, Patient
 
@@ -301,3 +302,110 @@ class BundleServeRouteTests(TestCase):
             },
         )
         self.assertEqual(self.client.get(url).status_code, 302)
+
+
+class BrainServeRouteTests(TestCase):
+    """`brain/app_urls.py` routes to brain's OWN serve_file, not maxillo's.
+
+    The two are separate implementations that happen to share a URL shape, and the
+    filename-suffixed route was registered in Phase 1 against a signature that never
+    accepted a filename. Every suffixed brain URL was therefore a 500 from the moment
+    the route was added -- nothing called it until the Phase 3 validation harness did,
+    which is how it surfaced: all 25 brain studies errored with `HTTP 500`.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        suffix = uuid.uuid4().hex[:8]
+        cls.project = Project.objects.create(
+            name=f"brainserve-{suffix}", slug=f"brainserve-{suffix}", domain="brain"
+        )
+        cls.folder = BrainFolder.objects.create(name="br", project=cls.project)
+        cls.patient = BrainPatient.objects.create(
+            patient_id=9501, folder=cls.folder, project=cls.project
+        )
+        cls.file = FileRegistry.objects.create(
+            brain_patient=cls.patient,
+            file_type="braintumor_mri_t1_raw",
+            file_path="brain/raw/braintumor-mri-t1_patient_777.nii.gz",
+            file_size=1,
+            file_hash="0" * 64,
+            domain="brain",
+        )
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username=f"b{uuid.uuid4().hex[:8]}", password="pw"  # noqa: S106
+        )
+        ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
+        self.client.force_login(self.user)
+
+    def _serve(self, url):
+        served = {}
+
+        def fake_stream(path_or_key, **kwargs):
+            served["path"] = path_or_key
+            return HttpResponse(b"", content_type=kwargs.get("content_type") or "")
+
+        with patch("brain.api_views.streaming_response", side_effect=fake_stream):
+            response = self.client.get(url)
+        return response, served.get("path")
+
+    def test_the_filename_suffixed_route_serves_rather_than_500ing(self):
+        url = reverse(
+            "brain:api_serve_file_named",
+            kwargs={
+                "file_id": self.file.id,
+                "filename": "braintumor-mri-t1_patient_777.nii.gz",
+            },
+        )
+        response, path = self._serve(url)
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        self.assertEqual(path, self.file.file_path)
+
+    def test_the_filename_is_decorative_here_too(self):
+        """Same contract as maxillo's: the segment carries the extension, nothing else."""
+        response, path = self._serve(
+            reverse(
+                "brain:api_serve_file_named",
+                kwargs={"file_id": self.file.id, "filename": "something-else.nii.gz"},
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(path, self.file.file_path)
+
+    def test_the_plain_route_still_works(self):
+        response, path = self._serve(
+            reverse("brain:api_serve_file", kwargs={"file_id": self.file.id})
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(path, self.file.file_path)
+
+    def test_a_bundle_key_is_refused_because_brain_has_no_bundles(self):
+        """404, not a silent fall-back to the row's own file.
+
+        Only `cbct_processed` rows carry bundles. A brain request naming a member is
+        asking for something that does not exist, and serving the row's own bytes under
+        a name that promised a different file is worse than refusing.
+        """
+        response, path = self._serve(
+            reverse(
+                "brain:api_serve_file_bundle",
+                kwargs={
+                    "file_id": self.file.id,
+                    "bundle_key": "volume_nifti",
+                    "filename": "v.nii.gz",
+                },
+            )
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(path)
+
+    def test_the_gz_suffix_survives_into_the_url(self):
+        """The whole reason the suffixed route exists (finding F3)."""
+        url = reverse(
+            "brain:api_serve_file_named",
+            kwargs={"file_id": self.file.id, "filename": "scan.nii.gz"},
+        )
+        self.assertTrue(url.endswith(".gz"))
+        self.assertNotIn("?", url)

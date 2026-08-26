@@ -82,9 +82,34 @@ def get_file_registry(request):
 
 @login_required
 @require_http_methods(["GET"])
-def serve_file(request, file_id):
+def serve_file(request, file_id, filename=None, bundle_key=None):
     """Stream a brain FileRegistry entry after checking the requesting user can
-    read the owning patient's folder (or is a brain project admin / staff)."""
+    read the owning patient's folder (or is a brain project admin / staff).
+
+    URL: /brain/api/processing/files/serve/<file_id>/
+         /brain/api/processing/files/serve/<file_id>/<filename>
+
+    ``filename`` is **decorative and deliberately unused**, exactly as in
+    ``maxillo.api_views.files.serve_file``: the bytes served are always
+    ``FileRegistry.file_path``. It exists because Cornerstone3D's NIfTI loader
+    decides whether to gunzip by testing ``new URL(url).pathname`` for a ``.gz``
+    suffix, which a query parameter cannot carry (finding F3).
+
+    It is accepted here because ``brain/app_urls.py`` routes the suffixed form to
+    *this* view and not to maxillo's -- the two are separate implementations that
+    happen to share a URL shape. Phase 1 registered that route without widening this
+    signature, so every suffixed brain URL was a 500 from the moment it was added
+    until the Phase 3 harness became its first caller. Nothing had exercised it.
+
+    ``bundle_key`` is accepted and refused. Brain has no multi-file bundles -- only
+    ``cbct_processed`` rows carry them -- so a request naming one is asking for
+    something that does not exist, and 404 is the honest answer. Ignoring it would
+    silently serve the row's own file under a name that promised a different one.
+    """
+    del filename  # see the docstring: URL decoration only, never used to resolve.
+    if bundle_key:
+        raise Http404("Brain files are not multi-file bundles")
+
     file_obj = FileRegistry.objects.filter(id=file_id, domain="brain").first()
     if not file_obj:
         raise Http404("File not found")

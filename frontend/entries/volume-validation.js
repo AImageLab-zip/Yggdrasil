@@ -28,6 +28,7 @@
 import {
     RenderingEngine,
     Enums as coreEnums,
+    imageLoader,
     volumeLoader,
     cache,
     setVolumesForViewports,
@@ -50,6 +51,7 @@ import { cachedScalarData, cornerstoneLeg, niivueLeg } from '../imaging/validati
 import { allFixtures } from '../imaging/validation/fixtures.js';
 import { formatReport, summarize } from '../imaging/validation/report.js';
 import { DEFAULT_SEED } from '../imaging/validation/prng.js';
+import { IMAGE_LOADER_SCHEME, volumeIdFor } from '../imaging/grid/layout.js';
 
 export const SURFACE = 'volume-validation';
 
@@ -106,7 +108,9 @@ async function loadThroughCornerstone(url) {
     if (!imageIds?.length) {
         throw new Error('Cornerstone produced no imageIds for this volume.');
     }
-    const volumeId = `nifti:${url}`;
+    // NOT `nifti:` -- that is the *image* loader's scheme, and using it here routes
+    // volume loading into the image loader. See VOLUME_ID_SCHEME.
+    const volumeId = volumeIdFor(url);
     const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
     await volume.load();
     return volume;
@@ -295,7 +299,13 @@ export async function runValidation({
     seed = DEFAULT_SEED,
 } = {}) {
     const capabilities = await initImaging();
-    volumeLoader.registerVolumeLoader('nifti', cornerstoneNiftiImageLoader);
+    // The NIfTI loader is an **image** loader: it serves the per-frame
+    // `nifti:<url>?frame=N` ids. Registering it as a *volume* loader routes volume
+    // loading into it, where it looks up `imagePlaneModule` for an id that has no
+    // per-frame metadata and dies on `const { rows, columns } = imagePlaneModule`.
+    // The volume itself is built by the default streaming loader, which any
+    // unregistered volume-id scheme falls through to -- hence VOLUME_ID_SCHEME.
+    imageLoader.registerImageLoader(IMAGE_LOADER_SCHEME, cornerstoneNiftiImageLoader);
 
     const runs = [];
     const total = studies.length + (includeFixtures ? allFixtures().length : 0);
