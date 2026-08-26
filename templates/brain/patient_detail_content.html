@@ -1,4 +1,5 @@
 {% load static %}
+{% load cornerstone %}
 <link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
 
 <!-- Django data for JavaScript -->
@@ -147,7 +148,9 @@
     </div>
 </div>
 
-<!-- NiiVue for medical volume viewing (DISP-01) -->
-<script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.67.0/dist/niivue.umd.min.js"></script>
-<script src="{% static 'js/modality_viewers/niivue_viewer.js' %}"></script>
-<script src="{% static 'js/viewer_grid.js' %}"></script>
+{% comment %}
+Cornerstone3D volume grid (roadmap Phase 3). Replaces the NiiVue 0.67 CDN tag -- note
+brain pinned a *different* NiiVue version from maxillo's 0.69, which is one of the
+reasons the two surfaces drifted.
+{% endcomment %}
+{% cornerstone_entry 'volume-grid' %}

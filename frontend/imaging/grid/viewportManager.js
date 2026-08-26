@@ -43,7 +43,9 @@ import {
     setOrientation,
     windowAt,
 } from './windowState.js';
-import { openingVoi, unitFor } from './voi.js';
+import { modalityWindowFromVoiRange, openingVoi, unitFor } from './voi.js';
+import { DEFAULT_RENDER_MODE, applyRenderMode } from './renderModes.js';
+import { residualModalityLut } from '../metadata/modalityLutModule.js';
 import { awaitVolumeLoad, readScalarData } from './volumeLoading.js';
 import { describeGeometry } from '../geometry/orientation.js';
 
@@ -98,6 +100,12 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
     const state = createGridState(layout);
     const renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
 
+    // Keyed by volume id, so two windows on one file share one entry. The header is
+    // kept alongside the volume because everything that needs real values needs both,
+    // and re-fetching the header per consumer would be a second round trip for bytes
+    // already in hand.
+    const volumeCache = new Map();
+
     const viewportInputs = layout
         .filter((entry) => !entry.lazy)
         .map((entry) => {
@@ -127,10 +135,18 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         renderingEngine,
         toolGroups,
         elements,
+        volumeCache,
 
         /** Load one volume into one window. Returns the F2 warning, if any. */
         loadVolumeIntoWindow: (windowIndex, descriptor) =>
-            loadVolumeIntoWindow({ cornerstone, renderingEngine, state, windowIndex, descriptor }),
+            loadVolumeIntoWindow({
+                cornerstone,
+                renderingEngine,
+                state,
+                windowIndex,
+                descriptor,
+                volumeCache,
+            }),
 
         /** Point a window at a different plane, rebuilding its viewport. */
         setWindowOrientation: (windowIndex, orientation) =>
@@ -140,8 +156,22 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         setPrimaryTool: (toolName) =>
             setPrimaryTool({ toolGroup: toolGroups[toolGroupIdFor(ORIENTATIONS.AXIAL)], toolsEnums, toolName }),
 
+        /** Bring up the 3D window, which the layout leaves lazy. */
+        enable3DWindow: (windowIndex, mode) =>
+            enable3DWindow({ cornerstone, renderingEngine, state, elements, toolGroups, windowIndex, mode }),
+
+        /** Switch the volume render between mip / amip / shaded. */
+        setRenderMode: (windowIndex, mode) =>
+            setRenderMode({ renderingEngine, windowIndex, mode }),
+
+        /** Reset the camera on one window, or on all of them. */
+        resetCameras: (windowIndex) => resetCameras({ renderingEngine, state, windowIndex }),
+
+        /** The window/level currently applied to a window, in modality units. */
+        readWindow: (windowIndex) => readWindow({ renderingEngine, state, windowIndex, volumeCache }),
+
         /** Drop volumes no window is showing any more. */
-        releaseUnusedVolumes: () => releaseUnusedVolumes({ cornerstone, state }),
+        releaseUnusedVolumes: () => releaseUnusedVolumes({ cornerstone, state, volumeCache }),
 
         destroy() {
             for (const group of new Set(Object.values(toolGroups))) {
@@ -236,7 +266,14 @@ function setPrimaryTool({ toolGroup, toolsEnums, toolName }) {
  *
  * @returns {Promise<{orientationWarning: string|null, voi: object, geometry: object}>}
  */
-async function loadVolumeIntoWindow({ cornerstone, renderingEngine, state, windowIndex, descriptor }) {
+async function loadVolumeIntoWindow({
+    cornerstone,
+    renderingEngine,
+    state,
+    windowIndex,
+    descriptor,
+    volumeCache,
+}) {
     const { volumeLoader, createNiftiImageIdsAndCacheMetadata, setVolumesForViewports } = cornerstone;
     const { url, modality, fileId } = descriptor;
     const volumeId = volumeIdFor(url);
@@ -254,6 +291,7 @@ async function loadVolumeIntoWindow({ cornerstone, renderingEngine, state, windo
         // NOT `await volume.load()`: `ImageVolume.load` returns undefined, so awaiting
         // it resolves on the next microtask with no frames loaded. See volumeLoading.js.
         await awaitVolumeLoad(volume);
+        volumeCache?.set(volumeId, { volume, header });
 
         // The window may have been cleared or reloaded while that was in flight.
         if (!completeLoad(state, windowIndex, generation, {
@@ -367,14 +405,123 @@ function setWindowOrientation({ renderingEngine, state, windowIndex, orientation
  * Asks `activeVolumeIds`, which deduplicates: clearing one of three windows on a
  * shared CBCT must not blank the other two.
  */
-function releaseUnusedVolumes({ cornerstone, state }) {
+function releaseUnusedVolumes({ cornerstone, state, volumeCache }) {
     const keep = new Set(activeVolumeIds(state));
     const released = [];
     for (const volume of cornerstone.cache.getVolumes()) {
         if (!keep.has(volume.volumeId)) {
             cornerstone.cache.removeVolumeLoadObject(volume.volumeId);
+            // Dropped here too, or this map pins the scalar data Cornerstone just
+            // released and the eviction frees nothing.
+            volumeCache?.delete(volume.volumeId);
             released.push(volume.volumeId);
         }
     }
     return released;
+}
+
+
+/**
+ * Bring up the lazy 3D window.
+ *
+ * The layout marks window 3 `lazy` and `createVolumeGrid` skips it, because a volume
+ * render of a full CBCT is the most expensive thing the page can do and most visits
+ * never ask for it. This is what happens when somebody does.
+ */
+async function enable3DWindow({
+    cornerstone,
+    renderingEngine,
+    state,
+    elements,
+    toolGroups,
+    windowIndex,
+    mode = DEFAULT_RENDER_MODE,
+}) {
+    const { setVolumesForViewports } = cornerstone;
+    const id = viewportId(windowIndex);
+    const spec = viewportSpecFor(ORIENTATIONS.RENDER);
+
+    // The volume to show is whatever the 2D windows are already showing; loading a
+    // second copy for the 3D view would double a CBCT in GPU memory.
+    const source = state.windows.find((entry) => entry.volumeId && !entry.loading);
+    if (!source) {
+        throw new Error('There is no loaded volume to render in 3D yet.');
+    }
+
+    renderingEngine.enableElement({
+        viewportId: id,
+        type: spec.type,
+        element: elements[windowIndex],
+        defaultOptions: {},
+    });
+    toolGroups[toolGroupIdFor(ORIENTATIONS.RENDER)].addViewport(id, RENDERING_ENGINE_ID);
+
+    setOrientation(state, windowIndex, ORIENTATIONS.RENDER);
+    const window = windowAt(state, windowIndex);
+    window.volumeId = source.volumeId;
+    window.modality = source.modality;
+    window.fileId = source.fileId;
+
+    await setVolumesForViewports(renderingEngine, [{ volumeId: source.volumeId }], [id]);
+    setRenderMode({ renderingEngine, windowIndex, mode });
+    renderingEngine.renderViewports([id]);
+    return window;
+}
+
+/**
+ * Apply a render mode to the 3D viewport.
+ *
+ * Reaches for the actor rather than the viewport's own helpers because the blend mode
+ * and the shader replacements both live on the mapper, and `renderModes.js` owns the
+ * order they have to be set in.
+ */
+function setRenderMode({ renderingEngine, windowIndex, mode }) {
+    const viewport = renderingEngine.getViewport(viewportId(windowIndex));
+    if (!viewport) {
+        throw new Error(`Window ${windowIndex} has no viewport to render into.`);
+    }
+    const actor = viewport.getActors?.()?.[0]?.actor;
+    if (!actor?.getMapper) {
+        throw new Error('The 3D viewport has no volume actor yet.');
+    }
+    const spec = applyRenderMode(actor, mode);
+    viewport.render();
+    return spec;
+}
+
+/** Reset the camera on one window, or every loaded one. */
+function resetCameras({ renderingEngine, state, windowIndex = null }) {
+    const targets =
+        windowIndex === null
+            ? state.windows.filter((entry) => entry.volumeId).map((entry) => entry.index)
+            : [windowIndex];
+
+    for (const index of targets) {
+        const viewport = renderingEngine.getViewport(viewportId(index));
+        viewport?.resetCamera?.();
+    }
+    renderingEngine.renderViewports(targets.map(viewportId));
+    return targets;
+}
+
+/**
+ * The window currently applied to a viewport, in modality units.
+ *
+ * Converted back out of stored units on the way, because that is what the readout has
+ * to show -- see `voi.js`. Returns null when there is nothing to report rather than a
+ * zero window, which would read as a real setting.
+ */
+function readWindow({ renderingEngine, state, windowIndex, volumeCache }) {
+    const window = windowAt(state, windowIndex);
+    const viewport = renderingEngine.getViewport(viewportId(windowIndex));
+    const range = viewport?.getProperties?.()?.voiRange;
+    const cached = window.volumeId ? volumeCache?.get(window.volumeId) : null;
+
+    if (!range || !cached?.header) {
+        return null;
+    }
+    return {
+        ...modalityWindowFromVoiRange(range, residualModalityLut(cached.header)),
+        unit: unitFor(window.modality),
+    };
 }

@@ -90,6 +90,21 @@ Templates load a surface with:
 
 Details and rationale: [docs/cornerstone-roadmap.md](docs/cornerstone-roadmap.md).
 
+## `panoramicSource.js` and `reorient.js` are scaffolding
+
+`cbct_panorex_editor.js` is Phase 7's to rewrite. Until then it reads its **data** out
+of `window.ViewerGrid` — three methods and the `viewergridvolumeready` event — and it
+expects **RAS-ordered voxels**, because NiiVue reoriented every volume on load.
+
+`frontend/imaging/grid/panoramicSource.js` reproduces that interface and
+`frontend/imaging/geometry/reorient.js` does the reorientation, so that Phase 3 could
+delete NiiVue without transposing every exported panoramic. Both go with Phase 7.
+
+Do not build on them, and do not "simplify" the reorientation away: the panoramic was
+tuned against NiiVue's output, `export_catalog.py` ships the baked PNGs, and a
+different-but-defensible convention is still a change to an exported clinical artifact
+that nothing in the build would notice.
+
 ## The Phase 3 validation harness is temporary
 
 `frontend/imaging/validation/`, `frontend/entries/volume-validation.js`,

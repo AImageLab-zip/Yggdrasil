@@ -147,6 +147,7 @@ export {
 };
 
 import { createVolumeGrid, RENDERING_ENGINE_ID, PRIMARY_TOOLS } from '../imaging/grid/viewportManager.js';
+import { bootstrapVolumeGrid } from '../imaging/grid/bootstrap.js';
 import {
     FIXED_CBCT_LAYOUT,
     FREE_LAYOUT,
@@ -230,8 +231,26 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
     });
 }
 
+/**
+ * Start on page load.
+ *
+ * The `{% cornerstone_entry %}` tag loads this module for its side effects, so the
+ * self-start is the side effect. `bootstrapVolumeGrid` returns null on any page without
+ * a grid, which is most of them, and reports a real failure into the grid rather than
+ * throwing -- a bootstrap that throws here would take the rest of the patient record
+ * with it.
+ */
+const started = bootstrapVolumeGrid({ mount: mountVolumeGrid }).catch((error) => {
+    // Belt and braces: bootstrapVolumeGrid already catches its own failures, so
+    // reaching here means a bug in the bootstrap itself.
+    console.error('The volume grid failed to start:', error);
+    return null;
+});
+
 export {
     createVolumeGrid,
+    bootstrapVolumeGrid,
+    started,
     mountVolumeGrid as default,
     RENDERING_ENGINE_ID,
     PRIMARY_TOOLS,

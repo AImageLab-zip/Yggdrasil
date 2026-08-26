@@ -353,7 +353,7 @@ implemented, which is F7's original requirement and is unchanged.
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
-| 3 | CBCT + brain volume grid | 🟡 in progress (`release/3.0`, `8758efa`…`3f01954`) — foundation, harness, replacement grid and measurement persistence are in. **Tier 1 and Tier 2 pass on every readable study** (34/34, 2026-08-27); **Tier 3 has not run and nothing is wired to a template**. Deletion still gated: 22 brain studies unread, and F7's `amip` sign-off outstanding |
+| 3 | CBCT + brain volume grid | 🟢 shipped, unrendered (`release/3.0`, `8758efa`…HEAD) — grid wired in both namespaces, **NiiVue and `viewer_grid.js` deleted**, measurements persist. Tier 1 + Tier 2 pass 34/34. **Nobody has looked at a rendered pixel**: Tier 3 has not run, F7's `amip` sign-off is outstanding, and 22 brain studies were never read. Merged on the maintainer's explicit call |
 | 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
 | 5 | Intraoral tooth segmentation | ⬜ not started |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
@@ -738,6 +738,29 @@ failure, so all bytes-reading work is a management command
 >   22 unreadable studies drowning the three that had something to say. They are counted
 >   and listed separately now — still blocking, since a corpus the harness could not
 >   read cannot clear a gate about the corpus, but no longer burying the signal.
+> - **Deleting the viewer was not a deletion.** `cbct_panorex_editor.js` reaches into
+>   `window.ViewerGrid` for *data* — three methods and the `viewergridvolumeready`
+>   event — so removing `viewer_grid.js` breaks panoramic reconstruction, silently: the
+>   editor whose descriptor returns null simply never starts, and `panoramic_warmup.py`
+>   reports a run of zero successes that reads as "nothing to do". Worse, **NiiVue
+>   reoriented every volume to RAS on load**, so the array the panoramic has always
+>   consumed is permuted and flipped. Handing it Cornerstone's file-order array under
+>   the same interface would have transposed every exported panoramic while every test
+>   in the tree still passed — and the harness would not have caught it either, since it
+>   validates the grid's data path and not the panoramic's. `geometry/reorient.js`
+>   derives the permutation the way NiiVue does and `grid/panoramicSource.js` reproduces
+>   the interface; both are scaffolding Phase 7 deletes.
+> - **The percent sliders became a readout, not a control.** Decision #5 removes
+>   percent-of-data-range; window/level is now dragged on the image and reported in
+>   modality units with the unit named — or omitted for CBCT, whose greyscale is not
+>   calibrated Hounsfield.
+> - **`amip` is wired, not signed off.** `grid/renderModes.js` maps the toolbar's three
+>   modes onto vtk.js, with `amip` as `MAXIMUM_INTENSITY_BLEND` plus the F18 shader
+>   replacement. F7's requirement — look at it on real studies — is **still outstanding**.
+> - **What no test in this repo covers.** The grid has never rendered. Tools binding,
+>   crosshair sync, the lazy 3D window, the toolbar, measurement round-trip and the
+>   panoramic hand-off are all exercised only by unit tests over their pure parts. The
+>   deletion was made on the maintainer's explicit instruction with that stated.
 > - **Everything in the harness is temporary** and is deleted with the viewer
 >   replacement: `frontend/entries/volume-validation.js`,
 >   `frontend/imaging/validation/`, `common/imaging_validation.py`,
