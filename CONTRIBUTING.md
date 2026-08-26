@@ -146,6 +146,23 @@ index, no error — so "exactly one" rules use a nullable slot column instead. A
 a millimetre measurement requires `is_calibrated`, enforced by a `CHECK`: an
 uncalibrated length is reported in pixels, never dressed up as a physical size.
 
+## Object-storage work is a management command, never a migration or a request
+
+Anything that reads bytes out of Garage lives in `annotations/management/commands/`.
+Not a `RunPython`: row counts are unbounded, a migration doing it blocks the deploy
+and cannot resume after failing halfway, and object storage is unreachable in CI.
+Not a request path either — `annotations_compute_roi_stats` downloads whole volumes.
+
+`annotations_normalize_coordinates`, `annotations_materialize_landmarks`,
+`annotations_crosscheck` and `annotations_compute_roi_stats` all follow the same
+shape, and it is worth copying: idempotent, `--dry-run`, `--limit`, and **one bad
+object costs its own rows and not the sweep**. A corpus pass that dies on the first
+unreadable file is a pass nobody can finish.
+
+Group by resource before downloading. A volume shared by twenty annotations must be
+fetched once; the naive loop is O(annotations) round trips, which on a real corpus is
+hours rather than minutes.
+
 ## The runner HTTP API is frozen
 
 External processing runners speak the claim/complete/fail HTTP API

@@ -641,11 +641,24 @@ failure, so all bytes-reading work is a management command
 >   `RectangleROI`'s corners are stored (BL, BR, TL, TR), so a shoelace walked in index
 >   order traces a bow-tie whose signed area cancels **exactly** — a 4×3 ROI would be
 >   recorded as 0 mm² with nothing about the shape looking wrong.
-> - **Intensity statistics are refused rather than accepted from the client.** A
->   probe's Hounsfield reading is not derivable from geometry; it needs the voxels.
->   Decision #11 puts ROI statistics in the first release, and they belong to a
->   server-side pass that reads the volume — **still outstanding**, and the one part of
->   #11 this phase does not deliver. The shape is stored; the number is not invented.
+> - **Intensity statistics are refused from the client and computed on the server.** A
+>   probe's Hounsfield reading is not derivable from geometry; it needs the voxels. The
+>   adapter stores the shape and omits the number, and
+>   `annotations_compute_roi_stats` supplies it from the volume — a management command
+>   for the same reason `annotations_materialize_landmarks` is, since reading the bytes
+>   is object-storage I/O. This is not fastidiousness: `cachedStats` is computed on top
+>   of `modalityScaleNifti`, so taking the browser's number would have recorded half
+>   the CBCT corpus 1024 HU out (F1) with nothing saying so. nibabel applies the
+>   rescale unconditionally, which is precisely the property the number needs.
+>   Statistics are written onto the revision that holds the geometry — they are facts
+>   about *that* shape, materialised late — and `ever_annotated` is untouched, because
+>   a machine computing a mean is not annotation work. With this, **decision #11 is
+>   complete**: ROI statistics, calibration and durable measurements all ship in the
+>   first release. (DICOM SR export is Phase 9's, as #11 always intended.)
+> - **A CBCT statistic is reported without a unit, not as HU.** Only real CT earns the
+>   label. CBCT greyscale is vendor-dependent and is not calibrated Hounsfield, so
+>   calling it HU would dress a relative number up as a physical measurement — the same
+>   mistake `MeasurementItem`'s calibration constraint prevents for lengths.
 > - **Saving is replace-the-set, not a diff.** A revision *is* the state of the work at
 >   a moment. Diffing would need a stable per-annotation identity, and the only
 >   candidate is the `annotationUID` — the identifier the governing rule says is never
