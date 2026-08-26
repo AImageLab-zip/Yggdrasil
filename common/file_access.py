@@ -79,3 +79,83 @@ def streaming_response(
             response[str(k)] = str(v)
 
     return response
+
+
+def authorize_file_read(user, file_obj, namespace=None):
+    """Authorize ``user`` to read ``file_obj``, scoped to the file's own domain.
+
+    Returns ``(allowed, error_message, status_code)``; on success the last two
+    are ``None``.
+
+    This is the single authorization funnel for every endpoint that streams a
+    ``FileRegistry`` row. It exists because the per-domain copies had drifted:
+    the maxillo copy resolved the patient with an ``if laparoscopy / else
+    .patient`` branch (so a brain row consulted the maxillo FK) and then
+    authorized every domain against a hardcoded ``slug='maxillo'`` project, so
+    brain and laparoscopy files were gated on maxillo project membership in
+    both directions -- granting access to maxillo members who had none, and
+    denying it to laparoscopy-only members who did.
+
+    Authorization resolves the patient through the domain registry and defers
+    to ``patient.project``, which is mandatory on all three Patient models.
+    """
+    from common.domains import fk_fields_for, normalize_domain
+    from common.models import ProjectAccess
+    from common.modality_config import raw_file_hidden
+    from common.permissions import user_can_read_patient, user_can_view_caption_content
+
+    if file_obj is None:
+        return False, "File not found", 404
+
+    # The row's own domain wins; the request namespace is only a fallback for
+    # legacy rows that predate the column (and for the global "api" namespace,
+    # which is not a domain).
+    file_domain = normalize_domain(file_obj.domain or namespace)
+    patient_fk, caption_fk = fk_fields_for(file_domain)
+
+    patient = getattr(file_obj, patient_fk, None)
+    if patient is None:
+        # Tolerate mis-filed rows: fall back across the other domains' FKs
+        # rather than 403-ing on data the uploader wrote to the wrong column.
+        for other_domain in ("maxillo", "brain", "laparoscopy"):
+            other_fk, _ = fk_fields_for(other_domain)
+            patient = getattr(file_obj, other_fk, None)
+            if patient is not None:
+                break
+
+    if patient is not None:
+        if getattr(patient, "deleted", False):
+            return False, "Patient not found", 404
+
+        # Resolves patient.project internally -- never a hardcoded domain.
+        if not user_can_read_patient(user, patient):
+            return False, "Permission denied", 403
+
+        caption = getattr(file_obj, caption_fk, None)
+        if caption is None:
+            for other_domain in ("maxillo", "brain", "laparoscopy"):
+                _, other_caption_fk = fk_fields_for(other_domain)
+                caption = getattr(file_obj, other_caption_fk, None)
+                if caption is not None:
+                    break
+        # A caption file needs the caption gate too (annotators do not see
+        # other annotators' captions), on top of the patient read above.
+        if caption is not None and not user_can_view_caption_content(
+            user, caption, file_domain
+        ):
+            return False, "Permission denied", 403
+    else:
+        # Orphaned row: no patient to scope against, so require admin anywhere.
+        if not (user and user.is_authenticated):
+            return False, "Permission denied", 403
+        if not user.is_staff and not ProjectAccess.objects.filter(
+            user=user, role="admin"
+        ).exists():
+            return False, "Permission denied", 403
+
+    # Backstop: a raw input that is discarded, or blocked until its processing
+    # completes, must never be served even via a direct URL.
+    if raw_file_hidden(file_obj):
+        return False, "File not found", 404
+
+    return True, None, None

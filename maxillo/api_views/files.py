@@ -11,14 +11,16 @@ import re
 import logging
 import traceback
 import mimetypes
-from common.models import FileRegistry, ProjectAccess
+from common.models import FileRegistry
 from common.permissions import (
     filter_patients_for_user,
-    user_can_read_folder,
-    user_can_view_caption_content,
     user_is_project_admin,
 )
-from common.file_access import exists as artifact_exists, streaming_response
+from common.file_access import (
+    authorize_file_read,
+    exists as artifact_exists,
+    streaming_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,81 +68,18 @@ def serve_file(request, file_id):
             getattr(request, "resolver_match", None)
             and request.resolver_match.namespace
         ) or "maxillo"
-        file_domain = file_obj.domain or request_namespace
-        if file_domain not in ["maxillo", "brain", "laparoscopy"]:
-            file_domain = request_namespace
 
-
-        # Authentication: Check if user has access to the patient associated with this file
-        if file_domain == "laparoscopy":
-            patient = file_obj.laparoscopy_patient
-        else:
-            patient = file_obj.patient
-        if not patient:
-            patient = file_obj.patient or file_obj.brain_patient or file_obj.laparoscopy_patient
-        if patient:
-            if getattr(patient, "deleted", False):
-                return JsonResponse({"error": "Patient not found"}, status=404)
-
-            from common.models import Project
-
-            project = Project.objects.filter(slug='maxillo').first()
-
-            can_view = user_is_project_admin(request.user, 'maxillo') or (
-                patient.folder and user_can_read_folder(request.user, patient.folder, 'maxillo')
-            )
-
-            if not can_view:
-                logger.warning(
-                    f"User {request.user.id} denied access to file {file_id} for patient {patient.patient_id}"
-                )
-                return JsonResponse({"error": "Permission denied"}, status=403)
-
-            # Check project access if patient belongs to a project
-            if project and not user_is_project_admin(request.user, project):
-                has_project_access = ProjectAccess.objects.filter(
-                    user=request.user, project=project
-                ).exists()
-                if not has_project_access:
-                    logger.warning(
-                        f"User {request.user.id} denied project access for file {file_id}"
-                    )
-                    return JsonResponse({"error": "Project access denied"}, status=403)
-
-            voice_caption = (
-                file_obj.brain_voice_caption
-                if file_domain == "brain"
-                else file_obj.voice_caption
-            )
-            if not voice_caption:
-                voice_caption = file_obj.voice_caption or file_obj.brain_voice_caption
-            if voice_caption and not user_can_view_caption_content(
-                request.user, voice_caption, file_domain
-            ):
-                logger.warning(
-                    f"User {request.user.id} denied access to voice caption file {file_id}"
-                )
-                return JsonResponse({"error": "Permission denied"}, status=403)
-        else:
-            # If file is not associated with a patient, check any project access
-            has_any_admin_access = ProjectAccess.objects.filter(
-                user=request.user, role="admin"
-            ).exists()
-            if not has_any_admin_access:
-                logger.warning(
-                    f"User {request.user.id} denied access to orphaned file {file_id}"
-                )
-                return JsonResponse({"error": "Permission denied"}, status=403)
-
-        # Security backstop: a raw input that is discarded, or blocked until its
-        # processing completes, must never be served even via a direct URL.
-        from common.modality_config import raw_file_hidden
-
-        if raw_file_hidden(file_obj):
+        allowed, error, status = authorize_file_read(
+            request.user, file_obj, request_namespace
+        )
+        if not allowed:
             logger.warning(
-                f"User {request.user.id} blocked from raw file {file_id} (discard/blocking gate)"
+                "User %s denied access to file %s (%s)",
+                request.user.id,
+                file_id,
+                error,
             )
-            return JsonResponse({"error": "File not found"}, status=404)
+            return JsonResponse({"error": error}, status=status)
 
         if bundle_not_found:
             raise Http404("Requested bundle file not found")

@@ -69,6 +69,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   externally routable Redis/API URLs from `.env.worker`.
 
 ### Security
+- File serving is now authorized against the file's own domain. `serve_file`
+  resolved the patient with an `if laparoscopy / else .patient` branch (so a
+  brain row consulted the maxillo FK) and then authorized **every** domain
+  against a hardcoded `Project.objects.filter(slug='maxillo')`, passing the
+  literal `'maxillo'` into `user_is_project_admin`/`user_can_read_folder`.
+  Both directions were wrong: a maxillo member could read brain and
+  laparoscopy files, and a laparoscopy-only member was refused their own.
+  The namespaced routes were shielded by `ActiveProfileMiddleware`, but the
+  global `/api/processing/files/serve/<id>/` route (used by the file-management
+  UI) skips that middleware, so the view's own check was the only gate there.
+  Authorization now runs through one helper, `common.file_access
+  .authorize_file_read`, which resolves the patient via the domain registry and
+  defers to `patient.project`. `brain.api_views.serve_file` uses it too and
+  thereby gains the `raw_file_hidden` backstop it previously lacked.
+  **Behavior change**: maxillo project admins no longer receive brain or
+  laparoscopy files. Audit `ProjectAccess` rows across domains after deploying
+  and grant per-domain access where it is genuinely intended.
 - Patient-viewer and activity-stats pages now inject server data via Django's
   `json_script` filter instead of `|safe` JSON interpolation, removing a
   script-breakout XSS vector. The rendered `<script type="application/json">`

@@ -18,13 +18,9 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import Http404, JsonResponse
 from django.views.decorators.http import require_http_methods
 
-from common.file_access import streaming_response
+from common.file_access import authorize_file_read, streaming_response
 from common.models import FileRegistry, Job
-from common.permissions import (
-    user_can_view_caption_content,
-    user_has_project_access,
-    user_is_project_admin,
-)
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +29,6 @@ _staff_required = user_passes_test(lambda u: u.is_authenticated and u.is_staff)
 
 def health_check(request):
     return JsonResponse({"status": "ok", "domain": "brain"})
-
-
-def _user_can_read_brain_patient(user, patient):
-    if patient is None or getattr(patient, "deleted", False):
-        return False
-    if user_is_project_admin(user, patient.project):
-        return True
-    return user_has_project_access(user, patient.project)
 
 
 @login_required
@@ -101,17 +89,15 @@ def serve_file(request, file_id):
     if not file_obj:
         raise Http404("File not found")
 
-    patient = file_obj.brain_patient
-    voice_caption = file_obj.brain_voice_caption
-    if voice_caption is not None:
-        if not user_can_view_caption_content(request.user, voice_caption, "brain"):
-            return JsonResponse({"error": "Permission denied"}, status=403)
-    else:
-        if not _user_can_read_brain_patient(request.user, patient):
-            logger.warning(
-                "User %s denied access to brain file %s", request.user.id, file_id
-            )
-            return JsonResponse({"error": "Permission denied"}, status=403)
+    allowed, error, status = authorize_file_read(request.user, file_obj, "brain")
+    if not allowed:
+        logger.warning(
+            "User %s denied access to brain file %s (%s)",
+            request.user.id,
+            file_id,
+            error,
+        )
+        return JsonResponse({"error": error}, status=status)
 
     path = file_obj.file_path
     if not path:
