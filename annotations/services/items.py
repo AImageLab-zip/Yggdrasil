@@ -266,8 +266,12 @@ def add_event(
     _check_membership(revision, target, selector, label)
     if not event_type:
         raise ValidationError("an event must say what it asserts about")
-    if label is None and not value:
-        raise ValidationError("an event needs a label or a value; it asserts nothing")
+    if label is None and not value and not attributes:
+        # A bare event_type asserts nothing -- "quadrant" with no quadrant named
+        # is not a marker. Attributes count, because some events *are* their own
+        # assertion: a voice caption whose transcription has not run yet still
+        # records that somebody recorded one.
+        raise ValidationError("an event needs a label, a value or attributes")
     if time_ms is not None:
         if isinstance(time_ms, bool) or not isinstance(time_ms, int) or time_ms < 0:
             raise ValidationError("time_ms must be non-negative integer milliseconds")

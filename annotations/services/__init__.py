@@ -10,6 +10,7 @@ skip the flag, and then a scan with landmarks on it becomes replaceable.
 Read paths do not belong here: querying is what the models are for.
 """
 
+from annotations.services.apply import apply_descriptors
 from annotations.services.exceptions import (
     AnnotationConflict,
     AnnotationLocked,
@@ -49,6 +50,7 @@ __all__ = [
     "add_payload",
     "add_spatial_3d",
     "add_temporal",
+    "apply_descriptors",
     "attach_target",
     "confirm",
     "current_revision_number",
