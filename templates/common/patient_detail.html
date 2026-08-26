@@ -25,9 +25,6 @@
 {% block extra_js %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
 {{ django_data|json_script:"django-data" }}
-{# Core volume rendering #}
-<script src="{% static 'js/volume_renderer.js' %}"></script>
-
 {# Volume loading (preload cache + Web Worker support) #}
 <script src="{% static 'js/modality_viewers/volume_loader.js' %}"></script>
 
