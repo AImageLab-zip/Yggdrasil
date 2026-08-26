@@ -223,6 +223,20 @@ encoding) receives no rescale at all — every voxel is off by 1024 HU, silently
 `modalityLutModule` from the raw header in `frontend/imaging/metadata/`, and guarded by CI
 fixtures across all four slope/intercept branches.
 
+**`modalityScaleNifti.js` `allocateScalarData` — `Int8Array` under-counts the cache
+budget by 2×** (roadmap F16).
+
+```js
+case 'Int8Array':
+    bitsAllocated = 8;                       // but...
+    checkCacheAvailable(bitsAllocated, nVox);
+    scalarData = new Int16Array(nVox);       // ...16 bits are allocated
+```
+
+`checkCacheAvailable` therefore reserves half the bytes actually taken, so a volume near
+the cache ceiling can be admitted and then overrun it. Not worked around here — it only
+affects the `NIFTI_TYPE_INT8` branch with a float rescale, and the honest fix is upstream.
+
 **Fabricated affine when no qform/sform.** `nifti-reader-js` synthesises a diagonal RAS affine
 from `pixDims` when `qform_code < 1 && sform_code < 1`; `rasToLps()` then converts that
 fiction into a plausible LPS direction and the volume renders without complaint. This is the

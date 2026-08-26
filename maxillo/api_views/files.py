@@ -28,11 +28,26 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @login_required
 @require_http_methods(["GET"])
-def serve_file(request, file_id):
+def serve_file(request, file_id, filename=None):
     """
     Serve files from FileRegistry by ID with authentication
+
     URL: /api/processing/files/serve/<file_id>/
+         /api/processing/files/serve/<file_id>/<filename>
+
+    The second, filename-suffixed form exists for Cornerstone3D's NIfTI loader,
+    which decides whether to gunzip by testing ``new URL(url).pathname`` for a
+    ``.gz`` suffix -- a query parameter cannot carry that (finding F3 of
+    docs/cornerstone-roadmap.md).
+
+    ``filename`` is **decorative and deliberately unused**: the bytes served are
+    always ``FileRegistry.file_path`` (or the requested ``file_key`` within a
+    multi-file bundle), and the Content-Disposition name is still derived from the
+    registry row below. Django's ``str`` converter already excludes ``/``, but not
+    reading the segment at all is what makes that irrelevant rather than merely
+    survivable.
     """
+    del filename  # see the docstring: URL decoration only, never used to resolve.
     try:
         file_obj = FileRegistry.objects.select_related("patient").get(id=file_id)
         resolved_file_path = file_obj.file_path

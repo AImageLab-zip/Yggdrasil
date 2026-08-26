@@ -203,4 +203,15 @@ urlpatterns = [
         api_views.serve_file,
         name="api_serve_file",
     ),
+    # Same view, filename-suffixed. Cornerstone's NIfTI loader does `new URL(url)`
+    # (which throws on a relative path) and then tests `pathname.endsWith('.gz')`
+    # (which excludes the query string), so `?ext=.gz` cannot help -- finding F3 of
+    # docs/cornerstone-roadmap.md. The suffix must be the last path segment and must
+    # carry no trailing slash, which is why `file_key` stays a query parameter.
+    # `filename` is decorative: it never takes part in resolving the file.
+    path(
+        "api/processing/files/serve/<int:file_id>/<str:filename>",
+        api_views.serve_file,
+        name="api_serve_file_named",
+    ),
 ]

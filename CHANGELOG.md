@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Frontend build toolchain for the Cornerstone3D v5 migration: npm + esbuild,
+  **dev-only**, with the emitted bundle committed under
+  `static/vendor/cornerstone/<build>/`. Deploys need no Node and make no network
+  request. `scripts/build_frontend.sh` builds it, `scripts/check_bundle_assets.mjs`
+  (`npm run verify`) asserts every web-worker and wasm URL resolves against its own
+  emitting file and that no emitted file names a third-party CDN, and a new CI job
+  rebuilds and fails on any diff. `{% cornerstone_entry 'volume-grid' %}` loads a
+  surface. Five per-surface entries exist; **no template loads one yet** — the viewers
+  are replaced one at a time in later phases.
+- `api_serve_file_named`: `…/processing/files/serve/<id>/<filename>` beside the existing
+  route, in all four namespaces. Cornerstone's NIfTI loader decides whether to gunzip by
+  testing the URL *pathname* for a `.gz` suffix, which a query parameter cannot carry.
+  Same view, same ACL; the filename segment never takes part in resolving the file.
+
+### Changed
+- The Cornerstone bundle derives modality rescale (HU) from the raw NIfTI header itself
+  rather than trusting `@cornerstonejs/nifti-volume-loader`, whose
+  `modalityScaleNifti` skips the rescale whenever either factor is already neutral — so
+  the ordinary `scl_slope=1, scl_inter=-1024` CBCT encoding would have been silently off
+  by 1024 HU.
+
+### Removed
+- ~2,700 lines of dead viewer code: `volume_viewer.js` (which also shadowed the live
+  `window.CBCTViewer` with a duplicate), `slice_renderer.js`, `volume_interaction.js`,
+  `windowing.js`, `maxillo_niivue_viewer.js`, `nifti-reader-min.js`, and
+  `volume_renderer.js` with `static/shaders/volume_fragment.glsl` — the latter loaded on
+  every patient-detail page and never called.
+
 ## [2.0.0] - 2026-08-26
 
 ### Added

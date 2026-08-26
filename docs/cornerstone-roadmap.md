@@ -81,6 +81,9 @@ Established by reading the shipped `@cornerstonejs/*@5.8.2` packages and this re
 documentation. Each one invalidates an assumption the migration would otherwise rest on.
 
 **F1 — `modalityScaleNifti` has an inverted operator; HU would be silently wrong.**
+✅ **Confirmed verbatim against the shipped 5.8.2 package** (Phase 1). Note the gate is
+*not* near the top of the file — the header fields are normalised correctly first
+(`scl_slope` of 0/NaN → 1), and the defect is the loop guard at the end.
 `nifti-volume-loader/dist/esm/helpers/modalityScaleNifti.js` gates rescaling on
 `if (slope !== 1 && inter !== 0)` — must be `||`. A NIfTI with `scl_slope = 1,
 scl_inter = -1024` (the common uint16-plus-intercept CT/CBCT encoding) gets **no rescale at
@@ -97,6 +100,8 @@ documented at `static/js/volume_metadata.js:6-9` for NiiVue. **`volume_metadata.
 kept and re-wired, not deleted.**
 
 **F3 — the NIfTI loader's `.gz` detection breaks on this repo's URLs, two ways.**
+✅ **Confirmed verbatim** and fixed in Phase 1 — see also F14, a third way found while
+fixing it.
 `createNiftiImageIdsAndCacheMetadata.js` does `new URL(url)`, which **throws** on a relative
 path (`/maxillo/api/processing/files/serve/123/`), and tests `pathname.endsWith('.gz')`, which
 excludes query strings so `?ext=.gz` cannot help. Fixed by a filename-suffixed serve route plus
@@ -164,6 +169,11 @@ site (`static/js/patient_detail.js:863-864`) is
   Zero ⇒ delete both files with the rest. Non-zero ⇒ keep them, or drop the load to
   `{% if ns == 'maxillo' %}`-style gating first and re-check.
 
+  **Status: not yet run, so both files were kept in Phase 1.** They are still loaded at
+  `templates/common/patient_detail.html`. Phase 3 replaces their only call site
+  (`static/js/patient_detail.js:863-864`) regardless, so this is a tidy-up, not a
+  blocker — but the count should be checked before the deletion, not after.
+
 **F9 — the file-serving ACL defect.** ✅ **Fixed** on `release/2.0` (`232b40e`). Recorded here
 because the reachability analysis matters for Phase 8: `ActiveProfileMiddleware` only inspects
 `maxillo`/`brain`/`laparoscopy` path prefixes, so the **global `api` namespace**
@@ -196,14 +206,54 @@ calls `project_allows_annotation`, unlike every other annotation write. Both fix
 warning**. This already happens for `save_generic_modality_folder` prefix rows; a DICOM series
 export would silently produce nothing.
 
+The three below were found in Phase 1, while building against the real packages.
+
+**F14 — the loader appends `?frame=N` with a literal `?`, so a `file_key` URL is
+unusable.** Found in Phase 1. `createNiftiImageIdsAndCacheMetadata.js:174` builds each
+slice id as ``` `nifti:${niftiURL}?frame=${i}` ``` unconditionally. A serve URL that
+already carries a query string therefore yields
+`nifti:/…/serve/123/v.nii.gz?file_key=segmentation_nifti?frame=0` — **two `?`**, so
+`frame` parses as part of the `file_key` value and every slice resolves to frame 0.
+This collides directly with the Phase 1 decision to keep `file_key` a query parameter,
+and it matters concretely: a `cbct_processed` row with `file_hash == 'multi-file'` is
+addressed as `?file_key=segmentation_nifti` (`maxillo/api_views/files.py:45-65`) and is
+a volume Phase 3 must display. Phase 1 does **not** paper over it —
+`frontend/imaging/ids/imageIds.js` `assertLoaderSafeUrl()` refuses such a URL with the
+reason, and it is unit-tested. **Phase 3 must decide how a bundle member is addressed
+without a query string** (most likely: resolve the bundle key from the filename segment
+server-side, which would change the "`filename` is decorative" contract in
+`maxillo/api_views/files.py` — a deliberate design change, not a patch).
+
+**F15 — four `import.meta.url` worker resolutions, at four depths, not three.**
+Found in Phase 1 while building. F4 counts three; `itk-wasm` adds a fourth, *nested*
+one: `itk-wasm/dist/pipeline/create-web-worker.js:9` spawns
+`new Worker(new URL('./web-workers/itk-wasm-pipeline.worker.js', import.meta.url))`
+from **inside** the interpolation worker, so it resolves from `app/workers/`.
+
+Worse, the compute-worker specifier resolves from **two** places at once. It is
+`'../workers/computeWorker.js'` in both `app/chunk-*.js` (→ `<build>/workers/`, correct)
+and `app/workers/polySegConverters.js` — because the polyseg worker imports the
+`@cornerstonejs/tools` `utilities` barrel and so carries the string too, resolving to
+`<build>/app/workers/computeWorker.js`, which did not exist. Fixed with a one-line ESM
+re-export stub rather than a second 3.4 MB copy of the worker. `scripts/check_bundle_assets.mjs`
+found this on its first run; it is exactly the class of failure it exists for — dead
+worker, clinical viewer, no build error.
+
+**F16 — `allocateScalarData`'s `Int8Array` case under-counts the cache budget by 2×.**
+Minor, and ours to report upstream, not to work around.
+`modalityScaleNifti.js` `allocateScalarData` sets `bitsAllocated = 8` for `'Int8Array'`
+and then allocates `new Int16Array(nVox)`, so `checkCacheAvailable` reserves half the
+bytes actually taken. Filed alongside F1.
+
 ## Status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0.1 | File-serving ACL fix (standalone security PR) | ✅ done (`release/2.0`, `232b40e`) |
 | 0.2 | 2.0 close-out: rehearsals recorded, `[2.0.0]` dated | ✅ done (`release/2.0`, `c2e0ec7`); **`v2.0.0` tag still to push** |
+| 0.4 | `release/3.0` cut from `release/2.0` @ `cda55df` | ✅ done |
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
-| 1 | Build toolchain + vendored bundle + dead-code deletion | ⬜ not started |
+| 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ⬜ not started |
 | 3 | CBCT + brain volume grid | ⬜ not started |
 | 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
@@ -215,6 +265,57 @@ export would silently produce nothing.
 | 10 | Laparoscopy video (Konva removed) | ⬜ not started |
 
 ## Phase 1 — Build toolchain and vendored bundle
+
+> **Shipped.** What follows is the plan as designed; the corrections below record where
+> the shipped implementation differs, and why. All seven of the unconditionally-dead F8
+> files are gone; the *conditionally*-dead pair is not — see the end of this section.
+>
+> - **Actual emitted layout** (see `scripts/build_frontend.mjs` for the authority):
+>   the ICRPolySeg wasm lands in `app/workers/assets/`, not `<build>/assets/`, because
+>   it is imported by the polyseg *worker* and esbuild writes a file-loader asset
+>   relative to the file that emitted it. `app/workers/computeWorker.js` also exists as a
+>   one-line re-export stub — F15.
+> - **`<build>` hashes the inputs, not the outputs** (`frontend/**` minus `frontend/tests/`,
+>   plus `package-lock.json` and `scripts/build_frontend.mjs`). An output hash would be
+>   circular: the app bundle's `publicPath` and the vendored itk pipelines URL both name
+>   the build directory. `frontend/tests/` is excluded on purpose — a test edit must not
+>   restamp ~20 MB of byte-identical committed output.
+> - **`build_frontend.sh` does *not* regenerate `static/js/nifti-reader.js` or
+>   `static/js/vendor/fflate-0.8.2.min.js`, and the "freshness gate becomes total" claim
+>   below is withdrawn.** fflate is not esbuild output at all — its own header reads
+>   `Original file: /npm/fflate@0.8.2/umd/index.js`, i.e. a jsdelivr copy of the prebuilt
+>   UMD file. `nifti-reader.js` *is* esbuild output, but of a **custom entry that assigns
+>   `window.nifti = {...}`** and was never committed, built from an unrecorded source
+>   version. Re-authoring that entry would swap the header parser underneath
+>   `volume_metadata.js`, `cbct_convert.js` and the panorex path — a behavioural change to
+>   a load-bearing parser, for no benefit, in exactly the silent-hazard class this
+>   migration exists to remove. Both files are already self-hosted. Phase 3 revisits the
+>   parser when it re-wires `volume_metadata.js` (F2), and can settle the version
+>   question then; `@cornerstonejs/nifti-volume-loader@5.8.2` itself depends on
+>   `nifti-reader-js@0.6.9`, which is a useful corroboration of the Phase-3 preflight
+>   hypothesis but not proof about this file.
+> - **Two browser shims were required**: `events@3.3.0` and `url@0.11.4`.
+>   `@cornerstonejs/core`'s `Mesh` class imports vtk.js's `XMLPolyDataReader`, which uses
+>   `xmlbuilder2` — CommonJS, node builtins, on the actual read path. Real shims rather
+>   than throwing stubs: guessing at unreachability inside a mesh reader that Phase 6
+>   depends on is the wrong trade for a clinical viewer.
+> - **The no-CDN assertion is enforced by *aliasing*, not by calling
+>   `setPipelinesBaseUrl()`.** The setter stops the fetch but leaves the jsdelivr literal
+>   in the emitted bytes, which would force `check_bundle_assets.mjs` to allowlist a CDN
+>   host and gut risk #4's mitigation. `frontend/vendor-shims/itk-pipelines-base-url.js`
+>   replaces the vendor module at build time, so the fallback is unreachable by
+>   construction and the assertion stays absolute. The URL is still set at runtime — from
+>   `import.meta.url` **inside the worker**, since the worker `peerImport`s its own module
+>   instance and a main-thread setter would not reach it.
+> - **`splitting` cannot separate core+tools.** All five surfaces need them, so the shared
+>   chunk is ~4.1 MB and every page pays it. What splitting *does* buy is the intended
+>   thing: the NIfTI loader, polySeg, itk-wasm and the CPR mapper stay out of it, so a
+>   laparoscopy page does not download the volume/CPR/mesh stack.
+> - **`application/wasm` resolves correctly** from Python 3.11's `mimetypes` in the app
+>   container, so whitenoise serves the wasm with the right type. One fewer unknown for
+>   the "needs a live environment" list.
+> - `npm test` runs `node --test <glob>`, not `node --test <dir>`: directory discovery
+>   does not work in this Node build.
 
 **`package.json`** (root, dev-only, **no `"type"` field** — this keeps `static/js/**` in the
 default CommonJS scope so five of the seven existing `node:test` files survive unedited).
@@ -243,10 +344,11 @@ Five entries with `--splitting` (per-surface, not one mega-bundle:
 `templates/common/patient_detail.html:37-43` already gates viewer scripts per namespace, and a
 laparoscopy page must not download the volume/CPR/mesh stack).
 
-**`scripts/build_frontend.sh`** — added to the `.gitignore:199-204` allowlist. It also
-regenerates `static/js/nifti-reader.js` and `static/js/vendor/fflate-0.8.2.min.js`, both
-already esbuild output from an unrecorded invocation, so the freshness gate becomes total.
-*Cost: a one-time byte diff on both files.*
+**`scripts/build_frontend.sh`** — added to the `.gitignore` allowlist, together with
+`scripts/build_frontend.mjs` (esbuild's JS API is needed for the F5 alias and the F15
+worker layout) and `scripts/check_bundle_assets.mjs`. ~~It also regenerates
+`static/js/nifti-reader.js` and `static/js/vendor/fflate-0.8.2.min.js`~~ — **withdrawn,
+see the note at the top of this section.**
 
 **`scripts/check_bundle_assets.mjs`** — resolves every `new URL(..., import.meta.url)` and
 public-path asset string against its emitting file and fails if the target is missing; also
@@ -389,7 +491,9 @@ Tier 1 compares two different header parsers.
 
 **CI:** `ruff check .` → `makemigrations --check --dry-run` **empty** → `migrate` → full
 Django suite on MySQL 8 + Redis 7 → **new frontend job** (`npm ci`, build,
-`git diff --exit-code`, `npm run verify`, `node --test`).
+`git diff --exit-code`, `npm run verify`, `npm test`). Shipped in Phase 1; the frontend
+job installs `git` *before* `actions/checkout`, because without it checkout falls back to
+a tarball and there is no repository for `git diff` to compare against.
 
 **JS tests.** Five of the seven existing files survive with **zero edits** (root
 `package.json` has no `"type"` field). `niivue_render_modes.test.js` and
@@ -431,6 +535,12 @@ Baseline for comparison, measured on `release/2.0` at `232b40e` **without** obje
 425 tests, these 5 failing; with the ACL fix's tests, 444 tests and the same 5. See
 [running.md](running.md) and [setup.md](setup.md) for bringing the stack up.
 
+**Measured on `release/3.0` at `cda55df` *with* live object storage** (the dev stack's
+Garage, via `docker compose -f docker-compose.dev.yml`): **444 tests, 0 failures** — all
+five of the above pass, confirming they are environmental and not latent bugs. After
+Phase 1: **462 tests, 0 failures** (+9 `common.tests_cornerstone_assets`,
++9 `common.tests_file_serve_acl`), and 87 JS tests in one `npm test` invocation.
+
 **Prod-clone rehearsal** (before Phases 2 and 8): restore the dump → read `migrate --plan` and
 confirm every operation is `CreateModel`/`AddField`/`RunPython` → `sqlmigrate common 0046`
 **must print no DDL** → migrate → `annotations_crosscheck` exits 0 → materialize landmarks →
@@ -449,10 +559,10 @@ streaming of a bundle containing a full DICOM series under gunicorn.
 |---|---|---|
 | 1 | **F1 — silently wrong HU** | Own `modalityLutModule` + Tier-2 harness + CI fixtures across all four branches; file upstream |
 | 2 | **F7 — `amip` has no equivalent**, and it is the default | Explicit sign-off on real studies before deleting `niivue_render_modes.js` |
-| 3 | **Worker/wasm URL resolution** at three depths, un-rewritten by esbuild | Fixed layout + pre-registration with URLs we control + `npm run verify` failing the build |
-| 4 | **F5 — itk-wasm's jsdelivr default** | `setPipelinesBaseUrl` + the no-CDN string assertion |
-| 5 | **Bundle-freshness gate needs byte-reproducible esbuild** | Exact pin, committed lockfile, no sourcemaps; fall back to a content-hash manifest if noisy |
-| 6 | **`npm ci` needs registry egress** on the self-hosted runner | Document beside the existing `gh` requirement |
+| 3 | **Worker/wasm URL resolution** at ~~three~~ **four** depths, un-rewritten by esbuild | ✅ discharged in Phase 1 — fixed layout + `npm run verify`, which caught a real broken path on its first run (F15) |
+| 4 | **F5 — itk-wasm's jsdelivr default** | ✅ discharged in Phase 1 — build-time **alias** (not just `setPipelinesBaseUrl`), so the no-CDN assertion can stay absolute |
+| 5 | **Bundle-freshness gate needs byte-reproducible esbuild** | ✅ discharged in Phase 1 — verified: consecutive builds are byte-identical (exact pin, committed lockfile, no sourcemaps) |
+| 6 | **`npm ci` needs registry egress** on the self-hosted runner | Documented in `CONTRIBUTING.md` beside the existing `gh` requirement; **still to be provisioned on the runner** |
 | 7 | **No feature flags** makes the harness gate load-bearing | If the corpus is too large, sweep every folder with confirmed annotations plus a random sample |
 | 8 | **F10 — demo guests reach every new endpoint** | `is_demo_guest → 404` behind `DICOM_DEMO_ENABLED`; nightly verification green before flipping |
 | 9 | **De-identification is header-only** | Refuse burned-in / Secondary-Capture; record `deid_confidence`; never claim more in the UI |

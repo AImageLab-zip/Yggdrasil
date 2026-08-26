@@ -68,6 +68,14 @@ import { interpolate as interpolateLabelmap } from '@cornerstonejs/labelmap-inte
 import { initImaging } from '../imaging/runtime/init.js';
 import { GRID_VIEWPORT_COUNT } from '../imaging/runtime/config.js';
 
+// F3: the loader throws on a relative URL and reads `.gz` off the pathname only.
+import { niftiVolumeImageId, volumeUrl, upgradeLegacyServeUrl } from '../imaging/ids/imageIds.js';
+
+// F1: `modalityScaleNifti` skips the rescale whenever either factor is neutral, so HU
+// would be silently wrong. Decision #5 (real modality values, no percent-of-range)
+// rests on deriving the LUT ourselves.
+import { modalityLutModule, applyModalityLut } from '../imaging/metadata/modalityLutModule.js';
+
 export const SURFACE = 'volume-grid';
 
 export const NAVIGATION_TOOLS = [
@@ -120,4 +128,9 @@ export {
     interpolateLabelmap,
     initImaging,
     GRID_VIEWPORT_COUNT,
+    niftiVolumeImageId,
+    volumeUrl,
+    upgradeLegacyServeUrl,
+    modalityLutModule,
+    applyModalityLut,
 };
