@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
     bootstrapVolumeGrid,
     isMeasurable,
-    observeMeasurable,
+    observeSize,
     primaryVolumeFrom,
     readGridData,
     readWindowElements,
@@ -21,10 +21,7 @@ function fakeDoc({ data = {}, windows = 4, measurable = true } = {}) {
             offsetParent: measurable ? {} : null,
             clientWidth: measurable ? 400 : 0,
             children: [],
-            handlers: {},
-            addEventListener(type, fn) {
-                this.handlers[type] = fn;
-            },
+            addEventListener() {},
             querySelector: () => null,
             appendChild(node) {
                 this.children.push(node);
@@ -51,6 +48,38 @@ function fakeDoc({ data = {}, windows = 4, measurable = true } = {}) {
         element.ownerDocument = doc;
     }
     return { doc, elements, made };
+}
+
+/** A mounted grid, with a rendering engine that counts resizes. */
+function fakeMountedGrid() {
+    const grid = {
+        resets: 0,
+        renderingEngine: {
+            resizes: 0,
+            resize() {
+                this.resizes += 1;
+            },
+        },
+        resetCameras() {
+            grid.resets += 1;
+        },
+        loadVolumeIntoWindow: async () => ({}),
+        state: { windows: [] },
+    };
+    return grid;
+}
+
+/** Capture console.info for the tests that assert the bootstrap says why. */
+function captureInfo(run) {
+    const lines = [];
+    const original = console.info;
+    console.info = (...args) => lines.push(args.map(String).join(' '));
+    return Promise.resolve()
+        .then(run)
+        .finally(() => {
+            console.info = original;
+        })
+        .then(() => lines.join('\n'));
 }
 
 const DATA = {
@@ -103,72 +132,118 @@ test('a brain page falls back to its default modality', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The visibility gate -- the bug this exists for
+// Mounting: unconditional, then sized when visible
 // ---------------------------------------------------------------------------
 
 test('an element inside a hidden container is not measurable', () => {
-    // Cornerstone sizes a viewport from its element. Inside `display: none` that is
-    // 0x0, and the viewport is built against nothing -- it does not throw, it renders
-    // blank forever.
     assert.equal(isMeasurable({ offsetParent: null, clientWidth: 0 }), false);
     assert.equal(isMeasurable({ offsetParent: {}, clientWidth: 0 }), false);
     assert.equal(isMeasurable({ offsetParent: {}, clientWidth: 400 }), true);
     assert.equal(isMeasurable(null), false);
 });
 
-test('a hidden grid does NOT mount on load', async () => {
-    // #cbct-viewer is display:none unless CBCT is the default modality.
+test('a hidden grid mounts anyway', async () => {
+    // Gating the mount on visibility failed twice over: `#cbct-viewer` is
+    // `display: none` unless CBCT is the default modality, and the trigger it waited
+    // for cannot arrive -- `patient_detail.js` is a classic script and this is a
+    // deferred module, so `ensureCbctViewerReady` runs before `window.CBCTViewer`
+    // exists, finds it undefined, and returns. Nothing calls it again.
     const { doc } = fakeDoc({ data: DATA, measurable: false });
     let mounted = 0;
-    const result = await bootstrapVolumeGrid({ mount: async () => { mounted += 1; return {}; }, doc });
-
-    assert.equal(result, null);
-    assert.equal(mounted, 0, 'mounting into a 0x0 container renders blank forever');
-});
-
-test('a hidden grid installs the hook patient_detail.js already calls', async () => {
-    // `ensureCbctViewerReady` calls window.CBCTViewer.init() when the tab is shown.
-    const { doc } = fakeDoc({ data: DATA, measurable: false });
-    await bootstrapVolumeGrid({ mount: async () => ({ ok: true }), doc });
-
-    assert.equal(typeof doc.defaultView.CBCTViewer.init, 'function');
-    assert.equal(doc.defaultView.CBCTViewer.loading, false);
-});
-
-test('a visible grid mounts immediately', async () => {
-    const { doc } = fakeDoc({ data: DATA, measurable: true });
-    let mounted = 0;
-    await bootstrapVolumeGrid({
+    const grid = await bootstrapVolumeGrid({
         mount: async () => {
             mounted += 1;
-            return { loadVolumeIntoWindow: async () => ({}), state: { windows: [] } };
+            return fakeMountedGrid();
         },
         doc,
     });
-    assert.equal(mounted, 1);
+
+    assert.equal(mounted, 1, 'a hidden container must not stop the grid mounting');
+    assert.ok(grid);
 });
 
-test('starting is idempotent: the hook and the observer cannot mount twice', async () => {
+test('a hidden grid is not resized until it is actually on screen', async () => {
+    // A camera fitted to a 0x0 viewport is not a camera.
     const { doc } = fakeDoc({ data: DATA, measurable: false });
-    let mounted = 0;
-    const mount = async () => {
-        mounted += 1;
-        return { loadVolumeIntoWindow: async () => ({}), state: { windows: [] } };
-    };
-    await bootstrapVolumeGrid({ mount, doc });
+    const mounted = fakeMountedGrid();
+    await bootstrapVolumeGrid({ mount: async () => mounted, doc });
 
-    await doc.defaultView.CBCTViewer.init();
-    await doc.defaultView.CBCTViewer.init();
-    assert.equal(mounted, 1, 'a second grid over the first');
+    assert.equal(mounted.renderingEngine.resizes, 0);
+    assert.equal(mounted.resets, 0);
+});
+
+test('a visible grid is sized and its cameras reset', async () => {
+    const { doc } = fakeDoc({ data: DATA, measurable: true });
+    const mounted = fakeMountedGrid();
+    await bootstrapVolumeGrid({ mount: async () => mounted, doc });
+
+    assert.ok(mounted.renderingEngine.resizes >= 1);
+    assert.equal(mounted.resets, 1);
+});
+
+test('the CBCTViewer hook sizes a grid that has since become visible', async () => {
+    const { doc, elements } = fakeDoc({ data: DATA, measurable: false });
+    const mounted = fakeMountedGrid();
+    await bootstrapVolumeGrid({ mount: async () => mounted, doc });
+    assert.equal(mounted.renderingEngine.resizes, 0);
+
+    for (const element of elements) {
+        element.offsetParent = {};
+        element.clientWidth = 400;
+    }
+    doc.defaultView.CBCTViewer.init();
+
+    assert.equal(mounted.renderingEngine.resizes, 1);
+    assert.equal(mounted.resets, 1);
+});
+
+test('the camera is reset only on the FIRST sizing, not on every resize', async () => {
+    const { doc } = fakeDoc({ data: DATA, measurable: true });
+    const mounted = fakeMountedGrid();
+    await bootstrapVolumeGrid({ mount: async () => mounted, doc });
+
+    doc.defaultView.CBCTViewer.init();
+    doc.defaultView.CBCTViewer.init();
+
+    assert.ok(mounted.renderingEngine.resizes >= 3, 'every nudge resizes');
+    assert.equal(mounted.resets, 1, 'a later resize must not throw the view away');
 });
 
 test('the CBCTViewer global is merged, not clobbered', async () => {
-    const { doc } = fakeDoc({ data: DATA, measurable: false });
+    const { doc } = fakeDoc({ data: DATA, measurable: true });
     doc.defaultView.CBCTViewer = { somethingElse: () => 'kept' };
-    await bootstrapVolumeGrid({ mount: async () => ({}), doc });
+    await bootstrapVolumeGrid({ mount: async () => fakeMountedGrid(), doc });
 
     assert.equal(doc.defaultView.CBCTViewer.somethingElse(), 'kept');
     assert.equal(typeof doc.defaultView.CBCTViewer.init, 'function');
+});
+
+// ---------------------------------------------------------------------------
+// Saying why -- the property whose absence caused a blank viewer to report nothing
+// ---------------------------------------------------------------------------
+
+test('a page with no payload says so rather than failing silently', async () => {
+    const output = await captureInfo(() => {
+        const { doc } = fakeDoc({ data: null });
+        return bootstrapVolumeGrid({ mount: async () => fakeMountedGrid(), doc });
+    });
+    assert.match(output, /no #viewerGridData on this page/);
+});
+
+test('an incomplete grid says how many windows it found', async () => {
+    const output = await captureInfo(() => {
+        const { doc } = fakeDoc({ data: DATA, windows: 2 });
+        return bootstrapVolumeGrid({ mount: async () => fakeMountedGrid(), doc });
+    });
+    assert.match(output, /no complete \.viewer-grid/);
+});
+
+test('a patient with no volume says so, and still mounts the grid', async () => {
+    const output = await captureInfo(() => {
+        const { doc } = fakeDoc({ data: { ...DATA, modalityFiles: {} } });
+        return bootstrapVolumeGrid({ mount: async () => fakeMountedGrid(), doc });
+    });
+    assert.match(output, /no volume to show/);
 });
 
 // ---------------------------------------------------------------------------
@@ -201,40 +276,43 @@ test('showWindowMessage on a missing element is a no-op', () => {
     assert.doesNotThrow(() => showWindowMessage(null, 'anything'));
 });
 
+// ---------------------------------------------------------------------------
+// The size observer
+// ---------------------------------------------------------------------------
 
-test('without a ResizeObserver the observer does nothing, rather than mounting hidden', () => {
-    // The tempting fallback is to run the callback anyway, and that is exactly the bug
-    // it exists to prevent. CBCTViewer.init() is the primary trigger and needs no
-    // observer, so this degrades to "starts when the tab is clicked".
+test('without a ResizeObserver, observing is a harmless no-op', () => {
     let called = 0;
     const element = { ownerDocument: { defaultView: {} }, offsetParent: null, clientWidth: 0 };
-    const disconnect = observeMeasurable(element, () => { called += 1; });
-
+    const disconnect = observeSize(element, () => {
+        called += 1;
+    });
     assert.equal(called, 0);
     assert.doesNotThrow(disconnect);
 });
 
-test('the observer fires once the element gains size', () => {
+test('the observer reports measurability on every size change', () => {
     let observed = null;
     const element = { ownerDocument: null, offsetParent: null, clientWidth: 0 };
     element.ownerDocument = {
         defaultView: {
             ResizeObserver: class {
-                constructor(fn) { observed = fn; }
+                constructor(fn) {
+                    observed = fn;
+                }
                 observe() {}
                 disconnect() {}
             },
         },
     };
 
-    let called = 0;
-    observeMeasurable(element, () => { called += 1; });
+    const seen = [];
+    observeSize(element, (measurable) => seen.push(measurable));
 
     observed();
-    assert.equal(called, 0, 'still hidden');
+    assert.deepEqual(seen, [false], 'still hidden');
 
     element.offsetParent = {};
     element.clientWidth = 400;
     observed();
-    assert.equal(called, 1);
+    assert.deepEqual(seen, [false, true]);
 });

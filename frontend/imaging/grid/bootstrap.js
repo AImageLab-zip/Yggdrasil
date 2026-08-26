@@ -129,12 +129,35 @@ export function showWindowMessage(element, message, level = 'warning') {
     }
 }
 
+/** Prefix for every diagnostic this module emits, so a console can be filtered. */
+export const LOG_PREFIX = '[ygg-grid]';
+
 /**
- * Whether an element can actually be measured yet.
+ * Say what the bootstrap decided, and why.
  *
- * Cornerstone sizes a viewport from its element when `setViewports` runs. Inside a
- * `display: none` container that is 0x0, and the viewport is built against nothing --
- * it does not throw, it renders blank forever.
+ * Not decoration. The first version of this module returned `null` from three
+ * different places with no output at all, and the result was a blank viewer that
+ * reported nothing anywhere -- no error, no warning, no clue. A bootstrap that can
+ * decline to run has to say so, or the only way to tell "there is no volume on this
+ * page" from "the volume failed to load" is to read the source.
+ *
+ * @param {string} message
+ * @param {object} [detail]
+ */
+export function report(message, detail) {
+    const line = `${LOG_PREFIX} ${message}`;
+    if (detail === undefined) {
+        console.info(line);
+    } else {
+        console.info(line, detail);
+    }
+}
+
+/**
+ * Whether an element can currently be measured.
+ *
+ * Used to decide when to *resize*, not whether to mount -- see
+ * {@link bootstrapVolumeGrid}.
  *
  * @param {HTMLElement} element
  * @returns {boolean}
@@ -144,92 +167,108 @@ export function isMeasurable(element) {
 }
 
 /**
- * Call back once an element has non-zero size.
- *
- * `ResizeObserver` rather than a poll, because the thing being waited for *is* a resize
- * -- the container going from `display: none` to visible when its tab is selected.
- *
- * Where there is no `ResizeObserver`, this does **nothing**, deliberately. The
- * tempting fallback is to run the callback anyway, and that is precisely the bug:
- * it mounts into the hidden container. `CBCTViewer.init()` is the primary trigger and
- * needs no observer, so doing nothing here degrades to "starts when the tab is
- * clicked" rather than "starts wrong".
+ * Call back whenever an element's size changes, and once it first has one.
  *
  * @param {HTMLElement} element
- * @param {() => void} callback
+ * @param {(measurable: boolean) => void} callback
  * @returns {() => void} disconnect.
  */
-export function observeMeasurable(element, callback) {
+export function observeSize(element, callback) {
     const view = element?.ownerDocument?.defaultView ?? globalThis;
     if (!element || typeof view.ResizeObserver !== 'function') {
         return () => {};
     }
-    const observer = new view.ResizeObserver(() => {
-        if (isMeasurable(element)) {
-            observer.disconnect();
-            callback();
-        }
-    });
+    const observer = new view.ResizeObserver(() => callback(isMeasurable(element)));
     observer.observe(element);
     return () => observer.disconnect();
 }
 
 /**
- * Prepare the grid on this page, starting it when it becomes visible.
+ * Start the grid on this page.
  *
- * **Not eager.** `#cbct-viewer` is `display: none` unless CBCT is the page's default
- * modality, so mounting on module evaluation builds four viewports inside a 0x0
- * container -- which does not throw and never renders. `viewer_grid.js` avoided this by
- * starting from `CBCTViewer.init()`, which `patient_detail.js:429` already calls when
- * the tab is shown; that hook is reinstated here, and a size observer covers the case
- * where the container becomes visible some other way.
+ * **Mounts unconditionally**, and resizes when the container becomes visible. The
+ * previous version gated mounting on visibility, which was wrong twice over:
  *
- * Starting is idempotent: the hook and the observer can both fire, and the second is a
- * no-op rather than a second grid over the first.
+ *   1. `#cbct-viewer` is `display: none` unless CBCT is the page's default modality,
+ *      so on every other page the grid waited for a trigger.
+ *   2. The trigger it waited for cannot work. `patient_detail.js` is a **classic**
+ *      script and `{% cornerstone_entry %}` emits a **deferred module**, so
+ *      `ensureCbctViewerReady` runs *before* this module defines `window.CBCTViewer`,
+ *      finds it undefined, and returns. Nothing calls it again.
+ *
+ * Cornerstone handles a viewport whose element starts at zero size: `resize()` is the
+ * documented way to pick up a container that was hidden when its viewport was built.
+ * So the grid mounts now and is resized -- and its cameras reset -- the first time it
+ * is actually on screen. `CBCTViewer.init()` is still installed, but only as an extra
+ * nudge; nothing depends on it arriving.
  *
  * @param {object} options
  * @param {(opts: object) => Promise<object>} options.mount `mountVolumeGrid` from the entry.
  * @param {Document} [options.doc]
- * @returns {Promise<object|null>} the grid handle if it started now, else null.
+ * @returns {Promise<object|null>}
  */
 export async function bootstrapVolumeGrid({ mount, doc = globalThis.document }) {
     const data = readGridData(doc);
+    if (!data) {
+        report('no #viewerGridData on this page; nothing to mount.');
+        return null;
+    }
     const elements = readWindowElements(doc);
-    if (!data || !elements) {
-        // Not a page with a volume grid. The overwhelmingly common case.
+    if (!elements) {
+        report('no complete .viewer-grid on this page; nothing to mount.', {
+            found: doc.querySelectorAll(WINDOW_SELECTOR).length,
+            needed: GRID_WINDOWS,
+        });
         return null;
     }
 
-    let pending = null;
-    const start = () => {
-        if (!pending) {
-            pending = mountAndLoad({ mount, doc, data, elements });
+    report('mounting', { namespace: data.projectNamespace, fixedMode: Boolean(data.fixedMode) });
+    const grid = await mountAndLoad({ mount, doc, data, elements });
+    if (!grid?.renderingEngine) {
+        return grid ?? null;
+    }
+
+    // Size the viewports to the container whenever it changes -- which includes the
+    // moment a hidden tab is shown. The first time it has a real size, reset the
+    // cameras too: a camera fitted to a 0x0 viewport is not a camera.
+    let sized = false;
+    const resize = (measurable) => {
+        if (!measurable) {
+            return;
         }
-        return pending;
+        try {
+            grid.renderingEngine.resize(true, true);
+            if (!sized) {
+                sized = true;
+                grid.resetCameras?.();
+                report('sized to the visible container.');
+            }
+        } catch (error) {
+            report(`resize failed: ${error.message}`);
+        }
     };
 
-    // The hook `patient_detail.js` already calls when the CBCT tab is shown. Merged
-    // rather than assigned: the old adapter defined this global too, and the panoramic
-    // bridge writes to a neighbouring one.
+    for (const element of elements) {
+        observeSize(element, resize);
+    }
+    resize(isMeasurable(elements[0]));
+
+    // Kept for `patient_detail.js`, which calls it on tab switch. It can no longer be
+    // the thing that starts the grid -- see above -- so it only nudges the size.
     const view = doc.defaultView ?? globalThis;
     view.CBCTViewer = Object.assign(view.CBCTViewer || {}, {
         loading: false,
-        init: () => start(),
+        init: () => {
+            resize(isMeasurable(elements[0]));
+            return grid;
+        },
     });
 
-    // Already on screen (CBCT is the default modality): start now.
-    if (isMeasurable(elements[0])) {
-        return start();
-    }
-
-    // Otherwise wait for it to be shown. Not awaited: module evaluation must not block
-    // on a tab the user may never open.
-    observeMeasurable(elements[0], start);
-    return null;
+    return grid;
 }
 
 /**
- * Mount the grid and load its volume. Called once, when the grid is visible.
+ * Mount the grid and load its volume.
  *
  * @returns {Promise<object|null>}
  */
@@ -251,6 +290,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     } catch (error) {
         // WebGL2 missing (decision #13) lands here, and the message is written for a
         // clinician rather than a console.
+        report(`could not create the rendering engine: ${error.message}`);
         for (const element of elements) {
             showWindowMessage(element, error.message, 'error');
         }
@@ -259,6 +299,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
 
     const volume = primaryVolumeFrom(data);
     if (!volume) {
+        report('this patient has no volume to show.', { modalities: Object.keys(data.modalityFiles || {}) });
         return grid;
     }
 
@@ -295,6 +336,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
             }
             loaded = loaded || !result?.superseded;
         } catch (error) {
+            report(`window ${windowIndex} failed: ${error.message}`);
             showWindowMessage(elements[windowIndex], `Could not load this volume: ${error.message}`, 'error');
         }
     }
@@ -316,6 +358,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     }
 
     if (loaded) {
+        report(`loaded ${volume.modality} #${volume.fileId} into ${targets.length} window(s).`);
         announceVolumeReady(
             { windowIndex: targets[0], modality: volume.modality, fileId: volume.fileId },
             view
