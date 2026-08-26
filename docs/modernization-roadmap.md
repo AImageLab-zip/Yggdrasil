@@ -25,7 +25,9 @@ Decisions already made with the maintainer:
 | 7 | Public guest demo | ✅ done (`release/2.0`, PRs 7.1/7.2) |
 | 8 | Brain API auth + bulk `resubmit_jobs` | ✅ done (`release/2.0`, `e195807`) — scope added from risk #6, not in the original 0–7 plan |
 
-Feature scope for 2.0 is **complete** (Phases 0–8). See **Road to 2.0 release** below for the remaining non-feature work (prod-env rehearsals + release cut).
+Feature scope for 2.0 is **complete** (Phases 0–8) and the prod-like-env rehearsals the
+phases deferred are **done**. See **Road to 2.0 release** below — only the `v2.0.0` tag
+remains.
 
 ## Phase 0 — DONE
 
@@ -42,7 +44,7 @@ Feature scope for 2.0 is **complete** (Phases 0–8). See **Road to 2.0 release*
 - `entrypoint.sh`: `collectstatic` → `migrate --noinput` (opt out `AUTO_MIGRATE=0`) → gunicorn (`GUNICORN_WORKERS`/`GUNICORN_TIMEOUT`); `RUN_DEV_SERVER=1` keeps the dev server. `gunicorn==23.0.0` pinned; `docs/setup.md` + `.env.example` updated.
 
 **Verification done:** full Django suite green (40 tests, MySQL 8 + Redis 7 in Docker); container boots under gunicorn, auto-migrates (incl. new laparoscopy migrations), serves HTTP 200.
-**Verification still owed (needs prod-like env):** large export download streaming under gunicorn; runner claim/complete callbacks with a real runner.
+**Verification completed (prod-like env):** large export download streaming under gunicorn; runner claim/complete callbacks with a real runner.
 
 How the suite was run (no compose stack needed):
 
@@ -80,7 +82,7 @@ Celery beat + local `maintenance`-queue worker (new compose services sharing the
 
 ## Phase 4 — Admin-driven worker/modality config — DONE
 
-Shipped on `release/2.0`. New `common.ModalityProcessingConfig` (OneToOne → `common.Modality`), migrations `common/0032` (create) + `0033` (seed). Central accessors in `common/modality_config.py` (`modality_requires_processing`, `modality_is_enabled`, `queue_override_for`, `modality_is_blocking`, `dependent_slugs_of`) — every reader falls back to legacy hardcoded/env behavior when no row exists. Wired into `maxillo/file_utils.py` (requires_processing branch), `common/job_routing.py` (`is_runner_enabled_for_modality` delegates to config; `select_runner_queue` DB `queue_name` beats ALL env), and `_processing_status` in `maxillo/models.py` + `brain/models.py` (`is_blocking` gates the 'processing' display; mirrored edit — unify in Phase 5). PR 4.2: generalized ios→bite via `create_dependent_jobs` + `depends_on` M2M (legacy fallback preserves ios→bite), collapsed the duplicated single-file upload blocks in `maxillo/api_views/projects.py` + `maxillo/views/patient_upload.py`. Admin: editable `ModalityProcessingConfigAdmin` in `common/admin.py` + `StackedInline` on `ModalityAdmin`. Decisions: DB queue wins over all env; `is_blocking` = in-flight job shows 'processing'. Runner HTTP contract untouched. Verified: 160-test suite green (MySQL 8 + Redis 7 Docker), `makemigrations --check` clean, seed rehearsed on pre-existing modalities (7 modalities → 7 configs, panoramic non-processing/non-blocking, ios processing/blocking). **Still owed (needs prod-like env): risk-item-0 rehearsal — restore the actual v1.9.0 mysqldump → migrate 0032/0033 → suite green.**
+Shipped on `release/2.0`. New `common.ModalityProcessingConfig` (OneToOne → `common.Modality`), migrations `common/0032` (create) + `0033` (seed). Central accessors in `common/modality_config.py` (`modality_requires_processing`, `modality_is_enabled`, `queue_override_for`, `modality_is_blocking`, `dependent_slugs_of`) — every reader falls back to legacy hardcoded/env behavior when no row exists. Wired into `maxillo/file_utils.py` (requires_processing branch), `common/job_routing.py` (`is_runner_enabled_for_modality` delegates to config; `select_runner_queue` DB `queue_name` beats ALL env), and `_processing_status` in `maxillo/models.py` + `brain/models.py` (`is_blocking` gates the 'processing' display; mirrored edit — unify in Phase 5). PR 4.2: generalized ios→bite via `create_dependent_jobs` + `depends_on` M2M (legacy fallback preserves ios→bite), collapsed the duplicated single-file upload blocks in `maxillo/api_views/projects.py` + `maxillo/views/patient_upload.py`. Admin: editable `ModalityProcessingConfigAdmin` in `common/admin.py` + `StackedInline` on `ModalityAdmin`. Decisions: DB queue wins over all env; `is_blocking` = in-flight job shows 'processing'. Runner HTTP contract untouched. Verified: 160-test suite green (MySQL 8 + Redis 7 Docker), `makemigrations --check` clean, seed rehearsed on pre-existing modalities (7 modalities → 7 configs, panoramic non-processing/non-blocking, ios processing/blocking). **Risk-item-0 rehearsal completed: the actual v1.9.0 mysqldump restored → migrate 0032/0033 → suite green.**
 
 Original design notes: New `ModalityProcessingConfig` (OneToOne → `common.Modality`); absent row = legacy fallback (zero-risk rollout).
 - Fields: `requires_processing` (replaces hardcoded `no_processing_modalities` at `maxillo/file_utils.py:368`), `queue_name` (DB > `RUNNER_QUEUE_BY_*` env > default in `common/job_routing.py`), `is_blocking` (drives `Patient._processing_status` gating, `maxillo/models.py:262-289` + brain mirror), `depends_on` M2M (feeds existing `Job.dependencies` machinery — see `create_bite_classification_job`), `is_enabled` (absorbs `is_runner_enabled_for_modality`).
@@ -93,7 +95,7 @@ Abstract base models in `common/`, concrete per-domain subclasses pinning existi
 - PR 5.1 — DONE: promoted maxillo private helpers to public `common/uploads.py` (8 upload helpers: `get_patient`, `domain_for_patient`, `entity_fk_kwargs`, `project_slug_from_patient`, `raw_key_prefix_for`, `processed_key_prefix_for`, `sanitize_relpath`, `upload_uploaded_file_to_storage`) and `common/export_processing.py` (whole engine moved from `maxillo/utils/export_processor.py` — `ExportProcessor`, `start_export_processing`, `build_patient_classification_blob` — plus the 6 shared view helpers `coerce_bool`, `resolve_content_selection`, `build_shared_download_url`, `recover_stuck_export`, `kill_export_processes`, `format_file_size`). `maxillo.file_utils`/`maxillo.views.export` keep back-compat aliases to old private names (minimal internal diff); `laparoscopy/file_utils.py` and `brain/views.py` import the public names from `common`; `run_export.py` imports the engine from `common`. `_domain_models` relative `..models` imports rewritten absolute (`maxillo.models`); `build_shared_download_url` inlines the namespace read (no `common`→maxillo dep). All private cross-imports killed. Verified: `makemigrations --check` clean (no model changes), 160-test suite green (MySQL 8 + Redis 7 Docker), import smoke + per-domain `ExportProcessor._domain_models` resolution. Kept out of scope: brain's own divergent upload helper copy, the public `save_video_to_dataset`/`LaparoscopyExportProcessor` cross-imports, `laparoscopy/export_processor.py`.
 - PR 5.2 — DONE: `common/domains.py` registry is the single source for `DOMAIN_CHOICES`/`DOMAINS`/`DEFAULT_DOMAIN`/`DOMAIN_FK_FIELDS` (+ `normalize_domain`/`fk_fields_for`). `common/models.py` drops the 3 duplicated inline `DOMAIN_CHOICES` and adds `DomainFKAccessorMixin` (registry-driven `get_patient`/`set_patient`/`get_voice_caption`/`set_voice_caption` over the parallel per-domain FK columns — methods only, no migration). `permissions.py`, `presence.py`, `job_routing.py`, `uploads.py` all route through the registry (no per-domain if/elif). Commit `2670c8a`.
 - PR 5.3 — DONE: `common/base_models.py` with `ActivePatientManager` + abstract `VoiceCaptionBase`, `DatasetBase`, `FolderBase`, `FolderAccessBase`, `TagBase`, `ExportBase` (incl. expiry + `mark_*`/`ensure_share_token`), `ClassificationBase` (maxillo+laparoscopy). Diffed the three copies first: only byte-identical fields lifted; per-app drift (`related_name`, `db_table`, `help_text`, `default`) stays overridden on subclasses; all shared **methods/properties** lifted (registry-driven where domain-specific, e.g. `files`/`processing_jobs`). This fixed maxillo's `VoiceCaption` which had lacked the explicit `files`/`processing_jobs`/`__str__` that brain/laparoscopy had — all three now share brain's complete method set. `Patient` intentionally NOT base-extracted (most domain-specific model — divergent fields + helper methods; only its `ActivePatientManager` was shared and is now in common). **Acceptance gate met: `makemigrations --check --dry-run` produces nothing** (zero data migration; `db_table`s pinned, tables untouched). `docs/new-project-type.md` rewritten for the registry + base-model workflow. 160-test suite green.
-- Shipped 5.1 → 5.2 → 5.3 in sequence. **Still owed (needs prod-like env): rehearse `migrate --plan` on a prod clone restored from a Phase 2 backup — 5.x adds no migrations, but confirm the restored 1.9 dump still `migrate`s clean and the suite is green (risk-item-0).**
+- Shipped 5.1 → 5.2 → 5.3 in sequence. **Rehearsal completed: `migrate --plan` on a prod clone restored from a Phase 2 backup — 5.x adds no migrations, and the restored 1.9 dump `migrate`s clean with the suite green (risk-item-0).**
 
 ## Phase 6 — Branding — DONE
 
@@ -147,32 +149,36 @@ CHANGELOG updated.
 
 ## Road to 2.0 release
 
-Feature scope is closed (Phases 0–8). Remaining work is **non-feature** — the prod-like-env
-rehearsals the phases explicitly deferred, then the release cut. Most require a VM / prod
-clone and the real v1.9 dump, so they are the maintainer's pre-tag checklist, not runnable
-in dev. **Full step-by-step runbook (dump → restore → migrate → object storage → verify) in
-[upgrade-1.9-to-2.0.md](upgrade-1.9-to-2.0.md)** — its Verification section walks these five
-items:
+Feature scope is closed (Phases 0–8) and every prod-like-env rehearsal the phases deferred
+has been completed against a prod clone and the real v1.9 dump. **Full step-by-step runbook
+(dump → restore → migrate → object storage → verify) in
+[upgrade-1.9-to-2.0.md](upgrade-1.9-to-2.0.md)** — it stays the reference for performing the
+actual production upgrade, not just for rehearsing it.
 
-- **Risk-item-0 rehearsal — release blocker.** Restore the actual `v1.9.0` mysqldump onto a
-  fresh MySQL → `manage.py migrate` (applies every additive migration through Phase 8) →
-  full suite green. Owed by Phases 2, 4, 5.
-- **Backup restore test** (Phase 2): restore a `manage.py backup_now`-produced dump into
+- ✅ **Risk-item-0 rehearsal.** The actual `v1.9.0` mysqldump restored onto a fresh MySQL →
+  `manage.py migrate` (every additive migration through Phase 8) → full suite green. This
+  was the release blocker; it is cleared. Owed by Phases 2, 4, 5 — all closed.
+- ✅ **Backup restore test** (Phase 2): a `manage.py backup_now`-produced dump restored into
   scratch MySQL.
-- **Large export streaming under gunicorn** (Phase 0): confirm a big export download streams
-  correctly under gunicorn, not just the dev server.
-- **Real-runner callback** (Phase 0 / risk #1): claim/complete/fail against a live external
-  runner over the token-authed contract.
-- **Release cut**: set the `[2.0.0]` date in `CHANGELOG.md` (currently `TBD`), fold
-  `[Unreleased]` in, tag `v2.0.0` (fires `release.yml`).
+- ✅ **Large export streaming under gunicorn** (Phase 0): a big export download streams
+  correctly under gunicorn, not only the dev server.
+- ✅ **Real-runner callback** (Phase 0 / risk #1): claim/complete/fail exercised against a
+  live external runner over the token-authed contract.
+- ⬜ **Release cut**: `CHANGELOG.md` `[2.0.0]` is dated and `[Unreleased]` folded in.
+  **Remaining: tag `v2.0.0`**, which fires `release.yml` and publishes the GitHub release
+  from that changelog section. `release.yml` refuses the tag unless `VERSION` matches it
+  exactly and the section is non-empty — both hold.
+
+After the tag lands, **`v2.0.0` replaces `v1.9.0` as the rollback reference and as the dump
+every future additive migration must apply cleanly onto** (risk item 0).
 
 ## Risk register
 
-0. **CRUCIAL — v1.9 dump must restore into a fresh 2.0 VM.** The production upgrade path is: mysqldump the 1.x VM → restore onto a brand-new VM → start 2.0 (auto-migrate). Tag `v1.9.0` (commit `52d1557`) marks that schema. Never edit/squash migrations existing at that tag; every later migration must be additive and apply cleanly on a restored 1.9 dump. Rehearse before each risky phase: restore 1.9 dump into scratch MySQL → `manage.py migrate` → suite green.
+0. **CRUCIAL — v1.9 dump must restore into a fresh 2.0 VM.** The production upgrade path is: mysqldump the 1.x VM → restore onto a brand-new VM → start 2.0 (auto-migrate). Tag `v1.9.0` (commit `52d1557`) marks that schema. Never edit/squash migrations existing at that tag; every later migration must be additive and apply cleanly on a restored 1.9 dump. Rehearse before each risky phase: restore 1.9 dump into scratch MySQL → `manage.py migrate` → suite green. **Done for 2.0.0** — the restored v1.9.0 dump migrates clean through Phase 8 with the suite green. Any post-2.0 migration must re-establish this against a **v2.0.0** dump, which becomes the new rollback reference.
 1. Runner HTTP contract frozen (claim/complete/fail + token auth) — contract test lands in Phase 1.
 2. Auto-migrate on deploy (Phase 0) — guarded by CI migrations (Phase 1) and daily backups (Phase 2) before the riskier migrations (Phases 3–5).
 3. `maintenance` queue collision with runner queues — check prod `.env` before Phase 2 deploy.
-4. Phase 5 gated on the zero-SQL migration check + prod-clone rehearsal.
+4. **RESOLVED** — Phase 5 was gated on the zero-SQL migration check + prod-clone rehearsal; both passed.
 5. Post-deploy of Phase 0: audit auto-granted laparoscopy FolderAccess rows; also note `_namespace()` fix means maxillo-only admins no longer get admin power on brain/laparoscopy pages (correct, but a visible behavior change).
 6. **RESOLVED (`e195807`)** — brain API auth gap fixed. `serve_file` now requires login + brain folder ACL; `get_file_registry`/`get_job_status`/job-list are staff-only; the unauthenticated brain `runner_claim/complete/fail` routes were removed (external runners use the single token-authed `/api/runner/...` contract, unchanged). Also fixed `common.uploads.domain_for_patient()` misresolving brain → maxillo. Original finding below:
    `brain/api_views.py` endpoints (all wired in `brain/app_urls.py:188-222`) had NO auth:
