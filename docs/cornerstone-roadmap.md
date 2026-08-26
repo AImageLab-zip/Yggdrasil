@@ -353,7 +353,7 @@ implemented, which is F7's original requirement and is unchanged.
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
-| 3 | CBCT + brain volume grid | 🟡 in progress (`release/3.0`, `8758efa`…`d7687c4`) — foundation, **the validation harness**, the replacement grid and measurement persistence are in; **nothing is wired to a template yet** and the deletions are gated on a green harness run across both corpora |
+| 3 | CBCT + brain volume grid | 🟡 in progress (`release/3.0`, `8758efa`…`3f01954`) — foundation, harness, replacement grid and measurement persistence are in. **Tier 1 and Tier 2 pass on every readable study** (34/34, 2026-08-27); **Tier 3 has not run and nothing is wired to a template**. Deletion still gated: 22 brain studies unread, and F7's `amip` sign-off outstanding |
 | 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
 | 5 | Intraoral tooth segmentation | ⬜ not started |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
@@ -749,7 +749,36 @@ failure, so all bytes-reading work is a management command
 >   is part of what is being validated.
 
 **Gate: the validation harness must be green across the maxillo *and* brain corpora before
-this merges.** With no feature flags, this pre-merge gate *is* the safety net.
+this merges.**
+
+> **Run of 2026-08-27, on a staging box restored from the production database.**
+> 34 of 34 *readable* studies passed, 0 failed, 0 errored. All six synthetic fixtures
+> passed, including all four F1 rescale branches, the F2 undeclared-orientation case and
+> the chirality blob. Cornerstone's geometry agreed with the file's own affine to
+> **3.8e-6 mm** worst case over 31 CBCTs and 3 brain MRIs, and Tier 2 was **exact**
+> (max deviation 0) on every study.
+>
+> The gate is **not** cleared, and the three reasons are worth separating because only
+> one of them is about the data:
+>
+> 1. **22 of 25 brain studies could not be read** — that box's object storage holds only
+>    the most recent uploads. Three brain studies is not the brain corpus.
+> 2. **No real study in the readable corpus exercises F1.** Every one reports
+>    `residual LUT (1, 0)`; the `(1, -1024)` encoding the finding is about appears only
+>    in the fixture. That is *good news about risk* — F1 is latent here, not active —
+>    but it means the mitigation carries no real-study evidence yet, and a corpus that
+>    does contain uint16-plus-intercept volumes has not been through this.
+> 3. **Tier 3 has never run, and the viewer has never rendered a pixel.** The harness
+>    validates the *data path*: does a voxel land where the affine says, and does it hold
+>    the value the header says. It says nothing about whether `viewportManager.js` builds
+>    working viewports, whether the tools bind, whether the crosshair synchronises, or
+>    whether a measurement round-trips. Deleting `viewer_grid.js` on the strength of a
+>    data-path result would be answering a question nobody asked.
+>
+> F7's requirement is unchanged and is the concrete next step: `amip` is `selected` by
+> default and needs looking at on real studies before the old path goes.
+
+ With no feature flags, this pre-merge gate *is* the safety net.
 
 Deletes `viewer_grid.js` (2267), `niivue_viewer.js` (760), `niivue_render_modes.js` (544 — and
 with it the `VERSION = '0.69.0'` pin and the three shader anchor strings),
