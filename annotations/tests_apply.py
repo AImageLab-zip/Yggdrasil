@@ -36,7 +36,10 @@ class ApplyTestCase(TestCase):
         )
 
     def _fdi_schema(self, *codes):
-        schema = LabelSchema.objects.create(name="FDI", slug="fdi-permanent")
+        """A small stand-in rather than the seeded ``fdi-permanent`` schema, so a
+        test can assert on a code being *absent* without depending on which
+        teeth the real vocabulary happens to define."""
+        schema = LabelSchema.objects.create(name="FDI subset", slug="fdi-subset")
         for index, code in enumerate(codes, start=1):
             LabelDefinition.objects.create(
                 schema=schema, value=index, code=code, display_name=f"Tooth {code}"

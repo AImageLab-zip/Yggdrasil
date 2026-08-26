@@ -37,7 +37,18 @@ class AnnotationItemBase(models.Model):
         AnnotationRevision, on_delete=models.CASCADE, related_name="%(class)ss"
     )
     target = models.ForeignKey(
-        AnnotationTarget, on_delete=models.PROTECT, related_name="%(class)ss"
+        AnnotationTarget,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="%(class)ss",
+        help_text=(
+            "The resource this item is anchored to. NULL means the set as a "
+            "whole: an occlusion classification or a voice caption is a "
+            "statement about the study, and a patient may have no file for it "
+            "to point at. Geometry and measurements always require one -- see "
+            "annotations.services.items."
+        ),
     )
     selector = models.ForeignKey(
         AnnotationSelector,

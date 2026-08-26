@@ -31,20 +31,34 @@ from annotations.validators import (
 )
 
 
-def _check_membership(revision, target, selector, label):
+def _check_membership(revision, target, selector, label, *, target_required=True):
     """The relationships a pure validator cannot see.
 
     Every one of these is a way to build a row that reads back as valid and
     describes the wrong thing: an item on one set pointing at another set's
     target, a selector that narrows a resource the item is not anchored to, a
     label from a schema the set does not use.
+
+    ``target_required`` is false only for the two item types that can be
+    statements about the study as a whole -- an occlusion classification or a
+    voice caption on a patient with no file to point at. Anything with
+    coordinates needs a resource, because coordinates without one are numbers.
     """
-    if target.annotation_set_id != revision.annotation_set_id:
-        raise ValidationError(
-            "the target belongs to a different annotation set than the revision"
-        )
-    if selector is not None and selector.target_id != target.pk:
-        raise ValidationError("the selector narrows a different target")
+    if target is None:
+        if target_required:
+            raise ValidationError(
+                "geometry and measurements must name the resource they were "
+                "measured against"
+            )
+        if selector is not None:
+            raise ValidationError("a selector narrows a target; this item has none")
+    else:
+        if target.annotation_set_id != revision.annotation_set_id:
+            raise ValidationError(
+                "the target belongs to a different annotation set than the revision"
+            )
+        if selector is not None and selector.target_id != target.pk:
+            raise ValidationError("the selector narrows a different target")
     if label is not None:
         schema_id = revision.annotation_set.label_schema_id
         if schema_id is None:
@@ -133,7 +147,9 @@ def add_spatial_3d(
     # only meaningful against that resource. Anchoring them to a target the
     # frame does not come from is the silent version of plotting a landmark on
     # the wrong model.
-    if coordinate_system == CoordinateSystem.RESOURCE_LOCAL and not target.source_resource_id:
+    if coordinate_system == CoordinateSystem.RESOURCE_LOCAL and not getattr(
+        target, "source_resource_id", None
+    ):
         raise ValidationError("resource_local coordinates need a resolved target resource")
 
     return SpatialAnnotation3DItem.objects.create(
@@ -209,7 +225,7 @@ def add_measurement(
 @transaction.atomic
 def add_temporal(
     revision,
-    target,
+    target=None,
     *,
     start_time_ms,
     end_time_ms,
@@ -219,7 +235,7 @@ def add_temporal(
     attributes=None,
 ):
     """Write one labelled span of a video, half-open and in integer milliseconds."""
-    _check_membership(revision, target, selector, label)
+    _check_membership(revision, target, selector, label, target_required=False)
     for name, value in (("start_time_ms", start_time_ms), ("end_time_ms", end_time_ms)):
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValidationError(
@@ -246,7 +262,7 @@ def add_temporal(
 @transaction.atomic
 def add_event(
     revision,
-    target,
+    target=None,
     *,
     event_type,
     label=None,
@@ -263,7 +279,7 @@ def add_event(
     while a string is one typo away from a second category that looks like a
     real one in every report.
     """
-    _check_membership(revision, target, selector, label)
+    _check_membership(revision, target, selector, label, target_required=False)
     if not event_type:
         raise ValidationError("an event must say what it asserts about")
     if label is None and not value and not attributes:

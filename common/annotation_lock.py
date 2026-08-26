@@ -52,6 +52,12 @@ still allowed: it re-derives outputs from the same frozen raw bytes.
 _KIND_REASONS = {
     "voice_caption": "voice captions",
     "occlusion_classification": "an occlusion classification",
+    # The laparoscopy ``Classification`` row carries free-text notes, not
+    # occlusion facets. The legacy branch reports it as "an occlusion
+    # classification" -- a pre-existing mislabel that is not this change's to
+    # fix -- so during the cross-check release a laparoscopy patient can report
+    # both phrases. The legacy one goes when that branch does.
+    "study_notes": "study notes",
     "intraoral_segmentation": "tooth segmentation",
     "ios_landmarks": "IOS landmarks",
     "panoramic_arch": "an edited panoramic arch",

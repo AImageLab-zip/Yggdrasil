@@ -53,6 +53,10 @@ def _resolve_selector(target, spec, cache):
     """
     if not spec:
         return None
+    if target is None:
+        raise ValidationError(
+            "a selector narrows a target; this conversion has none to narrow"
+        )
     key = (
         target.pk,
         spec.get("kind"),
@@ -83,7 +87,7 @@ def _resolve_selector(target, spec, cache):
     return selector
 
 
-def apply_descriptors(revision, target, descriptor_list, *, require_labels=True):
+def apply_descriptors(revision, target=None, descriptor_list=(), *, require_labels=True):
     """Write every descriptor against ``revision``/``target``. Returns the items.
 
     Runs inside whatever transaction the caller opened -- and callers should

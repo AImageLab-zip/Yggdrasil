@@ -364,7 +364,12 @@ class LabelVocabularyTests(AnnotationSchemaTestCase):
 
         LabelDefinition.objects.create(schema=v2, value=2, display_name="Maxilla")
 
-        self.assertEqual(LabelDefinition.objects.filter(value=2).count(), 2)
+        self.assertEqual(
+            LabelDefinition.objects.filter(
+                value=2, schema__slug="jaw-structures"
+            ).count(),
+            2,
+        )
 
     def test_codes_are_unique_where_present_and_absent_ones_do_not_collide(self):
         LabelDefinition.objects.create(

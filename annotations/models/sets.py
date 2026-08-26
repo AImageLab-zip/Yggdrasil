@@ -62,6 +62,7 @@ class AnnotationSet(DomainFKAccessorMixin, models.Model):
         ("ios_landmarks", "IOS landmarks"),
         ("intraoral_segmentation", "Intraoral tooth segmentation"),
         ("occlusion_classification", "Occlusion classification"),
+        ("study_notes", "Study notes"),
         ("panoramic_arch", "Panoramic arch"),
         ("video_regions", "Video region annotation"),
         ("video_quadrants", "Video quadrant markers"),
