@@ -300,7 +300,7 @@ without fixing F17 would introduce a wrap. File both upstream together.
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
-| 3 | CBCT + brain volume grid | 🟡 in progress (`release/3.0`, `8758efa`, `b90a7f9`, `831f9a2`) — foundation and **the validation harness** are in; the viewer replacement and the deletions are gated on a green run across both corpora |
+| 3 | CBCT + brain volume grid | 🟡 in progress (`release/3.0`, `8758efa`…`d7687c4`) — foundation, **the validation harness**, the replacement grid and measurement persistence are in; **nothing is wired to a template yet** and the deletions are gated on a green harness run across both corpora |
 | 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
 | 5 | Intraoral tooth segmentation | ⬜ not started |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
@@ -630,6 +630,32 @@ failure, so all bytes-reading work is a management command
 >   rotation purely about x comes out of `rasToLps` as a symmetric matrix whose
 >   transpose is itself — so that test passed vacuously. The second one is why the
 >   fixture now asserts its own asymmetry first.
+> - **Measurements persist, and the number the store keeps is not the number the
+>   viewer reported.** The "Why" table opens with "one measurement tool exists, and it
+>   is never saved"; `annotations/adapters/cornerstone.py` closes it. Every value is
+>   recomputed from the handles, because `cachedStats` is Cornerstone's own cache and
+>   is stale between edits *by design* — a store that trusted it would record a number
+>   that disagrees with the shape beside it, and the serializer already refuses a
+>   document containing one. Two handle conventions would have been wrong by guess:
+>   `Angle`'s vertex is the **middle** handle (`AngleTool.js:411-418`), and
+>   `RectangleROI`'s corners are stored (BL, BR, TL, TR), so a shoelace walked in index
+>   order traces a bow-tie whose signed area cancels **exactly** — a 4×3 ROI would be
+>   recorded as 0 mm² with nothing about the shape looking wrong.
+> - **Intensity statistics are refused rather than accepted from the client.** A
+>   probe's Hounsfield reading is not derivable from geometry; it needs the voxels.
+>   Decision #11 puts ROI statistics in the first release, and they belong to a
+>   server-side pass that reads the volume — **still outstanding**, and the one part of
+>   #11 this phase does not deliver. The shape is stored; the number is not invented.
+> - **Saving is replace-the-set, not a diff.** A revision *is* the state of the work at
+>   a moment. Diffing would need a stable per-annotation identity, and the only
+>   candidate is the `annotationUID` — the identifier the governing rule says is never
+>   persisted. Deleting a measurement is an empty save, which records the deletion
+>   instead of erasing the work.
+> - **A Frame of Reference UID is dropped outside patient space.** Cornerstone attaches
+>   it to every annotation; in `volume_voxel` or `resource_local` it is a false claim of
+>   comparability with any other series carrying the same UID, and a later fusion would
+>   trust it. Found because Phase 2's validator refused the row — the adapter now agrees
+>   with the validator rather than working around it.
 > - **Everything in the harness is temporary** and is deleted with the viewer
 >   replacement: `frontend/entries/volume-validation.js`,
 >   `frontend/imaging/validation/`, `common/imaging_validation.py`,
