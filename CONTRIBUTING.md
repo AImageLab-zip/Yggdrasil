@@ -31,7 +31,7 @@ Or without the dev stack, the raw-docker recipe in
 ## CI
 
 `.github/workflows/ci.yml` runs on self-hosted runners for pushes to
-`release/2.0`/`main` and all PRs:
+`release/3.0`/`release/2.0`/`main` and all PRs:
 
 - **lint** — `ruff check .` with a deliberately minimal ruleset
   (`E9`, `F63`, `F7`, `F82`: syntax errors and undefined names only).
@@ -39,6 +39,10 @@ Or without the dev stack, the raw-docker recipe in
   Do not reformat files wholesale — widening the lint ruleset is its own PR.
 - **test** — `makemigrations --check --dry-run` (no unmigrated model changes),
   `migrate`, then the full suite against MySQL 8 + Redis 7 services.
+- **frontend** — `npm ci`, `npm run build`, then **`git diff --exit-code`**: the
+  committed Cornerstone bundle must be byte-identical to a fresh build. Then
+  `npm run verify` (worker/wasm URLs resolve, no CDN host in any emitted file) and
+  `npm test`. See [The frontend bundle](#the-frontend-bundle).
 
 ### Self-hosted runner setup
 
@@ -46,7 +50,45 @@ The workflows expect a repo-level runner with labels `self-hosted, linux` and
 Docker available (jobs run in `python:3.11-slim` containers with MySQL/Redis
 service containers). Register one via GitHub → Settings → Actions → Runners →
 "New self-hosted runner", then run it as a service. The `release` workflow
-additionally needs `gh` installed on the runner host.
+additionally needs `gh` installed on the runner host, and the `frontend` job needs
+**npm-registry egress** (`https://registry.npmjs.org`) from the runner.
+
+## The frontend bundle
+
+Imaging is rendered by Cornerstone3D, built with npm + esbuild. Both are **dev-only**:
+the emitted bundle is committed under `static/vendor/cornerstone/`, so deploys need no
+Node and make no network request. This is deliberate — `templates/base.html:42-44`
+states the policy that no third-party CDN may be contacted at runtime.
+
+```bash
+npm ci               # exact versions from package-lock.json; needs registry egress
+npm run build        # -> static/vendor/cornerstone/<build>/ + manifest.json
+npm run verify       # every worker/wasm URL resolves; no CDN host is named
+npm test             # node:test, both the ESM frontend/ and legacy static/js/tests/
+```
+
+**If you touch anything under `frontend/`, run `npm run build` and commit the
+result.** CI rebuilds and fails on any diff. Output is byte-reproducible: esbuild is
+pinned exactly, the lockfile is committed, and sourcemaps are off.
+
+Two constraints that look like style but are not:
+
+- The **root `package.json` must not have a `"type"` field.** The seven test files in
+  `static/js/tests/` are CommonJS and stop resolving if the root scope becomes ESM.
+  `frontend/package.json` carries `"type": "module"` for the new source instead.
+- The bundle is **ESM, and script tags must be `type="module"`.** Three vendored
+  packages locate their web workers via `new URL(..., import.meta.url)`, which does not
+  exist in esbuild's IIFE output — an IIFE build silently loses every worker. The
+  `{% cornerstone_entry %}` tag therefore has no non-module variant.
+
+Templates load a surface with:
+
+```django
+{% load cornerstone %}
+{% cornerstone_entry 'volume-grid' %}
+```
+
+Details and rationale: [docs/cornerstone-roadmap.md](docs/cornerstone-roadmap.md).
 
 ## The runner HTTP API is frozen
 

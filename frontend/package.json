@@ -1,0 +1,8 @@
+{
+  "name": "@yggdrasil/imaging",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESM source for the Cornerstone3D imaging frontend. The `type` field lives here, not in the root package.json: the seven legacy test files under static/js/tests/ are CommonJS and must keep resolving as such.",
+  "license": "SEE LICENSE IN LICENSE"
+}

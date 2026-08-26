@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["release/2.0", "main"]
+    branches: ["release/3.0", "release/2.0", "main"]
   pull_request:
 
 jobs:
@@ -75,3 +75,44 @@ jobs:
         run: python manage.py migrate --noinput
       - name: Test
         run: python manage.py test --noinput -v 2
+
+  frontend:
+    # Builds the Cornerstone3D bundle from source and requires the result to be
+    # byte-identical to what is committed under static/vendor/cornerstone/.
+    # See docs/cornerstone-roadmap.md Phase 1 and CONTRIBUTING.md.
+    #
+    # NOTE: this job needs npm-registry egress on the self-hosted runner, the same
+    # way the release workflow needs `gh`.
+    runs-on: [self-hosted, linux]
+    container: node:22-slim
+    steps:
+      # Before checkout: without git in the container, actions/checkout falls back to
+      # a tarball and there is no repository for `git diff` to compare against.
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+      - uses: actions/checkout@v4
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install JS deps
+        run: npm ci
+      - name: Build the vendored bundle
+        run: npm run build
+      - name: Committed bundle must match a fresh build
+        # esbuild output is byte-reproducible here: the version is pinned exactly, the
+        # lockfile is committed, and sourcemaps are off.
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::static/vendor/cornerstone/ is stale -- run scripts/build_frontend.sh and commit the result" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain >&2
+            echo "::error::the build left untracked files -- commit them or ignore them" >&2
+            exit 1
+          fi
+      - name: Verify bundle assets (worker/wasm URLs, no CDN)
+        run: npm run verify
+      - name: JS tests
+        run: npm test

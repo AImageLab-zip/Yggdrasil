@@ -196,12 +196,19 @@ GitHub.sublime-settings
 prod_db.sql
 *.sql
 
+# Frontend build (npm + esbuild, dev-only -- the emitted bundle under
+# static/vendor/cornerstone/ IS committed; see docs/cornerstone-roadmap.md).
+node_modules/
+
 # Local scripts (tracked ones re-included explicitly below)
 scripts/*
 !scripts/backup_prod.sh
 !scripts/restore_prod.sh
 !scripts/manual_test_external_api.py
 !scripts/dev_bootstrap.sh
+!scripts/build_frontend.sh
+!scripts/build_frontend.mjs
+!scripts/check_bundle_assets.mjs
 
 # OpenCode local artifacts
 AGENTS.md
