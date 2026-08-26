@@ -1,0 +1,174 @@
+{% extends 'common/base_app.html' %}
+{% load static %}
+{% load cornerstone %}
+
+{% comment %}
+Phase 3 validation harness (docs/cornerstone-roadmap.md).
+
+Temporary, staff-only, and deleted together with frontend/imaging/validation/, the
+`volume-validation` bundle entry and the vendored NiiVue once the gate is cleared.
+
+The page is deliberately plain: it is read by whoever is signing off the migration, not
+by clinicians, and the thing that matters is the numbers being copy-pasteable into the
+PR that deletes the old viewers.
+{% endcomment %}
+
+{% block title %}Imaging validation harness - Yggdrasil{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <strong><i class="fas fa-vials me-2"></i>Phase 3 validation harness</strong>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Phase 3 replaces the CBCT and brain volume grid with Cornerstone3D and deletes
+                NiiVue. There are no feature flags, so this run is the safety net: it loads each
+                volume <strong>three times</strong> &mdash; once through Cornerstone, once through
+                NiiVue&nbsp;0.69, and once straight into the NIfTI reader &mdash; and compares
+                both viewers against the file&rsquo;s own affine rather than against each other.
+            </p>
+            <p class="text-muted small mb-0">
+                Tier&nbsp;1 (geometry) and Tier&nbsp;2 (intensity) are gates. Tier&nbsp;3
+                (appearance) is human-reviewed and never a gate. Volumes are large and are held
+                in GPU memory twice at a time, so keep this tab open and in the foreground.
+            </p>
+        </div>
+    </div>
+
+    {% if empty_domains %}
+    <div class="alert alert-warning">
+        <strong>No volumes found for:</strong> {{ empty_domains|join:", " }}.
+        The gate requires a green run across the maxillo <em>and</em> brain corpora, so an
+        empty corpus does not clear it.
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Corpus</strong></div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% for domain, studies in corpora.items %}
+                <div class="col-md-6">
+                    <h6 class="text-uppercase text-muted">{{ domain }}</h6>
+                    <p class="mb-1"><strong>{{ studies|length }}</strong> volume{{ studies|length|pluralize }}</p>
+                    <ul class="small text-muted mb-0">
+                        {% for study in studies %}
+                        <li><code>{{ study.study }}</code> &mdash; {{ study.fileType }}</li>
+                        {% empty %}
+                        <li><em>none</em></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+
+            <hr>
+
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-primary" id="runValidation">
+                    <i class="fas fa-play me-2"></i>Run harness
+                </button>
+                <div class="form-check ms-3">
+                    <input class="form-check-input" type="checkbox" id="includeFixtures" checked>
+                    <label class="form-check-label small" for="includeFixtures">
+                        Include synthetic fixtures
+                    </label>
+                </div>
+                <span class="text-muted small ms-3" id="validationProgress"></span>
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+                The fixtures cover the cases no real corpus contains: the four
+                <code>scl_slope</code>/<code>scl_inter</code> branches of finding&nbsp;F1, a
+                volume that declares no orientation at all (F2), and a blob at a known side for
+                the chirality check.
+            </p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>Report</strong>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="copyReport" disabled>
+                <i class="fas fa-copy me-1"></i>Copy
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="validationVerdict" class="mb-3"></div>
+            <pre id="validationReport" class="small mb-0"
+                 style="max-height: 60vh; overflow: auto; white-space: pre-wrap;">Not run yet.</pre>
+        </div>
+    </div>
+
+</div>
+
+{{ validation_data|json_script:"validationData" }}
+{% cornerstone_entry 'volume-validation' %}
+
+<script type="module">
+    // The bundle is an ES module and exports `runValidation`; the tag above loads it
+    // for its side effects, so re-import it here by the same URL to get the export.
+    // `document.currentScript` is null in a module, hence the explicit selector.
+    const entry = document.querySelector('script[type="module"][src*="volume-validation"]');
+    const { runValidation } = await import(entry.src);
+
+    const studies = JSON.parse(document.getElementById('validationData').textContent).studies;
+    const runButton = document.getElementById('runValidation');
+    const progress = document.getElementById('validationProgress');
+    const report = document.getElementById('validationReport');
+    const verdict = document.getElementById('validationVerdict');
+    const copyButton = document.getElementById('copyReport');
+
+    runButton.addEventListener('click', async () => {
+        runButton.disabled = true;
+        copyButton.disabled = true;
+        verdict.innerHTML = '';
+        report.textContent = 'Running...';
+
+        try {
+            const result = await runValidation({
+                studies,
+                includeFixtures: document.getElementById('includeFixtures').checked,
+                onProgress: ({ done, total, run }) => {
+                    progress.textContent = `${done} / ${total} — ${run.study}`;
+                },
+            });
+
+            report.textContent = result.text;
+            const level = result.summary.mayMerge
+                ? 'success'
+                : result.summary.verdict === 'awaiting-review'
+                  ? 'warning'
+                  : 'danger';
+            verdict.innerHTML =
+                `<div class="alert alert-${level} mb-0">` +
+                `<strong>${result.summary.verdict.toUpperCase()}</strong> — ` +
+                `${result.summary.counts.passed} passed, ` +
+                `${result.summary.counts.failed} failed, ` +
+                `${result.summary.counts['awaiting-review']} awaiting review, ` +
+                `${result.summary.counts.errored} errored. ` +
+                `May merge: <strong>${result.summary.mayMerge ? 'yes' : 'no'}</strong>.` +
+                '</div>';
+            copyButton.disabled = false;
+        } catch (error) {
+            report.textContent = `The harness itself failed: ${error.stack || error.message}`;
+            verdict.innerHTML =
+                '<div class="alert alert-danger mb-0"><strong>ERRORED</strong> — ' +
+                'the harness did not complete, so nothing has been validated.</div>';
+        } finally {
+            runButton.disabled = false;
+            progress.textContent = '';
+        }
+    });
+
+    copyButton.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(report.textContent);
+        copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied';
+        setTimeout(() => {
+            copyButton.innerHTML = '<i class="fas fa-copy me-1"></i>Copy';
+        }, 1500);
+    });
+</script>
+{% endblock %}

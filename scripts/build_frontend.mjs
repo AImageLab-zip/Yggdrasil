@@ -118,6 +118,11 @@ const APP_ENTRIES = [
     'mesh-landmarks',
     'panoramic-cpr',
     'video-annotate',
+    // Temporary, and the only entry that vendors NiiVue. It exists to clear the Phase 3
+    // gate ("the validation harness must be green across the maxillo *and* brain
+    // corpora before this merges") and goes when that gate is cleared, together with
+    // frontend/imaging/validation/ and the @niivue/niivue devDependency.
+    'volume-validation',
 ];
 
 /**

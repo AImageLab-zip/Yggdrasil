@@ -94,36 +94,35 @@ export function scalarRange(scalarData) {
 }
 
 /**
- * Robust minimum and maximum: the values at the low and high percentile cuts.
+ * Bin the data once, so every percentile afterwards is free.
  *
- * Single pass to bin, second pass over the 256 bins to accumulate -- so the cost is
- * one traversal of the data regardless of volume size. The returned values are bin
- * *edges*, which means they are quantised to `(max - min) / bins`; that is accurate
- * enough for an opening window and is exactly what the NiiVue implementation this
- * replaces also did.
+ * Separated from {@link robustRange} because Tier 2 of the validation harness reports a
+ * seven-point percentile ladder alongside the robust pair, and computing each of those
+ * with its own traversal would be eight passes over 10^8 voxels for one report. One
+ * pass to bin, then arithmetic on 256 numbers.
  *
  * @param {ArrayLike<number>} scalarData
  * @param {object} [options]
- * @param {number} [options.low] low cut, 0..1.
- * @param {number} [options.high] high cut, 0..1.
  * @param {number} [options.bins]
- * @returns {{min: number, max: number, robustMin: number, robustMax: number}}
+ * @returns {{
+ *   min: number, max: number, count: number, skipped: number,
+ *   bins: number, binWidth: number, histogram: Float64Array
+ * }}
  */
-export function robustRange(scalarData, options = {}) {
-    const low = finiteNumber(options.low, DEFAULT_ROBUST_PERCENTILES.low);
-    const high = finiteNumber(options.high, DEFAULT_ROBUST_PERCENTILES.high);
-    const bins = Math.max(2, Math.floor(finiteNumber(options.bins, HISTOGRAM_BINS)));
+export function computeHistogram(scalarData, { bins: requestedBins } = {}) {
+    const bins = Math.max(2, Math.floor(finiteNumber(requestedBins, HISTOGRAM_BINS)));
+    const { min, max, count, skipped } = scalarRange(scalarData);
 
-    const { min, max, count } = scalarRange(scalarData);
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-        return { min: NaN, max: NaN, robustMin: NaN, robustMax: NaN };
-    }
-    if (min === max || count === 0) {
-        // A constant volume has no percentiles worth the name.
-        return { min, max, robustMin: min, robustMax: max };
+    if (!Number.isFinite(min) || !Number.isFinite(max) || count === 0) {
+        return { min, max, count, skipped, bins, binWidth: NaN, histogram: new Float64Array(bins) };
     }
 
     const histogram = new Float64Array(bins);
+    if (min === max) {
+        histogram[0] = count;
+        return { min, max, count, skipped, bins, binWidth: 0, histogram };
+    }
+
     const scale = bins / (max - min);
     const length = scalarData.length;
     for (let index = 0; index < length; index += 1) {
@@ -137,32 +136,94 @@ export function robustRange(scalarData, options = {}) {
         histogram[bin] += 1;
     }
 
-    const lowTarget = count * clamp(low, 0, 1);
-    const highTarget = count * clamp(high, 0, 1);
+    return { min, max, count, skipped, bins, binWidth: (max - min) / bins, histogram };
+}
+
+/**
+ * The bin index at which the cumulative count first reaches a given cut.
+ *
+ * @param {{count: number, bins: number, histogram: Float64Array}} binned
+ * @param {number} cut 0..1.
+ * @returns {number} bin index.
+ */
+export function binAtPercentile({ count, bins, histogram }, cut) {
+    const target = count * clamp(cut, 0, 1);
     let cumulative = 0;
-    let robustMinBin = 0;
-    let robustMaxBin = bins - 1;
-    let foundLow = false;
     for (let bin = 0; bin < bins; bin += 1) {
         cumulative += histogram[bin];
-        if (!foundLow && cumulative >= lowTarget) {
-            robustMinBin = bin;
-            foundLow = true;
-        }
-        if (cumulative >= highTarget) {
-            robustMaxBin = bin;
-            break;
+        if (cumulative >= target) {
+            return bin;
         }
     }
+    return bins - 1;
+}
 
-    const binWidth = (max - min) / bins;
+/**
+ * Values at a ladder of percentiles, from one binning pass.
+ *
+ * Each value is the *near* edge of the bin the cut falls in, so the ladder is
+ * monotonic and quantised to one bin width. {@link robustRange} deliberately differs
+ * for its upper cut -- see there.
+ *
+ * @param {ArrayLike<number>|object} dataOrHistogram raw data, or a {@link computeHistogram} result.
+ * @param {number[]} cuts percentiles in 0..1.
+ * @param {object} [options] forwarded to {@link computeHistogram} when data is passed.
+ * @returns {number[]}
+ */
+export function percentileValues(dataOrHistogram, cuts, options) {
+    const binned = isHistogram(dataOrHistogram)
+        ? dataOrHistogram
+        : computeHistogram(dataOrHistogram, options);
+    if (!Number.isFinite(binned.min) || !Number.isFinite(binned.max)) {
+        return cuts.map(() => NaN);
+    }
+    if (binned.min === binned.max) {
+        return cuts.map(() => binned.min);
+    }
+    return cuts.map((cut) => binned.min + binAtPercentile(binned, cut) * binned.binWidth);
+}
+
+function isHistogram(value) {
+    return Boolean(value) && ArrayBuffer.isView(value.histogram) && typeof value.bins === 'number';
+}
+
+/**
+ * Robust minimum and maximum: the values at the low and high percentile cuts.
+ *
+ * The returned values are bin *edges*, quantised to `(max - min) / bins`; that is
+ * accurate enough for an opening window and is what the NiiVue implementation this
+ * replaces also did.
+ *
+ * @param {ArrayLike<number>|object} dataOrHistogram raw data, or a {@link computeHistogram} result.
+ * @param {object} [options]
+ * @param {number} [options.low] low cut, 0..1.
+ * @param {number} [options.high] high cut, 0..1.
+ * @param {number} [options.bins]
+ * @returns {{min: number, max: number, robustMin: number, robustMax: number}}
+ */
+export function robustRange(dataOrHistogram, options = {}) {
+    const low = finiteNumber(options.low, DEFAULT_ROBUST_PERCENTILES.low);
+    const high = finiteNumber(options.high, DEFAULT_ROBUST_PERCENTILES.high);
+    const binned = isHistogram(dataOrHistogram)
+        ? dataOrHistogram
+        : computeHistogram(dataOrHistogram, options);
+    const { min, max, count, binWidth } = binned;
+
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        return { min: NaN, max: NaN, robustMin: NaN, robustMax: NaN };
+    }
+    if (min === max || count === 0) {
+        // A constant volume has no percentiles worth the name.
+        return { min, max, robustMin: min, robustMax: max };
+    }
+
     return {
         min,
         max,
-        robustMin: min + robustMinBin * binWidth,
+        robustMin: min + binAtPercentile(binned, low) * binWidth,
         // The upper cut is the *far* edge of its bin, or the robust range would be
         // systematically narrow by one bin at the top.
-        robustMax: min + (robustMaxBin + 1) * binWidth,
+        robustMax: min + (binAtPercentile(binned, high) + 1) * binWidth,
     };
 }
 
