@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "common",
+    "annotations",
     "maxillo",
     "brain",
     "laparoscopy",
