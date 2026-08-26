@@ -263,4 +263,14 @@ urlpatterns = [
         api_views.serve_file,
         name="api_serve_file_named",
     ),
+    # Same view again, with the bundle key in the path. Finding F14: the NIfTI
+    # loader appends `?frame=N` with a literal `?`, so a URL that already carries
+    # `?file_key=` produces two of them and every slice resolves to frame 0. The
+    # maxillo CBCT display volume *is* a bundle member, so the viewer needs a
+    # query-free way to name one. `filename` stays decorative here too.
+    path(
+        "api/processing/files/serve/<int:file_id>/key/<str:bundle_key>/<str:filename>",
+        api_views.serve_file,
+        name="api_serve_file_bundle",
+    ),
 ]

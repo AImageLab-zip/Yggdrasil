@@ -28,12 +28,13 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @login_required
 @require_http_methods(["GET"])
-def serve_file(request, file_id, filename=None):
+def serve_file(request, file_id, filename=None, bundle_key=None):
     """
     Serve files from FileRegistry by ID with authentication
 
     URL: /api/processing/files/serve/<file_id>/
          /api/processing/files/serve/<file_id>/<filename>
+         /api/processing/files/serve/<file_id>/key/<bundle_key>/<filename>
 
     The second, filename-suffixed form exists for Cornerstone3D's NIfTI loader,
     which decides whether to gunzip by testing ``new URL(url).pathname`` for a
@@ -41,17 +42,45 @@ def serve_file(request, file_id, filename=None):
     docs/cornerstone-roadmap.md).
 
     ``filename`` is **decorative and deliberately unused**: the bytes served are
-    always ``FileRegistry.file_path`` (or the requested ``file_key`` within a
-    multi-file bundle), and the Content-Disposition name is still derived from the
-    registry row below. Django's ``str`` converter already excludes ``/``, but not
-    reading the segment at all is what makes that irrelevant rather than merely
-    survivable.
+    always ``FileRegistry.file_path`` (or the requested bundle member), and the
+    Content-Disposition name is still derived from the registry row below. Django's
+    ``str`` converter already excludes ``/``, but not reading the segment at all is
+    what makes that irrelevant rather than merely survivable.
+
+    The third form carries the bundle key **in the path**, and exists because
+    ``?file_key=`` is unusable from the viewer (finding F14).
+    ``createNiftiImageIdsAndCacheMetadata.js:174`` builds each slice id as
+    ``nifti:${niftiURL}?frame=${i}`` with a literal ``?``, unconditionally, so a URL
+    that already has a query string yields ``...?file_key=volume_nifti?frame=0`` --
+    two ``?``, so ``frame`` parses as part of the ``file_key`` value and **every
+    slice resolves to frame 0**. That is not a hypothetical: a ``cbct_processed`` row
+    with ``file_hash == 'multi-file'`` is how the maxillo CBCT display volume is
+    stored (``maxillo/views/patient_detail.py:_resolved_cbct_viewer_source``), so
+    without a query-free form the volume grid cannot address the volume it exists to
+    show.
+
+    ``?file_key=`` is kept, unchanged, for the existing non-Cornerstone callers. When
+    both are present they must agree; a mismatch is refused rather than resolved by
+    precedence, because the two names would be pointing at different volumes and
+    guessing which the caller meant is how the wrong anatomy gets rendered.
     """
     del filename  # see the docstring: URL decoration only, never used to resolve.
     try:
         file_obj = FileRegistry.objects.select_related("patient").get(id=file_id)
         resolved_file_path = file_obj.file_path
-        requested_file_key = (request.GET.get('file_key') or '').strip()
+        query_file_key = (request.GET.get('file_key') or '').strip()
+        path_file_key = (bundle_key or '').strip()
+        if path_file_key and query_file_key and path_file_key != query_file_key:
+            return JsonResponse(
+                {
+                    "error": (
+                        "Conflicting bundle keys: the path names "
+                        f"'{path_file_key}' and file_key names '{query_file_key}'."
+                    )
+                },
+                status=400,
+            )
+        requested_file_key = path_file_key or query_file_key
         bundle_filename = ""
         bundle_not_found = False
 
