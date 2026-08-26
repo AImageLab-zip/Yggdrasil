@@ -1,9 +1,9 @@
 # Cornerstone3D — deferred work
 
-Everything here was considered during the Cornerstone3D v5 migration design and
+Companion to [cornerstone-roadmap.md](cornerstone-roadmap.md), which tracks the migration
+itself. Everything here was considered during the Cornerstone3D v5 migration design and
 **deliberately left out of scope**, with the reasoning recorded so a later decision does not
-have to re-derive it. The migration itself is tracked separately, alongside
-[modernization-roadmap.md](modernization-roadmap.md).
+have to re-derive it.
 
 Nothing in this file is committed work. Each entry states what it is, why it was deferred,
 what would have to be true to pick it up, and roughly what it would cost.
