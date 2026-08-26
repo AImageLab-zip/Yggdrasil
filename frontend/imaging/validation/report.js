@@ -25,7 +25,30 @@ export const VERDICT = Object.freeze({
     FAILED: 'failed',
     AWAITING_REVIEW: 'awaiting-review',
     ERRORED: 'errored',
+    UNAVAILABLE: 'unavailable',
 });
+
+/**
+ * Errors that mean "these bytes are not here", as opposed to "these bytes are wrong".
+ *
+ * Still blocking -- a corpus the harness could not read cannot clear a gate that is
+ * about the corpus. But it is a different fact from a study that loaded and disagreed,
+ * and collapsing the two makes a report unreadable in exactly the environment where
+ * you most need to read it: a staging box restored from a production database whose
+ * object storage holds only some of the files. The first real run had 22 of these and
+ * they drowned the three studies that had something to say.
+ */
+const UNAVAILABLE_PATTERNS = [
+    /failed to fetch/i,
+    /networkerror/i,
+    /HTTP 40[34]/,
+    /HTTP 5\d\d/,
+    /not in object storage/i,
+];
+
+function isUnavailable(message) {
+    return UNAVAILABLE_PATTERNS.some((pattern) => pattern.test(String(message)));
+}
 
 /**
  * Decide one study's verdict from its tier results.
@@ -40,9 +63,13 @@ export const VERDICT = Object.freeze({
  */
 export function verdictFor(run) {
     if (run.error) {
+        const unavailable = isUnavailable(run.error);
         return {
-            verdict: VERDICT.ERRORED,
-            blocking: [`${run.study} could not be loaded: ${run.error}`],
+            verdict: unavailable ? VERDICT.UNAVAILABLE : VERDICT.ERRORED,
+            blocking: [
+                `${run.study} could not be loaded: ${run.error}` +
+                    (unavailable ? ' [not present in this environment]' : ''),
+            ],
             warnings: [],
         };
     }
@@ -84,19 +111,24 @@ export function verdictFor(run) {
  * }}
  */
 export function summarize(runs) {
-    const counts = { passed: 0, failed: 0, 'awaiting-review': 0, errored: 0 };
+    const counts = { passed: 0, failed: 0, 'awaiting-review': 0, errored: 0, unavailable: 0 };
     const blocking = [];
+    const unavailable = [];
     const warnings = [];
 
     for (const run of runs) {
         const outcome = verdictFor(run);
         counts[outcome.verdict] += 1;
-        blocking.push(...outcome.blocking);
+        // Kept apart so a partial environment cannot drown the studies that actually
+        // had something to say. Both still block; only the reading order changes.
+        (outcome.verdict === VERDICT.UNAVAILABLE ? unavailable : blocking).push(
+            ...outcome.blocking
+        );
         warnings.push(...outcome.warnings);
     }
 
     let verdict = VERDICT.PASSED;
-    if (counts.failed || counts.errored) {
+    if (counts.failed || counts.errored || counts.unavailable) {
         verdict = VERDICT.FAILED;
     } else if (counts['awaiting-review']) {
         verdict = VERDICT.AWAITING_REVIEW;
@@ -112,6 +144,7 @@ export function summarize(runs) {
         total: runs.length,
         counts,
         blocking,
+        unavailable,
         warnings,
         // The one boolean the roadmap's gate turns on. Deliberately strict: awaiting
         // review is not permission to merge.
@@ -197,12 +230,22 @@ export function formatReport(runs) {
         `Phase 3 validation harness: ${summary.verdict.toUpperCase()}`,
         `${summary.total} studies -- ` +
             `${summary.counts.passed} passed, ${summary.counts.failed} failed, ` +
-            `${summary.counts['awaiting-review']} awaiting review, ${summary.counts.errored} errored`,
+            `${summary.counts['awaiting-review']} awaiting review, ` +
+            `${summary.counts.errored} errored, ` +
+            `${summary.counts.unavailable} not present in this environment`,
         `may merge: ${summary.mayMerge ? 'yes' : 'NO'}`,
         '',
     ];
     if (summary.blocking.length) {
         header.push('Blocking:', ...summary.blocking.map((item) => `  - ${item}`), '');
+    }
+    if (summary.unavailable.length) {
+        header.push(
+            `Not present in this environment (${summary.unavailable.length}) -- still blocking, ` +
+                'because a corpus the harness could not read cannot clear a gate about the corpus:',
+            ...summary.unavailable.map((item) => `  - ${item}`),
+            ''
+        );
     }
     return [...header, ...runs.map(formatRun)].join('\n');
 }

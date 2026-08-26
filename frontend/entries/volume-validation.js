@@ -47,7 +47,8 @@ import { describeGeometry } from '../imaging/geometry/orientation.js';
 import { autoVoi } from '../imaging/windowing/autoVoi.js';
 import { runTier1 } from '../imaging/validation/tier1Geometry.js';
 import { runTier2 } from '../imaging/validation/tier2Intensity.js';
-import { cachedScalarData, cornerstoneLeg, niivueLeg } from '../imaging/validation/adapters.js';
+import { cornerstoneLeg, niivueLeg } from '../imaging/validation/adapters.js';
+import { awaitVolumeLoad, readScalarData } from '../imaging/grid/volumeLoading.js';
 import { allFixtures } from '../imaging/validation/fixtures.js';
 import { formatReport, summarize } from '../imaging/validation/report.js';
 import { DEFAULT_SEED } from '../imaging/validation/prng.js';
@@ -112,7 +113,9 @@ async function loadThroughCornerstone(url) {
     // volume loading into the image loader. See VOLUME_ID_SCHEME.
     const volumeId = volumeIdFor(url);
     const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
-    await volume.load();
+    // NOT `await volume.load()` -- that method returns undefined, so awaiting it
+    // resolves immediately and hands back a volume with no frames. See volumeLoading.js.
+    await awaitVolumeLoad(volume);
     return volume;
 }
 
@@ -214,7 +217,7 @@ export async function validateVolume({
             ];
         }
 
-        const tier2 = runTier2({ cached: cachedScalarData(volume), raw, header, seed });
+        const tier2 = runTier2({ cached: readScalarData(volume), raw, header, seed });
 
         return {
             study,
@@ -222,7 +225,7 @@ export async function validateVolume({
             tier1,
             tier2,
             // Reported, not gated: the opening window a clinician will actually see.
-            openingVoi: autoVoi(cachedScalarData(volume), { header }),
+            openingVoi: autoVoi(readScalarData(volume), { header }),
             geometry: describeGeometry(header),
         };
     } catch (error) {

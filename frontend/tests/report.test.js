@@ -58,10 +58,42 @@ test('a tier that did not run is a failure, not an absence', () => {
     assert.match(outcome.blocking.join(' '), /tier 2 did not run/);
 });
 
-test('a study that could not be loaded is errored, never skipped', () => {
-    const outcome = verdictFor({ study: 'patient-9', error: 'HTTP 404' });
+test('a study that could not be loaded is never skipped', () => {
+    const outcome = verdictFor({ study: 'patient-9', error: 'kaboom' });
     assert.equal(outcome.verdict, VERDICT.ERRORED);
-    assert.match(outcome.blocking.join(' '), /could not be loaded: HTTP 404/);
+    assert.match(outcome.blocking.join(' '), /could not be loaded: kaboom/);
+});
+
+test('a missing file is UNAVAILABLE, distinct from a real error but still blocking', () => {
+    // A staging box restored from a production database has only some of the objects.
+    // Collapsing "not here" into "wrong" makes the report unreadable in exactly the
+    // environment where you most need to read it -- the first real run had 22 of these
+    // and they drowned the three studies that had something to say.
+    for (const message of ['Failed to fetch', 'HTTP 404 fetching the volume.', 'HTTP 500 fetching the volume.']) {
+        const outcome = verdictFor({ study: 'p', error: message });
+        assert.equal(outcome.verdict, VERDICT.UNAVAILABLE, message);
+        assert.match(outcome.blocking.join(' '), /not present in this environment/);
+    }
+
+    // Still blocking: an unread corpus cannot clear a gate about the corpus.
+    const summary = summarize([run(), { study: 'p3', error: 'Failed to fetch' }]);
+    assert.equal(summary.mayMerge, false);
+    assert.equal(summary.counts.unavailable, 1);
+    assert.equal(summary.counts.errored, 0);
+    assert.equal(summary.blocking.length, 0, 'and kept out of the real blocking list');
+    assert.equal(summary.unavailable.length, 1);
+});
+
+test('a content failure is NOT mistaken for a missing file', () => {
+    // The distinction only helps if it is narrow: a study that loaded and disagreed
+    // must stay in the blocking list where someone will read it.
+    const summary = summarize([
+        run({ tier2: { ...PASSING_TIER2, passed: false, blocking: ['voxel-exact agreement'] } }),
+    ]);
+    assert.equal(summary.counts.failed, 1);
+    assert.equal(summary.counts.unavailable, 0);
+    assert.equal(summary.blocking.length, 1);
+    assert.deepEqual(summary.unavailable, []);
 });
 
 test('warnings travel with a passing run rather than being dropped', () => {
@@ -87,10 +119,16 @@ test('an empty corpus does not clear the gate', () => {
 });
 
 test('one errored study fails the whole corpus', () => {
-    const summary = summarize([run(), run({ study: 'p2' }), { study: 'p3', error: 'timeout' }]);
+    const summary = summarize([run(), run({ study: 'p2' }), { study: 'p3', error: 'kaboom' }]);
     assert.equal(summary.verdict, VERDICT.FAILED);
     assert.equal(summary.mayMerge, false);
-    assert.deepEqual(summary.counts, { passed: 2, failed: 0, 'awaiting-review': 0, errored: 1 });
+    assert.deepEqual(summary.counts, {
+        passed: 2,
+        failed: 0,
+        'awaiting-review': 0,
+        errored: 1,
+        unavailable: 0,
+    });
 });
 
 test('awaiting review is not permission to merge', () => {
@@ -108,10 +146,10 @@ test('mayMerge is true only when every study passed and there was at least one',
 
 test('the formatted report leads with the verdict and the merge answer', () => {
     const text = formatReport([run(), { study: 'p3', error: 'timeout' }]);
+    assert.match(text, /p3 could not be loaded: timeout/);
     assert.match(text, /^Phase 3 validation harness: FAILED/);
     assert.match(text, /may merge: NO/);
     assert.match(text, /Blocking:/);
-    assert.match(text, /p3 could not be loaded: timeout/);
 });
 
 test('a formatted run surfaces the residual LUT and whether upstream skipped', () => {

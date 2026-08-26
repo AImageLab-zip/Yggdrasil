@@ -40,6 +40,42 @@ export const POSITION_TOLERANCE_MM = 1e-4;
 export const GEOMETRY_TOLERANCE = 1e-6;
 
 /**
+ * Relative tolerance for a length, against the magnitude of the coordinates it spans.
+ *
+ * The roadmap gives one figure, 1e-6, for "dims, spacing, direction cosines" and for
+ * the analytic length check. That is right for the first three -- direction cosines are
+ * dimensionless and near 1, spacings are small -- and **unsatisfiable for the fourth**
+ * on a stack that computes in single precision.
+ *
+ * gl-matrix, which NiiVue uses for `frac2mm`, sets `ARRAY_TYPE = Float32Array`. One
+ * float32 ulp at a patient coordinate of 130 mm is 1.5e-5 mm, and a length is the
+ * difference of two such positions. Demanding agreement to 1e-6 mm therefore demands
+ * better than the format can represent: the first real harness run failed the NiiVue
+ * length check on 21 of 31 maxillo studies with position deviations of 1.0e-5 to
+ * 2.9e-5 mm -- exactly one to two ulps -- while Cornerstone, which computes in
+ * float64, passed every one at 1e-6.
+ *
+ * So the tolerance scales with the coordinate magnitude. 1e-6 relative is about eight
+ * float32 ulps, which leaves room for a few accumulated operations, and at a realistic
+ * 130 mm it works out to 1.3e-4 mm -- still four thousand times smaller than the finest
+ * CBCT voxel, so a real spacing error cannot hide inside it.
+ *
+ * The absolute {@link GEOMETRY_TOLERANCE} remains the floor, so a volume near the
+ * origin is still held to it.
+ */
+export const COORDINATE_RELATIVE_TOLERANCE = 1e-6;
+
+/**
+ * The length tolerance that applies at a given coordinate magnitude.
+ *
+ * @param {number} magnitudeMm the largest absolute ordinate involved.
+ * @returns {number} millimetres.
+ */
+export function lengthToleranceFor(magnitudeMm) {
+    return Math.max(GEOMETRY_TOLERANCE, Math.abs(magnitudeMm) * COORDINATE_RELATIVE_TOLERANCE);
+}
+
+/**
  * Compare one leg's world positions against the reference, over a sample.
  *
  * @param {object} options
@@ -190,7 +226,7 @@ export function compareDerivedGeometry(reference, candidate, tolerance = GEOMETR
  * @param {number} [options.tolerance] mm.
  * @returns {{passed: boolean, checks: object[], maxErrorMm: number}}
  */
-export function checkAnalyticLengths({ candidate, spacing, dims, tolerance = GEOMETRY_TOLERANCE }) {
+export function checkAnalyticLengths({ candidate, spacing, dims, tolerance = null }) {
     const checks = [];
     let maxErrorMm = 0;
 
@@ -215,11 +251,33 @@ export function checkAnalyticLengths({ candidate, spacing, dims, tolerance = GEO
         const measuredMm = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
         const expectedMm = steps * spacing[axis];
         const errorMm = Math.abs(measuredMm - expectedMm);
+
+        // Scaled to the coordinates actually involved, not to the length: the error is
+        // inherited from the two endpoint positions, and on a float32 stack those carry
+        // an ulp proportional to their distance from the origin, not to their
+        // separation. See COORDINATE_RELATIVE_TOLERANCE.
+        const magnitudeMm = Math.max(...a.map(Math.abs), ...b.map(Math.abs));
+        const applied = tolerance ?? lengthToleranceFor(magnitudeMm);
+
         maxErrorMm = Math.max(maxErrorMm, errorMm);
-        checks.push({ axis, steps, measuredMm, expectedMm, errorMm, passed: errorMm < tolerance });
+        checks.push({
+            axis,
+            steps,
+            measuredMm,
+            expectedMm,
+            errorMm,
+            toleranceMm: applied,
+            magnitudeMm,
+            passed: errorMm < applied,
+        });
     }
 
-    return { passed: checks.length > 0 && checks.every((check) => check.passed), checks, maxErrorMm };
+    return {
+        passed: checks.length > 0 && checks.every((check) => check.passed),
+        checks,
+        maxErrorMm,
+        toleranceMm: checks.length ? Math.max(...checks.map((check) => check.toleranceMm)) : NaN,
+    };
 }
 
 /**

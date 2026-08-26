@@ -139,18 +139,10 @@ export function lpsToRas(point) {
 }
 
 /**
- * Read a Cornerstone volume's cached scalar data, for Tier 2.
- *
- * @param {object} volume a Cornerstone `ImageVolume`.
- * @returns {ArrayLike<number>}
+ * Reading a volume's cached scalar data now lives in
+ * `imaging/grid/volumeLoading.js` (`readScalarData`), together with the wait that has
+ * to happen before it means anything. Keeping the read next to the wait is the point:
+ * `getCompleteScalarDataArray` returns an empty array rather than throwing when the
+ * volume has no frames yet, so a read that is not preceded by a completed load is
+ * silently wrong.
  */
-export function cachedScalarData(volume) {
-    const manager = volume?.voxelManager;
-    if (manager?.getCompleteScalarDataArray) {
-        return manager.getCompleteScalarDataArray();
-    }
-    if (manager?.getScalarData) {
-        return manager.getScalarData();
-    }
-    throw new Error('The Cornerstone volume exposes no scalar data; it has not finished loading.');
-}

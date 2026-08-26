@@ -44,6 +44,7 @@ import {
     windowAt,
 } from './windowState.js';
 import { openingVoi, unitFor } from './voi.js';
+import { awaitVolumeLoad, readScalarData } from './volumeLoading.js';
 import { describeGeometry } from '../geometry/orientation.js';
 
 /** The rendering engine id. Session-scoped, never persisted. */
@@ -250,7 +251,9 @@ async function loadVolumeIntoWindow({ cornerstone, renderingEngine, state, windo
             throw new Error('The loader produced no imageIds for this volume.');
         }
         const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
-        await volume.load();
+        // NOT `await volume.load()`: `ImageVolume.load` returns undefined, so awaiting
+        // it resolves on the next microtask with no frames loaded. See volumeLoading.js.
+        await awaitVolumeLoad(volume);
 
         // The window may have been cleared or reloaded while that was in flight.
         if (!completeLoad(state, windowIndex, generation, {
@@ -263,7 +266,7 @@ async function loadVolumeIntoWindow({ cornerstone, renderingEngine, state, windo
         await setVolumesForViewports(renderingEngine, [{ volumeId }], [id]);
 
         const voi = openingVoi({
-            scalarData: scalarDataOf(volume),
+            scalarData: readScalarData(volume),
             header,
             modality,
         });
@@ -317,16 +320,6 @@ async function fetchHeader(url) {
     return reader.readHeader(decompressed);
 }
 
-function scalarDataOf(volume) {
-    const manager = volume?.voxelManager;
-    if (manager?.getCompleteScalarDataArray) {
-        return manager.getCompleteScalarDataArray();
-    }
-    if (manager?.getScalarData) {
-        return manager.getScalarData();
-    }
-    throw new Error('The volume exposes no scalar data; it has not finished loading.');
-}
 
 /**
  * Rebuild one window's viewport for a different plane.
