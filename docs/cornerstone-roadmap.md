@@ -234,8 +234,8 @@ either the `classification` or `bite_classification` slug, matching the form-pos
 warning**. This already happens for `save_generic_modality_folder` prefix rows; a DICOM series
 export would silently produce nothing.
 
-The five below were found while building against the real packages: F14–F16 in Phase 1,
-F17 and F18 in Phase 3.
+The six below were found while building against the real packages: F14–F16 in Phase 1,
+F17–F19 in Phase 3. F19 was found by the harness, on real studies — not by reading.
 
 **F14 — the loader appends `?frame=N` with a literal `?`, so a `file_key` URL is
 unusable.** Found in Phase 1. `createNiftiImageIdsAndCacheMetadata.js:174` builds each
@@ -298,6 +298,28 @@ datatype-only table would report overflow for volumes that are in fact promoted 
 safe. Note that **F16's over-allocation is load-bearing here**: `'Int8Array'` allocates
 an `Int16Array`, which is what gives a rescaled int8 volume room to grow. Fixing F16
 without fixing F17 would introduce a wrap. File both upstream together.
+
+**F19 — `volume.load()` returns `undefined`, and reading too early yields an empty
+array rather than an error.** Found in Phase 3, by the harness, on real studies.
+`ImageVolume.load(callback)` is an empty method body
+(`core/cache/classes/ImageVolume.js:115`) and the streaming subclass that overrides it
+is callback-based and also returns `undefined`
+(`BaseStreamingImageVolume.js:165`). **`await volume.load()` therefore resolves on the
+next microtask with no frames loaded** — and because
+`voxelManager.getCompleteScalarDataArray()` returns `new Uint8Array(0)` when no slice
+has data (`core/utilities/VoxelManager.js:643-647`) instead of throwing, the caller
+gets an empty array that behaves like data.
+
+The completion signal is `framesProcessed === totalNumFrames`; the callback fires
+**once per frame** (`:104`), and a permanently-failed frame still increments
+`framesProcessed` (`:132-152`), so waiting on `framesLoaded` hangs forever on a volume
+with one bad frame. `frontend/imaging/grid/volumeLoading.js` encodes all three rules and
+refuses an empty or short array.
+
+Worth recording for Phases 4–10, which all load volumes: the dangerous form of this is
+not the empty read but the *partial* one. The harness caught a study mid-load reporting
+182 of 200,000 voxels disagreeing — which is indistinguishable, by inspection, from a
+genuine intensity defect.
 
 **F18 — vtk.js supports mapper-level shader replacement, so `amip` is portable.**
 Found in Phase 3 while scoping F7. `vtkOpenGLVolumeMapper` mixes in
@@ -700,6 +722,22 @@ failure, so all bytes-reading work is a management command
 >   comparability with any other series carrying the same UID, and a later fusion would
 >   trust it. Found because Phase 2's validator refused the row — the adapter now agrees
 >   with the validator rather than working around it.
+> - **The analytic length check needed a magnitude-scaled tolerance.** The roadmap gives
+>   one figure, 1e-6, for "dims, spacing, direction cosines" *and* the analytic length
+>   check. It is right for the first three and **unsatisfiable for the fourth** against
+>   NiiVue: gl-matrix sets `ARRAY_TYPE = Float32Array`, so `frac2mm` computes in single
+>   precision, and one float32 ulp at a patient coordinate of 130 mm is 1.5e-5 mm. The
+>   first real corpus run failed 24 studies on exactly that — deviations of 1.0e-5 to
+>   2.9e-5 mm, one to two ulps — while Cornerstone passed every one at 1e-6 in float64.
+>   The tolerance now scales with the coordinate magnitude (1e-6 relative, ~1.3e-4 mm at
+>   130 mm, still four thousand times finer than the smallest CBCT voxel). The failure
+>   mode is worth naming: the leg being *deleted* was failing a check the migration
+>   target passed, so the gate would have blocked the phase on a non-issue.
+> - **"Not present in this environment" is its own verdict.** A staging box restored
+>   from a production database has only some of the objects, and the first real run had
+>   22 unreadable studies drowning the three that had something to say. They are counted
+>   and listed separately now — still blocking, since a corpus the harness could not
+>   read cannot clear a gate about the corpus, but no longer burying the signal.
 > - **Everything in the harness is temporary** and is deleted with the viewer
 >   replacement: `frontend/entries/volume-validation.js`,
 >   `frontend/imaging/validation/`, `common/imaging_validation.py`,
