@@ -388,3 +388,36 @@ class GroupingTests(SimpleTestCase):
         )
         self.assertEqual(descriptors[0]["item"], d.SPATIAL_3D)
         self.assertTrue(all(entry["item"] == d.MEASUREMENT for entry in descriptors[1:]))
+
+
+class FrameOfReferenceScopeTests(SimpleTestCase):
+    """The UID is a claim about comparability, and only some frames can make it."""
+
+    def test_a_patient_frame_keeps_the_uid(self):
+        for frame in (CoordinateSystem.PATIENT_LPS_MM, CoordinateSystem.PATIENT_RAS_MM):
+            descriptors = cs.descriptors_for_annotation(
+                annotation("Length", [[0, 0, 0], [1, 0, 0]]), coordinate_system=frame
+            )
+            self.assertEqual(
+                by_item(descriptors, d.SPATIAL_3D)[0]["frame_of_reference_uid"],
+                "1.2.840.113619.2.55.3.12345",
+            )
+
+    def test_a_resource_scoped_frame_drops_the_uid(self):
+        """Cornerstone attaches it to every annotation; here it would be a false claim.
+
+        Voxel indices and a mesh's object space mean nothing outside the one resource
+        that defines them, so asserting comparability with any other series carrying
+        the same UID is wrong -- and a later fusion would trust it.
+        ``annotations.validators.geometry`` refuses such a row outright, so passing it
+        on would turn every voxel-frame save into a 400.
+        """
+        for frame in (CoordinateSystem.VOLUME_VOXEL, CoordinateSystem.RESOURCE_LOCAL):
+            descriptors = cs.descriptors_for_annotation(
+                annotation("Length", [[0, 0, 0], [1, 0, 0]]), coordinate_system=frame
+            )
+            self.assertEqual(
+                by_item(descriptors, d.SPATIAL_3D)[0]["frame_of_reference_uid"],
+                "",
+                f"{frame} must not claim a frame of reference",
+            )

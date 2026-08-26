@@ -1,5 +1,6 @@
 from django.urls import path
 from . import api_views
+from annotations import views as annotations_views
 
 app_name = "api"
 
@@ -62,6 +63,19 @@ urlpatterns = [
         "processing/files/serve/<int:file_id>/key/<str:bundle_key>/<str:filename>",
         api_views.serve_file,
         name="api_serve_file_bundle",
+    ),
+    # Measurements made in the volume grid become durable annotation revisions.
+    # Domain-oriented on purpose (the governing architectural rule): the URL names a
+    # patient and the work, not a viewer. See annotations/views.py.
+    path(
+        "patients/<int:patient_id>/measurements/",
+        annotations_views.save_measurements_api,
+        name="api_save_measurements",
+    ),
+    path(
+        "patients/<int:patient_id>/measurements/state/",
+        annotations_views.measurements_state_api,
+        name="api_measurements_state",
     ),
     # Project-based API endpoints
     path(

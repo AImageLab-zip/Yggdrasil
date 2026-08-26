@@ -30,6 +30,11 @@ from annotations.services.resources import (
     register_file,
     register_logical_volume,
 )
+from annotations.services.viewer import (
+    MAX_ANNOTATIONS_PER_REVISION,
+    MEASUREMENTS_KIND,
+    save_measurements,
+)
 from annotations.services.sets import (
     add_payload,
     attach_target,
@@ -40,6 +45,8 @@ from annotations.services.sets import (
 )
 
 __all__ = [
+    "MAX_ANNOTATIONS_PER_REVISION",
+    "MEASUREMENTS_KIND",
     "AnnotationConflict",
     "AnnotationLocked",
     "AnnotationNotAllowed",
@@ -60,4 +67,5 @@ __all__ = [
     "register_derived",
     "register_file",
     "register_logical_volume",
+    "save_measurements",
 ]

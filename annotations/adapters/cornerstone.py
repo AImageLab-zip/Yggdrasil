@@ -10,8 +10,11 @@ from convenience, and each one is a refusal:
 
 **Runtime identifiers are dropped, not stored.** ``annotationUID``, ``referencedImageId``
 and any ``volumeId`` are session-scoped -- they name objects in one browser tab's cache
-and mean nothing tomorrow. ``FrameOfReferenceUID`` is the exception and is *kept*: that
-one is DICOM's, not Cornerstone's, and ``SpatialAnnotation3DItem`` has a column for it.
+and mean nothing tomorrow. ``FrameOfReferenceUID`` is the exception and is kept *in
+patient space*: that one is DICOM's, not Cornerstone's, and
+``SpatialAnnotation3DItem`` has a column for it. It is dropped again in a
+resource-scoped frame, where it would be a false claim -- see
+:data:`RESOURCE_SCOPED_FRAMES`.
 
 **Measurements are recomputed from the points, never read from ``cachedStats``.** The
 serializer's ``assert_no_viewer_identifiers`` already refuses a document containing
@@ -68,6 +71,12 @@ GEOMETRIC_TOOLS = frozenset(
 
 #: Tools that carry geometry but whose *number* needs the voxels. See the module note.
 INTENSITY_TOOLS = frozenset({"Probe"})
+
+#: Frames whose coordinates mean nothing outside the one resource that defines them,
+#: and which therefore cannot carry a DICOM Frame of Reference UID.
+RESOURCE_SCOPED_FRAMES = frozenset(
+    {CoordinateSystem.VOLUME_VOXEL, CoordinateSystem.RESOURCE_LOCAL}
+)
 
 
 def _point(value):
@@ -300,7 +309,19 @@ def descriptors_for_annotation(
     }
     geometry_kwargs = dict(
         coordinate_system=coordinate_system,
-        frame_of_reference_uid=str(metadata.get("FrameOfReferenceUID") or ""),
+        # A Frame of Reference UID asserts these coordinates are comparable with any
+        # other series carrying it. That is true in patient space and false in a
+        # resource-scoped frame -- voxel indices and a mesh's object space mean nothing
+        # outside the one resource that defines them. Cornerstone attaches the UID to
+        # every annotation regardless, so it is dropped here rather than passed on: a
+        # false claim is worse than none, because a later fusion would trust it.
+        # ``annotations.validators.geometry`` refuses it outright, so this is the
+        # adapter agreeing with the validator rather than working around it.
+        frame_of_reference_uid=(
+            str(metadata.get("FrameOfReferenceUID") or "")
+            if coordinate_system not in RESOURCE_SCOPED_FRAMES
+            else ""
+        ),
         **shared,
     )
 

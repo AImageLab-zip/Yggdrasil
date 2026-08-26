@@ -49,19 +49,36 @@ class CommittedBundleTests(SimpleTestCase):
             self.assertIsNotNone(path, name)
             self.assertTrue((static_dir / path).is_file(), f"{name} -> {path}")
 
+    #: The five per-surface bundles. Phases 3, 4, 6, 7 and 10 each own one.
+    SURFACE_ENTRIES = [
+        "mesh-landmarks",
+        "panoramic-cpr",
+        "photo-stack",
+        "video-annotate",
+        "volume-grid",
+    ]
+
+    #: Entries that are scaffolding and have a deletion date. ``volume-validation``
+    #: is the Phase 3 harness: it is the only place in the tree that vendors NiiVue,
+    #: and it goes when the viewer replacement merges.
+    TEMPORARY_ENTRIES = ["volume-validation"]
+
     def test_the_five_surfaces_the_roadmap_names_are_all_present(self):
-        # Phases 3, 4, 6, 7 and 10 each own one of these. If a rename drops one, the
-        # phase that needs it should fail here rather than in a template.
-        self.assertEqual(
-            sorted(cornerstone_assets.get_entries()),
-            [
-                "mesh-landmarks",
-                "panoramic-cpr",
-                "photo-stack",
-                "video-annotate",
-                "volume-grid",
-            ],
-        )
+        # If a rename drops one, the phase that needs it should fail here rather than
+        # in a template.
+        entries = set(cornerstone_assets.get_entries())
+        for name in self.SURFACE_ENTRIES:
+            self.assertIn(name, entries)
+
+    def test_the_only_extra_entry_is_the_temporary_phase_3_harness(self):
+        """A build entry nobody named is either a typo or scaffolding left behind.
+
+        Splitting this from the check above keeps the surface list strict while
+        letting the harness exist: when Phase 3 deletes it, ``TEMPORARY_ENTRIES``
+        empties and this test becomes the strict equality it used to be.
+        """
+        extras = sorted(set(cornerstone_assets.get_entries()) - set(self.SURFACE_ENTRIES))
+        self.assertEqual(extras, self.TEMPORARY_ENTRIES)
 
     def test_the_tag_emits_a_module_script(self):
         # F4: an IIFE bundle loses every web worker, so the tag must never emit a
