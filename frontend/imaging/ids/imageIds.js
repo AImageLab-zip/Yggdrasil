@@ -25,9 +25,16 @@
  *      {@link assertLoaderSafeUrl} refuses such a URL instead of building it.
  *
  * (3) matters concretely: a `cbct_processed` row with `file_hash == 'multi-file'` is
- * addressed as `?file_key=segmentation_nifti` (`maxillo/api_views/files.py:45-65`), and
- * that is a volume Phase 3 has to display. Phase 1 draws the boundary loudly rather
- * than changing the serve contract to suit the viewer; see the roadmap's F14.
+ * addressed as `?file_key=segmentation_nifti` (`maxillo/api_views/files.py`), and that
+ * is a volume Phase 3 has to display. Phase 1 drew the boundary loudly rather than
+ * changing the serve contract to suit the viewer; see the roadmap's F14.
+ *
+ * **Phase 3 resolves it.** `serve_file` now also accepts the bundle key as a path
+ * segment (`.../serve/<id>/key/<bundle_key>/<filename>`), so a bundle member can be
+ * named without a query string at all. {@link bundleFilePath} builds that form and
+ * {@link volumeUrl} takes an optional `bundleKey`. `assertLoaderSafeUrl` is unchanged
+ * and still refuses a query string -- the constraint was never wrong, it just had no
+ * answer until the server gained one.
  */
 
 /** The loader's own scheme prefix (`nifti-volume-loader/constants/niftiLoaderScheme`). */
@@ -60,6 +67,63 @@ export function serveFilePath({ fileId, filename, namespace = 'api' }) {
     // No trailing slash: the suffix has to be the last thing in the path, or rule (2)
     // above goes false for a gzipped volume.
     return `${prefix}/api/processing/files/serve/${Number(fileId)}/${filename}`;
+}
+
+/**
+ * Path of the bundle-member serve route -- the query-free answer to F14.
+ *
+ * Matches `api_serve_file_bundle`, registered in `maxillo/app_urls.py`,
+ * `maxillo/api_urls.py` and `brain/app_urls.py`. The key sits *before* the filename so
+ * the filename stays the last segment and keeps carrying the extension the loader's
+ * `.gz` test reads.
+ *
+ * @param {object} options
+ * @param {number|string} options.fileId `FileRegistry.id`.
+ * @param {string} options.bundleKey a key of `FileRegistry.metadata['files']`,
+ *   e.g. `'volume_nifti'` or `'segmentation_nifti'`.
+ * @param {string} options.filename final path segment; must carry the real extension.
+ * @param {string} [options.namespace] one of {@link SERVE_NAMESPACES}.
+ * @returns {string} e.g. `/maxillo/api/processing/files/serve/123/key/volume_nifti/v.nii.gz`
+ */
+export function bundleFilePath({ fileId, bundleKey, filename, namespace = 'api' }) {
+    assertBundleKey(bundleKey);
+    // Reuse the plain builder for its namespace and id validation, then splice the key
+    // in ahead of the filename -- one place decides what a serve path looks like.
+    const base = serveFilePath({ fileId, filename, namespace });
+    const cut = base.lastIndexOf('/');
+    return `${base.slice(0, cut)}/key/${bundleKey}${base.slice(cut)}`;
+}
+
+/**
+ * Reject a bundle key that would not survive the round trip through the URL.
+ *
+ * Deliberately strict. The key is looked up verbatim against
+ * `FileRegistry.metadata['files']`, and every key this codebase writes is a plain
+ * identifier (`volume_nifti`, `segmentation_nifti`); anything needing escaping is
+ * far more likely a mistake than a real key.
+ *
+ * @param {string} bundleKey
+ */
+export function assertBundleKey(bundleKey) {
+    if (typeof bundleKey !== 'string' || bundleKey.length === 0) {
+        throw new Error('bundleKey is required.');
+    }
+    if (!/^[A-Za-z0-9_.-]+$/.test(bundleKey)) {
+        throw new Error(
+            `bundleKey must be a plain identifier, got '${bundleKey}'. ` +
+                "Django's <str:> converter would not match a key containing '/'."
+        );
+    }
+    if (bundleKey === 'primary') {
+        // `serve_file` reads 'primary' as "no specific member" -- it is the sentinel
+        // `modality_files` emits for every ordinary single-file modality, not the name
+        // of anything in `metadata['files']`. Routing it through the bundle path would
+        // read as though a member called 'primary' existed.
+        throw new Error(
+            "'primary' is not a bundle member: it is the sentinel for an ordinary " +
+                'single-file row. Omit bundleKey instead.'
+        );
+    }
 }
 
 /**
@@ -129,11 +193,20 @@ export function assertLoaderSafeUrl(absoluteUrl) {
 /**
  * Build the loader URL for one volume: absolute, suffixed, query-free.
  *
- * @param {object} options passed to {@link serveFilePath}, plus `origin`.
+ * Pass `bundleKey` to address one member of a multi-file `cbct_processed` row. That
+ * goes in the path, not the query string -- see F14 in this file's header.
+ *
+ * @param {object} options passed to {@link serveFilePath}, plus `bundleKey` and `origin`.
  * @returns {string}
  */
-export function volumeUrl({ fileId, filename, namespace = 'api', origin } = {}) {
-    const path = serveFilePath({ fileId, filename, namespace });
+export function volumeUrl({ fileId, filename, namespace = 'api', bundleKey, origin } = {}) {
+    // An explicit 'primary' means "the row's own file", which is the plain route --
+    // `modality_files` in maxillo/views/patient_detail.py emits that sentinel for every
+    // non-bundle modality, so accepting it here saves every call site a conditional.
+    const key = bundleKey === 'primary' ? undefined : bundleKey;
+    const path = key
+        ? bundleFilePath({ fileId, bundleKey: key, filename, namespace })
+        : serveFilePath({ fileId, filename, namespace });
     return assertLoaderSafeUrl(toAbsoluteUrl(path, { origin }));
 }
 

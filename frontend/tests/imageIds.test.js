@@ -10,6 +10,8 @@ import {
     volumeUrl,
     niftiVolumeImageId,
     upgradeLegacyServeUrl,
+    bundleFilePath,
+    assertBundleKey,
 } from '../imaging/ids/imageIds.js';
 
 const ORIGIN = 'https://yggdrasil.ing.unimore.it';
@@ -164,4 +166,106 @@ test('upgrading refuses to silently drop a file_key', () => {
 
 test('upgrading a URL that is not a serve URL is refused', () => {
     assert.throws(() => upgradeLegacyServeUrl('/static/js/app.js', 'v.nii'), /Not a file-serve URL/);
+});
+
+// ---------------------------------------------------------------------------
+// F14: addressing one member of a multi-file bundle without a query string.
+//
+// Phase 1 could only refuse these URLs; the server had no query-free way to name a
+// bundle member, and the maxillo CBCT display volume is one. Phase 3 added the
+// `.../key/<bundle_key>/<filename>` route, so the refusal now has an alternative to
+// point at rather than being a dead end.
+// ---------------------------------------------------------------------------
+
+test('bundleFilePath puts the key before the filename, so the extension stays last', () => {
+    assert.equal(
+        bundleFilePath({ fileId: 123, bundleKey: 'volume_nifti', filename: 'v.nii.gz' }),
+        '/api/processing/files/serve/123/key/volume_nifti/v.nii.gz'
+    );
+    assert.equal(
+        bundleFilePath({
+            fileId: 7,
+            bundleKey: 'segmentation_nifti',
+            filename: 'seg.nii.gz',
+            namespace: 'maxillo',
+        }),
+        '/maxillo/api/processing/files/serve/7/key/segmentation_nifti/seg.nii.gz'
+    );
+});
+
+test('a bundle URL is loader-safe: absolute, query-free, and .gz-detectable', () => {
+    const url = volumeUrl({
+        fileId: 42,
+        bundleKey: 'volume_nifti',
+        filename: 'cbct.nii.gz',
+        namespace: 'maxillo',
+        origin: 'https://ygg.example',
+    });
+    assert.equal(
+        url,
+        'https://ygg.example/maxillo/api/processing/files/serve/42/key/volume_nifti/cbct.nii.gz'
+    );
+
+    // The two loader rules this whole module exists for, checked on the new shape.
+    const parsed = new URL(url); // rule 1: does not throw
+    assert.equal(parsed.search, ''); // rule 3: no `?` for `?frame=N` to collide with
+    assert.ok(parsed.pathname.endsWith('.gz')); // rule 2: gunzip is detected
+});
+
+test('bundleFilePath inherits the id and namespace validation of the plain route', () => {
+    assert.throws(
+        () => bundleFilePath({ fileId: 0, bundleKey: 'volume_nifti', filename: 'v.nii' }),
+        /positive integer/
+    );
+    assert.throws(
+        () => bundleFilePath({ fileId: 1, bundleKey: 'volume_nifti', filename: 'v.nii', namespace: 'nope' }),
+        /Unknown serve namespace/
+    );
+    assert.throws(
+        () => bundleFilePath({ fileId: 1, bundleKey: 'volume_nifti', filename: 'a/b.nii' }),
+        /single path segment/
+    );
+});
+
+test('assertBundleKey refuses keys the route could not carry', () => {
+    assert.throws(() => assertBundleKey(''), /required/);
+    assert.throws(() => assertBundleKey(undefined), /required/);
+    assert.throws(() => assertBundleKey('a/b'), /plain identifier/);
+    assert.throws(() => assertBundleKey('a?b'), /plain identifier/);
+    assert.throws(() => assertBundleKey('a b'), /plain identifier/);
+    // Valid shapes stay valid.
+    for (const key of ['volume_nifti', 'segmentation_nifti', 'v2.nii', 'a-b']) {
+        assert.doesNotThrow(() => assertBundleKey(key));
+    }
+});
+
+test("'primary' is not a bundle member, and volumeUrl treats it as the plain route", () => {
+    // 'primary' is the sentinel maxillo/views/patient_detail.py emits for every
+    // ordinary single-file modality; it names nothing in `metadata['files']`.
+    assert.throws(() => assertBundleKey('primary'), /not a bundle member/);
+    assert.equal(
+        volumeUrl({ fileId: 5, bundleKey: 'primary', filename: 'x.nii.gz', origin: 'https://h' }),
+        volumeUrl({ fileId: 5, filename: 'x.nii.gz', origin: 'https://h' })
+    );
+});
+
+test('niftiVolumeImageId carries the bundle key through the scheme prefix', () => {
+    assert.equal(
+        niftiVolumeImageId({
+            fileId: 9,
+            bundleKey: 'volume_nifti',
+            filename: 'v.nii.gz',
+            origin: 'https://h',
+        }),
+        'nifti:https://h/api/processing/files/serve/9/key/volume_nifti/v.nii.gz'
+    );
+});
+
+test('the query-string form is still refused, now that a path form exists', () => {
+    // Unchanged behaviour, asserted again deliberately: F14 was resolved by giving the
+    // caller somewhere to go, not by relaxing the rule.
+    assert.throws(
+        () => assertLoaderSafeUrl('https://h/api/processing/files/serve/9/v.nii.gz?file_key=volume_nifti'),
+        /every slice resolves to frame 0/
+    );
 });
