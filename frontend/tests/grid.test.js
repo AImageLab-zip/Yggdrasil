@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import {
     FIXED_CBCT_LAYOUT,
@@ -42,6 +43,7 @@ import {
     voiRangeFromModalityWindow,
 } from '../imaging/grid/voi.js';
 import { residualModalityLut } from '../imaging/metadata/modalityLutModule.js';
+import { PRIMARY_TOOLS } from '../imaging/grid/viewportManager.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..', '..');
@@ -427,4 +429,44 @@ test('the window readout names its unit, or has none to name', () => {
 
     assert.equal(formatWindow({ windowCenter: 300, windowWidth: 1500 }, 'HU'), 'W 1500 HU / L 300 HU');
     assert.equal(formatWindow({ windowCenter: 812.5, windowWidth: 2799.4 }), 'W 2799 / L 813');
+});
+
+// ---------------------------------------------------------------------------
+// viewportManager.js <-> the entry
+// ---------------------------------------------------------------------------
+
+test('every primary tool is actually registered by the entry', async () => {
+    // The invariant: `setPrimaryTool` refuses a name outside PRIMARY_TOOLS, and the
+    // tool group can only bind a tool the entry put in GRID_TOOLS. A name in one list
+    // and not the other is a toolbar button that throws when clicked.
+    //
+    // Read as text, not imported: frontend/entries/volume-grid.js imports
+    // @cornerstonejs/tools, which needs a DOM. `viewportManager.js` deliberately does
+    // not, which is why its half can be imported normally.
+    const { PRIMARY_TOOLS } = await import('../imaging/grid/viewportManager.js');
+    const entry = await readFile(join(HERE, '..', 'entries', 'volume-grid.js'), 'utf8');
+
+    const block = entry.slice(entry.indexOf('export const GRID_TOOLS'));
+    const registered = new Set(
+        [...block.slice(0, block.indexOf('};')).matchAll(/^\s{4}(\w+):\s/gm)].map((m) => m[1])
+    );
+
+    assert.ok(registered.size > 0, 'GRID_TOOLS could not be parsed out of the entry');
+    for (const tool of PRIMARY_TOOLS) {
+        assert.ok(registered.has(tool), `PRIMARY_TOOLS names '${tool}', which GRID_TOOLS does not register`);
+    }
+    // And the permanently-bound ones the tool groups reference by name.
+    for (const tool of ['Pan', 'Zoom', 'StackScroll', 'TrackballRotate']) {
+        assert.ok(registered.has(tool), `GRID_TOOLS must register '${tool}'`);
+    }
+});
+
+test('window/level is a primary tool, and pan/zoom/scroll deliberately are not', () => {
+    // A user who has picked the length tool still has to navigate, so pan, zoom and
+    // scroll keep permanent bindings and are never what the toolbar swaps.
+    assert.ok(PRIMARY_TOOLS.includes('WindowLevel'));
+    assert.ok(PRIMARY_TOOLS.includes('Length'));
+    for (const navigation of ['Pan', 'Zoom', 'StackScroll']) {
+        assert.ok(!PRIMARY_TOOLS.includes(navigation), `${navigation} must not be swappable`);
+    }
 });

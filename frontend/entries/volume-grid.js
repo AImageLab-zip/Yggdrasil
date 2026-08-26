@@ -1,11 +1,19 @@
 /**
  * Entry point: CBCT + brain volume grid (roadmap Phase 3).
  *
- * Phase 1 builds this bundle; it does not wire it. No template loads this file yet
- * -- `templates/common/patient_detail.html` still loads NiiVue and viewer_grid.js.
- * The imports below are the real surface Phase 3 needs, and they are what pull the
- * three web workers and the ICRPolySeg wasm into the emitted tree, so
- * `npm run verify` has something to check.
+ * **Not yet wired.** `templates/common/patient_detail.html` still loads NiiVue and
+ * `viewer_grid.js`; the swap and the deletions are gated on a green validation-harness
+ * run across the maxillo *and* brain corpora, which is the roadmap's own condition for
+ * this phase. What is here is the replacement, built and testable ahead of that gate.
+ *
+ * The imports below are also what pull the three web workers and the ICRPolySeg wasm
+ * into the emitted tree, so `npm run verify` has something to check.
+ *
+ * Cornerstone is imported *here* and injected into `createVolumeGrid` rather than
+ * imported by `imaging/grid/viewportManager.js` directly. That keeps every module
+ * under `imaging/grid/` importable under `node --test`, which is what lets the layout,
+ * the window state machine and the VOI conversions carry 30 tests between them while
+ * the part that genuinely needs a GPU stays one thin file.
  */
 
 import {
@@ -31,6 +39,9 @@ import {
     StackScrollTool,
     WindowLevelTool,
     CrosshairsTool,
+    // The 3D window's primary. Phase 6 uses the same tool for IOS meshes, where it
+    // replaces THREE.TrackballControls; the volume render needs it first.
+    TrackballRotateTool,
     // Measurement -- the whole point of the migration. Today there is exactly one
     // tool (static/js/viewer_grid.js:88-91) and it is never persisted.
     LengthTool,
@@ -133,4 +144,94 @@ export {
     upgradeLegacyServeUrl,
     modalityLutModule,
     applyModalityLut,
+};
+
+import { createVolumeGrid, RENDERING_ENGINE_ID, PRIMARY_TOOLS } from '../imaging/grid/viewportManager.js';
+import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, ORIENTATIONS, GRID_WINDOWS } from '../imaging/grid/layout.js';
+import { formatWindow, modalityWindowFromVoiRange, openingVoi, unitFor } from '../imaging/grid/voi.js';
+import {
+    createGridState,
+    setFreeScroll,
+    syncTargets,
+    windowAt,
+} from '../imaging/grid/windowState.js';
+
+/**
+ * The tools the grid registers, by the name the tool group knows them under.
+ *
+ * A map rather than the arrays above because `viewportManager` needs to pick
+ * `TrackballRotate` out for the 3D group and bind `Pan`/`Zoom`/`StackScroll`
+ * permanently; addressing those by array index would be unreadable and fragile.
+ */
+export const GRID_TOOLS = {
+    Pan: PanTool,
+    Zoom: ZoomTool,
+    StackScroll: StackScrollTool,
+    WindowLevel: WindowLevelTool,
+    Crosshairs: CrosshairsTool,
+    Length: LengthTool,
+    Height: HeightTool,
+    Angle: AngleTool,
+    CobbAngle: CobbAngleTool,
+    Bidirectional: BidirectionalTool,
+    Probe: ProbeTool,
+    RectangleROI: RectangleROITool,
+    EllipticalROI: EllipticalROITool,
+    CircleROI: CircleROITool,
+    TrackballRotate: TrackballRotateTool,
+};
+
+/**
+ * Build a volume grid over four DOM elements.
+ *
+ * @param {object} options
+ * @param {HTMLElement[]} options.elements one per window, in window order.
+ * @param {object[]} [options.layout] {@link FIXED_CBCT_LAYOUT} or {@link FREE_LAYOUT}.
+ * @returns {Promise<object>} the grid handle from `createVolumeGrid`.
+ */
+export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) {
+    if (!Array.isArray(elements) || elements.length !== GRID_VIEWPORT_COUNT) {
+        throw new Error(
+            `The grid needs exactly ${GRID_VIEWPORT_COUNT} elements, got ${elements?.length}.`
+        );
+    }
+
+    await initImaging();
+    volumeLoader.registerVolumeLoader('nifti', cornerstoneNiftiImageLoader);
+
+    return createVolumeGrid({
+        cornerstone: {
+            RenderingEngine,
+            coreEnums,
+            toolsEnums,
+            addTool,
+            ToolGroupManager,
+            tools: GRID_TOOLS,
+            volumeLoader,
+            createNiftiImageIdsAndCacheMetadata,
+            setVolumesForViewports,
+            cache,
+        },
+        elements,
+        layout,
+    });
+}
+
+export {
+    createVolumeGrid,
+    mountVolumeGrid as default,
+    RENDERING_ENGINE_ID,
+    PRIMARY_TOOLS,
+    FIXED_CBCT_LAYOUT,
+    FREE_LAYOUT,
+    ORIENTATIONS,
+    GRID_WINDOWS,
+    createGridState,
+    setFreeScroll,
+    syncTargets,
+    windowAt,
+    formatWindow,
+    modalityWindowFromVoiRange,
+    openingVoi,
+    unitFor,
 };
