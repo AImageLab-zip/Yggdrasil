@@ -92,6 +92,19 @@ unimplementable on top of this.** Mitigation: derive `modalityLutModule` from th
 in our own metadata provider and apply it explicitly in the ROI/probe/stat layer; assert in
 the harness and in CI fixtures across all four branches. File upstream.
 
+✅ **Mitigated in Phase 3** (`b90a7f9`), with one correction to the sentence above: the
+LUT that must be applied is **not** the header's. Upstream skips two of the four branches
+and *applies* the other two, so re-applying the header LUT unconditionally would double
+the intercept on the branches it got right. The hazard is not "the rescale is skipped"
+but "it is skipped sometimes, and nothing on the volume records which".
+`residualModalityLut()` answers that question and is what the metadata provider
+registers; identity from it means "already in modality units", never "no rescale
+defined". `toStoredValue()` is the inverse, which keeps an absolute preset expressible
+against an array that may still be raw. Tier 2 of the harness asserts the whole thing on
+real bytes, and the unit tests drive all four branches through a transcription of
+`modalityScaleNifti`'s own array selection and buggy gate. See also **F17**, a second
+defect in the same code path found while building this.
+
 **F2 — Cornerstone inherits the silent-mirroring hazard `volume_metadata.js` guards.**
 `static/js/nifti-reader.js:701-704` fabricates a diagonal RAS affine from `pixDims` when
 `qform_code < 1 && sform_code < 1`; `rasToLps()` then converts that fiction into a
@@ -212,7 +225,8 @@ either the `classification` or `bite_classification` slug, matching the form-pos
 warning**. This already happens for `save_generic_modality_folder` prefix rows; a DICOM series
 export would silently produce nothing.
 
-The three below were found in Phase 1, while building against the real packages.
+The four below were found while building against the real packages: F14–F16 in Phase 1,
+F17 in Phase 3.
 
 **F14 — the loader appends `?frame=N` with a literal `?`, so a `file_key` URL is
 unusable.** Found in Phase 1. `createNiftiImageIdsAndCacheMetadata.js:174` builds each
@@ -225,10 +239,18 @@ and it matters concretely: a `cbct_processed` row with `file_hash == 'multi-file
 addressed as `?file_key=segmentation_nifti` (`maxillo/api_views/files.py:45-65`) and is
 a volume Phase 3 must display. Phase 1 does **not** paper over it —
 `frontend/imaging/ids/imageIds.js` `assertLoaderSafeUrl()` refuses such a URL with the
-reason, and it is unit-tested. **Phase 3 must decide how a bundle member is addressed
-without a query string** (most likely: resolve the bundle key from the filename segment
-server-side, which would change the "`filename` is decorative" contract in
-`maxillo/api_views/files.py` — a deliberate design change, not a patch).
+reason, and it is unit-tested.
+
+✅ **Resolved in Phase 3** (`8758efa`), though not the way this finding guessed. Rather
+than resolving the bundle key from the filename segment — which would have ended the
+"`filename` is decorative" contract and would collide whenever two members share a
+basename — the key moved into its own path segment:
+`.../serve/<id>/key/<bundle_key>/<filename>`, registered in all three serving
+namespaces. Additive, so no existing caller changes; `filename` stays decorative on
+both forms; and `assertLoaderSafeUrl` is **unchanged** and still refuses a query string.
+The constraint was never wrong — it simply had no alternative to point at until the
+server grew one. `?file_key=` is kept for existing callers, and a request carrying both
+a path key and a query key that disagree is a **400**, not a precedence rule.
 
 **F15 — four `import.meta.url` worker resolutions, at four depths, not three.**
 Found in Phase 1 while building. F4 counts three; `itk-wasm` adds a fourth, *nested*
@@ -251,6 +273,23 @@ Minor, and ours to report upstream, not to work around.
 and then allocates `new Int16Array(nVox)`, so `checkCacheAvailable` reserves half the
 bytes actually taken. Filed alongside F1.
 
+**F17 — the rescale is applied *in place, into an integer array*, so it can wrap.**
+Found in Phase 3, while building F1's mitigation. For the two branches
+`modalityScaleNifti` does not skip, it writes `raw * slope + inter` back into the typed
+array it chose from the datatype — and that array is often still integral.
+`NIFTI_TYPE_INT16` with `scl_slope = 2` stays an `Int16Array`, so a study whose raw
+maximum exceeds 16383 wraps silently; `NIFTI_TYPE_UINT16` with a positive integral
+rescale stays a `Uint16Array` and wraps the same way. Unlike F1 this cannot be shown
+from the header alone — it needs the data range — so it ships as a per-study predicate
+(`upstreamRescaleMayOverflow` in `frontend/imaging/metadata/modalityLutModule.js`)
+evaluated by the harness rather than as a fixture. The predicate has to mirror
+upstream's own array selection and not merely the datatype: a fractional rescale takes
+the `Float32Array` branch, and so does a negative one for both unsigned types, so a
+datatype-only table would report overflow for volumes that are in fact promoted and
+safe. Note that **F16's over-allocation is load-bearing here**: `'Int8Array'` allocates
+an `Int16Array`, which is what gives a rescaled int8 volume room to grow. Fixing F16
+without fixing F17 would introduce a wrap. File both upstream together.
+
 ## Status
 
 | Phase | Scope | Status |
@@ -261,7 +300,7 @@ bytes actually taken. Filed alongside F1.
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
-| 3 | CBCT + brain volume grid | ⬜ not started |
+| 3 | CBCT + brain volume grid | 🟡 in progress (`release/3.0`, `8758efa`, `b90a7f9`, `831f9a2`) — foundation and **the validation harness** are in; the viewer replacement and the deletions are gated on a green run across both corpora |
 | 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
 | 5 | Intraoral tooth segmentation | ⬜ not started |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
@@ -497,6 +536,109 @@ failure, so all bytes-reading work is a management command
 **Fix F11 in this phase, shipped alone.** ✅ done (`47ede3b`).
 
 ## Phase 3 — CBCT + brain volume grid (largest, riskiest)
+
+> **In progress** (`8758efa`, `b90a7f9`, `831f9a2`). The foundation and the validation
+> harness are shipped; the viewer replacement and the deletions are not, and are gated
+> on a green harness run across the maxillo *and* brain corpora. Nothing is wired to a
+> template yet — `templates/common/patient_detail.html` still loads NiiVue and
+> `viewer_grid.js`. What follows is the plan as designed; the corrections below record
+> where the shipped part differs, and why.
+>
+> - **Preflight passed.** `static/js/nifti-reader.js` *is* built from
+>   `nifti-reader-js@0.6.9`: the `NIFTI1.readHeader` bodies are byte-identical to the
+>   released bundle apart from the module-namespace prefix a different bundler emits
+>   (`Utils.` vs `utilities_1.Utils.`). Tier 1 therefore compares one header parser
+>   against itself, not two parsers against each other. Re-run the diff if the pin moves.
+> - **F14 is resolved by a new route, not by re-reading the filename.** The roadmap
+>   guessed "resolve the bundle key from the filename segment server-side, which would
+>   change the `filename` is decorative contract". Shipped instead:
+>   `.../serve/<id>/key/<bundle_key>/<filename>`, registered in all three serving
+>   namespaces. It is additive, so every existing caller keeps its contract; it cannot
+>   collide when two bundle members share a basename, which a basename lookup would; and
+>   `filename` stays decorative on both forms rather than becoming load-bearing on one.
+>   `?file_key=` is untouched, and when both are present and disagree the request is a
+>   **400** rather than a precedence rule — the two names point at different volumes, and
+>   the failure being prevented is a viewer rendering the segmentation while every label
+>   says it is showing the volume.
+> - **F1's mitigation needed a second half the roadmap does not name.** "Derive
+>   `modalityLutModule` from the raw header and apply it explicitly" is only right for
+>   the two branches upstream skips. For the other two, upstream *does* apply the
+>   rescale, and applying the header LUT again would double the intercept. The operative
+>   hazard is therefore not "the rescale is skipped" but "it is skipped *sometimes*,
+>   with nothing on the volume recording which". `residualModalityLut()` is what a
+>   consumer of real values must ask; identity means "already in modality units", not
+>   "no rescale defined".
+> - **A new finding, F17, fell out of that.** `modalityScaleNifti` applies its rescale
+>   **in place, into the integer array it just allocated**, so `NIFTI_TYPE_INT16` with
+>   `scl_slope = 2` and a raw maximum above 16383 wraps silently. Unlike F1 it needs the
+>   data range to demonstrate, so it ships as a per-study predicate
+>   (`upstreamRescaleMayOverflow`) rather than a fixture. The predicate mirrors
+>   upstream's own array-selection branches, not just the datatype — a datatype-only
+>   table reports overflow for volumes that are in fact promoted to `Float32Array` and
+>   safe. F16's over-allocation turns out to be **load-bearing** for the INT8 case and
+>   is deliberately not "corrected".
+> - **The harness is three-legged, not a viewer-versus-viewer diff.** The roadmap says
+>   "NiiVue `frac2mm` (RAS) vs Cornerstone `indexToWorld` (LPS)". Taken literally that
+>   is a pairwise comparison, which reports agreement when both stacks are wrong the
+>   same way — precisely the F2 population, where both consume the same fabricated
+>   affine. Shipped with the file's own affine as the **reference** leg and both viewers
+>   measured against it, so an F2 study reports *agreement plus a warning* instead of a
+>   plain green. The roadmap's own "pure affine maths cannot catch a mirroring bug
+>   introduced downstream" is the same observation from the other end.
+> - **NiiVue's index space is not the file's, and the roadmap does not mention it.**
+>   NiiVue reorients every volume to RAS on load. Feeding the same `(i, j, k)` to
+>   `frac2mm` and to `indexToWorld` therefore compares two different voxels — and
+>   agrees by accident on any volume already stored RAS, which is most of them. The
+>   permutation is undone from `nvImage.permRAS`, whose convention was read off the
+>   shipped 0.69.0 (`dimsRAS = [dims[0], dims[perm[0]], …]`, so output axis `j` reads
+>   input axis `perm[j] - 1`, negated when flipped). The flip must use the **source**
+>   axis length: using the output axis's is silent on a cube and wrong on every real
+>   CBCT. `frac2mm` is called with `isForceSliceMM = true`, or it uses `frac2mmOrtho` —
+>   the orthogonalised slice matrix, which is not an oblique volume's true world mapping.
+> - **Sampling is seeded.** The roadmap says "~10⁴ pseudo-random voxel indices" without
+>   saying reproducible. A gate whose samples cannot be reproduced reports "green once,
+>   on voxels nobody can name": a failure cannot be re-examined at the index that failed,
+>   and two runs' numbers cannot be compared. `mulberry32` with a committed default seed,
+>   and the eight corners plus the centre are pinned before the random fill — an
+>   off-by-one at the far edge is exactly what an interior draw misses.
+> - **`volumeRange`'s inputs could not be ported, only its logic.** The roadmap says
+>   "reuse `niivue_render_modes.volumeRange`'s robust min/max logic (and port its test)".
+>   Its `robust_min`/`robust_max` were computed by *NiiVue*, inside the library being
+>   deleted; only the fallback chain is ours to keep. That chain is reproduced decision
+>   for decision — including the widening that stops a 99%-air volume opening on a window
+>   which clips the anatomy entirely — and `robustRange()` computes the percentiles here,
+>   by histogram rather than sort because a CBCT is 10⁸ voxels. The ported test asserts
+>   the real-value answer *and* re-derives the percentages the old one asserted, so a
+>   drift between them shows up as a failure rather than as a rewrite.
+> - **Presets are CT-only, deliberately.** Decision #16 says "absolute HU presets only
+>   where meaningful". Shipped: `MODALITY_PRESETS` has a `ct` table and nothing else.
+>   CBCT greyscale is not calibrated Hounsfield — the same anatomy reads differently
+>   between vendors and between fields of view on one machine — so a CBCT preset would
+>   be a number that looks authoritative and is not. The per-`Modality` admin
+>   configuration half of #16 lands with the viewer, since it needs a migration.
+> - **The harness page is staff-only, not project-admin.** `panoramic_warmup` — the
+>   pattern it follows — gates on project admin. That is not enough here: F10 records
+>   that `demo_index` logs anonymous visitors in as a real user, and this page
+>   enumerates raw volume URLs across domains. The demo guest is a non-staff user, so
+>   `is_staff` is a gate the demo path cannot reach at all, and the test asserts it
+>   against the actual seeded guest rather than reasoning about it.
+> - **Two bugs were found by writing the harness's own tests**, both in code written
+>   minutes earlier, and both of the class the harness exists to catch:
+>   `checkAnalyticLengths` walked its 64-voxel run off the end of any axis shorter than
+>   66, skipped every check, and reported failure for a *correct* viewer; and the
+>   fixture for "catches a transposed direction matrix" was accidentally symmetric — a
+>   rotation purely about x comes out of `rasToLps` as a symmetric matrix whose
+>   transpose is itself — so that test passed vacuously. The second one is why the
+>   fixture now asserts its own asymmetry first.
+> - **Everything in the harness is temporary** and is deleted with the viewer
+>   replacement: `frontend/entries/volume-validation.js`,
+>   `frontend/imaging/validation/`, `common/imaging_validation.py`,
+>   `templates/common/imaging_validation.html` and the `@niivue/niivue` devDependency.
+>   The bundle entry is the only place in the tree that vendors NiiVue.
+> - **Test count: 197 frontend (`node --test`, from 97) and 16 new Django tests**, 0
+>   failures. The fixtures are real NIfTI-1 files written byte by byte and round-tripped
+>   through `nifti-reader-js`: a mock header object would skip the parser, and the parser
+>   is part of what is being validated.
 
 **Gate: the validation harness must be green across the maxillo *and* brain corpora before
 this merges.** With no feature flags, this pre-merge gate *is* the safety net.

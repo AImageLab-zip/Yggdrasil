@@ -90,6 +90,30 @@ Templates load a surface with:
 
 Details and rationale: [docs/cornerstone-roadmap.md](docs/cornerstone-roadmap.md).
 
+## The Phase 3 validation harness is temporary
+
+`frontend/imaging/validation/`, `frontend/entries/volume-validation.js`,
+`common/imaging_validation.py`, `templates/common/imaging_validation.html` and the
+`@niivue/niivue` devDependency exist to clear one gate: the volume grid may not be
+replaced until the harness is green across the maxillo *and* brain corpora. That
+bundle entry is the only place in the tree that vendors NiiVue.
+
+**All of it is deleted with the viewer replacement.** Do not build on it, and do not
+import from `imaging/validation/` outside the harness. A scaffold that outlives its
+gate becomes architecture nobody chose.
+
+Run it at `/imaging-validation/` as a staff user. It is staff-only rather than
+`@login_required` on purpose — `common/demo.py` logs anonymous visitors in as a real
+user, so an authenticated-only page listing raw volume URLs would be public.
+
+Two rules inside it are load-bearing and look like detail:
+
+- **Both viewers are compared against the file's own affine, never against each
+  other.** A pairwise diff reports agreement when both stacks are wrong the same way,
+  which is exactly the population whose header declares no orientation.
+- **Sampling is seeded.** A gate whose samples cannot be reproduced means "green once,
+  on voxels nobody can name". If you add a tier, take the seed as an argument.
+
 ## The `annotations` app: layering is enforced by review
 
 `annotations/` is the durable annotation model. Four layers, and the boundaries
