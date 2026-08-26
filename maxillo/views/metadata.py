@@ -14,6 +14,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 
+from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.models import FileRegistry, Job
 from common.object_storage import download_to_tempfile, get_object_storage
 from common.permissions import user_can_edit_metadata, user_can_read_folder, user_is_project_admin
@@ -233,6 +234,21 @@ def update_nifti_metadata(request, patient_id):
 
         if not user_can_edit_metadata(request.user, patient):
             return JsonResponse({"error": "Permission denied"}, status=403)
+
+        # Rewriting qform/sform re-bases every landmark, spline and polygon ever
+        # drawn on this volume: the voxels keep their values but move in patient
+        # space, and nothing in the record would say so. Same rule as adding or
+        # removing a raw file -- once annotation work exists, the raw inputs are
+        # frozen, and unlike the Django admin nothing in the app can override it.
+        lock_reasons = annotation_lock_reasons(patient)
+        if lock_reasons:
+            return JsonResponse(
+                {
+                    "error": lock_message(lock_reasons, subject="scan orientation"),
+                    "raw_locked": True,
+                },
+                status=409,
+            )
 
         # Check if CBCT exists
         if not patient.has_cbct_scan():

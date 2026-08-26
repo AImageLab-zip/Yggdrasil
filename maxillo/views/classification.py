@@ -9,7 +9,11 @@ import os
 import logging
 
 from .domain import get_domain_models
-from common.permissions import user_can_write_annotations, user_is_project_admin
+from common.permissions import (
+    project_allows_annotation,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,20 @@ def update_classification(request, patient_id):
         
         if not can_classify:
             return JsonResponse({'error': 'Permission denied'}, status=403)
+
+        # Every other annotation write asks the project first; this one did not,
+        # so a project with occlusion classification switched off still accepted
+        # instant updates. Both slugs are checked because the form-post path in
+        # ``patient_detail`` accepts either.
+        if not (
+            project_allows_annotation(patient, 'classification')
+            or project_allows_annotation(patient, 'bite_classification')
+        ):
+            return JsonResponse(
+                {'error': 'Occlusion classification is disabled for this project.'},
+                status=403,
+            )
+
         data = json.loads(request.body)
         
         field = data.get('field')
