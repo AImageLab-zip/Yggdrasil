@@ -140,6 +140,15 @@ constant, `selected` at `templates/maxillo/patient_detail_content.html:88`. `mip
 `MAXIMUM_INTENSITY_BLEND` and `shaded` → native vtk.js gradient shading are clean equivalents;
 `amip` is not. **Requires sign-off on real studies before deletion.**
 
+🟡 **Narrowed in Phase 3, and the framing was too pessimistic.** `amip` is not a blend
+mode vtk.js lacks — it is *depth-attenuated MIP*: the running maximum is taken over
+`density * transmittance` rather than over `density`, with
+`transmittance *= exp(-density * 0.018)` accumulated front to back. There is no vtk.js
+`BlendMode` for it (`Rendering/Core/VolumeMapper/Constants.js` has seven and none
+attenuates), but it does **not follow that it has to be deleted or approximated** — see
+**F18**. What still stands is the sign-off requirement: the extinction constant is
+by-eye, so whatever ships has to be looked at on real studies before the old path goes.
+
 **F8 — ~3,000 lines are already dead, and a further ~700 are conditionally dead.**
 
 *Unconditionally dead — no template references them at all, verified by grep:*
@@ -225,8 +234,8 @@ either the `classification` or `bite_classification` slug, matching the form-pos
 warning**. This already happens for `save_generic_modality_folder` prefix rows; a DICOM series
 export would silently produce nothing.
 
-The four below were found while building against the real packages: F14–F16 in Phase 1,
-F17 in Phase 3.
+The five below were found while building against the real packages: F14–F16 in Phase 1,
+F17 and F18 in Phase 3.
 
 **F14 — the loader appends `?frame=N` with a literal `?`, so a `file_key` URL is
 unusable.** Found in Phase 1. `createNiftiImageIdsAndCacheMetadata.js:174` builds each
@@ -289,6 +298,28 @@ datatype-only table would report overflow for volumes that are in fact promoted 
 safe. Note that **F16's over-allocation is load-bearing here**: `'Int8Array'` allocates
 an `Int16Array`, which is what gives a rescaled int8 volume room to grow. Fixing F16
 without fixing F17 would introduce a wrap. File both upstream together.
+
+**F18 — vtk.js supports mapper-level shader replacement, so `amip` is portable.**
+Found in Phase 3 while scoping F7. `vtkOpenGLVolumeMapper` mixes in
+`ReplacementShaderMapper.implementBuildShadersWithReplacements`
+(`Rendering/OpenGL/VolumeMapper.js:977`), which reads
+`mapper.getViewSpecificProperties().OpenGL` and applies both a list of
+`ShaderReplacements` — `{shaderType, originalValue, replacementValue, replaceFirst,
+replaceAll}`, substituted against **any literal string**, not only a `//VTK::` anchor —
+and, if present, a wholesale `FragmentShaderCode` override. The volume fragment shader's
+`MAXIMUM_INTENSITY_BLEND` branch keeps its running maximum in a `selectedValue` /
+`selectedPosVC` pair inside a bounded sample loop, which is structurally the same place
+NiiVue's `yggMaximum` / `yggMaximumValue` live. Splicing the transmittance accumulation
+in is therefore the *same technique* `niivue_render_modes.js` already uses on NiiVue's
+shader (`spliceRenderFragment`, anchored on three literal strings and covered by
+`static/js/tests/niivue_render_modes.test.js`).
+
+**Not yet built or run** — what Phase 3 establishes is that the mechanism exists and is
+supported, not that the port is done. Two costs to budget honestly: the replacement is
+version-coupled, so a vtk.js bump can move the anchor and must fail loudly rather than
+silently rendering plain MIP (port the splice test, do not delete it); and the by-eye
+`0.018` constant means the result needs looking at on real studies whichever way it is
+implemented, which is F7's original requirement and is unchanged.
 
 ## Status
 
