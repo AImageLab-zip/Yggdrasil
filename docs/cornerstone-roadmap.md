@@ -157,6 +157,16 @@ attenuates), but it does **not follow that it has to be deleted or approximated*
 **F18**. What still stands is the sign-off requirement: the extinction constant is
 by-eye, so whatever ships has to be looked at on real studies before the old path goes.
 
+✅ **Signed off** — the maintainer compared the F18 shader replacement against the old
+NiiVue path on real studies and accepted it. This is the item the Phase 3 gate was
+finally held on, and it was always going to be settled by looking rather than by a
+number: `0.018` is a by-eye constant, so no tolerance could have decided it. Note what
+the sign-off does *not* cover — the replacement is version-coupled, and a vtk.js bump
+can move the anchor strings. `frontend/tests/attenuatedMip.test.js` loads the **real**
+`vtkVolumeFS.glsl.js` out of `node_modules` for exactly that reason, so an anchor that
+moves fails the build rather than silently rendering plain MIP. **Do not delete that
+test**, and re-do the sign-off if the pin moves.
+
 **F8 — ~3,000 lines are already dead, and a further ~700 are conditionally dead.**
 
 *Unconditionally dead — no template references them at all, verified by grep:*
@@ -361,9 +371,8 @@ implemented, which is F7's original requirement and is unchanged.
 | 0.3 | `docs/cornerstone-future-work.md` | ✅ done (`release/2.0`, `5dbb639`) |
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
-| 3 | CBCT + brain volume grid | 🟢 shipped, unrendered (`release/3.0`, `8758efa`…HEAD) — grid wired in both namespaces, **NiiVue and `viewer_grid.js` deleted**, measurements persist. Tier 1 + Tier 2 pass 34/34. **Nobody has looked at a rendered pixel**: Tier 3 has not run, F7's `amip` sign-off is outstanding, and 22 brain studies were never read. Merged on the maintainer's explicit call |
-| 4 | Photo stacks (teleradiography + intraoral) | ⬜ not started |
-| 5 | Intraoral tooth segmentation | ⬜ not started |
+| 3 | CBCT + brain volume grid | ✅ done (`release/3.0`, `8758efa`…`768be15`) — grid wired in both namespaces, **NiiVue and `viewer_grid.js` deleted**, measurements persist and come back on reload behind an annotation *mode*. Tier 1 + Tier 2 pass 34/34; **F7's `amip` sign-off recorded on real studies by the maintainer**, which clears the last item the gate was held on. 22 brain studies remain unread on the staging box — an environment limit, not a finding |
+| 4+5 | Photo stacks **and** intraoral tooth segmentation — **merged**, see the note under *Phases 4–10* | ⬜ not started |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
 | 7 | Panoramic live CPR | ⬜ not started |
 | 8 | Native DICOM ingestion and serving | ⬜ not started |
@@ -598,12 +607,22 @@ failure, so all bytes-reading work is a management command
 
 ## Phase 3 — CBCT + brain volume grid (largest, riskiest)
 
-> **In progress** (`8758efa`, `b90a7f9`, `831f9a2`). The foundation and the validation
-> harness are shipped; the viewer replacement and the deletions are not, and are gated
-> on a green harness run across the maxillo *and* brain corpora. Nothing is wired to a
-> template yet — `templates/common/patient_detail.html` still loads NiiVue and
-> `viewer_grid.js`. What follows is the plan as designed; the corrections below record
-> where the shipped part differs, and why.
+> **Shipped** (`8758efa`…`768be15`). The grid is wired in both namespaces, NiiVue and
+> `viewer_grid.js` are deleted, measurements persist and are restored on reload, and
+> the gate is cleared: Tier 1 + Tier 2 green across the readable corpus, and F7's
+> `amip` sign-off performed on real studies. What follows is the plan as designed; the
+> corrections below record where the shipped implementation differs, and why.
+>
+> The two things the plan did not anticipate, both found after the merge and both
+> silent failures, are recorded with the annotation-mode work in `768be15`: an
+> annotation saved while measurements were hidden could never be shown again
+> (`setAnnotationVisibility(uid, true)` only clears the flag for a UID already in
+> Cornerstone's hidden set), and restored measurements were not drawn at all until a
+> tool button happened to be clicked (`addTool` writes no `toolOptions` entry, and a
+> mode-less tool is skipped by `getToolsWithModesForElement`). Both are exactly the
+> class of defect the Tier 3 appearance pass exists to catch, and both were found by
+> use rather than by the harness — which validates the data path and says nothing
+> about whether the viewer binds its tools.
 >
 > - **Preflight passed.** `static/js/nifti-reader.js` *is* built from
 >   `nifti-reader-js@0.6.9`: the `NIFTI1.readHeader` bodies are byte-identical to the
@@ -789,25 +808,42 @@ this merges.**
 > **3.8e-6 mm** worst case over 31 CBCTs and 3 brain MRIs, and Tier 2 was **exact**
 > (max deviation 0) on every study.
 >
-> The gate is **not** cleared, and the three reasons are worth separating because only
-> one of them is about the data:
+> **The gate is now cleared.** It was held on the three reasons below; the resolution of
+> each is recorded inline. They are worth keeping because only one of them was ever
+> about the data, and the other two say what this result does and does not prove:
 >
 > 1. **22 of 25 brain studies could not be read** — that box's object storage holds only
->    the most recent uploads. Three brain studies is not the brain corpus.
+>    the most recent uploads. Three brain studies is not the brain corpus. **Still true,
+>    and not resolved by anything below.** It is an environment limit rather than a
+>    finding, but it means the brain corpus has not been through Tier 1 at full width. If
+>    a box with fuller storage ever exists, re-run before trusting this number for brain.
 > 2. **No real study in the readable corpus exercises F1.** Every one reports
 >    `residual LUT (1, 0)`; the `(1, -1024)` encoding the finding is about appears only
 >    in the fixture. That is *good news about risk* — F1 is latent here, not active —
 >    but it means the mitigation carries no real-study evidence yet, and a corpus that
->    does contain uint16-plus-intercept volumes has not been through this.
+>    does contain uint16-plus-intercept volumes has not been through this. **Still true.**
+>    The mitigation is covered by fixtures across all four branches, which is why this
+>    was never blocking on its own.
 > 3. **Tier 3 has never run, and the viewer has never rendered a pixel.** The harness
 >    validates the *data path*: does a voxel land where the affine says, and does it hold
 >    the value the header says. It says nothing about whether `viewportManager.js` builds
 >    working viewports, whether the tools bind, whether the crosshair synchronises, or
->    whether a measurement round-trips. Deleting `viewer_grid.js` on the strength of a
->    data-path result would be answering a question nobody asked.
+>    whether a measurement round-trips. **Resolved by use, not by Tier 3** — which was
+>    never written. The maintainer drove the real viewer on real studies, signed off
+>    `amip` (F7), and the exercise found two defects no data-path check could have: an
+>    annotation saved while hidden could never be shown again, and restored measurements
+>    were not drawn until a tool button was clicked. Both are fixed in `768be15`.
 >
-> F7's requirement is unchanged and is the concrete next step: `amip` is `selected` by
-> default and needs looking at on real studies before the old path goes.
+>    Worth stating plainly for Phases 4–10: **a green harness is not evidence that a
+>    viewer works.** Two of the three defects this phase shipped with were in exactly the
+>    region the harness does not look at, and both were found by a person using the thing.
+
+**Harness deleted** once the sign-off was recorded — it was always temporary, and with
+`amip` settled it had nothing left to answer. That removes the `@niivue/niivue`
+devDependency, the sixth bundle entry, and ~2.2 MB of committed output (1.4 MB of it
+base64-inlined Blosc/Zstd/LZ4 wasm reached through `zarrita`). **The reference
+implementation is gone with it**: re-running Tier 1 or Tier 2 now means reverting that
+commit, so any corpus worth checking should be checked before, not after.
 
  With no feature flags, this pre-merge gate *is* the safety net.
 
@@ -843,15 +879,81 @@ Tier 1 compares two different header parsers.
 
 ## Phases 4–10 (summary)
 
-- **4 — Photo stacks.** `webImageLoader.js` (~60 lines, scheme `ygg-web:`). **No
+> **Phases 4 and 5 are merged**, on the maintainer's call. `intraoral.js` delegates its whole
+> grid to `IntraoralSegmentation.mount()`, so replacing the intraoral *viewer* without the
+> segmentation would either keep the old path alive behind a condition — a feature flag by
+> another name, which decision #3 forbids — or drop tooth segmentation for a release. They
+> ship together; teleradiography, which has no such entanglement, ships first within that.
+
+- **4 — Photo stacks.** `webImageLoader.js` (scheme **`yggweb:`**). **No
   `pixelSpacing` unless known** — Cornerstone then reports `px` and labels it uncalibrated;
   never fabricate 1 mm/px. Calibration persisted in `FileRegistry.metadata['pixel_spacing_mm']`
-  (a JSONField already used for per-file data — **no migration**).
+  (a JSONField already used for per-file data — **no migration**;
+  `intraoral_segmentation._get_image_bounds` already writes `image_width`/`image_height`
+  there, so the pattern is established).
+  - **The scheme lost its hyphen, and that is not cosmetic.**
+    `@cornerstonejs/metadata/utilities/imageIdToURI.js` matches `/^[a-zA-Z]+:/`, which
+    `ygg-web:` does not, so it would return the whole imageId unchanged — while
+    `tools/utilities/planar/filterAnnotationsForDisplay.js:19-21` takes
+    `imageId.substring(imageId.indexOf(':') + 1)`. Two spellings of "the URI of this image",
+    latent in 5.8.2 and one upstream refactor away from restored annotations silently never
+    drawing. `yggweb:` makes both agree.
+  - **~60 lines was optimistic.** Three things in the shipped package have to be handled or
+    the surface fails far from its cause: `ensureImageLoader` does
+    `delete image.imageFrame.pixelData` on a hand-built image, so the loader must construct
+    its own `voxelManager`; `rowPixelSpacing`/`columnPixelSpacing` must be `null` rather than
+    `undefined`, or every stack-scroll step rebuilds the actor and resets the VOI; and
+    `imagePixelModule`, `generalSeriesModule` and `imagePlaneModule` are destructured without
+    a guard, so returning `undefined` for any of them is a `TypeError`, not a fallback.
+  - **One revision, many targets.** `AnnotationSet` is keyed `(domain, patient, kind)` and a
+    revision replaces the whole set, so a surface with N files per patient needs
+    `save_measurements` to span targets and carry forward the ones a save did not name. This
+    is **already a live defect** — a brain patient with several series loses series A's
+    measurements when the grid saves series B — and it is fixed here rather than worked
+    around.
+  - `rgb_editor.js` **survives this phase**: it is a *geometric* editor (crop, mirror,
+    rotate), not a windowing one, and it creates the `*_processed` rows the export catalog
+    reads. Only its mounting moves. Replacing it needs a phase of its own.
 - **5 — Intraoral tooth segmentation.** FDI-keyed polygons ↔ `Contour` representation. The
   `labelMapper` FDI↔segmentIndex table is load-bearing and must be exhaustively unit-tested.
   Preserve the operation-based undo/redo — implemented over the *Yggdrasil* representation, not
   Cornerstone state — and the edit-operation replay at `intraoral_segmentation.js:465-495`.
   Segmentation accelerators land here.
+  - **The target model already exists and must not be re-invented.**
+    `annotations/adapters/legacy_maxillo.py:127` already converts `{FDI: [[[x, y], …], …]}`
+    into `Geometry2DItem(POLYGON, IMAGE_PIXEL, closed=True, label_code=fdi,
+    order=polygon_index)`; `AnnotationSet.kind` already has `intraoral_segmentation`;
+    `migrations/0002` already seeds the `fdi-permanent` vocabulary and
+    `annotations_convert_legacy` already maps `is_confirmed` onto revision status. The live
+    path must produce exactly what the converter produces, or `annotations_crosscheck`
+    compares two different shapes.
+  - **`labelMapper` is a projection of the seeded vocabulary, not a constant.**
+    `LabelDefinition.value = (quadrant - 1) * 8 + position`, frozen by
+    `UniqueConstraint(schema, value)`. The JS `toothCodes` array is in *mouth* order and the
+    seed is in *quadrant-major* order, so the two disagree on position for most of the arch:
+    **key on `code`, never on array index.** That mismatch is why the roadmap calls this
+    table load-bearing.
+  - **Two "operation" mechanisms live in that file and they are unrelated.** `:644-711` is
+    the undo/redo action log. `:465-495` is the *image*-edit replay that re-projects polygons
+    through `rgb_editor`'s crop/flip/rotate so a segmentation survives its photo being
+    edited. Conflating them is the biggest porting hazard here.
+  - **A live bug to fix on the way through:** the server's half of that replay
+    (`maxillo/views/intraoral_segmentation.py:207-219`) implements only `flip-h`, `flip-v`
+    and `crop` — it has **no `rotate-cw` and no `rotate-arbitrary`**, so a rotated photo reads
+    back untransformed source polygons. Drive both implementations from shared fixtures so
+    they cannot drift again.
+  - **Two things to check against production before trusting the conversion:** whether any
+    row uses the bare single-polygon shape (`{"11": [[x,y],[x,y],[x,y]]}`), which the JS and
+    the view both tolerate and the *adapter does not* — it would produce degenerate 2-point
+    items; and whether any intraoral `edit_meta` carries a rotate operation.
+  - `tension: 0.35` means the drawn curve is not the stored polygon. A Cornerstone `Contour`
+    draws the stored points, so shapes render tighter unless the smoothing is reproduced.
+    **Decide it deliberately.**
+  - **Magic Tool / SAM2 is not on this surface** — decision #9 is about laparoscopy video
+    (Phase 10). The only AI touchpoint here is a passive `segmentation_job_running` flag from
+    an offline `Job`. Accelerators would be new work, not a port.
+  - There are **no JS tests on this surface at all** today, for either replay mechanism, and
+    the server twin of the second is untested too. Write characterisation tests first.
 - **6 — IOS meshes.** `cornerstoneMeshLoader` + `MeshType.STL` in a `VolumeViewport3D`;
   `TrackballRotateTool` replaces `THREE.TrackballControls`. Deletes `ios.js` (1539) and
   `templates/base.html:36-39`. **Sitewide change** — grep for `THREE.` in the same PR.
@@ -959,7 +1061,7 @@ streaming of a bundle containing a full DICOM series under gunicorn.
 | # | Risk | Mitigation |
 |---|---|---|
 | 1 | **F1 — silently wrong HU** | Own `modalityLutModule` + Tier-2 harness + CI fixtures across all four branches; file upstream |
-| 2 | **F7 — `amip` has no equivalent**, and it is the default | Explicit sign-off on real studies before deleting `niivue_render_modes.js` |
+| 2 | **F7 — `amip` has no equivalent**, and it is the default | ✅ discharged in Phase 3 — F18's shader replacement shipped and the maintainer signed it off on real studies. `frontend/tests/attenuatedMip.test.js` reads the real vtk.js shader from `node_modules`, so a version bump that moves the anchors fails the build instead of silently rendering plain MIP |
 | 3 | **Worker/wasm URL resolution** at ~~three~~ **four** depths, un-rewritten by esbuild | ✅ discharged in Phase 1 — fixed layout + `npm run verify`, which caught a real broken path on its first run (F15) |
 | 4 | **F5 — itk-wasm's jsdelivr default** | ✅ discharged in Phase 1 — build-time **alias** (not just `setPipelinesBaseUrl`), so the no-CDN assertion can stay absolute |
 | 5 | **Bundle-freshness gate needs byte-reproducible esbuild** | ✅ discharged in Phase 1 — verified: consecutive builds are byte-identical (exact pin, committed lockfile, no sourcemaps) |
