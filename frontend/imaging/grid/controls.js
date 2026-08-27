@@ -132,7 +132,6 @@ export function bindControls({ grid, doc = globalThis.document, onSave }) {
                 const expanded = container?.classList.toggle(EXPANDED_CLASS) ?? false;
                 plan.expand3D.setAttribute('aria-pressed', String(expanded));
                 grid.resize?.();
-                setStatus(expanded ? '3D fills the grid' : '');
             })
         );
         bound.push('expand3D');

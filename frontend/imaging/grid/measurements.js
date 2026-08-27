@@ -39,6 +39,45 @@ export const VIEWER_COORDINATE_SYSTEM = 'patient_lps_mm';
 export const MAX_ANNOTATIONS = 500;
 
 /**
+ * The tools whose annotations are measurements.
+ *
+ * Mirrors `GEOMETRIC_TOOLS | INTENSITY_TOOLS` in
+ * `annotations/adapters/cornerstone.py`, and `frontend/tests/measurements.test.js`
+ * pins the two lists to each other.
+ *
+ * The list exists because `getAllAnnotations()` returns **everything Cornerstone is
+ * holding**, including annotations tools keep for their own state.
+ * `CrosshairsTool` is the one that bit: it stores an annotation whose `data.handles`
+ * carries `toolCenter` and `rotationPoints` and **no `points` array**, so sending it
+ * made the server refuse the whole save with "a Cornerstone annotation must carry at
+ * least one handle" -- an accurate message about an annotation the user never drew.
+ */
+export const MEASUREMENT_TOOLS = Object.freeze([
+    'Length',
+    'Height',
+    'Angle',
+    'CobbAngle',
+    'Bidirectional',
+    'RectangleROI',
+    'EllipticalROI',
+    'CircleROI',
+    'Probe',
+]);
+
+/**
+ * Keep only the annotations that are measurements.
+ *
+ * @param {object[]} annotations everything `getAllAnnotations()` returned.
+ * @returns {object[]}
+ */
+export function measurementAnnotations(annotations) {
+    if (!Array.isArray(annotations)) {
+        return [];
+    }
+    return annotations.filter((entry) => MEASUREMENT_TOOLS.includes(entry?.metadata?.toolName));
+}
+
+/**
  * The grid facts a saved measurement was measured against.
  *
  * Key names match `annotations_normalize_coordinates` exactly -- `shape`,

@@ -25,7 +25,7 @@ import { windowAt } from './windowState.js';
 import { volumeUrl } from '../ids/imageIds.js';
 import { announceVolumeReady, installPanoramicBridge, nativeRawVolumeDescriptor } from './panoramicSource.js';
 import { bindControls, loadingIndicator, markActiveTool } from './controls.js';
-import { buildSaveRequest, interpretSaveResponse } from './measurements.js';
+import { buildSaveRequest, interpretSaveResponse, measurementAnnotations } from './measurements.js';
 
 /** The element `viewer_grid_data` is rendered into by both content templates. */
 export const DATA_ELEMENT_ID = 'viewerGridData';
@@ -441,7 +441,9 @@ export { windowAt };
  * @returns {Promise<{message: string}>}
  */
 async function saveMeasurements({ grid, data, volume, view, origin, namespace }) {
-    const annotations = grid.readAnnotations?.() ?? [];
+    // Filtered, not everything Cornerstone holds: `getAllAnnotations()` includes the
+    // state tools keep for themselves, and the crosshair's has no handles at all.
+    const annotations = measurementAnnotations(grid.readAnnotations?.() ?? []);
     const header = grid.currentHeader?.();
     if (!header) {
         return { message: 'Nothing to save yet: the volume is still loading.' };
@@ -472,7 +474,7 @@ async function saveMeasurements({ grid, data, volume, view, origin, namespace })
 
     return {
         message: result.saved
-            ? `Saved ${annotations.length} measurement(s) as revision ${result.revision}.`
+            ? `Saved ${annotations.length} measurement${annotations.length === 1 ? '' : 's'} as revision ${result.revision}.`
             : result.message,
     };
 }

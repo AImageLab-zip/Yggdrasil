@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const REPO = '/srv/Yggdrasil';
 
 import {
     MAX_ANNOTATIONS,
@@ -213,4 +217,61 @@ test('any other failure surfaces the server message', () => {
 test('a failure with no body still produces a message', () => {
     const result = interpretSaveResponse({ ok: false, status: 500 }, null);
     assert.match(result.message, /HTTP 500/);
+});
+
+// ---------------------------------------------------------------------------
+// Which annotations are measurements
+// ---------------------------------------------------------------------------
+
+test('tool state that is not a measurement is not sent', async () => {
+    // `getAllAnnotations()` returns everything Cornerstone holds, including the state
+    // tools keep for themselves. CrosshairsTool is the one that bit: its annotation's
+    // `data.handles` has `toolCenter` and `rotationPoints` and no `points` array, so
+    // sending it made the server refuse the whole save with "a Cornerstone annotation
+    // must carry at least one handle" -- about an annotation the user never drew.
+    const { measurementAnnotations, MEASUREMENT_TOOLS } = await import(
+        '../imaging/grid/measurements.js'
+    );
+
+    const crosshair = {
+        metadata: { toolName: 'Crosshairs' },
+        data: { handles: { toolCenter: [0, 0, 0], rotationPoints: [] } },
+    };
+    const length = {
+        metadata: { toolName: 'Length' },
+        data: { handles: { points: [[0, 0, 0], [1, 0, 0]] } },
+    };
+
+    assert.deepEqual(measurementAnnotations([crosshair, length]), [length]);
+    assert.ok(!MEASUREMENT_TOOLS.includes('Crosshairs'));
+    assert.ok(!MEASUREMENT_TOOLS.includes('WindowLevel'));
+});
+
+test('a malformed or empty annotation list yields nothing rather than throwing', async () => {
+    const { measurementAnnotations } = await import('../imaging/grid/measurements.js');
+    assert.deepEqual(measurementAnnotations([]), []);
+    assert.deepEqual(measurementAnnotations(undefined), []);
+    assert.deepEqual(measurementAnnotations([{}, { metadata: {} }, null]), []);
+});
+
+test('the client and the server agree on which tools are measurements', async () => {
+    // Two lists of tool names in two languages. The server refuses anything it cannot
+    // map, so a name here that is missing there fails the whole save -- and a name
+    // there that is missing here is a measurement the user draws and never saves.
+    const { MEASUREMENT_TOOLS } = await import('../imaging/grid/measurements.js');
+    const adapter = await readFile(
+        join(REPO, 'annotations', 'adapters', 'cornerstone.py'),
+        'utf8'
+    );
+
+    const namesIn = (constant) => {
+        const block = adapter.slice(adapter.indexOf(`${constant} = frozenset(`));
+        return (block.slice(0, block.indexOf(')')).match(/"(\w+)"/g) ?? []).map((q) =>
+            q.replaceAll('"', '')
+        );
+    };
+    const server = [...namesIn('GEOMETRIC_TOOLS'), ...namesIn('INTENSITY_TOOLS')];
+
+    assert.ok(server.length > 0, 'the adapter tool sets could not be parsed');
+    assert.deepEqual([...MEASUREMENT_TOOLS].sort(), server.sort());
 });
