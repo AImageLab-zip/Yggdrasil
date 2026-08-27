@@ -10,6 +10,14 @@ Companion documents:
 - [modernization-roadmap.md](modernization-roadmap.md) — the 2.0 program, whose conventions
   this document follows.
 
+> **Superseded constraint.** This document treats "no third-party CDN may be contacted at
+> runtime" as a requirement (finding F5, decision table, the no-CDN assertion). **That
+> requirement no longer holds** — CDNs are allowed; see `CONTRIBUTING.md` and
+> `docs/cornerstone-future-work.md` §9. What survives is narrower and unchanged by it:
+> webfonts stay self-hosted for GDPR reasons, and the itk-wasm pipelines stay vendored
+> because their ABI is pinned to the package version. The text below is left as the record
+> of what was decided at the time.
+
 ## Why
 
 Four unrelated frontend stacks render and annotate medical images, glued together by

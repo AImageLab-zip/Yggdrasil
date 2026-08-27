@@ -40,8 +40,16 @@
     <script src="{% static 'js/nifti-reader.js' %}"></script>
 
     <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> components -> fonts.
-         Font Awesome is self-hosted (never a CDN — it ships webfonts, and the
-         GDPR rule that keeps IBM Plex local applies to it too). -->
+
+         Third-party CDNs are allowed here, and the three script tags above use them:
+         a CDN serves a static asset faster than this deployment can and takes the
+         bandwidth off it. (This replaces an earlier blanket no-CDN rule. That rule was
+         also never true — those script tags predate it.)
+
+         Webfonts stay self-hosted, and that is a *different* rule, not a leftover of
+         the old one. A font CDN sees every page view of every visitor and needs no
+         consent banner to do it; GDPR is why IBM Plex and Font Awesome are served from
+         `static/`, and that reason does not apply to a JavaScript library. -->
     <link href="{% static 'vendor/fontawesome/css/all.min.css' %}" rel="stylesheet">
     <link href="{% static 'css/tokens.css' %}" rel="stylesheet">
     <link href="{% static 'css/tailwind.css' %}" rel="stylesheet">

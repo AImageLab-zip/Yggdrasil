@@ -105,8 +105,17 @@ const itkPipelinesBaseUrlPlugin = {
     },
 };
 
-/** Fail the build if a bundled module still names a third-party CDN. */
-const NO_CDN_HOSTS = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'cdnjs.com'];
+/**
+ * Hosts worth reporting when a bundled module still names one.
+ *
+ * A **warning**, not a failure. The project no longer forbids third-party CDNs -- see
+ * `templates/base.html` -- so a CDN in the bundle is a fact to know about, not a broken
+ * build. It is still worth printing: the itk-wasm pipelines are aliased to the vendored
+ * copies (see {@link itkPipelinesShim}), and if that alias ever stops applying the
+ * bundle would silently start fetching a *specific version* of those wasm blobs from
+ * elsewhere, which is a compatibility question rather than a policy one.
+ */
+const REPORTED_CDN_HOSTS = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'cdnjs.com'];
 
 // ---------------------------------------------------------------------------
 // Build units
@@ -282,7 +291,7 @@ async function main() {
         JSON.stringify({ build, cornerstone: cornerstoneVersion(), entries: APP_ENTRIES }, null, 2) + '\n'
     );
 
-    assertNoCdn(outDir);
+    reportCdnHosts(outDir);
 
     console.log(`built static/vendor/cornerstone/${build}/`);
 }
@@ -292,23 +301,25 @@ function cornerstoneVersion() {
     return pkg.version;
 }
 
-function assertNoCdn(outDir) {
-    const offenders = [];
+function reportCdnHosts(outDir) {
+    const found = [];
     for (const file of walk(outDir)) {
         if (!/\.(js|mjs|json|css)$/.test(file)) {
             continue;
         }
         const text = readFileSync(file, 'utf8');
-        for (const host of NO_CDN_HOSTS) {
+        for (const host of REPORTED_CDN_HOSTS) {
             if (text.includes(host)) {
-                offenders.push(`${relative(ROOT, file)}: ${host}`);
+                found.push(`${relative(ROOT, file)}: ${host}`);
             }
         }
     }
-    if (offenders.length) {
-        throw new Error(
-            'Emitted bundle names a third-party CDN (see F5 and templates/base.html:42-44):\n  ' +
-                offenders.join('\n  ')
+    if (found.length) {
+        console.warn(
+            'note: the emitted bundle names a third-party CDN. Allowed, but check it is ' +
+                'the fetch you meant -- the itk-wasm pipelines are meant to resolve to the ' +
+                'vendored copies:\n  ' +
+                found.join('\n  ')
         );
     }
 }

@@ -191,17 +191,27 @@ client-side pre-filter that avoids uploading 400 MB of non-DICOM. Keep everythin
 
 ---
 
-## 9. Remaining CDN dependencies
+## 9. Remaining CDN dependencies — **withdrawn**
 
-`templates/base.html:42-44` states the rationale for self-hosting (GDPR: no third-party
-request). The Cornerstone migration removes NiiVue ×2, Three.js ×3, Konva ×2 and fflate.
+This entry proposed removing the last runtime CDNs (Chart.js and
+`chartjs-adapter-date-fns` on `templates/common/user_activity_stats.html`) and extending
+`scripts/check_bundle_assets.mjs` to scan templates so a no-CDN rule was machine-enforced.
 
-**Left over:** Chart.js + `chartjs-adapter-date-fns` on
-`templates/common/user_activity_stats.html`. Unrelated to imaging, so it is out of the
-migration's scope, but it is the last runtime CDN in the codebase and undermines the stated
-policy on its own. Worth a small standalone PR. The bundle's no-CDN assertion
-(`scripts/check_bundle_assets.mjs`) should eventually be extended to scan templates too, so
-the policy is machine-enforced rather than remembered.
+**The rule it was enforcing is gone.** A CDN serves a static asset faster than this
+deployment can and takes the bandwidth off it; the blanket ban was never actually held to
+either — `templates/base.html` has loaded Three.js, an STL loader, trackball controls and
+fflate from three different CDNs the whole time. So Chart.js stays where it is, and the
+build-time and verify-time checks now *note* a CDN reference instead of failing on it.
+
+Two narrower rules survive, and they are not this one:
+
+- **Webfonts stay self-hosted.** A font CDN sees every page view of every visitor, which
+  is a consent question a JavaScript library does not raise. That is why IBM Plex and Font
+  Awesome are in `static/`, and it is a GDPR argument, not a performance one.
+- **The itk-wasm pipelines stay vendored and aliased** (F5). Not policy: those are wasm
+  blobs whose ABI is pinned to the package version, and the upstream default URL is a
+  moving reference. The check that used to enforce the ban is what now reports it if the
+  alias ever stops applying.
 
 ---
 

@@ -41,7 +41,7 @@ Or without the dev stack, the raw-docker recipe in
   `migrate`, then the full suite against MySQL 8 + Redis 7 services.
 - **frontend** — `npm ci`, `npm run build`, then **`git diff --exit-code`**: the
   committed Cornerstone bundle must be byte-identical to a fresh build. Then
-  `npm run verify` (worker/wasm URLs resolve, no CDN host in any emitted file) and
+  `npm run verify` (every worker/wasm URL in the emitted bundle resolves) and
   `npm test`. See [The frontend bundle](#the-frontend-bundle).
 
 ### Self-hosted runner setup
@@ -57,13 +57,24 @@ additionally needs `gh` installed on the runner host, and the `frontend` job nee
 
 Imaging is rendered by Cornerstone3D, built with npm + esbuild. Both are **dev-only**:
 the emitted bundle is committed under `static/vendor/cornerstone/`, so deploys need no
-Node and make no network request. This is deliberate — `templates/base.html:42-44`
-states the policy that no third-party CDN may be contacted at runtime.
+Node. That is about **reproducibility**, not about avoiding CDNs: the bundle is a
+byte-reproducible artefact CI re-derives and compares, and the viewer's web workers and
+wasm blobs have to sit at paths the emitting file can reach (see the `import.meta.url`
+note below).
+
+Third-party CDNs are fine, and `templates/base.html` uses three. An earlier rule
+forbade them; it is gone. Two things it is worth keeping in mind rather than a policy:
+
+- **Webfonts stay self-hosted.** A font CDN sees every page view of every visitor,
+  which is a GDPR question a JavaScript library does not raise. IBM Plex and Font
+  Awesome are served from `static/`.
+- **Pin what you load.** A version-less CDN URL changes the viewer under you with no
+  commit to bisect.
 
 ```bash
 npm ci               # exact versions from package-lock.json; needs registry egress
 npm run build        # -> static/vendor/cornerstone/<build>/ + manifest.json
-npm run verify       # every worker/wasm URL resolves; no CDN host is named
+npm run verify       # every worker/wasm URL resolves; CDN references are noted
 npm test             # node:test, both the ESM frontend/ and legacy static/js/tests/
 ```
 

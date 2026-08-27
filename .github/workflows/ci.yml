@@ -112,7 +112,7 @@ jobs:
             echo "::error::the build left untracked files -- commit them or ignore them" >&2
             exit 1
           fi
-      - name: Verify bundle assets (worker/wasm URLs, no CDN)
+      - name: Verify bundle assets (worker/wasm URLs resolve)
         run: npm run verify
       - name: JS tests
         run: npm test

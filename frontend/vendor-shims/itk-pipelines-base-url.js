@@ -7,16 +7,20 @@
  *     let defaultPipelinesBaseUrl =
  *         `https://cdn.jsdelivr.net/npm/@itk-wasm/morphological-contour-interpolation@${version}/dist/pipelines`;
  *
- * so shipping `labelmap-interpolation` without calling `setPipelinesBaseUrl()` silently
- * reintroduces a runtime CDN -- against the GDPR rationale stated at
- * `templates/base.html:42-44`.
+ * so shipping `labelmap-interpolation` without calling `setPipelinesBaseUrl()` fetches
+ * the pipelines from jsdelivr at runtime.
  *
- * Calling the setter would be enough to stop the *fetch*, but not enough to stop the
- * *string*: the jsdelivr literal would still be present in the emitted bundle, which
- * would force `scripts/check_bundle_assets.mjs` to allowlist a CDN host and thereby
- * weaken the guard the roadmap's risk #4 depends on. Aliasing the module away instead
- * makes the fallback unreachable by construction, and keeps the no-CDN assertion
- * absolute: *no* emitted file may name a CDN.
+ * That is **not** a policy problem -- CDNs are allowed here, see `CONTRIBUTING.md`. It is
+ * a correctness problem. Those are wasm blobs whose ABI is pinned to the package version,
+ * the vendored copies under `itk/pipelines` are the ones this build was tested against,
+ * and a viewer that silently falls back to a URL built from a version string is a viewer
+ * that can start failing without a commit to bisect.
+ *
+ * Calling the setter would be enough to stop the *fetch*, but the jsdelivr literal would
+ * still sit in the emitted bundle, leaving a live fallback path one refactor away from
+ * being taken. Aliasing the module away makes it unreachable by construction, which is
+ * also what makes `scripts/check_bundle_assets.mjs` noting a CDN host in the bundle a
+ * useful signal: it means this alias stopped applying.
  *
  * `frontend/workers/itk-pipelines-config.js` is what actually sets the URL, from
  * `import.meta.url` inside the worker, so it survives the version-stamped output

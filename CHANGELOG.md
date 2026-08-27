@@ -40,8 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `static/vendor/cornerstone/<build>/`. Deploys need no Node and make no network
   request. `scripts/build_frontend.sh` builds it, `scripts/check_bundle_assets.mjs`
   (`npm run verify`) asserts every web-worker and wasm URL resolves against its own
-  emitting file and that no emitted file names a third-party CDN, and a new CI job
-  rebuilds and fails on any diff. `{% cornerstone_entry 'volume-grid' %}` loads a
+  emitting file, and a new CI job rebuilds and fails on any diff. `{% cornerstone_entry 'volume-grid' %}` loads a
   surface. Five per-surface entries exist; **no template loads one yet** — the viewers
   are replaced one at a time in later phases.
 - `api_serve_file_named`: `…/processing/files/serve/<id>/<filename>` beside the existing
@@ -65,6 +64,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`window.appNotify`) instead of "Saved 3 measurements." in the toolbar; a failed save
   gets a red one rather than arriving in the same place as a success. The toolbar's status
   line is now only for failures that are about the toolbar itself.
+- **Third-party CDNs are allowed.** The blanket no-CDN rule is withdrawn: a CDN serves a
+  static asset faster than this deployment can and takes the bandwidth off it, and
+  `templates/base.html` had been loading Three.js, an STL loader, trackball controls and
+  fflate from three of them the whole time. `scripts/build_frontend.mjs` and
+  `scripts/check_bundle_assets.mjs` now *note* a CDN reference in the emitted bundle
+  instead of failing the build on it. Two narrower rules survive and are unaffected:
+  webfonts stay self-hosted (a font CDN sees every page view of every visitor — a GDPR
+  question a library does not raise), and the itk-wasm pipelines stay vendored and aliased
+  because their ABI is pinned to the package version. `docs/cornerstone-future-work.md`
+  §9 is withdrawn accordingly.
 - **The raw-data lock reads `AnnotationSet.ever_annotated`.** `common/annotation_lock.py`
   keeps its module path and all five public signatures byte-identical, and gains
   `annotations` as its first source: one indexed query instead of up to five per-domain
