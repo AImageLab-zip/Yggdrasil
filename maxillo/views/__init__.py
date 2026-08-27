@@ -52,6 +52,7 @@ from .patient_data import (
     save_browser_panoramic,
     patient_intraoral_data,
     patient_teleradiography_data,
+    calibrate_image_pixel_spacing,
     save_rgb_image_edit,
 )
 
@@ -126,6 +127,7 @@ __all__ = [
     'save_browser_panoramic',
     'patient_intraoral_data',
     'patient_teleradiography_data',
+    'calibrate_image_pixel_spacing',
     'save_rgb_image_edit',
     'patient_intraoral_segmentation_data',
     'update_patient_intraoral_segmentation',

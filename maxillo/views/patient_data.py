@@ -28,6 +28,14 @@ from common.permissions import (
     user_is_project_admin,
 )
 from common.object_storage import get_object_storage
+from common.imaging_calibration import (
+    HISTORY_KEY as CALIBRATION_HISTORY_KEY,
+    METADATA_KEY as CALIBRATION_KEY,
+    CalibrationError,
+    calibration_record,
+    pixel_spacing_mm,
+    spacing_from_known_length,
+)
 from common.models import FileRegistry, Modality
 from .domain import get_domain_models
 from .patient_detail import _resolved_cbct_viewer_source
@@ -1315,6 +1323,7 @@ def patient_intraoral_data(request, patient_id):
                             else None
                         ),
                         "url": _serve_file_url(request, file_obj.id),
+                        **_calibration_fields(file_obj),
                     }
                 )
             if not images_data:
@@ -1359,6 +1368,10 @@ def patient_intraoral_data(request, patient_id):
                             else None
                         ),
                         "url": _serve_file_url(request, official_file.id),
+                        # Null until calibrated, and passed through as null: a photograph
+                        # has no intrinsic scale, and inventing 1 mm/px would report a
+                        # fiction in millimetres.
+                        **_calibration_fields(official_file),
                     }
                 )
 
@@ -1373,6 +1386,118 @@ def patient_intraoral_data(request, patient_id):
     except Exception as e:
         logger.error(f"Error serving intraoral data: {e}", exc_info=True)
         return JsonResponse({"error": "Internal server error"}, status=500)
+
+
+def _calibration_fields(file_obj):
+    """The per-image scale facts a stack viewer needs, in the shape it reads them.
+
+    ``pixel_spacing_mm`` is ``None`` for an uncalibrated image and must stay ``None`` all
+    the way to the metadata provider, which then omits ``pixelSpacing`` entirely -- that
+    omission is what makes Cornerstone report ``px`` rather than a fabricated millimetre.
+    """
+    spacing = pixel_spacing_mm(file_obj)
+    metadata = file_obj.metadata if isinstance(file_obj.metadata, dict) else {}
+    return {
+        "pixel_spacing_mm": {"x_mm": spacing[0], "y_mm": spacing[1]} if spacing else None,
+        "image_width": metadata.get("image_width"),
+        "image_height": metadata.get("image_height"),
+    }
+
+
+@login_required
+@require_POST
+def calibrate_image_pixel_spacing(request, patient_id, file_id):
+    """Record the millimetres per pixel a user measured on one 2D image.
+
+    Body::
+
+        {"pointA": [x, y], "pointB": [x, y], "knownLengthMm": 10.0}
+
+    **The server recomputes the scale from the two points** and ignores any
+    ``mmPerPixel`` the client sends, for the same reason
+    ``annotations.adapters.cornerstone`` recomputes every measurement rather than reading
+    ``cachedStats``: this one number silently rescales every length ever taken on the
+    image, and a value the server cannot re-derive is a value nobody can check.
+
+    Writes ``FileRegistry.metadata['pixel_spacing_mm']`` -- no migration; that JSONField
+    already carries per-file data on this family of surfaces. Deliberately *not* an
+    ``AnnotationSet``: a pixel spacing is a property of the image, not of annotation
+    work, and filing it as work would mean deleting the measurements deleted the scale.
+
+    Recalibrating an image that already carries measurements is allowed and reported,
+    not refused: the usual reason to recalibrate is that the first attempt was wrong, and
+    refusing would leave the only fix as deleting the work. The previous value is kept in
+    ``pixel_spacing_mm_history`` so a length that looks wrong later is explainable.
+    """
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not _can_write_patient(request, patient):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    file_obj = get_object_or_404(FileRegistry, id=file_id)
+    if file_obj.get_patient() != patient:
+        # The body names a file and the URL names a patient independently. Without this
+        # a user with write access to patient A could calibrate patient B's image.
+        return JsonResponse(
+            {"error": "That file does not belong to this patient."}, status=403
+        )
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Malformed JSON body"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Body must be a JSON object"}, status=400)
+
+    try:
+        mm_per_pixel, pixel_distance = spacing_from_known_length(
+            body.get("pointA"), body.get("pointB"), body.get("knownLengthMm")
+        )
+    except CalibrationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    with transaction.atomic():
+        locked = FileRegistry.objects.select_for_update().get(id=file_obj.id)
+        metadata = dict(locked.metadata or {})
+        previous = metadata.get(CALIBRATION_KEY)
+        if previous is not None:
+            history = metadata.get(CALIBRATION_HISTORY_KEY)
+            metadata[CALIBRATION_HISTORY_KEY] = (
+                [*history, previous] if isinstance(history, list) else [previous]
+            )
+        metadata[CALIBRATION_KEY] = calibration_record(
+            mm_per_pixel,
+            known_length_mm=body["knownLengthMm"],
+            pixel_distance=pixel_distance,
+            user=request.user,
+            now=timezone.now(),
+        )
+        locked.metadata = metadata
+        locked.save(update_fields=["metadata"])
+
+    return JsonResponse(
+        {
+            "pixelSpacingMm": metadata[CALIBRATION_KEY],
+            "recalibrated": previous is not None,
+            # What the caller needs to warn with. Counted, not blocked: the numbers
+            # already stored are pixels and stay correct; it is their millimetre
+            # *reading* that just changed, and the user should be told which studies.
+            "affectedMeasurements": _measurements_on_file(file_obj),
+        }
+    )
+
+
+def _measurements_on_file(file_obj):
+    """How many stored measurements are read through this image's scale.
+
+    Zero when the annotations app has nothing for it, which is the common case and must
+    not cost a join on every calibration.
+    """
+    from annotations.models import MeasurementItem
+
+    return MeasurementItem.objects.filter(
+        target__source_resource__file_id=file_obj.id
+    ).count()
 
 
 @login_required
@@ -1420,12 +1545,24 @@ def patient_teleradiography_data(request, patient_id):
         source_file_id = source_file_id or teleradiography_file.id
         expose_raw = not modality_discard_raw("teleradiography")
         if request.GET.get("meta") == "1":
+            # `pixel_spacing_mm` is null until somebody calibrates the image, and the
+            # viewer must pass that null straight through rather than defaulting it --
+            # Cornerstone reports `px` and marks the length uncalibrated, which is the
+            # honest answer for a photograph.
+            spacing = pixel_spacing_mm(teleradiography_file)
+            metadata = teleradiography_file.metadata or {}
             return JsonResponse(
                 {
                     "url": _serve_file_url(request, teleradiography_file.id),
                     "source_file_id": source_file_id,
                     "raw_url": _serve_file_url(request, source_file_id) if expose_raw else None,
                     "is_processed": teleradiography_file.file_type.endswith("_processed"),
+                    "file_id": teleradiography_file.id,
+                    "pixel_spacing_mm": (
+                        {"x_mm": spacing[0], "y_mm": spacing[1]} if spacing else None
+                    ),
+                    "image_width": metadata.get("image_width"),
+                    "image_height": metadata.get("image_height"),
                 }
             )
 

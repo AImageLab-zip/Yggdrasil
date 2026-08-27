@@ -171,6 +171,14 @@ urlpatterns = [
         views.panoramic_warmup_pending,
         name="panoramic_warmup_pending",
     ),
+    # Millimetres per pixel for one 2D image, measured by the user on a known length.
+    # Beside the modality endpoints because a pixel spacing is a property of the image;
+    # it is deliberately not an annotations/ route (see common/imaging_calibration.py).
+    path(
+        "api/patient/<int:patient_id>/images/<int:file_id>/calibration/",
+        views.calibrate_image_pixel_spacing,
+        name="patient_image_calibration",
+    ),
     path(
         "api/patient/<int:patient_id>/intraoral/",
         views.patient_intraoral_data,
