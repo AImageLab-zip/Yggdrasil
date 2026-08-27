@@ -33,10 +33,22 @@
 
     <!-- Viewer runtime globals (loaded on every page so patient-detail viewers
          find THREE / fflate / nifti already present before their init) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js"></script>
-    <script src="https://unpkg.com/fflate@0.8.2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+            integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"
+            integrity="sha384-QF8EmP6pyNE+i7WmcltzC4ddzFVKDxfn5WD5gXyKTSE4SCw0R25TI+q0LUlnf7tq"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js"
+            integrity="sha384-hf3oVtegKGVgPlVvpd9Lg2YX9MGMmV/Dn9iSbKOeIAvzwL2L3WLK4RWf7QNkNrfJ"
+            crossorigin="anonymous"></script>
+    {# fflate is served from static/, not a CDN, and that is a consolidation rather than
+       a policy: static/js/vendor/fflate-0.8.2.min.js already has to exist because
+       static/js/worker/cbct_convert_worker.js importScripts() it, and importScripts is
+       all-or-nothing -- a blocked CDN fetch there would take nifti-reader.js and
+       volume_metadata.js down with it. Two sources for one byte-identical file (both are
+       the fflate@0.8.2 UMD build) is one more thing to keep in step for no gain. #}
+    <script src="{% static 'js/vendor/fflate-0.8.2.min.js' %}"></script>
     <script src="{% static 'js/nifti-reader.js' %}"></script>
 
     <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> components -> fonts.

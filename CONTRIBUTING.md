@@ -70,6 +70,13 @@ forbade them; it is gone. Two things it is worth keeping in mind rather than a p
   Awesome are served from `static/`.
 - **Pin what you load.** A version-less CDN URL changes the viewer under you with no
   commit to bisect.
+- **SRI what you pin.** Every third-party `<script>` carries
+  `integrity="sha384-…" crossorigin="anonymous"`. These pages render patient data, and
+  without it a CDN compromise executes arbitrary JavaScript in a clinical app; with it
+  the script simply fails to load. Safe precisely *because* the URLs are exact pins —
+  jsdelivr's caveat about SRI applies to dynamically generated files, which these are
+  not. Compute one with
+  `curl -sfL <url> | openssl dgst -sha384 -binary | openssl base64 -A`.
 
 ```bash
 npm ci               # exact versions from package-lock.json; needs registry egress

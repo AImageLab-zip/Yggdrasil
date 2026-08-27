@@ -367,8 +367,13 @@
     <i class="fas fa-check me-1"></i>Saved!
 </div>
 
-<!-- Konva.js (required by the annotation canvas layer) -->
-<script src="https://unpkg.com/konva@9/konva.min.js"></script>
+<!-- Konva.js (required by the annotation canvas layer).
+     Pinned exactly, and to the same version templates/common/patient_detail.html loads:
+     `konva@9` is a range, so unpkg served whatever the latest 9.x was that day and the
+     two pages could drift apart with no commit to bisect. See CONTRIBUTING.md. -->
+<script src="https://unpkg.com/konva@9.3.20/konva.min.js"
+        integrity="sha384-chZfUp+dDy+Z9NNL/wlLCKHhRYh1tNUse5T0ikH8HziawiqQG88F8SBIIcrHY+/b"
+        crossorigin="anonymous"></script>
 
 {{ worker_video_source_ref|json_script:"worker-video-source-ref" }}
 {{ worker_video_source_file_id|json_script:"worker-video-source-file-id" }}
