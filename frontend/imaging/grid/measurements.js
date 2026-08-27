@@ -65,6 +65,17 @@ export const MEASUREMENT_TOOLS = Object.freeze([
 ]);
 
 /**
+ * The primary tool that navigates rather than measures.
+ *
+ * The other side of the list above: the crosshair is the one tool bound to the left
+ * button that is *not* a measurement, so it is the tool the grid falls back to when
+ * measuring is switched off, it is never disabled with the measurement tools, and its
+ * annotation is neither saved, hidden nor cleared with theirs. Named here, beside the
+ * list it is the complement of, so the toolbar and the grid cannot disagree about it.
+ */
+export const NAVIGATION_TOOL = 'Crosshairs';
+
+/**
  * Keep only the annotations that are measurements.
  *
  * @param {object[]} annotations everything `getAllAnnotations()` returned.

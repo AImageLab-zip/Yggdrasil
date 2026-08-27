@@ -50,6 +50,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Same view, same ACL; the filename segment never takes part in resolving the file.
 
 ### Changed
+- **CBCT annotation is a mode now, and it is off by default.** One switch reading
+  `Annotations on` / `Annotations off` replaces the eye button: turning it on reveals the
+  measurement tools *and* shows the measurements, turning it off hides both and puts the
+  crosshair back on the left mouse button. A study being read shows six fewer controls
+  than one being measured, and there is no longer a pair of states (mode vs. visibility)
+  that could disagree. The state lives in the DOM (`aria-checked`) and is read back at
+  click time, so the switch cannot invert.
+- A trash button beside save clears every measurement drawn on the study. It asks first,
+  and it clears the *viewer*: the server replaces the whole set on save, so the next save
+  is what makes a clear permanent and a reload is what undoes it. Both the confirmation
+  and the notification say so.
+- A saved measurement set is confirmed by the platform's green toast
+  (`window.appNotify`) instead of "Saved 3 measurements." in the toolbar; a failed save
+  gets a red one rather than arriving in the same place as a success. The toolbar's status
+  line is now only for failures that are about the toolbar itself.
 - **The raw-data lock reads `AnnotationSet.ever_annotated`.** `common/annotation_lock.py`
   keeps its module path and all five public signatures byte-identical, and gains
   `annotations` as its first source: one indexed query instead of up to five per-domain
@@ -65,6 +80,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by 1024 HU.
 
 ### Fixed
+- **Restored measurements were not drawn until a tool button was clicked.** The switch
+  showed them and nothing appeared; switching it off and on again "fixed" it only
+  because a tool button had been clicked in between. `ToolGroup.addTool` instantiates a
+  tool but writes no `toolOptions` entry, and a tool with no mode is skipped by
+  `getToolsWithModesForElement` — so the annotation rendering engine never asked
+  `LengthTool` to draw, whatever the annotations' visibility said. Clicking any
+  measurement button gave every tool a mode as a side effect of `setPrimaryTool`
+  passiving its neighbours, which is what made it look intermittent. Switching the mode
+  on now puts every measurement tool in `Passive` deliberately (and `Disabled` on the way
+  out), pinned by a test that needs no GPU.
+- **Measurements that could not be made visible again.** Two independent bugs, both
+  reported as "I switch annotations on and nothing appears":
+  - Restoring a study wrote the stored `isVisible` flag back. An annotation saved while
+    the measurements were hidden therefore came back invisible *and unreachable* —
+    Cornerstone's `setAnnotationVisibility(uid, true)` only clears the flag for a UID in
+    its own hidden set, which a freshly added annotation is never in, so no amount of
+    toggling could show it. Visibility is session state now, not part of the record.
+  - Hiding "all annotations" hid the crosshair too. `getAllAnnotations()` returns the
+    state tools keep for themselves, and the navigation reticle is one of those, so
+    switching measurements off took the reticle with it. The hide now uses the same
+    measurement filter a save uses, and writes the flag as well as the hidden set, which
+    makes it idempotent.
 - **Two annotation gates that were missing.** `update_nifti_metadata` rewrote a raw
   CBCT's qform/sform in place and restamped `FileRegistry.file_hash` without consulting
   the annotation lock — every landmark, spline and polygon already drawn on that volume

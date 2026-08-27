@@ -50,6 +50,8 @@ import { formatWindow } from './voi.js';
 import { residualModalityLut } from '../metadata/modalityLutModule.js';
 import { awaitVolumeLoad, readScalarData } from './volumeLoading.js';
 import { describeGeometry } from '../geometry/orientation.js';
+// The same list and filter a save uses: what is hidden, cleared and stored is one set.
+import { MEASUREMENT_TOOLS, NAVIGATION_TOOL, measurementAnnotations } from './measurements.js';
 
 /** The rendering engine id. Session-scoped, never persisted. */
 export const RENDERING_ENGINE_ID = 'ygg-volume-grid';
@@ -232,7 +234,10 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         }
     }
 
-    return {
+    // Named rather than returned anonymously: `setAnnotationMode` composes two of the
+    // handle's own operations, and calling them through the object is what keeps that
+    // composition honest if either one grows.
+    const grid = {
         state,
         renderingEngine,
         toolGroups,
@@ -333,7 +338,20 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
             let restored = 0;
             for (const entry of annotations) {
                 try {
-                    add(structuredClone(entry), element);
+                    const annotation = structuredClone(entry);
+                    // **`isVisible` is not restored from storage.** The stored payload is
+                    // the viewer's state verbatim, so an annotation saved while the
+                    // measurements were hidden carries `isVisible: false` -- and
+                    // `setAnnotationVisibility(uid, true)` will not undo it, because
+                    // Cornerstone's `show()` only writes the flag for a UID that is in
+                    // its own hidden set (`annotationVisibility.js`), which a freshly
+                    // added annotation never is. That is the "I switch it on and see
+                    // nothing" report: the annotation was restored permanently invisible
+                    // and no toggle could reach it. Visibility belongs to the session,
+                    // not to the record, so it starts true and
+                    // {@link setAnnotationsVisible} decides from there.
+                    annotation.isVisible = true;
+                    add(annotation, element);
                     restored += 1;
                 } catch (error) {
                     // One malformed stored annotation must not cost the others.
@@ -347,24 +365,115 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         },
 
         /**
-         * Show or hide every measurement at once.
+         * Turn measuring on or off across the grid, as one operation.
          *
-         * Visibility, not deletion: the annotations stay in Cornerstone's state, so
-         * hiding and showing cannot lose work, and a save while hidden still writes
-         * everything that is there.
+         * **The tool modes are the point, not the visibility.** `ToolGroup.addTool`
+         * only *instantiates* a tool; it writes no entry in `toolOptions`, so a tool
+         * that has never been given a mode is invisible to the annotation renderer --
+         * `getToolsWithModesForElement` reads modes off `toolOptions` and skips
+         * anything absent from it, and `AnnotationRenderingEngine._triggerRender` only
+         * asks the tools that survive that filter to draw. So a Length annotation
+         * restored on page load was **not drawn at all** until something put the Length
+         * tool into a mode, no matter what its visibility said. That is why switching
+         * annotations on showed nothing the first time and worked later: the first
+         * click on any measurement button calls {@link setPrimaryTool}, which passives
+         * every *other* primary tool and thereby gives them all a mode as a side
+         * effect. This makes it the deliberate part of switching the mode on.
+         *
+         * Passive rather than Enabled: a measurement that is on screen should be
+         * draggable by its handles. Drawing a *new* one still needs Active, which is
+         * what the toolbar's tool buttons do.
+         *
+         * Order matters going the other way. `setPrimaryTool` passives the other
+         * primary tools, so it has to run *before* the measurement tools are disabled
+         * or it would hand them a mode back on the way out.
          */
-        setAnnotationsVisible: (visible) => {
-            const visibility = cornerstone.annotationVisibility;
+        setAnnotationMode: (enabled) => {
+            const on = Boolean(enabled);
+            const toolGroup = toolGroups[toolGroupIdFor(ORIENTATIONS.AXIAL)];
+            if (!on) {
+                setPrimaryTool({ toolGroup, toolsEnums, toolName: NAVIGATION_TOOL });
+            }
+            setMeasurementToolModes({ toolGroup, enabled: on });
+            return grid.setAnnotationsVisible(on);
+        },
+
+        /**
+         * Delete every measurement currently drawn.
+         *
+         * **The viewer only.** Nothing is written: the server's revisions are
+         * replace-the-whole-set, so what makes a clear permanent is the next save --
+         * and until then a reload brings the measurements back, which is the only undo
+         * there is. The caller says so in the notification.
+         *
+         * Measurements only, again: the crosshair's own annotation lives in the same
+         * state and removing it would take the navigation reticle with it.
+         *
+         * @returns {number} how many were removed.
+         */
+        clearAnnotations: () => {
+            const remove = cornerstone.annotationState?.removeAnnotation;
             const all = cornerstone.annotationState?.getAllAnnotations?.() ?? [];
-            for (const entry of all) {
-                if (entry?.annotationUID) {
-                    visibility?.setAnnotationVisibility(entry.annotationUID, visible);
+            const measurements = measurementAnnotations(
+                Array.isArray(all) ? all : Object.values(all).flat()
+            );
+            let removed = 0;
+            // Copied first: removing from the live state while iterating it is how one
+            // of these gets skipped.
+            for (const entry of [...measurements]) {
+                if (!entry?.annotationUID) {
+                    continue;
+                }
+                try {
+                    remove?.(entry.annotationUID);
+                    removed += 1;
+                } catch (error) {
+                    console.warn(`[ygg-grid] could not remove an annotation: ${error.message}`);
                 }
             }
             renderingEngine.renderViewports(
                 state.windows.filter((w) => w.volumeId).map((w) => viewportId(w.index))
             );
-            return visible;
+            return removed;
+        },
+
+        /**
+         * Show or hide every measurement at once.
+         *
+         * Visibility, not deletion: the annotations stay in Cornerstone's state, so
+         * hiding and showing cannot lose work, and a save while hidden still writes
+         * everything that is there.
+         *
+         * Two things it is careful about, both of which were wrong before:
+         *
+         * **Measurements only.** `getAllAnnotations()` returns everything Cornerstone is
+         * holding, including the state tools keep for themselves -- and the crosshair is
+         * one of them. Hiding "all annotations" therefore hid the crosshair too, so
+         * switching measurements off took the navigation reticle with it.
+         * {@link measurementAnnotations} is the same filter a save uses, so what gets
+         * hidden and what gets stored are the same set by construction.
+         *
+         * **The flag is written as well as the set.** `setAnnotationVisibility` maintains
+         * a module-level hidden-UID set and only touches `annotation.isVisible` when the
+         * UID moves in or out of it, so calling it with `true` on an annotation that was
+         * never in the set leaves a stale `isVisible: false` in place -- invisible, and
+         * unreachable by any further toggling. Writing the flag here makes the call
+         * idempotent, which is what lets the mode switch be re-asserted at will.
+         */
+        setAnnotationsVisible: (visible) => {
+            const on = Boolean(visible);
+            const visibility = cornerstone.annotationVisibility;
+            const all = cornerstone.annotationState?.getAllAnnotations?.() ?? [];
+            for (const entry of measurementAnnotations(Array.isArray(all) ? all : Object.values(all).flat())) {
+                if (entry?.annotationUID) {
+                    visibility?.setAnnotationVisibility(entry.annotationUID, on);
+                }
+                entry.isVisible = on;
+            }
+            renderingEngine.renderViewports(
+                state.windows.filter((w) => w.volumeId).map((w) => viewportId(w.index))
+            );
+            return on;
         },
 
         /** Drop volumes no window is showing any more. */
@@ -377,6 +486,8 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
             renderingEngine.destroy();
         },
     };
+
+    return grid;
 }
 
 /**
@@ -478,6 +589,43 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums, orient
  * its existing annotations visible and selectable, while a disabled one hides them.
  * Measurements disappearing when you pick a different tool is not acceptable.
  */
+/**
+ * Give every measurement tool a mode, or take it away.
+ *
+ * Extracted and exported because it is where the bug was and it needs no GPU: with no
+ * mode at all, a measurement tool **does not draw its annotations**. `addTool` writes no
+ * `toolOptions` entry, `getToolsWithModesForElement` reads modes off `toolOptions` and
+ * skips whatever is missing from it, and the annotation rendering engine only asks the
+ * surviving tools to draw. A study whose measurements were restored on load therefore
+ * showed nothing until something gave those tools a mode -- which the first click on any
+ * tool button did by accident, via `setPrimaryTool` passiving its neighbours.
+ *
+ * `Passive`, not `Enabled`: a measurement on screen should be draggable by its handles.
+ * Creating a new one needs `Active`, which is the toolbar's job.
+ *
+ * @param {object} options
+ * @param {object} options.toolGroup the 2D group.
+ * @param {boolean} options.enabled
+ * @returns {string[]} the tools whose mode was set, for the caller to assert on.
+ */
+export function setMeasurementToolModes({ toolGroup, enabled }) {
+    const applied = [];
+    for (const toolName of MEASUREMENT_TOOLS) {
+        // Guarded: the list is shared with the save filter, and a tool named there but
+        // never added to this group would otherwise only warn into the console.
+        if (!toolGroup?.getToolInstance?.(toolName)) {
+            continue;
+        }
+        if (enabled) {
+            toolGroup.setToolPassive(toolName);
+        } else {
+            toolGroup.setToolDisabled(toolName);
+        }
+        applied.push(toolName);
+    }
+    return applied;
+}
+
 function setPrimaryTool({ toolGroup, toolsEnums, toolName }) {
     if (!PRIMARY_TOOLS.includes(toolName)) {
         throw new Error(`'${toolName}' is not a primary tool; it cannot take the left button.`);

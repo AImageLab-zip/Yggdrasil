@@ -2,9 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    CLEARED_MESSAGE,
+    CLEAR_CONFIRM,
     CONTROL_IDS,
+    SAVED_MESSAGE,
+    applyAnnotationMode,
     bindControls,
     controlPlan,
+    isAnnotationModeOn,
     loadingIndicator,
     markActiveTool,
 } from '../imaging/grid/controls.js';
@@ -30,6 +35,9 @@ function fakeDoc(ids, toolNames = []) {
         },
     }));
     for (const id of ids) {
+        // `state` is the switch's visible on/off word; every element carries one so the
+        // stub does not have to know which id is the switch.
+        const state = { textContent: '' };
         elements.set(id, {
             id,
             ownerDocument: null,
@@ -37,6 +45,7 @@ function fakeDoc(ids, toolNames = []) {
             hidden: false,
             dataset: {},
             textContent: '',
+            state,
             attributes: {},
             handlers: {},
             addEventListener(type, handler) {
@@ -45,6 +54,13 @@ function fakeDoc(ids, toolNames = []) {
             setAttribute(name, value) {
                 this.attributes[name] = value;
             },
+            getAttribute(name) {
+                return this.attributes[name];
+            },
+            removeAttribute(name) {
+                delete this.attributes[name];
+            },
+            querySelector: () => state,
         });
     }
     return {
@@ -75,6 +91,11 @@ function fakeGrid(overrides = {}) {
         calls,
         resetCameras: (index) => calls.push(['resetCameras', index]),
         setPrimaryTool: (name) => calls.push(['setPrimaryTool', name]),
+        setAnnotationMode: (enabled) => calls.push(['setAnnotationMode', enabled]),
+        clearAnnotations: () => {
+            calls.push(['clearAnnotations']);
+            return 2;
+        },
         enable3DWindow: async (index, mode) => calls.push(['enable3DWindow', index, mode]),
         setRenderMode: (index, mode) => {
             calls.push(['setRenderMode', index, mode]);
@@ -152,35 +173,60 @@ test('a page with no tool buttons binds none, and does not crash', () => {
     assert.ok(!result.bound.includes('tools'));
 });
 
-test('saving reports what happened, in the status line', async () => {
+test('a clean save is a green toast, not a sentence in the toolbar', async () => {
+    // "Saved 3 measurements." in a toolbar is a sentence nobody reads. The platform's
+    // own notification is the confirmation; the status line stays empty.
     const doc = fakeDoc(ALL_IDS, ['Length']);
+    const toasts = [];
     let saved = 0;
     bindControls({
         grid: fakeGrid(),
         doc,
+        notify: (level, message) => toasts.push([level, message]),
         onSave: async () => {
             saved += 1;
-            return { message: 'Saved 2 measurement(s) as revision 5.' };
+            return { level: 'success', message: SAVED_MESSAGE };
         },
     });
 
     await doc.elements.get(CONTROL_IDS.save).handlers.click({});
     assert.equal(saved, 1);
-    assert.match(doc.elements.get(CONTROL_IDS.status).textContent, /revision 5/);
+    assert.deepEqual(toasts, [['success', SAVED_MESSAGE]]);
+    assert.equal(doc.elements.get(CONTROL_IDS.status).textContent, '');
 });
 
-test('a failed save says so rather than looking like a success', async () => {
+test('a save that reports a failure is not toasted green', async () => {
+    // A 409 arriving in the same box as a success is worse than no notification: the
+    // user walks away believing the work is stored.
     const doc = fakeDoc(ALL_IDS, ['Length']);
+    const toasts = [];
     bindControls({
         grid: fakeGrid(),
         doc,
-        onSave: async () => {
-            throw new Error('HTTP 409');
-        },
+        notify: (level, message) => toasts.push([level, message]),
+        onSave: async () => ({ level: 'danger', message: 'Someone else saved.' }),
     });
 
     await doc.elements.get(CONTROL_IDS.save).handlers.click({});
-    assert.match(doc.elements.get(CONTROL_IDS.status).textContent, /Save failed: HTTP 409/);
+    assert.deepEqual(toasts, [['danger', 'Someone else saved.']]);
+});
+
+test('a save that throws is reported, and the button stops looking busy', async () => {
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const toasts = [];
+    bindControls({
+        grid: fakeGrid(),
+        doc,
+        notify: (level, message) => toasts.push([level, message]),
+        onSave: async () => {
+            throw new Error('HTTP 500');
+        },
+    });
+
+    const button = doc.elements.get(CONTROL_IDS.save);
+    await button.handlers.click({});
+    assert.deepEqual(toasts, [['danger', 'The save failed: HTTP 500']]);
+    assert.equal(button.attributes['aria-busy'], undefined);
 });
 
 test('a handler that throws reports into the status line, not only the console', async () => {
@@ -204,13 +250,15 @@ test('every control the template offers is bound', () => {
         grid: fakeGrid(),
         doc,
         onSave: async () => ({}),
-        onToggleAnnotations: () => {},
+        onClear: async () => ({}),
+        onAnnotationMode: () => {},
     });
     assert.deepEqual(result.bound.sort(), [
+        'annotationMode',
+        'clear',
         'expand3D',
         'resetView',
         'save',
-        'toggleAnnotations',
         'tools',
     ]);
 });
@@ -314,28 +362,177 @@ test('expanding again collapses back to the four-panel grid', () => {
     assert.equal(button.attributes['aria-pressed'], 'false');
 });
 
-test('the measurements toggle hides and shows without deleting', () => {
-    // Visibility, not deletion: the annotations stay in Cornerstone's state, so hiding
-    // cannot lose work and a save while hidden still writes them all.
-    const doc = fakeDoc(ALL_IDS, ['Length']);
+// ---------------------------------------------------------------------------
+// Annotation mode
+// ---------------------------------------------------------------------------
+
+test('annotation mode starts off, and says so', async () => {
+    // Off is the default: a clinician opening a study is reading it, not measuring it.
+    // The state is asserted at bind time rather than assumed from the markup, so the
+    // switch, the tool group and the grid cannot start out disagreeing.
+    const doc = fakeDoc(ALL_IDS, ['Crosshairs', 'Length']);
     const seen = [];
-    bindControls({ grid: fakeGrid(), doc, onToggleAnnotations: (v) => seen.push(v) });
+    bindControls({ grid: fakeGrid(), doc, onAnnotationMode: (v) => seen.push(v) });
 
-    const button = doc.elements.get(CONTROL_IDS.toggleAnnotations);
-    button.handlers.click({});
+    const button = doc.elements.get(CONTROL_IDS.annotationMode);
     assert.deepEqual(seen, [false]);
-    assert.equal(button.attributes['aria-pressed'], 'false');
-
-    button.handlers.click({});
-    assert.deepEqual(seen, [false, true]);
-    assert.equal(button.attributes['aria-pressed'], 'true');
+    assert.equal(button.attributes['aria-checked'], 'false');
+    assert.equal(button.state.textContent, 'off');
+    assert.equal(doc.elements.get(CONTROL_IDS.annotationTools).hidden, true);
 });
 
-test('the toggle starts from visible, matching the template', () => {
-    // The template renders it pressed; the first click must therefore hide.
-    const doc = fakeDoc(ALL_IDS, []);
+test('switching the mode on reveals the tools and shows the measurements', () => {
+    // One switch, both effects. Two controls meant two states that could disagree,
+    // which is how "I clicked show and saw nothing" was reported.
+    const doc = fakeDoc(ALL_IDS, ['Crosshairs', 'Length']);
     const seen = [];
-    bindControls({ grid: fakeGrid(), doc, onToggleAnnotations: (v) => seen.push(v) });
-    doc.elements.get(CONTROL_IDS.toggleAnnotations).handlers.click({});
-    assert.deepEqual(seen, [false]);
+    bindControls({ grid: fakeGrid(), doc, onAnnotationMode: (v) => seen.push(v) });
+
+    const button = doc.elements.get(CONTROL_IDS.annotationMode);
+    button.handlers.click({});
+
+    assert.deepEqual(seen, [false, true]);
+    assert.equal(button.attributes['aria-checked'], 'true');
+    assert.equal(button.state.textContent, 'on');
+    assert.equal(doc.elements.get(CONTROL_IDS.annotationTools).hidden, false);
+});
+
+test('switching the mode off hides the tools and shows the crosshair as active', () => {
+    // The *grid* puts the crosshair back on the left button, because the order between
+    // that and disabling the measurement tools is not free -- see `setAnnotationMode`.
+    // What the toolbar owns is which button looks pressed.
+    const doc = fakeDoc(ALL_IDS, ['Crosshairs', 'Length']);
+    const grid = fakeGrid();
+    bindControls({ grid, doc, onAnnotationMode: (enabled) => grid.setAnnotationMode(enabled) });
+
+    const button = doc.elements.get(CONTROL_IDS.annotationMode);
+    button.handlers.click({});
+    doc.tools[1].handlers.click({});
+    button.handlers.click({});
+
+    assert.equal(button.attributes['aria-checked'], 'false');
+    assert.equal(doc.elements.get(CONTROL_IDS.annotationTools).hidden, true);
+    assert.deepEqual(grid.calls.at(-1), ['setAnnotationMode', false]);
+    const pressed = doc.tools.filter((t) => t.attributes['aria-pressed'] === 'true');
+    assert.deepEqual(pressed.map((t) => t.dataset.yggTool), ['Crosshairs']);
+});
+
+test('the mode reads its state from the DOM, so it cannot invert', () => {
+    // The bug this replaces: a closure variable initialised to `true` against markup
+    // that rendered "shown" meant the first click *hid*, and every click after it was
+    // the opposite of what the switch said.
+    const doc = fakeDoc(ALL_IDS, ['Crosshairs']);
+    const seen = [];
+    bindControls({ grid: fakeGrid(), doc, onAnnotationMode: (v) => seen.push(v) });
+
+    const button = doc.elements.get(CONTROL_IDS.annotationMode);
+    // Something else moves the switch -- a re-render, a second binding, anything.
+    applyAnnotationMode({ plan: { annotationMode: button }, enabled: true });
+    button.handlers.click({});
+
+    assert.equal(isAnnotationModeOn({ annotationMode: button }), false);
+    assert.deepEqual(seen, [false, false]);
+});
+
+test('the mode can be driven from outside the toolbar', () => {
+    const doc = fakeDoc(ALL_IDS, ['Crosshairs']);
+    const seen = [];
+    const controls = bindControls({ grid: fakeGrid(), doc, onAnnotationMode: (v) => seen.push(v) });
+
+    controls.setAnnotationMode(true);
+    assert.deepEqual(seen, [false, true]);
+    assert.equal(doc.elements.get(CONTROL_IDS.annotationMode).state.textContent, 'on');
+});
+
+test('applying the mode to a page that has no switch is a no-op', () => {
+    // The brain page carries the grid without the CBCT toolbar.
+    assert.doesNotThrow(() => applyAnnotationMode({ plan: {}, enabled: true }));
+    assert.equal(isAnnotationModeOn({}), false);
+});
+
+
+// ---------------------------------------------------------------------------
+// Clearing
+// ---------------------------------------------------------------------------
+
+/** Give one element a window, so the clear button can ask for confirmation. */
+function withConfirm(element, answer) {
+    const asked = [];
+    element.ownerDocument = {
+        defaultView: {
+            confirm: (message) => {
+                asked.push(message);
+                return answer;
+            },
+        },
+    };
+    return asked;
+}
+
+test('clearing asks first, and says the save is what makes it permanent', async () => {
+    // It destroys visible work and the only undo is a reload -- and only until the next
+    // save. Both the question and the confirmation have to say so.
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const toasts = [];
+    let cleared = 0;
+    bindControls({
+        grid: fakeGrid(),
+        doc,
+        notify: (level, message) => toasts.push([level, message]),
+        onClear: async () => {
+            cleared += 1;
+            return { level: 'success', message: CLEARED_MESSAGE };
+        },
+    });
+
+    const button = doc.elements.get(CONTROL_IDS.clear);
+    const asked = withConfirm(button, true);
+    await button.handlers.click({});
+
+    assert.deepEqual(asked, [CLEAR_CONFIRM]);
+    assert.equal(cleared, 1);
+    assert.deepEqual(toasts, [['success', CLEARED_MESSAGE]]);
+    assert.match(CLEAR_CONFIRM, /reload/);
+    assert.match(CLEARED_MESSAGE, /[Ss]ave/);
+});
+
+test('declining the confirmation clears nothing', async () => {
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const toasts = [];
+    let cleared = 0;
+    bindControls({
+        grid: fakeGrid(),
+        doc,
+        notify: (level, message) => toasts.push([level, message]),
+        onClear: async () => {
+            cleared += 1;
+            return {};
+        },
+    });
+
+    const button = doc.elements.get(CONTROL_IDS.clear);
+    withConfirm(button, false);
+    await button.handlers.click({});
+
+    assert.equal(cleared, 0);
+    assert.deepEqual(toasts, []);
+});
+
+test('a clear that fails is reported rather than looking like a success', async () => {
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const toasts = [];
+    bindControls({
+        grid: fakeGrid(),
+        doc,
+        notify: (level, message) => toasts.push([level, message]),
+        onClear: async () => {
+            throw new Error('no viewport');
+        },
+    });
+
+    const button = doc.elements.get(CONTROL_IDS.clear);
+    withConfirm(button, true);
+    await button.handlers.click({});
+
+    assert.deepEqual(toasts, [['danger', 'Could not clear the measurements: no viewport']]);
 });

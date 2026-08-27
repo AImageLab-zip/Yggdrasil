@@ -990,6 +990,91 @@
   .ygg-loading__spinner { animation: none; }
 }
 
+/* --- Annotation mode ------------------------------------------------------ */
+
+/* A switch, not an icon button. The eye button it replaces could not say whether it
+ * was reporting a state or offering an action, and was clicked in the belief that it
+ * enabled annotations while it hid them. `role="switch"` plus a visible on/off word
+ * removes the question. Off is the default and the resting look. */
+.cbct-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.3rem;
+  border: 1px solid var(--ygg-border, rgba(255, 255, 255, 0.18));
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.cbct-mode-toggle__track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: var(--ygg-border, rgba(255, 255, 255, 0.25));
+  transition: background 120ms ease;
+}
+
+.cbct-mode-toggle__knob {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.1rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms ease;
+}
+
+.cbct-mode-toggle__state {
+  min-width: 1.6rem;
+  font-weight: 600;
+  /* Reserved width and a fixed side: "on" and "off" differ by a character, and a
+   * toolbar that reflows on every toggle reads as a glitch. */
+  text-align: left;
+  color: var(--ygg-text-muted);
+}
+
+.cbct-mode-toggle[aria-checked='true'] {
+  border-color: var(--ygg-primary);
+  color: var(--ygg-primary);
+}
+
+.cbct-mode-toggle[aria-checked='true'] .cbct-mode-toggle__track {
+  background: var(--ygg-primary);
+}
+
+.cbct-mode-toggle[aria-checked='true'] .cbct-mode-toggle__knob {
+  transform: translateX(0.8rem);
+}
+
+.cbct-mode-toggle[aria-checked='true'] .cbct-mode-toggle__state {
+  color: var(--ygg-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cbct-mode-toggle__track,
+  .cbct-mode-toggle__knob { transition: none; }
+}
+
+/* The tools the mode reveals. `hidden` does the hiding -- the attribute, so the state
+ * is in the DOM where the switch's `aria-controls` points and not only in JavaScript.
+ * The `display` here is what `hidden` has to beat, hence the explicit override. */
+.cbct-annotation-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cbct-annotation-tools[hidden] {
+  display: none;
+}
+
 /* --- Measurement tool group ----------------------------------------------- */
 
 .cbct-tool-group {

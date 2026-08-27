@@ -24,7 +24,13 @@ import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, volumeIdFor } from './lay
 import { windowAt } from './windowState.js';
 import { volumeUrl } from '../ids/imageIds.js';
 import { announceVolumeReady, installPanoramicBridge, nativeRawVolumeDescriptor } from './panoramicSource.js';
-import { bindControls, loadingIndicator, markActiveTool } from './controls.js';
+import {
+    CLEARED_MESSAGE,
+    SAVED_MESSAGE,
+    bindControls,
+    loadingIndicator,
+    markActiveTool,
+} from './controls.js';
 import { buildSaveRequest, interpretSaveResponse, measurementAnnotations } from './measurements.js';
 
 /** The element `viewer_grid_data` is rendered into by both content templates. */
@@ -391,7 +397,14 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         grid,
         doc,
         onSave: () => saveMeasurements({ grid, data, volume, view, origin, namespace }),
-        onToggleAnnotations: (visible) => grid.setAnnotationsVisible?.(visible),
+        onClear: () => clearMeasurements({ grid }),
+        // One switch, one grid call. It decides which measurement tools have a mode at
+        // all -- without which a restored annotation is not drawn no matter what its
+        // visibility says, see `setAnnotationMode` -- as well as visibility and the
+        // primary tool. `bindControls` calls this once at bind time with the starting
+        // state, so a study opens read-only rather than opening editable until
+        // something switches it off.
+        onAnnotationMode: (enabled) => grid.setAnnotationMode?.(enabled),
     });
     // The template marks Crosshairs pressed; make the grid agree rather than trusting
     // two places to say the same thing.
@@ -455,7 +468,10 @@ export { windowAt };
  * moment, and the viewer knows what is on screen far better than it knows which
  * annotation the user deleted. See `annotations/services/viewer.py`.
  *
- * @returns {Promise<{message: string}>}
+ * Returns a level as well as a message because the caller toasts it, and a failed save
+ * that arrives in the same green box as a clean one is worse than no notification.
+ *
+ * @returns {Promise<{level: string, message: string}>}
  */
 async function saveMeasurements({ grid, data, volume, view, origin, namespace }) {
     // Filtered, not everything Cornerstone holds: `getAllAnnotations()` includes the
@@ -463,7 +479,7 @@ async function saveMeasurements({ grid, data, volume, view, origin, namespace })
     const annotations = measurementAnnotations(grid.readAnnotations?.() ?? []);
     const header = grid.currentHeader?.();
     if (!header) {
-        return { message: 'Nothing to save yet: the volume is still loading.' };
+        return { level: 'warning', message: 'Nothing to save yet: the volume is still loading.' };
     }
 
     const state = await fetch(measurementsUrl(data, volume, namespace, origin, '/state/'), {
@@ -489,14 +505,29 @@ async function saveMeasurements({ grid, data, volume, view, origin, namespace })
     const payload = await response.json().catch(() => null);
     const result = interpretSaveResponse(response, payload);
 
-    return {
-        // No revision number. Revisions are the audit trail and stay in the database;
-        // they are not a concept a clinician should have to hold. What matters is that
-        // the save landed and how much it covered.
-        message: result.saved
-            ? `Saved ${annotations.length} measurement${annotations.length === 1 ? '' : 's'}.`
-            : result.message,
-    };
+    return result.saved
+        ? // No count and no revision number. Revisions are the audit trail and stay in
+          // the database; the count was a number nobody acted on, and both of them made
+          // the confirmation a sentence to read rather than a colour to glance at.
+          { level: 'success', message: SAVED_MESSAGE }
+        : { level: 'danger', message: result.message };
+}
+
+/**
+ * Remove every measurement from the viewer.
+ *
+ * No request. A clear is made permanent by the next save -- the server replaces the
+ * whole set -- and until then a reload brings them back, which is the only undo there
+ * is. The message says both.
+ *
+ * @returns {Promise<{level: string, message: string}>}
+ */
+async function clearMeasurements({ grid }) {
+    const removed = grid.clearAnnotations?.() ?? 0;
+    if (!removed) {
+        return { level: 'info', message: 'There are no measurements on this study to remove.' };
+    }
+    return { level: 'success', message: CLEARED_MESSAGE };
 }
 
 /** The domain-oriented measurement endpoint for this patient. */

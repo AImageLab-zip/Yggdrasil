@@ -45,7 +45,8 @@ import {
     voiRangeFromModalityWindow,
 } from '../imaging/grid/voi.js';
 import { residualModalityLut } from '../imaging/metadata/modalityLutModule.js';
-import { PRIMARY_TOOLS } from '../imaging/grid/viewportManager.js';
+import { PRIMARY_TOOLS, setMeasurementToolModes } from '../imaging/grid/viewportManager.js';
+import { MEASUREMENT_TOOLS, NAVIGATION_TOOL } from '../imaging/grid/measurements.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..', '..');
@@ -462,6 +463,58 @@ test('every primary tool is actually registered by the entry', async () => {
     for (const tool of ['Pan', 'Zoom', 'StackScroll', 'TrackballRotate']) {
         assert.ok(registered.has(tool), `GRID_TOOLS must register '${tool}'`);
     }
+});
+
+/** A tool group stub: which tools exist, and what mode each was last put in. */
+function fakeToolGroup(present) {
+    const modes = {};
+    return {
+        modes,
+        getToolInstance: (name) => (present.includes(name) ? { name } : undefined),
+        setToolPassive: (name) => {
+            modes[name] = 'Passive';
+        },
+        setToolDisabled: (name) => {
+            modes[name] = 'Disabled';
+        },
+    };
+}
+
+test('switching annotations on gives every measurement tool a mode', () => {
+    // The bug this pins: `addTool` writes no `toolOptions` entry, and a tool with no
+    // mode is skipped by `getToolsWithModesForElement` -- so the annotation rendering
+    // engine never asks it to draw. Measurements restored on page load were therefore
+    // invisible however visible their `isVisible` said they were, until the first click
+    // on any tool button happened to passive its neighbours. Reported as "the first
+    // time I switch annotations on they are not shown".
+    const group = fakeToolGroup([...MEASUREMENT_TOOLS]);
+    const applied = setMeasurementToolModes({ toolGroup: group, enabled: true });
+
+    assert.deepEqual(applied, [...MEASUREMENT_TOOLS]);
+    for (const tool of MEASUREMENT_TOOLS) {
+        assert.equal(group.modes[tool], 'Passive', tool);
+    }
+});
+
+test('switching annotations off disables them, and never the crosshair', () => {
+    // Passive on the way in, Disabled on the way out -- and the crosshair is in neither
+    // list, because it navigates rather than measures.
+    const group = fakeToolGroup([...MEASUREMENT_TOOLS, NAVIGATION_TOOL]);
+    setMeasurementToolModes({ toolGroup: group, enabled: false });
+
+    for (const tool of MEASUREMENT_TOOLS) {
+        assert.equal(group.modes[tool], 'Disabled', tool);
+    }
+    assert.equal(group.modes[NAVIGATION_TOOL], undefined);
+    assert.ok(!MEASUREMENT_TOOLS.includes(NAVIGATION_TOOL));
+});
+
+test('a measurement tool the group never got is skipped, not warned about', () => {
+    // The list is shared with the save filter. A name in it that this group does not
+    // hold would only warn into the console, which is not where anyone would look.
+    const group = fakeToolGroup(['Length']);
+    assert.deepEqual(setMeasurementToolModes({ toolGroup: group, enabled: true }), ['Length']);
+    assert.doesNotThrow(() => setMeasurementToolModes({ toolGroup: undefined, enabled: true }));
 });
 
 test('window/level is a primary tool, and pan/zoom/scroll deliberately are not', () => {
