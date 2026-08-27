@@ -79,19 +79,26 @@
                 <span class="cbct-window-hint">Shift+drag to adjust brightness</span>
                 <div class="viewer-toolbar__divider"></div>
                 {% comment %}
-                The "Load 3D" toggle is gone: the volume render is built with the three
-                slice views now, because the volume is already decoded and in GPU memory
-                for them and the render costs a transfer function rather than a load.
+                Measurement tools. The roadmap's "Why" table opens with "one measurement
+                tool exists, and it is never saved" -- these are the tools that close it,
+                and every one of them persists through
+                `annotations/services/viewer.py`. `data-ygg-tool` is the Cornerstone tool
+                name; `frontend/imaging/grid/controls.js` binds whatever is present, so a
+                tool can be added or removed here without touching the JavaScript.
                 {% endcomment %}
-                <label class="cbct-render-select" for="cbctRenderMode">
-                    <span>Render</span>
-                    <select id="cbctRenderMode">
-                        <option value="mip">MIP</option>
-                        <option value="amip" selected>Attenuated MIP</option>
-                        <option value="shaded">Shaded Volume</option>
-                    </select>
-                </label>
-                <button type="button" class="icon-btn cbct-render-action" id="resetCBCT3DCamera" title="Reset 3D camera"><i class="fas fa-arrows-rotate" aria-hidden="true"></i></button>
+                <span class="viewer-toolbar__label">Measure</span>
+                <div class="cbct-tool-group" role="group" aria-label="Measurement tools">
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Crosshairs" aria-pressed="true" title="Navigate (crosshairs)"><i class="fas fa-crosshairs" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Length" aria-pressed="false" title="Length"><i class="fas fa-ruler" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Angle" aria-pressed="false" title="Angle"><i class="fas fa-drafting-compass" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Bidirectional" aria-pressed="false" title="Bidirectional"><i class="fas fa-up-down-left-right" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Probe" aria-pressed="false" title="Probe a point"><i class="fas fa-eye-dropper" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="EllipticalROI" aria-pressed="false" title="Elliptical ROI"><i class="far fa-circle" aria-hidden="true"></i></button>
+                    <button type="button" class="icon-btn cbct-tool" data-ygg-tool="RectangleROI" aria-pressed="false" title="Rectangular ROI"><i class="far fa-square" aria-hidden="true"></i></button>
+                </div>
+                {% if can_modify_segmentation %}
+                <button type="button" class="icon-btn" id="cbctSaveMeasurements" title="Save measurements"><i class="fas fa-floppy-disk" aria-hidden="true"></i></button>
+                {% endif %}
                 <span class="cbct-render-status" id="cbctRenderStatus" role="status" aria-live="polite"></span>
             </div>
         </div>

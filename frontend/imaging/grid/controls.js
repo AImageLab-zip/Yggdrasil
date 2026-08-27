@@ -1,30 +1,31 @@
 /**
  * The CBCT toolbar, bound to the grid.
  *
- * `templates/maxillo/patient_detail_content.html` carries seven controls that
- * `maxillo_cbct_grid_adapter.js` used to wire. Deleting that file without replacing
- * this leaves a toolbar of buttons that do nothing — the failure a user notices first
- * and reports as "the viewer is broken", with nothing in the console to go on.
+ * `maxillo_cbct_grid_adapter.js` used to wire these; deleting it without replacing this
+ * leaves a toolbar of buttons that do nothing — the failure a user notices first and
+ * reports as "the viewer is broken", with nothing in the console to go on.
  *
- * Every binding here is **optional and independently guarded**. The toolbar is rendered
- * by one template and the grid appears in two namespaces, so a control that exists on
- * the maxillo page does not exist on the brain one; and a handler that throws must not
- * take its neighbours with it. So each is bound only if present, and each runs inside a
+ * Every binding is **optional and independently guarded**. The toolbar is rendered by
+ * one template and the grid appears in two namespaces, so a control that exists on the
+ * maxillo page does not exist on the brain one; and a handler that throws must not take
+ * its neighbours with it. Each is bound only if present, and each runs inside a
  * reporter that puts the failure in the status line rather than only in the console.
  *
- * {@link controlPlan} is the decision — which controls exist, what each does — and is
- * pure. The binding below is the mechanical part.
+ * The measurement tools are **discovered from the DOM**, not listed here. Each button
+ * carries `data-ygg-tool="<Cornerstone tool name>"`, so a tool can be added to or
+ * removed from the toolbar by editing the template alone. Hard-coding the list in two
+ * places is how a button ends up bound to a tool that was never registered.
  */
-
-import { DEFAULT_RENDER_MODE, RENDER_MODES } from './renderModes.js';
 
 /** Element ids the template provides, and what each is for. */
 export const CONTROL_IDS = Object.freeze({
     resetView: 'resetCBCTView',
-    renderMode: 'cbctRenderMode',
-    reset3DCamera: 'resetCBCT3DCamera',
+    save: 'cbctSaveMeasurements',
     status: 'cbctRenderStatus',
 });
+
+/** Selector for the measurement-tool buttons. */
+export const TOOL_BUTTON_SELECTOR = '[data-ygg-tool]';
 
 /** The grid window the 3D render occupies, per `FIXED_CBCT_LAYOUT`. */
 export const RENDER_WINDOW = 3;
@@ -32,19 +33,33 @@ export const RENDER_WINDOW = 3;
 /**
  * Which controls this page actually has.
  *
- * Separated from the binding so "the brain page has no render-mode select" is a fact a
- * test can assert, rather than something that only shows up as a null dereference on
- * one of two pages.
- *
  * @param {Document} doc
- * @returns {Record<string, HTMLElement|null>}
+ * @returns {object}
  */
 export function controlPlan(doc) {
     const plan = {};
     for (const [name, id] of Object.entries(CONTROL_IDS)) {
         plan[name] = doc.getElementById(id);
     }
+    plan.tools = Array.from(doc.querySelectorAll(TOOL_BUTTON_SELECTOR));
     return plan;
+}
+
+/**
+ * Show which tool is active.
+ *
+ * `aria-pressed` as well as a class: these are toggle buttons in a group, and a screen
+ * reader has to be able to say which one is on.
+ *
+ * @param {HTMLElement[]} buttons
+ * @param {string} toolName
+ */
+export function markActiveTool(buttons, toolName) {
+    for (const button of buttons) {
+        const isActive = button.dataset.yggTool === toolName;
+        button.setAttribute('aria-pressed', String(isActive));
+        button.classList?.toggle('is-active', isActive);
+    }
 }
 
 /**
@@ -53,9 +68,10 @@ export function controlPlan(doc) {
  * @param {object} options
  * @param {object} options.grid the handle from `createVolumeGrid`.
  * @param {Document} [options.doc]
- * @returns {{bound: string[], setStatus: (message: string) => void}}
+ * @param {() => Promise<object>} [options.onSave] invoked by the save button.
+ * @returns {{bound: string[], setStatus: (message: string) => void, plan: object}}
  */
-export function bindControls({ grid, doc = globalThis.document }) {
+export function bindControls({ grid, doc = globalThis.document, onSave }) {
     const plan = controlPlan(doc);
     const bound = [];
 
@@ -74,7 +90,6 @@ export function bindControls({ grid, doc = globalThis.document }) {
         }
     };
 
-
     if (plan.resetView) {
         plan.resetView.addEventListener(
             'click',
@@ -86,46 +101,83 @@ export function bindControls({ grid, doc = globalThis.document }) {
         bound.push('resetView');
     }
 
-    if (plan.renderMode) {
-        // Reflect the template's default rather than assuming it: the `selected`
-        // attribute is what decides which mode a clinician actually sees, and it lives
-        // in the template.
-        const initial = RENDER_MODES.includes(plan.renderMode.value)
-            ? plan.renderMode.value
-            : DEFAULT_RENDER_MODE;
-
-        plan.renderMode.addEventListener(
-            'change',
-            guarded('Render mode', (event) => {
-                // The 3D window is built with the rest of the grid now, so there is
-                // nothing to bring up first.
-                const spec = grid.setRenderMode(RENDER_WINDOW, event.target.value);
-                setStatus(spec.label);
-            })
-        );
-        plan.renderMode.dataset.initialMode = initial;
-        bound.push('renderMode');
-    }
-
-    if (plan.reset3DCamera) {
-        // Now that the render is always there, this resets it -- which is what the
-        // button always claimed to do.
-        plan.reset3DCamera.addEventListener(
+    for (const button of plan.tools) {
+        const toolName = button.dataset.yggTool;
+        button.addEventListener(
             'click',
-            guarded('Reset 3D camera', () => {
-                grid.resetCameras(RENDER_WINDOW);
+            guarded(toolName, () => {
+                grid.setPrimaryTool(toolName);
+                markActiveTool(plan.tools, toolName);
                 setStatus('');
             })
         );
-        bound.push('reset3DCamera');
+    }
+    if (plan.tools.length) {
+        bound.push('tools');
+    }
+
+    if (plan.save && onSave) {
+        plan.save.addEventListener(
+            'click',
+            guarded('Save', async () => {
+                setStatus('Saving…');
+                const result = await onSave();
+                setStatus(result?.message ?? 'Saved.');
+            })
+        );
+        bound.push('save');
     }
 
     return { bound, setStatus, plan };
 }
 
-/*
- * The window/level readout used to live here, writing into a toolbar `<output>`. It
- * moved into each viewport's own overlay (`viewportOverlay.js`): the number belongs
- * next to the image it describes, and as a lone `<output>` in a toolbar it looked like
- * exactly what it was -- a slider's label with the slider taken away.
+/**
+ * A loading indicator for one grid window.
+ *
+ * A CBCT is tens of millions of voxels and takes real seconds to arrive. Without this
+ * the grid is simply black for that whole time, which is indistinguishable from a
+ * viewer that has failed — and was reported as exactly that.
+ *
+ * The element is removed on completion rather than hidden: a spinner that is merely
+ * hidden is a spinner that can be left behind by an early return.
+ *
+ * @param {HTMLElement} element the `.viewer-window`.
+ * @returns {{update: (fraction: number|null, label?: string) => void, done: () => void}}
  */
+export function loadingIndicator(element) {
+    const doc = element?.ownerDocument;
+    if (!doc) {
+        return { update: () => {}, done: () => {} };
+    }
+
+    const root = doc.createElement('div');
+    root.className = 'ygg-loading';
+    root.setAttribute('role', 'status');
+    root.setAttribute('aria-live', 'polite');
+
+    const spinner = doc.createElement('div');
+    spinner.className = 'ygg-loading__spinner';
+    root.appendChild(spinner);
+
+    const text = doc.createElement('div');
+    text.className = 'ygg-loading__text';
+    text.textContent = 'Loading volume…';
+    root.appendChild(text);
+
+    element.appendChild(root);
+
+    return {
+        update(fraction, label) {
+            if (label) {
+                text.textContent = label;
+            } else if (Number.isFinite(fraction)) {
+                // Clamped: a progress event that overshoots would read as "103%".
+                const percent = Math.min(100, Math.max(0, Math.round(fraction * 100)));
+                text.textContent = `Loading volume… ${percent}%`;
+            }
+        },
+        done() {
+            root.remove();
+        },
+    };
+}

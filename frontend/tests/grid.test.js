@@ -578,3 +578,34 @@ test('the loaded class is the one the stylesheet hides the drop-hint with', asyn
         `viewer_grid.css must hide .drop-hint under .${LOADED_CLASS}`
     );
 });
+
+test('the orientation marker is pointed at the vendored figure, not GitHub', async () => {
+    // Cornerstone's CUSTOM overlay defaults to fetching 3D Slicer's Human.vtp from
+    // raw.githubusercontent.com at runtime, and that string is still in the bundle
+    // because it is in the vendored library. The override is the only thing stopping
+    // the request, and `templates/base.html` says no third-party host may be contacted
+    // at runtime -- so if the override is ever dropped, this fails rather than the
+    // policy silently doing so.
+    const entry = await readFile(join(HERE, '..', 'entries', 'volume-grid.js'), 'utf8');
+    assert.match(
+        entry,
+        /orientationMarkerUrl:\s*new URL\('\.\.\/orientation\/Human\.vtp', import\.meta\.url\)/,
+        'the entry must resolve the vendored figure from its own bundle'
+    );
+
+    const manager = await readFile(join(HERE, '..', 'imaging', 'grid', 'viewportManager.js'), 'utf8');
+    assert.match(manager, /polyDataURL: orientationMarkerUrl/, 'and the tool must be told to use it');
+
+    // And the file it names is actually committed.
+    const vtp = await readFile(join(REPO, 'static', 'vendor', 'slicer', 'Human.vtp'), 'utf8');
+    assert.match(vtp.slice(0, 200), /<VTKFile type="PolyData"/, 'the vendored asset must be real PolyData');
+});
+
+test('the build copies the orientation figure into the bundle', async () => {
+    // It is resolved through `import.meta.url` relative to the app directory, so it has
+    // to land at <build>/orientation/ -- the same mechanism the web workers use, and
+    // the same failure mode if it does not: a runtime 404 with no build error.
+    const build = await readFile(join(REPO, 'scripts', 'build_frontend.mjs'), 'utf8');
+    assert.match(build, /from: 'static\/vendor\/slicer'/);
+    assert.match(build, /to: 'orientation'/);
+});

@@ -33,6 +33,8 @@ import {
     ToolGroupManager,
     Enums as toolsEnums,
     utilities as toolsUtilities,
+    synchronizers,
+    annotation as annotationApi,
     segmentation,
     // Navigation.
     PanTool,
@@ -228,6 +230,13 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
             // `getOrientationStringLPS` / `invertOrientationStringLPS`: Cornerstone's
             // own, so the overlay letters are its answer and not our table.
             orientationUtilities: toolsUtilities.orientation,
+            createVOISynchronizer: synchronizers.createVOISynchronizer,
+            annotationState: annotationApi.state,
+            // The vendored 3D Slicer human figure. Resolved from this module's own URL,
+            // the same way the web workers resolve theirs, so it follows the build
+            // directory and never reaches raw.githubusercontent.com. See
+            // static/vendor/slicer/README.md.
+            orientationMarkerUrl: new URL('../orientation/Human.vtp', import.meta.url).href,
             volumeLoader,
             createNiftiImageIdsAndCacheMetadata,
             setVolumesForViewports,

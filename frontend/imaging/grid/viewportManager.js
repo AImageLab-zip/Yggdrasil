@@ -113,6 +113,8 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         ToolGroupManager,
         tools,
         orientationUtilities,
+        createVOISynchronizer,
+        orientationMarkerUrl,
     } = cornerstone;
 
     // The inlined enum strings in layout.js are a copy; check it before anything is
@@ -153,7 +155,18 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         overlays.set(entry.window, createOverlay(elements[entry.window], { orientation: entry.orientation }));
     }
 
-    const toolGroups = createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums });
+    const toolGroups = createToolGroups({
+        addTool,
+        ToolGroupManager,
+        tools,
+        toolsEnums,
+        orientationMarkerUrl,
+    });
+
+    // Brightness applies to the whole study, not to one plane. Cornerstone's own
+    // synchronizer, so a Shift+drag in any window moves them all -- including the
+    // volume render, whose transfer function `setProperties({voiRange})` drives.
+    const voiSynchronizer = createVOISynchronizer?.('ygg-grid-voi', { syncColormap: false });
     for (const entry of layout) {
         if (entry.lazy) {
             continue;
@@ -162,6 +175,10 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
             viewportId(entry.window),
             RENDERING_ENGINE_ID
         );
+        voiSynchronizer?.add({
+            renderingEngineId: RENDERING_ENGINE_ID,
+            viewportId: viewportId(entry.window),
+        });
     }
 
     /**
@@ -245,6 +262,35 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         /** The window/level currently applied to a window, in modality units. */
         readWindow: (windowIndex) => readWindow({ renderingEngine, state, windowIndex, volumeCache }),
 
+        /**
+         * The header of whichever volume the grid is showing.
+         *
+         * Everything that needs real values needs it -- the residual LUT, the VOI, the
+         * descriptor a measurement is saved against -- and the load already has it in
+         * hand, so it is exposed rather than re-fetched.
+         */
+        currentHeader: () => {
+            for (const window of state.windows) {
+                const cached = window.volumeId ? volumeCache.get(window.volumeId) : null;
+                if (cached?.header) {
+                    return cached.header;
+                }
+            }
+            return null;
+        },
+
+        /**
+         * Every annotation currently drawn, as Cornerstone holds it.
+         *
+         * Handed to the server verbatim: the adapter there strips the runtime
+         * identifiers and recomputes every number from the handles, so the client has
+         * no business tidying it first.
+         */
+        readAnnotations: () => {
+            const groups = cornerstone.annotationState?.getAllAnnotations?.() ?? [];
+            return Array.isArray(groups) ? groups : Object.values(groups).flat();
+        },
+
         /** Drop volumes no window is showing any more. */
         releaseUnusedVolumes: () => releaseUnusedVolumes({ cornerstone, state, volumeCache }),
 
@@ -264,7 +310,7 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
  * meaning in a volume render, and a trackball has none in a slice. One group with
  * everything in it would put tools on a toolbar that cannot act.
  */
-function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
+function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums, orientationMarkerUrl }) {
     for (const tool of Object.values(tools)) {
         addTool(tool);
     }
@@ -322,10 +368,25 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
     threeD.setToolActive(tools.Zoom.toolName, { bindings: [{ mouseButton: MouseBindings.Secondary }] });
     threeD.setToolActive(tools.Pan.toolName, { bindings: [{ mouseButton: MouseBindings.Auxiliary }] });
 
-    // The coloured axes in the corner of the 3D view. `enabled` rather than `active`:
-    // it is an indicator, not something to drag.
+    // The orientation marker in the corner of the 3D view. `enabled` rather than
+    // `active`: it is an indicator, not something to drag.
+    //
+    // The CUSTOM overlay type is the human figure -- Cornerstone's own default for that
+    // type is 3D Slicer's `Human.vtp`, fetched from raw.githubusercontent.com at
+    // runtime. The URL is overridden with our vendored copy: same asset, same actor,
+    // no third-party request. Without the override this would reintroduce exactly the
+    // CDN dependency finding F5 removed from itk-wasm.
     if (tools.OrientationMarker) {
-        threeD.setToolEnabled(tools.OrientationMarker.toolName);
+        const marker = tools.OrientationMarker;
+        if (orientationMarkerUrl) {
+            threeD.setToolConfiguration(marker.toolName, {
+                overlayMarkerType: marker.OVERLAY_MARKER_TYPES.CUSTOM,
+                overlayConfiguration: {
+                    [marker.OVERLAY_MARKER_TYPES.CUSTOM]: { polyDataURL: orientationMarkerUrl },
+                },
+            });
+        }
+        threeD.setToolEnabled(marker.toolName);
     }
 
     return {

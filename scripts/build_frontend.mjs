@@ -194,6 +194,14 @@ const VENDORED_TREES = [
         from: 'node_modules/@itk-wasm/morphological-contour-interpolation/dist/pipelines',
         to: 'itk/pipelines',
     },
+    {
+        // The 3D orientation marker. `OrientationMarkerTool`'s CUSTOM overlay defaults
+        // to fetching this exact file from raw.githubusercontent.com at runtime; it is
+        // copied into the build so the entry can resolve it through `import.meta.url`
+        // and no third-party host is contacted. Same treatment as F5's jsdelivr default.
+        from: 'static/vendor/slicer',
+        to: 'orientation',
+    },
 ];
 
 // ---------------------------------------------------------------------------

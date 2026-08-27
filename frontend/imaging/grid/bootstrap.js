@@ -24,7 +24,8 @@ import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, volumeIdFor } from './lay
 import { windowAt } from './windowState.js';
 import { volumeUrl } from '../ids/imageIds.js';
 import { announceVolumeReady, installPanoramicBridge, nativeRawVolumeDescriptor } from './panoramicSource.js';
-import { bindControls } from './controls.js';
+import { bindControls, loadingIndicator, markActiveTool } from './controls.js';
+import { buildSaveRequest, interpretSaveResponse } from './measurements.js';
 
 /** The element `viewer_grid_data` is rendered into by both content templates. */
 export const DATA_ELEMENT_ID = 'viewerGridData';
@@ -324,6 +325,20 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     const targets = layout.filter((entry) => !entry.lazy).map((entry) => entry.window);
     let loaded = false;
 
+    // A CBCT takes real seconds to arrive, and without an indicator the grid is simply
+    // black for all of them -- which is indistinguishable from a viewer that failed,
+    // and was reported as exactly that.
+    const indicators = elements.map((element) => loadingIndicator(element));
+    const onProgress = (event) => {
+        const { loaded, total } = event?.detail ?? {};
+        if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
+            for (const indicator of indicators) {
+                indicator.update(loaded / total);
+            }
+        }
+    };
+    view.addEventListener?.('CORNERSTONE_NIFTI_VOLUME_PROGRESS', onProgress);
+
     // One call for every window: the same volume in three viewports is one load, and
     // one read of its scalar data. See `loadVolumeIntoWindows`.
     report(`loading ${volume.modality} #${volume.fileId}…`);
@@ -344,12 +359,26 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         for (const windowIndex of targets) {
             showWindowMessage(elements[windowIndex], `Could not load this volume: ${error.message}`, 'error');
         }
+    } finally {
+        // In `finally` so a failed load does not leave a spinner turning forever over
+        // an error message.
+        view.removeEventListener?.('CORNERSTONE_NIFTI_VOLUME_PROGRESS', onProgress);
+        for (const indicator of indicators) {
+            indicator.done();
+        }
     }
 
     // Bound after the load, and bound at all only on pages that have a toolbar --
     // `bindControls` returns an empty plan on the brain page, which carries the grid
     // without the CBCT controls.
-    const controls = bindControls({ grid, doc });
+    const controls = bindControls({
+        grid,
+        doc,
+        onSave: () => saveMeasurements({ grid, data, volume, view, origin, namespace }),
+    });
+    // The template marks Crosshairs pressed; make the grid agree rather than trusting
+    // two places to say the same thing.
+    markActiveTool(controls.plan.tools, 'Crosshairs');
 
     // The window/level readout now lives in each viewport's own overlay rather than in
     // the toolbar: it belongs to the image it describes, and the toolbar `<output>` it
@@ -401,3 +430,61 @@ function descriptorFor({ grid, url, volume }) {
 }
 
 export { windowAt };
+
+/**
+ * Persist everything currently drawn on the study.
+ *
+ * Replace-the-set, matching the server: a revision *is* the state of the work at a
+ * moment, and the viewer knows what is on screen far better than it knows which
+ * annotation the user deleted. See `annotations/services/viewer.py`.
+ *
+ * @returns {Promise<{message: string}>}
+ */
+async function saveMeasurements({ grid, data, volume, view, origin, namespace }) {
+    const annotations = grid.readAnnotations?.() ?? [];
+    const header = grid.currentHeader?.();
+    if (!header) {
+        return { message: 'Nothing to save yet: the volume is still loading.' };
+    }
+
+    const state = await fetch(measurementsUrl(data, volume, namespace, origin, '/state/'), {
+        credentials: 'same-origin',
+    })
+        .then((response) => (response.ok ? response.json() : { revision: 0 }))
+        .catch(() => ({ revision: 0 }));
+
+    const body = buildSaveRequest({
+        fileId: volume.fileId,
+        bundleKey: volume.bundleKey,
+        annotations,
+        header,
+        expectedRevision: Number(state.revision) || 0,
+    });
+
+    const response = await fetch(measurementsUrl(data, volume, namespace, origin, '/'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken(view) },
+        body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => null);
+    const result = interpretSaveResponse(response, payload);
+
+    return {
+        message: result.saved
+            ? `Saved ${annotations.length} measurement(s) as revision ${result.revision}.`
+            : result.message,
+    };
+}
+
+/** The domain-oriented measurement endpoint for this patient. */
+function measurementsUrl(data, volume, namespace, origin, suffix) {
+    const prefix = namespace === 'api' ? '/api' : `/${namespace}/api`;
+    return new URL(`${prefix}/patients/${data.scanId}/measurements${suffix}`, origin).href;
+}
+
+/** Django's CSRF cookie. A POST without it is a 403 with no explanation on screen. */
+function csrfToken(view) {
+    const match = /(?:^|;\s*)csrftoken=([^;]*)/.exec(view?.document?.cookie ?? '');
+    return match ? decodeURIComponent(match[1]) : '';
+}

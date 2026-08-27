@@ -23,6 +23,7 @@ function fakeDoc({ data = {}, windows = 4, measurable = true } = {}) {
             children: [],
             addEventListener() {},
             querySelector: () => null,
+            classList: { add() {}, toggle() {} },
             appendChild(node) {
                 this.children.push(node);
             },
@@ -33,13 +34,26 @@ function fakeDoc({ data = {}, windows = 4, measurable = true } = {}) {
         defaultView: {
             location: { origin: 'https://ygg.example' },
             dispatchEvent: () => true,
+            addEventListener() {},
+            removeEventListener() {},
             CustomEvent: globalThis.CustomEvent,
         },
         getElementById: (id) =>
             id === 'viewerGridData' && data ? { textContent: JSON.stringify(data) } : null,
-        querySelectorAll: () => elements,
+        querySelectorAll: (selector) => (selector === '[data-ygg-tool]' ? [] : elements),
         createElement: () => {
-            const node = { className: '', textContent: '', setAttribute() {} };
+            const node = {
+                className: '',
+                textContent: '',
+                children: [],
+                setAttribute() {},
+                appendChild(child) {
+                    this.children.push(child);
+                },
+                remove() {
+                    this.removed = true;
+                },
+            };
             made.push(node);
             return node;
         },
@@ -64,6 +78,9 @@ function fakeMountedGrid() {
             grid.resets += 1;
         },
         loadVolumeIntoWindows: async () => ({ windows: [0, 1, 2] }),
+        refreshOverlays() {},
+        readAnnotations: () => [],
+        currentHeader: () => null,
         state: { windows: [] },
     };
     return grid;

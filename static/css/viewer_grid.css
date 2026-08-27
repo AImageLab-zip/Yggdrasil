@@ -954,3 +954,52 @@
   font-size: 0.75rem;
   color: var(--bs-secondary-color, #8a94a6);
 }
+
+/* --- Loading indicator ---------------------------------------------------- */
+
+.ygg-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  z-index: 4;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.8rem;
+}
+
+.ygg-loading__spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  animation: ygg-spin 0.8s linear infinite;
+}
+
+@keyframes ygg-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Respect a user who has asked for less motion: the text still reports progress. */
+@media (prefers-reduced-motion: reduce) {
+  .ygg-loading__spinner { animation: none; }
+}
+
+/* --- Measurement tool group ----------------------------------------------- */
+
+.cbct-tool-group {
+  display: inline-flex;
+  gap: 0.15rem;
+  align-items: center;
+}
+
+.cbct-tool.is-active,
+.cbct-tool[aria-pressed='true'] {
+  background: var(--bs-primary, #0d6efd);
+  color: #fff;
+}
