@@ -1,0 +1,120 @@
+{
+  "_comment": [
+    "Shared contract between two implementations of the same algorithm: re-projecting",
+    "stored polygons through the geometric edits rgb_editor.js applied to the image",
+    "under them. The client half is frontend/imaging/photos/editReplay.js and the",
+    "server half is maxillo/views/intraoral_segmentation.py.",
+    "",
+    "They existed independently and had drifted: the server implemented flip-h, flip-v",
+    "and crop and NOT rotate-cw or rotate-arbitrary, so a rotated photograph read back",
+    "untransformed polygons -- the segmentation quietly detached from the anatomy. This",
+    "file is what stops that happening again: both test suites read it, and a change to",
+    "either implementation that is not matched in the other fails on both sides.",
+    "",
+    "Expected values are rounded to 3 decimals, which is what both implementations do.",
+    "Add a case here before fixing a bug in either one."
+  ],
+  "cases": [
+    {
+      "name": "no operations leaves the polygon alone",
+      "operations": [],
+      "polygon": [[10, 20], [30, 20], [30, 40], [10, 40]],
+      "expected": [[10, 20], [30, 20], [30, 40], [10, 40]]
+    },
+    {
+      "name": "flip-h mirrors x about the image width",
+      "operations": [{ "type": "flip-h", "input_width": 100, "input_height": 80 }],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[90, 20], [70, 20], [70, 40]]
+    },
+    {
+      "name": "flip-v mirrors y about the image height",
+      "operations": [{ "type": "flip-v", "input_width": 100, "input_height": 80 }],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[10, 60], [30, 60], [30, 40]]
+    },
+    {
+      "name": "a crop wholly containing the polygon is a translation",
+      "operations": [{ "type": "crop", "x": 5, "y": 10, "width": 90, "height": 60 }],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[5, 10], [25, 10], [25, 30]]
+    },
+    {
+      "name": "a crop cutting the polygon clips it and closes along the cut",
+      "operations": [{ "type": "crop", "x": 0, "y": 0, "width": 20, "height": 100 }],
+      "polygon": [[10, 10], [30, 10], [30, 30], [10, 30]],
+      "expected": [[10, 10], [20, 10], [20, 30], [10, 30]]
+    },
+    {
+      "name": "a crop that excludes the polygon entirely drops it",
+      "operations": [{ "type": "crop", "x": 50, "y": 50, "width": 20, "height": 20 }],
+      "polygon": [[10, 10], [20, 10], [20, 20], [10, 20]],
+      "expected": []
+    },
+    {
+      "name": "rotate-cw is a quarter turn about the image, not about the origin",
+      "operations": [{ "type": "rotate-cw", "input_width": 100, "input_height": 80 }],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[60, 10], [60, 30], [40, 30]]
+    },
+    {
+      "name": "rotate-arbitrary by zero degrees only re-origins into the bounding box",
+      "operations": [
+        {
+          "type": "rotate-arbitrary",
+          "angle": 0,
+          "input_width": 100,
+          "input_height": 80,
+          "bb_width": 100,
+          "bb_height": 80,
+          "crop_x": 0,
+          "crop_y": 0
+        }
+      ],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[10, 20], [30, 20], [30, 40]]
+    },
+    {
+      "name": "rotate-arbitrary by 90 degrees, with the bounding box the editor computes",
+      "operations": [
+        {
+          "type": "rotate-arbitrary",
+          "angle": 90,
+          "input_width": 100,
+          "input_height": 80,
+          "bb_width": 80,
+          "bb_height": 100,
+          "crop_x": 0,
+          "crop_y": 0
+        }
+      ],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[20, 90], [20, 70], [40, 70]]
+    },
+    {
+      "name": "operations compose in order: flip then crop",
+      "operations": [
+        { "type": "flip-h", "input_width": 100, "input_height": 80 },
+        { "type": "crop", "x": 60, "y": 0, "width": 40, "height": 80 }
+      ],
+      "polygon": [[10, 20], [30, 20], [30, 40], [10, 40]],
+      "_note": "the mirror reverses which vertex is which; the ring is the same, walked from the other corner",
+      "expected": [[30, 20], [10, 20], [10, 40], [30, 40]]
+    },
+    {
+      "name": "the same two operations in the other order give a different answer",
+      "operations": [
+        { "type": "crop", "x": 60, "y": 0, "width": 40, "height": 80 },
+        { "type": "flip-h", "input_width": 40, "input_height": 80 }
+      ],
+      "polygon": [[10, 20], [30, 20], [30, 40], [10, 40]],
+      "expected": []
+    },
+    {
+      "name": "an unknown operation is the identity, so an image stays openable",
+      "operations": [{ "type": "posterize", "input_width": 100, "input_height": 80 }],
+      "polygon": [[10, 20], [30, 20], [30, 40]],
+      "expected": [[10, 20], [30, 20], [30, 40]]
+    }
+  ]
+}

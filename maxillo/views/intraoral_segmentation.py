@@ -205,6 +205,19 @@ def _clip_polygon_to_rect(polygon, left, top, right, bottom):
 
 
 def _apply_edit_operation(point, operation):
+    """One polygon vertex through one of the image editor's geometric operations.
+
+    Must stay byte-for-byte equivalent to ``applyOperation`` in
+    ``frontend/imaging/photos/editReplay.js``. The two are driven by the same fixture
+    file, ``common/fixtures/image_edit_replay.json``, because they had already drifted
+    once: the two rotate cases below were implemented on the client and missing here, so
+    a rotated photograph read back *untransformed* source polygons and the segmentation
+    silently detached from the anatomy.
+
+    An unrecognised operation is the identity rather than an error -- a viewer that
+    refused an operation it did not know would make the image unopenable instead of
+    merely unrotated.
+    """
     x = float(point[0])
     y = float(point[1])
     op_type = operation.get('type')
@@ -216,6 +229,34 @@ def _apply_edit_operation(point, operation):
         return [round(x, 3), round(height - y, 3)]
     if op_type == 'crop':
         return [round(x - float(operation.get('x') or 0), 3), round(y - float(operation.get('y') or 0), 3)]
+    if op_type == 'rotate-cw':
+        # A quarter turn clockwise: the new x is measured down the old y axis from the
+        # bottom, and the new y is the old x.
+        height = float(operation.get('input_height') or 0)
+        return [round(height - y, 3), round(x, 3)]
+    if op_type == 'rotate-arbitrary':
+        theta = math.radians(((float(operation.get('angle') or 0) % 360) + 360) % 360)
+        cx = float(operation.get('input_width') or 0) / 2
+        cy = float(operation.get('input_height') or 0) / 2
+        dx = x - cx
+        dy = y - cy
+        # The sign convention is the editor's, not a mathematical choice: it rotates
+        # about the image centre into a bounding box that the crop then re-origins.
+        # Flipping either term rotates the polygons the opposite way from the pixels,
+        # which looks like a plausible segmentation of the wrong teeth.
+        rot_x = (
+            dx * math.cos(theta)
+            + dy * math.sin(theta)
+            + float(operation.get('bb_width') or 0) / 2
+            - float(operation.get('crop_x') or 0)
+        )
+        rot_y = (
+            -dx * math.sin(theta)
+            + dy * math.cos(theta)
+            + float(operation.get('bb_height') or 0) / 2
+            - float(operation.get('crop_y') or 0)
+        )
+        return [round(rot_x, 3), round(rot_y, 3)]
     return [round(x, 3), round(y, 3)]
 
 
