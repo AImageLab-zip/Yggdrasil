@@ -359,26 +359,81 @@
                 </div>
             </div>
 
-            <!-- Teleradiography Viewer -->
+            {% comment %}
+                Teleradiography, rendered by Cornerstone3D (roadmap Phases 4+5).
+
+                The <img> this replaces could not measure anything. What the stack gives
+                it is windowing on a greyscale ceph, the measurement tools, and lengths
+                that are honest about their unit: `px` until somebody calibrates the
+                image against a known distance, `mm User` afterwards. Nothing fabricates
+                a millimetre -- see frontend/imaging/photos/metadataProvider.js.
+            {% endcomment %}
             <div id="teleradiography-viewer" class="viewer-container" {% if default_modality_slug != 'teleradiography' %}style="display: none;"{% endif %}>
-                <div class="teleradiography-loading" id="teleradiographyLoading">
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status"></div>
-                        <p class="mt-2 text-muted">Loading teleradiography image...</p>
+                {{ photo_stack_data|json_script:"photoStackData" }}
+                {% csrf_token %}
+
+                <div class="photo-toolbar" role="toolbar" aria-label="Teleradiography tools">
+                    <div class="photo-toolbar-group" role="group" aria-label="View">
+                        <span class="photo-toolbar-label">View</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoPrev" title="Previous image">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span class="photo-counter" id="photoCounter"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoNext" title="Next image">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoEditImage" title="Crop, mirror or rotate this image">
+                            <i class="fas fa-crop"></i> Edit
+                        </button>
+                    </div>
+
+                    <div class="photo-toolbar-group" role="group" aria-label="Calibration">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoCalibrate"
+                                title="Draw a Length over something of known size, then set its real length">
+                            <i class="fas fa-ruler"></i> Calibrate
+                        </button>
+                        <span class="photo-calibration" id="photoCalibration"></span>
+                    </div>
+
+                    {# One switch, off by default: a study being read shows fewer controls than one being measured. #}
+                    <button type="button" class="cbct-mode-toggle" id="photoAnnotationMode"
+                            role="switch" aria-checked="false" aria-controls="photoAnnotationTools"
+                            title="Show the measurement tools and the measurements on this image">
+                        <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+                        <span class="cbct-mode-toggle__label">Annotations</span>
+                        <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+                    </button>
+
+                    <div class="photo-toolbar-group cbct-annotation-tools" id="photoAnnotationTools" role="group" aria-label="Measure" hidden>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Length" title="Length">
+                            <i class="fas fa-ruler-horizontal"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Angle" title="Angle">
+                            <i class="fas fa-drafting-compass"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="CobbAngle" title="Cobb angle">
+                            <i class="fas fa-project-diagram"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="RectangleROI" title="Rectangle">
+                            <i class="far fa-square"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="EllipticalROI" title="Ellipse">
+                            <i class="far fa-circle"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="ArrowAnnotate" title="Arrow with a note">
+                            <i class="fas fa-location-arrow"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="photoClearMeasurements" title="Remove every measurement">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-primary" id="photoSaveMeasurements">
+                            <i class="fas fa-floppy-disk"></i> Save
+                        </button>
                     </div>
                 </div>
-                <div class="teleradiography-content" id="teleradiographyContent" style="display: none;">
-                    <div class="d-flex align-items-center justify-content-center h-100">
-                        <img id="teleradiographyImage" class="img-fluid" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" alt="Teleradiography image">
-                    </div>
-                </div>
-                <div class="teleradiography-error" id="teleradiographyError" style="display: none;">
-                    <div class="text-center py-5">
-                        <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-secondary"></i></div>
-                        <h5 class="text-secondary mb-2">No Teleradiography Image</h5>
-                        <p class="text-muted">Upload teleradiography image to view it here.</p>
-                    </div>
-                </div>
+
+                <div class="photo-viewport" id="photoViewport"></div>
+                <small class="text-muted d-block mt-1" id="photoStatus"></small>
             </div>
 
             {% if has_panoramic %}

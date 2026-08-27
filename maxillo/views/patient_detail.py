@@ -661,6 +661,16 @@ def patient_detail(request, patient_id):
         'enableContextMenu': True,
         'allowClearWindow': False,
     }
+    # The photo stack's payload. Deliberately just the endpoint and the ids: the images
+    # themselves are listed by the modality endpoint the surface already has, and
+    # duplicating that list into the page would give a stale copy of it a second life.
+    _namespace = (request.resolver_match.namespace if request.resolver_match else None) or 'maxillo'
+    photo_stack_data = {
+        'patientId': patient.patient_id,
+        'projectNamespace': _namespace,
+        'modalitySlug': 'teleradiography',
+        'endpoint': f'/{_namespace}/api/patient/{patient.patient_id}/teleradiography/?meta=1',
+    }
 
     # Processing steps possible for this patient's rerun ("Rerun" header action).
     try:
@@ -680,6 +690,7 @@ def patient_detail(request, patient_id):
 
     context = {
         'patient': patient,
+        'photo_stack_data': photo_stack_data,
         'raw_data_locked': bool(raw_lock_reasons),
         'raw_lock_message': lock_message(raw_lock_reasons),
         'panoramic_locked': bool(panoramic_lock_reasons),

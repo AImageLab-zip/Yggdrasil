@@ -38,9 +38,20 @@ worker still parses headers through it (finding F2).
 {% cornerstone_entry 'volume-grid' %}
 {% endif %}
 <script src="{% static 'js/modality_viewers/intraoral.js' %}"></script>
+{% comment %}
+    rgb_editor.js survives Phases 4+5 and is NOT scaffolding. It is a *geometric* editor
+    -- crop, mirror, rotate -- and it writes the `*_processed` FileRegistry rows the
+    export catalog and `is_processed` both read. No Cornerstone tool replaces any of
+    that, so deleting it would be a capability regression dressed up as a migration.
+    What Phases 4+5 removed is its mounting from the two old viewers; the photo stack's
+    Edit button opens it instead.
+{% endcomment %}
 <script src="{% static 'js/modality_viewers/rgb_editor.js' %}"></script>
-<script src="{% static 'js/modality_viewers/teleradiography.js' %}"></script>
 <script src="{% static 'js/modality_viewers/panoramic.js' %}"></script>
+{% if ns == 'maxillo' %}
+{# Teleradiography, on Cornerstone3D. Replaces modality_viewers/teleradiography.js. #}
+{% cornerstone_entry 'photo-stack' %}
+{% endif %}
 
 {# Main patient detail controller #}
 <script src="{% static 'js/patient_detail.js' %}"></script>

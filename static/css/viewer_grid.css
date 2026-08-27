@@ -1105,3 +1105,66 @@
   grid-column: 1 / -1;
   grid-row: 1 / -1;
 }
+
+/* ---------------------------------------------------------------------------
+   Photo stack (teleradiography, intraoral) -- roadmap Phases 4+5.
+
+   Shares the CBCT toolbar's mode switch (`.cbct-mode-toggle`) rather than
+   defining a second one: the two surfaces have the same annotation-mode
+   concept, and two switches that looked slightly different would invite the
+   conclusion that they behave differently.
+   --------------------------------------------------------------------------- */
+
+.photo-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+}
+
+.photo-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* `hidden` must win over the flex above, or the tool group stays visible with
+   annotation mode off -- the same override .cbct-annotation-tools needs. */
+.photo-toolbar-group[hidden] {
+  display: none;
+}
+
+.photo-toolbar-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+  margin-right: 0.15rem;
+}
+
+.photo-counter,
+.photo-calibration {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  min-width: 4ch;
+  text-align: center;
+}
+
+/* The viewport is sized by CSS and read back by a ResizeObserver, so it needs a
+   real height before Cornerstone measures it: a camera fitted to a 0-height
+   element is not a camera. */
+.photo-viewport {
+  position: relative;
+  width: 100%;
+  min-height: 24rem;
+  height: 60vh;
+  background: #000;
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.photo-viewport canvas {
+  display: block;
+}

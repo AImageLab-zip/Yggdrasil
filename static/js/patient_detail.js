@@ -538,10 +538,11 @@ function initViewerToggle() {
                 
                 const teleradiographyViewer = document.getElementById('teleradiography-viewer');
                 if (teleradiographyViewer) {
+                    // The Cornerstone photo stack mounts itself on import and sizes
+                    // itself from a ResizeObserver, so showing the tab is all this has
+                    // to do. There is no load() to call -- and no window global to call
+                    // it on: the bundle is an ES module.
                     teleradiographyViewer.style.display = 'block';
-                    if (typeof window.TeleradiographyViewer !== 'undefined') {
-                        window.TeleradiographyViewer.load();
-                    }
                 }
             } else if (modality === 'panoramic') {
                 // Handle panoramic viewer
@@ -854,9 +855,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize image modality viewers
     if (typeof window.IntraoralViewer !== 'undefined') {
         window.IntraoralViewer.init(window.scanId);
-    }
-    if (typeof window.TeleradiographyViewer !== 'undefined') {
-        window.TeleradiographyViewer.init(window.scanId);
     }
     if (typeof window.PanoramicViewer !== 'undefined') {
         window.PanoramicViewer.init(window.scanId);
