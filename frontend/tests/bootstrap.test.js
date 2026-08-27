@@ -63,7 +63,7 @@ function fakeMountedGrid() {
         resetCameras() {
             grid.resets += 1;
         },
-        loadVolumeIntoWindow: async () => ({}),
+        loadVolumeIntoWindows: async () => ({ windows: [0, 1, 2] }),
         state: { windows: [] },
     };
     return grid;

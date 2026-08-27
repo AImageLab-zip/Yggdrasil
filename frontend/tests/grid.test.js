@@ -532,3 +532,48 @@ test('the entries register the NIfTI loader as an IMAGE loader, not a volume loa
         );
     }
 });
+
+// ---------------------------------------------------------------------------
+// Two cross-file contracts, each of which shipped broken once.
+// ---------------------------------------------------------------------------
+
+test('pan and zoom are added to BOTH tool groups, not just the 2D one', async () => {
+    // `setToolActive` on a tool that was never *added* to the group does not throw --
+    // it logs "Tool Zoom not added to toolGroup, can't set tool mode" and carries on,
+    // leaving the 3D view with no pan and no zoom. That is how this shipped.
+    const { SHARED_NAVIGATION_TOOLS } = await import('../imaging/grid/viewportManager.js');
+    assert.deepEqual(SHARED_NAVIGATION_TOOLS, ['Pan', 'Zoom']);
+
+    const manager = await readFile(join(HERE, '..', 'imaging', 'grid', 'viewportManager.js'), 'utf8');
+    // Every shared tool must be bound in the 3D group, and the binding is only legal
+    // because the loop above adds it there.
+    for (const tool of SHARED_NAVIGATION_TOOLS) {
+        assert.match(
+            manager,
+            new RegExp(`threeD\\.setToolActive\\(tools\\.${tool}\\.toolName`),
+            `${tool} is bound in the 3D group`
+        );
+    }
+    assert.match(manager, /SHARED_NAVIGATION_TOOLS\.includes\(name\)/, 'and added to it');
+
+    // And they are registered by the entry in the first place.
+    const entry = await readFile(join(HERE, '..', 'entries', 'volume-grid.js'), 'utf8');
+    for (const tool of SHARED_NAVIGATION_TOOLS) {
+        assert.match(entry, new RegExp(`^\\s{4}${tool}:\\s`, 'm'), `${tool} in GRID_TOOLS`);
+    }
+});
+
+test('the loaded class is the one the stylesheet hides the drop-hint with', async () => {
+    // The template ships a `.drop-hint` placeholder in every window and the stylesheet
+    // hides it behind `.viewer-window.loaded`. A mismatch here leaves a grey icon over
+    // a black canvas on a window that loaded perfectly -- which is indistinguishable
+    // from one that did not.
+    const { LOADED_CLASS } = await import('../imaging/grid/viewportManager.js');
+    const css = await readFile(join(REPO, 'static', 'css', 'viewer_grid.css'), 'utf8');
+
+    assert.match(
+        css,
+        new RegExp(`\\.viewer-window\\.${LOADED_CLASS}\\s+\\.drop-hint`),
+        `viewer_grid.css must hide .drop-hint under .${LOADED_CLASS}`
+    );
+});

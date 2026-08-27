@@ -24,7 +24,6 @@ import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, volumeIdFor } from './lay
 import { windowAt } from './windowState.js';
 import { volumeUrl } from '../ids/imageIds.js';
 import { announceVolumeReady, installPanoramicBridge, nativeRawVolumeDescriptor } from './panoramicSource.js';
-import { readScalarData } from './volumeLoading.js';
 import { CONTROL_IDS, bindControls, windowReadout } from './controls.js';
 
 /** The element `viewer_grid_data` is rendered into by both content templates. */
@@ -324,19 +323,24 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     const targets = layout.filter((entry) => !entry.lazy).map((entry) => entry.window);
     let loaded = false;
 
-    for (const windowIndex of targets) {
-        try {
-            const result = await grid.loadVolumeIntoWindow(windowIndex, {
-                url,
-                modality: volume.modality,
-                fileId: volume.fileId,
-            });
-            if (result?.orientationWarning) {
+    // One call for every window: the same volume in three viewports is one load, and
+    // one read of its scalar data. See `loadVolumeIntoWindows`.
+    report(`loading ${volume.modality} #${volume.fileId}…`);
+    try {
+        const result = await grid.loadVolumeIntoWindows(targets, {
+            url,
+            modality: volume.modality,
+            fileId: volume.fileId,
+        });
+        loaded = !result?.superseded;
+        if (result?.orientationWarning) {
+            for (const windowIndex of result.windows ?? targets) {
                 showWindowMessage(elements[windowIndex], result.orientationWarning, 'warning');
             }
-            loaded = loaded || !result?.superseded;
-        } catch (error) {
-            report(`window ${windowIndex} failed: ${error.message}`);
+        }
+    } catch (error) {
+        report(`load failed: ${error.message}`);
+        for (const windowIndex of targets) {
             showWindowMessage(elements[windowIndex], `Could not load this volume: ${error.message}`, 'error');
         }
     }
@@ -381,21 +385,16 @@ function descriptorFor({ grid, url, volume }) {
     }
 
     const cached = grid.volumeCache?.get?.(volumeId);
-    if (!cached?.volume || !cached?.header) {
-        return null;
-    }
-
-    let scalarData;
-    try {
-        scalarData = readScalarData(cached.volume);
-    } catch {
-        // Still loading, or loaded short. Null is what the old implementation returned
-        // and what the panorex editor already handles by waiting.
+    // The scalar data was read once at load time and kept. Re-reading here would
+    // materialise another full copy of the volume every time the panorex editor polls.
+    if (!cached?.header || !cached?.scalarData) {
+        // Still loading. Null is what the old implementation returned, and what the
+        // panorex editor already handles by waiting.
         return null;
     }
 
     return nativeRawVolumeDescriptor({
-        scalarData,
+        scalarData: cached.scalarData,
         header: cached.header,
         fileName: volume.filename,
         source: {

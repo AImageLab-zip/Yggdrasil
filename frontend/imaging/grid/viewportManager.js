@@ -53,6 +53,26 @@ import { describeGeometry } from '../geometry/orientation.js';
 export const RENDERING_ENGINE_ID = 'ygg-volume-grid';
 
 /**
+ * Navigation that belongs to **both** tool groups.
+ *
+ * A tool has to be *added* to a group before it can be made active in it.
+ * `setToolActive` on an unadded tool does not throw -- it logs "Tool Zoom not added to
+ * toolGroup, can't set tool mode" and carries on, leaving the 3D view with no pan and
+ * no zoom. That is how this shipped, and why the list is a named constant with a test
+ * rather than a condition inside a loop.
+ */
+export const SHARED_NAVIGATION_TOOLS = Object.freeze(['Pan', 'Zoom']);
+
+/**
+ * The class the stylesheet keys the drop-hint off.
+ *
+ * `static/css/viewer_grid.css` has `.viewer-window.loaded .drop-hint { display: none }`.
+ * Without the class the placeholder keeps its `height: 100%` and a loaded window shows
+ * a grey icon over a black canvas -- indistinguishable from a viewer that failed.
+ */
+export const LOADED_CLASS = 'loaded';
+
+/**
  * Tools bound to the left mouse button, one at a time, chosen from the toolbar.
  *
  * Everything else (pan on middle, zoom on right, scroll on wheel) stays bound
@@ -137,15 +157,16 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         elements,
         volumeCache,
 
-        /** Load one volume into one window. Returns the F2 warning, if any. */
-        loadVolumeIntoWindow: (windowIndex, descriptor) =>
-            loadVolumeIntoWindow({
+        /** Load one volume into one or more windows. Returns the F2 warning, if any. */
+        loadVolumeIntoWindows: (windowIndices, descriptor) =>
+            loadVolumeIntoWindows({
                 cornerstone,
                 renderingEngine,
                 state,
-                windowIndex,
+                windowIndices,
                 descriptor,
                 volumeCache,
+                elements,
             }),
 
         /** Point a window at a different plane, rebuilding its viewport. */
@@ -197,12 +218,20 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
     const twoD = ToolGroupManager.createToolGroup(toolGroupIdFor(ORIENTATIONS.AXIAL));
     const threeD = ToolGroupManager.createToolGroup(toolGroupIdFor(ORIENTATIONS.RENDER));
 
+    // Navigation belongs to both groups. A tool must be *added* to a group before it
+    // can be made active in it -- `setToolActive` on an unadded tool only warns
+    // ("Tool Zoom not added to toolGroup, can't set tool mode") and leaves the 3D view
+    // with no pan and no zoom. The measurement tools stay 2D-only, and the trackball
+    // stays 3D-only, because neither means anything in the other.
     for (const [name, tool] of Object.entries(tools)) {
         if (name === 'TrackballRotate') {
             threeD.addTool(tool.toolName);
             continue;
         }
         twoD.addTool(tool.toolName);
+        if (SHARED_NAVIGATION_TOOLS.includes(name)) {
+            threeD.addTool(tool.toolName);
+        }
     }
 
     const { MouseBindings } = toolsEnums;
@@ -257,27 +286,37 @@ function setPrimaryTool({ toolGroup, toolsEnums, toolName }) {
 }
 
 /**
- * Fetch a volume's header, load it, put it in a viewport, and set the opening window.
+ * Load one volume and show it in every window that wants it.
+ *
+ * **Plural on purpose.** The maxillo grid puts one CBCT in three windows, and doing
+ * that a window at a time is not merely inelegant: `getCompleteScalarDataArray()`
+ * allocates a *fresh copy of the whole volume* on every call
+ * (`VoxelManager.js:649`), so computing the opening VOI three times meant three
+ * 200 MB allocations for one 60-million-voxel study. That is most of the "it takes a
+ * while to load" this replaced.
  *
  * The header is read separately from the volume because the loader does not surface
  * it, and everything Phase 3 does with real values -- the residual LUT, the VOI, the
  * F2 gate -- needs it. One extra request for a few hundred bytes; the browser cache
  * serves it from the same entry as the volume fetch that follows.
  *
- * @returns {Promise<{orientationWarning: string|null, voi: object, geometry: object}>}
+ * @returns {Promise<object>} one result, describing all the windows.
  */
-async function loadVolumeIntoWindow({
+async function loadVolumeIntoWindows({
     cornerstone,
     renderingEngine,
     state,
-    windowIndex,
+    windowIndices,
     descriptor,
     volumeCache,
+    elements,
 }) {
     const { volumeLoader, createNiftiImageIdsAndCacheMetadata, setVolumesForViewports } = cornerstone;
     const { url, modality, fileId } = descriptor;
     const volumeId = volumeIdFor(url);
-    const generation = beginLoad(state, windowIndex, { modality, fileId, volumeId });
+    const generations = new Map(
+        windowIndices.map((index) => [index, beginLoad(state, index, { modality, fileId, volumeId })])
+    );
 
     try {
         const header = await fetchHeader(url);
@@ -291,35 +330,50 @@ async function loadVolumeIntoWindow({
         // NOT `await volume.load()`: `ImageVolume.load` returns undefined, so awaiting
         // it resolves on the next microtask with no frames loaded. See volumeLoading.js.
         await awaitVolumeLoad(volume);
-        volumeCache?.set(volumeId, { volume, header });
 
-        // The window may have been cleared or reloaded while that was in flight.
-        if (!completeLoad(state, windowIndex, generation, {
-            orientationWarning: geometry.declared ? null : orientationWarningFor(geometry),
-        })) {
-            return { superseded: true, orientationWarning: null, voi: null, geometry };
+        // Read once and keep it. Every later consumer -- the VOI here, the panoramic
+        // bridge, the ROI readout -- would otherwise re-materialise the whole volume.
+        const scalarData = readScalarData(volume);
+        volumeCache?.set(volumeId, { volume, header, scalarData });
+
+        const orientationWarning = geometry.declared ? null : orientationWarningFor(geometry);
+        const live = windowIndices.filter((index) =>
+            completeLoad(state, index, generations.get(index), { orientationWarning })
+        );
+        if (live.length === 0) {
+            return { superseded: true, orientationWarning: null, voi: null, geometry, windows: [] };
         }
 
-        const id = viewportId(windowIndex);
-        await setVolumesForViewports(renderingEngine, [{ volumeId }], [id]);
+        const ids = live.map(viewportId);
+        await setVolumesForViewports(renderingEngine, [{ volumeId }], ids);
 
-        const voi = openingVoi({
-            scalarData: readScalarData(volume),
-            header,
-            modality,
-        });
-        renderingEngine.getViewport(id).setProperties({ voiRange: voi.range });
-        renderingEngine.renderViewports([id]);
+        const voi = openingVoi({ scalarData, header, modality });
+        for (const id of ids) {
+            renderingEngine.getViewport(id)?.setProperties({ voiRange: voi.range });
+        }
+        renderingEngine.renderViewports(ids);
+
+        // The template ships a `.drop-hint` placeholder in every window, and the
+        // stylesheet hides it behind `.viewer-window.loaded`
+        // (`static/css/viewer_grid.css:252`). Without the class the hint keeps its
+        // `height: 100%` and the window shows a grey icon over a black canvas -- which
+        // is exactly what a viewer that failed to load looks like.
+        for (const index of live) {
+            elements?.[index]?.classList?.add(LOADED_CLASS);
+        }
 
         return {
             superseded: false,
-            orientationWarning: windowAt(state, windowIndex).orientationWarning,
+            orientationWarning,
             voi,
             unit: unitFor(modality),
             geometry,
+            windows: live,
         };
     } catch (error) {
-        failLoad(state, windowIndex, generation, error.message);
+        for (const [index, generation] of generations) {
+            failLoad(state, index, generation, error.message);
+        }
         throw error;
     }
 }
