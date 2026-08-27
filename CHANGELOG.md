@@ -74,6 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   question a library does not raise), and the itk-wasm pipelines stay vendored and aliased
   because their ABI is pinned to the package version. `docs/cornerstone-future-work.md`
   §9 is withdrawn accordingly.
+- **The Phase 3 validation harness is deleted**, along with the `/imaging-validation/`
+  page and the `@niivue/niivue` dependency. It existed to clear one gate; Tier 1 and
+  Tier 2 were green across the readable corpus and F7's `amip` sign-off is recorded, so
+  it had nothing left to answer. That takes ~2.2 MB out of the committed bundle — 1.4 MB
+  of it base64-inlined Blosc/Zstd/LZ4 wasm reached through `zarrita`, so a staff-only
+  page could in principle read Zarr arrays it was never shown — and drops the bundle
+  from 19 emitted files to 12. **NiiVue went with it, so the tree no longer contains a
+  reference implementation**: re-running either tier now means reverting the commit.
 - **The raw-data lock reads `AnnotationSet.ever_annotated`.** `common/annotation_lock.py`
   keeps its module path and all five public signatures byte-identical, and gains
   `annotations` as its first source: one indexed query instead of up to five per-domain

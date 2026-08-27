@@ -35,8 +35,11 @@ export function setPipelinesBaseUrl(baseUrl) {
 
 export function getPipelinesBaseUrl() {
     if (typeof pipelinesBaseUrl === 'undefined') {
-        // Loud, not silent: the vendor default we removed would have quietly gone to
-        // a third-party CDN with patient-derived work in flight.
+        // Loud, not silent. The vendor default we removed built its URL from the
+        // package's own version string, so it would have quietly fetched wasm whose
+        // ABI is pinned to a *different* build than the JS driver calling into it --
+        // and a mismatched pipeline fails in ways that read as bad data, not as a bad
+        // fetch. Not a CDN objection (CDNs are fine here); a pinned-artefact one.
         throw new Error(
             'Yggdrasil: itk-wasm pipelines base URL was never set. ' +
                 'frontend/workers/itk-pipelines-config.js must be imported before any ' +

@@ -20,7 +20,6 @@ from django.urls import path, include
 from django.contrib.auth import views as auth_views
 from maxillo import views as scans_views
 from common import views as common_views
-from common import imaging_validation as imaging_validation_views
 
 urlpatterns = [
     # App-agnostic admin control panel (must come before Django admin route)
@@ -58,22 +57,6 @@ urlpatterns = [
         "api/notifications/mark-read/",
         common_views.notifications_mark_read,
         name="notifications_mark_read",
-    ),
-    # Phase 3 validation harness (docs/cornerstone-roadmap.md). Staff-only and
-    # temporary: it exists to clear the pre-merge gate on replacing the volume grid,
-    # and goes when that merges. Not inside a domain namespace because the gate spans
-    # the maxillo *and* brain corpora. Staff rather than @login_required because
-    # finding F10: common/demo.py logs anonymous visitors in as a real user, so a
-    # merely-authenticated page listing raw volume URLs would be public.
-    path(
-        "imaging-validation/",
-        imaging_validation_views.imaging_validation,
-        name="imaging_validation",
-    ),
-    path(
-        "imaging-validation/studies/",
-        imaging_validation_views.imaging_validation_studies,
-        name="imaging_validation_studies",
     ),
     path("", scans_views.home, name="home"),
     path("maxillo/", include("maxillo.urls")),

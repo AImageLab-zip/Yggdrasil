@@ -569,7 +569,7 @@ test('the volume-id scheme falls through to the default streaming volume loader'
 test('the entries register the NIfTI loader as an IMAGE loader, not a volume loader', async () => {
     // Read as text: importing an entry needs a DOM. Pinning it anyway, because this is
     // the line whose reversal produced 56 errored studies and an unreadable message.
-    for (const name of ['volume-grid.js', 'volume-validation.js']) {
+    for (const name of ['volume-grid.js']) {
         const entry = await readFile(join(HERE, '..', 'entries', name), 'utf8');
         assert.match(
             entry,
@@ -636,9 +636,11 @@ test('the orientation marker is pointed at the vendored figure, not GitHub', asy
     // Cornerstone's CUSTOM overlay defaults to fetching 3D Slicer's Human.vtp from
     // raw.githubusercontent.com at runtime, and that string is still in the bundle
     // because it is in the vendored library. The override is the only thing stopping
-    // the request, and `templates/base.html` says no third-party host may be contacted
-    // at runtime -- so if the override is ever dropped, this fails rather than the
-    // policy silently doing so.
+    // the request. The reason it must not be dropped is not that the host is
+    // third-party -- CDNs are allowed -- but that raw.githubusercontent.com serves
+    // whatever the branch says today, while static/vendor/slicer/ is pinned to a
+    // commit. If the override goes, this fails rather than the figure quietly
+    // changing under a clinician.
     const entry = await readFile(join(HERE, '..', 'entries', 'volume-grid.js'), 'utf8');
     assert.match(
         entry,

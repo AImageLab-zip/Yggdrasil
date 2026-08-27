@@ -18,7 +18,6 @@
     "@cornerstonejs/tools": "5.8.2",
     "@cornerstonejs/utils": "5.8.2",
     "@kitware/vtk.js": "36.4.1",
-    "@niivue/niivue": "0.69.0",
     "d3-array": "3.2.4",
     "d3-interpolate": "3.0.1",
     "esbuild": "0.28.2",

@@ -111,7 +111,7 @@ const itkPipelinesBaseUrlPlugin = {
  * A **warning**, not a failure. The project no longer forbids third-party CDNs -- see
  * `templates/base.html` -- so a CDN in the bundle is a fact to know about, not a broken
  * build. It is still worth printing: the itk-wasm pipelines are aliased to the vendored
- * copies (see {@link itkPipelinesShim}), and if that alias ever stops applying the
+ * copies (see {@link itkPipelinesBaseUrlPlugin}), and if that alias ever stops applying the
  * bundle would silently start fetching a *specific version* of those wasm blobs from
  * elsewhere, which is a compatibility question rather than a policy one.
  */
@@ -127,11 +127,6 @@ const APP_ENTRIES = [
     'mesh-landmarks',
     'panoramic-cpr',
     'video-annotate',
-    // Temporary, and the only entry that vendors NiiVue. It exists to clear the Phase 3
-    // gate ("the validation harness must be green across the maxillo *and* brain
-    // corpora before this merges") and goes when that gate is cleared, together with
-    // frontend/imaging/validation/ and the @niivue/niivue devDependency.
-    'volume-validation',
 ];
 
 /**
@@ -206,8 +201,11 @@ const VENDORED_TREES = [
     {
         // The 3D orientation marker. `OrientationMarkerTool`'s CUSTOM overlay defaults
         // to fetching this exact file from raw.githubusercontent.com at runtime; it is
-        // copied into the build so the entry can resolve it through `import.meta.url`
-        // and no third-party host is contacted. Same treatment as F5's jsdelivr default.
+        // copied into the build so the entry can resolve it through `import.meta.url`.
+        // Not a CDN objection -- that endpoint serves whatever the branch says today,
+        // and static/vendor/slicer/ is pinned to a Slicer commit. Same treatment as
+        // F5's jsdelivr default, and for the same reason: a fixed artefact instead of
+        // a moving reference.
         from: 'static/vendor/slicer',
         to: 'orientation',
     },

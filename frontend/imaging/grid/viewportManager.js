@@ -560,9 +560,11 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums, orient
     //
     // The CUSTOM overlay type is the human figure -- Cornerstone's own default for that
     // type is 3D Slicer's `Human.vtp`, fetched from raw.githubusercontent.com at
-    // runtime. The URL is overridden with our vendored copy: same asset, same actor,
-    // no third-party request. Without the override this would reintroduce exactly the
-    // CDN dependency finding F5 removed from itk-wasm.
+    // runtime. The URL is overridden with our vendored copy, pinned to a Slicer commit
+    // (see static/vendor/slicer/README.md). The objection is not that the request is
+    // third-party -- CDNs are fine here -- but that raw.githubusercontent.com is a
+    // source-browsing endpoint serving whatever the branch says today. Same analogy as
+    // F5's itk-wasm default: a moving reference to an asset we need a fixed one of.
     if (tools.OrientationMarker) {
         const marker = tools.OrientationMarker;
         if (orientationMarkerUrl) {

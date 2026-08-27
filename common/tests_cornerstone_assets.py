@@ -58,27 +58,15 @@ class CommittedBundleTests(SimpleTestCase):
         "volume-grid",
     ]
 
-    #: Entries that are scaffolding and have a deletion date. ``volume-validation``
-    #: is the Phase 3 harness: it is the only place in the tree that vendors NiiVue,
-    #: and it goes when the viewer replacement merges.
-    TEMPORARY_ENTRIES = ["volume-validation"]
+    def test_the_five_surfaces_the_roadmap_names_are_exactly_the_entries(self):
+        """Strict equality, in both directions.
 
-    def test_the_five_surfaces_the_roadmap_names_are_all_present(self):
-        # If a rename drops one, the phase that needs it should fail here rather than
-        # in a template.
-        entries = set(cornerstone_assets.get_entries())
-        for name in self.SURFACE_ENTRIES:
-            self.assertIn(name, entries)
-
-    def test_the_only_extra_entry_is_the_temporary_phase_3_harness(self):
-        """A build entry nobody named is either a typo or scaffolding left behind.
-
-        Splitting this from the check above keeps the surface list strict while
-        letting the harness exist: when Phase 3 deletes it, ``TEMPORARY_ENTRIES``
-        empties and this test becomes the strict equality it used to be.
+        A missing entry should fail here rather than in the template of whichever
+        phase needs it next; an extra one is either a typo or scaffolding somebody
+        left behind. This was split in two while the Phase 3 harness existed as a
+        sixth, temporary entry; that entry is gone, so it is one check again.
         """
-        extras = sorted(set(cornerstone_assets.get_entries()) - set(self.SURFACE_ENTRIES))
-        self.assertEqual(extras, self.TEMPORARY_ENTRIES)
+        self.assertEqual(sorted(cornerstone_assets.get_entries()), sorted(self.SURFACE_ENTRIES))
 
     def test_the_tag_emits_a_module_script(self):
         # F4: an IIFE bundle loses every web worker, so the tag must never emit a

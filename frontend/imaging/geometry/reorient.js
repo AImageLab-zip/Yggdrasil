@@ -25,9 +25,12 @@
  *   - flip an output axis when its dominant coefficient is negative;
  *   - `dimsRAS = [dims[0], dims[perm[0]], dims[perm[1]], dims[perm[2]]]`.
  *
- * `frontend/imaging/validation/voxelSampling.js` already consumes the resulting
- * `permRAS` in the other direction, and its bijection test covers the index algebra;
- * this module produces the same value from the affine and applies it to the data.
+ * The convention was read off the shipped NiiVue 0.69.0 rather than from documentation,
+ * and the Phase 3 harness consumed the same `permRAS` in the other direction as a
+ * cross-check. That harness is gone (see CONTRIBUTING.md), so `frontend/tests/reorient.test.js`
+ * is now the only thing holding the index algebra: **the flip must use the source axis
+ * length, not the output axis's** -- the two agree on a cube and differ on every real
+ * CBCT, which is why that case is pinned explicitly.
  */
 
 /**
