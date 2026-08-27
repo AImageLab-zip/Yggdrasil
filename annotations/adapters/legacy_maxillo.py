@@ -16,6 +16,7 @@ import re
 from django.core.exceptions import ValidationError
 
 from annotations.adapters import descriptors
+from annotations.adapters.tooth_segmentation import tooth_polygons
 from annotations.constants import (
     CoordinateSystem,
     Geometry2DType,
@@ -127,38 +128,15 @@ def ios_landmarks(document, *, patient_id):
 def intraoral_segmentation(teeth):
     """Convert ``IntraoralToothSegmentation.teeth`` into 2D polygon descriptors.
 
-    The legacy shape is ``{FDI: [[[x, y], ...], ...]}`` -- a tooth may own
-    several disjoint polygons, which is why the inner list exists and why each
-    one becomes its own item rather than being merged.
-
-    Coordinates are image pixels. They are *not* normalized on the way in: the
-    photograph they were drawn on is the resource, and rescaling them here would
-    make the converted form differ from the original for no reason a
-    cross-check could explain.
+    Delegates to :func:`annotations.adapters.tooth_segmentation.tooth_polygons`, which is
+    also what the live editor calls. That is the point rather than tidiness: decision #6
+    keeps the legacy table readable for one release as a cross-check, and
+    ``annotations_crosscheck`` compares the two representations field by field. Two
+    implementations of this conversion would drift, and the drift would surface as the
+    cross-check reporting differences on every study anybody had edited -- burying the
+    signal it exists to give.
     """
-    if not isinstance(teeth, dict):
-        raise ValidationError("teeth must be a JSON object keyed by FDI code")
-
-    out = []
-    for fdi in sorted(teeth):
-        polygons = teeth[fdi]
-        if not isinstance(polygons, list):
-            raise ValidationError(f"tooth {fdi} must hold a list of polygons")
-        for index, polygon in enumerate(polygons):
-            if not isinstance(polygon, list):
-                raise ValidationError(f"tooth {fdi} polygon {index} must be a list")
-            out.append(
-                descriptors.geometry_2d(
-                    geometry_type=Geometry2DType.POLYGON,
-                    coordinate_system=CoordinateSystem.IMAGE_PIXEL,
-                    points=[list(point) for point in polygon],
-                    closed=True,
-                    label_code=str(fdi),
-                    order=index,
-                    attributes={"fdi": str(fdi), "polygon_index": index},
-                )
-            )
-    return out
+    return tooth_polygons(teeth)
 
 
 def panoramic_arch(spline, *, axial_slice, volume_shape, geometry_source, default_mode, algorithm_version=""):

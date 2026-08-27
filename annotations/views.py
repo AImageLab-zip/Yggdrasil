@@ -38,12 +38,20 @@ from annotations.services import (
     save_measurements,
 )
 from annotations.constants import PayloadFormat, ResourceKind
+from annotations.services.segmentation import (
+    save_tooth_segmentation,
+    tooth_segmentation_state,
+)
 from annotations.services.viewer import (
     MAX_ANNOTATIONS_PER_REVISION,
     save_measurement_groups,
 )
 from common.models import FileRegistry
-from common.permissions import user_can_write_annotations, user_is_project_admin
+from common.permissions import (
+    user_can_read_folder,
+    user_can_write_annotations,
+    user_is_project_admin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -391,3 +399,136 @@ def _latest_viewer_state(annotation_set):
 def _first_message(exc):
     messages = getattr(exc, "messages", None)
     return messages[0] if messages else str(exc)
+
+
+# ---------------------------------------------------------------------------
+# Tooth segmentation
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@require_POST
+def save_tooth_segmentation_api(request, patient_id):
+    """Replace this patient's tooth polygons with what is currently on screen.
+
+    Body::
+
+        {
+          "expectedRevision": 4,
+          "images": [
+            {"fileId": 12, "teeth": {"36": [[[x, y], ...], ...]}, "imageDescriptor": {...}}
+          ]
+        }
+
+    Replace-the-set per image, and **every image the editor is showing must appear** --
+    an image omitted from the body is carried forward by the server, so a client that
+    sent only the image it had just edited would find a cleared tooth quietly restored.
+    An empty ``teeth`` map is how a deletion is expressed.
+    """
+    Patient = _patient_model(request)
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+
+    can_write = bool(
+        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
+    ) or user_is_project_admin(request.user, request)
+    if not can_write:
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Malformed JSON body"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Body must be a JSON object"}, status=400)
+
+    expected_revision = body.get("expectedRevision")
+    if expected_revision is not None and (
+        not isinstance(expected_revision, int) or isinstance(expected_revision, bool)
+    ):
+        return JsonResponse(
+            {"error": "expectedRevision must be an integer or null"}, status=400
+        )
+
+    entries = body.get("images")
+    if not isinstance(entries, list) or not entries:
+        return JsonResponse({"error": "images must be a non-empty list"}, status=400)
+
+    images = []
+    seen = set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return JsonResponse({"error": f"images[{index}] must be an object"}, status=400)
+        try:
+            file_obj = _checked_file(entry.get("fileId"), patient, f"images[{index}]")
+        except _BadRequest as exc:
+            return JsonResponse({"error": str(exc)}, status=exc.status)
+        if file_obj.pk in seen:
+            return JsonResponse(
+                {"error": f"images[{index}] names a file already in this save"}, status=400
+            )
+        seen.add(file_obj.pk)
+        images.append(
+            {
+                "file_obj": file_obj,
+                "teeth": entry.get("teeth"),
+                "descriptor": entry.get("imageDescriptor") or {},
+            }
+        )
+
+    try:
+        revision = save_tooth_segmentation(
+            patient,
+            images=images,
+            author=request.user,
+            expected_revision=expected_revision,
+        )
+    except AnnotationConflict as exc:
+        return JsonResponse({"error": str(exc), "conflict": True}, status=409)
+    except AnnotationNotAllowed as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except ValidationError as exc:
+        # An adapter or label refusal: an unknown FDI code, a malformed polygon. Nothing
+        # was written -- the translation runs before the first row.
+        return JsonResponse({"error": _first_message(exc)}, status=400)
+
+    return JsonResponse(
+        {
+            "revision": revision.revision_number,
+            "setId": revision.annotation_set_id,
+            "teeth": sum(len(image["teeth"]) for image in images),
+        }
+    )
+
+
+@login_required
+def tooth_segmentation_state_api(request, patient_id):
+    """The polygons to draw, and the revision a save must quote.
+
+    Keyed by file id, rebuilt from the canonical items. There is no scratch payload for
+    this surface: a tooth polygon *is* a list of points, so the items are the whole truth
+    and a second copy allowed to go stale would only ever disagree with them.
+    """
+    Patient = _patient_model(request)
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        (patient.folder and user_can_read_folder(request.user, patient.folder, request))
+        or user_is_project_admin(request.user, request)
+    ):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    domain_field = {
+        "maxillo": "patient",
+        "brain": "brain_patient",
+        "laparoscopy": "laparoscopy_patient",
+    }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
+
+    state = tooth_segmentation_state(patient, domain_field=domain_field)
+    return JsonResponse(
+        {
+            **state,
+            # String keys, because JSON object keys are strings and a client that read
+            # them as numbers on one path and strings on another would have a bug that
+            # only showed up for one image.
+            "images": {str(key): value for key, value in state["images"].items()},
+        }
+    )

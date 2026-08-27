@@ -260,6 +260,39 @@ class MultiTargetSaveTests(TestCase):
             "saved last'",
         )
 
+    def test_a_photos_only_patient_still_gets_a_primary_target(self):
+        """`reclaim_primary=False` means "do not move one", not "leave none".
+
+        A set with no primary target has no answer to "what is this mostly about", which
+        is the question the slot exists to hold. Without the split, a photo save either
+        steals the slot from a volume on every save or a patient with only photographs
+        never gets one at all.
+        """
+        self._save_images(
+            [
+                self._image(self.photo_a, [[[0, 0], [3, 4]]]),
+                self._image(self.photo_b, [[[0, 0], [6, 8]]]),
+            ]
+        )
+        primary = self._set().targets.get(primary_slot=1)
+        self.assertEqual(primary.source_resource.file_id, self.photo_a.id)
+
+    def test_the_primary_slot_does_not_ping_pong_between_saves(self):
+        self._save_images(
+            [
+                self._image(self.photo_a, [[[0, 0], [3, 4]]]),
+                self._image(self.photo_b, [[[0, 0], [6, 8]]]),
+            ]
+        )
+        self._save_images(
+            [self._image(self.photo_b, [[[0, 0], [9, 12]]])], expectedRevision=1
+        )
+        primary = self._set().targets.get(primary_slot=1)
+        self.assertEqual(
+            primary.source_resource.file_id, self.photo_a.id,
+            "the slot answers 'what is this mostly about', not 'what was saved last'",
+        )
+
     # -- refusals -----------------------------------------------------------
 
     def test_a_group_naming_another_patients_file_writes_nothing(self):

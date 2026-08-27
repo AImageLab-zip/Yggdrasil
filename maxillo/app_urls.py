@@ -295,4 +295,17 @@ urlpatterns = [
         annotations_views.measurements_state_api,
         name="api_measurements_state",
     ),
+    # Tooth segmentation, through the same services. Its own set kind rather than its own
+    # machinery: a tooth polygon is not a measurement, but "one revision spanning several
+    # images, carrying forward the ones a save did not name" is the same problem.
+    path(
+        "api/patients/<int:patient_id>/tooth-segmentation/",
+        annotations_views.save_tooth_segmentation_api,
+        name="api_save_tooth_segmentation",
+    ),
+    path(
+        "api/patients/<int:patient_id>/tooth-segmentation/state/",
+        annotations_views.tooth_segmentation_state_api,
+        name="api_tooth_segmentation_state",
+    ),
 ]

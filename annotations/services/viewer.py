@@ -126,6 +126,11 @@ def save_measurement_groups(
     note="",
     reclaim_primary=True,
     carry_forward=True,
+    kind=MEASUREMENTS_KIND,
+    label_schema=None,
+    require_labels=False,
+    translate=None,
+    store_payload=True,
 ):
     """Write one revision holding the state of every resource the caller names.
 
@@ -152,8 +157,19 @@ def save_measurement_groups(
     modalities on every save, and the slot is meant to answer "what is this set mostly
     about", not "what was saved last".
 
+    ``kind`` and ``require_labels`` are what let a second surface reuse all of this. Tooth
+    segmentation is filed under its own kind -- a tooth polygon is not a measurement, and
+    ``get_or_create_set``'s ``(domain, patient, kind)`` key therefore gives it its own set
+    for free -- and it requires labels, because an FDI code is what decides a polygon's
+    segment number on export. Measurements do not: a length is meaningful unlabelled.
+
+    ``translate`` replaces the Cornerstone adapter for a caller whose input is not
+    Cornerstone annotation state. It takes one group and returns its descriptors.
+
     :param primary_index: which group claims the primary slot, when one is claimed.
     :param carry_forward: set false only for a caller that genuinely owns the whole set.
+    :param store_payload: false for a surface whose items are its only representation --
+        a resumable scratch copy that nothing reads is a second thing to keep in step.
     :returns: the new ``AnnotationRevision``.
     """
     groups = list(groups or [])
@@ -184,26 +200,30 @@ def save_measurement_groups(
     # save before any row exists, or the user is left with a revision that silently holds
     # some of what was on screen. With several groups this matters more, not less: a
     # partial write would also look like a deletion on the groups that never got written.
-    translated = []
-    for group in groups:
-        descriptor_list = []
-        for order, entry in enumerate(group["annotations"]):
-            descriptor_list.extend(
-                cs_adapter.descriptors_for_annotation(
-                    entry, coordinate_system=coordinate_system, order=order
-                )
-            )
-        translated.append(descriptor_list)
+    translated = [
+        translate(group) if translate else _translate_cornerstone(group, coordinate_system)
+        for group in groups
+    ]
 
     annotation_set = get_or_create_set(
         patient,
-        MEASUREMENTS_KIND,
+        kind,
         annotation_method=annotation_method,
+        label_schema=label_schema,
         created_by=author,
     )
     # Read before the new revision exists; afterwards "the latest" would be the empty
     # one being written.
     previous_revision = annotation_set.revisions.order_by("-revision_number").first()
+
+    # `reclaim_primary=False` means "do not move a primary somebody else holds", not
+    # "leave the set without one". A set with no primary target has no answer to "what is
+    # this mostly about", which is the question the slot exists to hold -- so an unset
+    # slot is still claimed, and only an already-set one is left alone. Without this
+    # split, a photo save either steals the slot from a volume on every save or a
+    # patient with only photographs never gets one at all.
+    has_primary = annotation_set.targets.filter(primary_slot=1).exists()
+    claim_primary = reclaim_primary or not has_primary
 
     targets = []
     for index, group in enumerate(groups):
@@ -218,7 +238,7 @@ def save_measurement_groups(
                 annotation_set,
                 resource,
                 role=group.get("role", ""),
-                primary=reclaim_primary and index == primary_index,
+                primary=claim_primary and index == primary_index,
                 order=group.get("order", index),
             )
         )
@@ -231,10 +251,8 @@ def save_measurement_groups(
         note=note,
     )
 
-    # Labels are not required: a measurement is meaningful without one, unlike a tooth
-    # polygon whose FDI code decides its export segment.
     for target, descriptor_list in zip(targets, translated):
-        apply_descriptors(revision, target, descriptor_list, require_labels=False)
+        apply_descriptors(revision, target, descriptor_list, require_labels=require_labels)
 
     if carry_forward:
         named = {target.pk for target in targets}
@@ -245,14 +263,27 @@ def save_measurement_groups(
 
     # The resumable scratch copy. Never canonical, free to go stale, and stripped of
     # every runtime identifier on the way in.
-    add_payload(
-        revision,
-        format=PayloadFormat.CORNERSTONE_STATE,
-        data=_state_payload(groups, targets, previous_revision, carry_forward),
-        canonical=False,
-    )
+    if store_payload:
+        add_payload(
+            revision,
+            format=PayloadFormat.CORNERSTONE_STATE,
+            data=_state_payload(groups, targets, previous_revision, carry_forward),
+            canonical=False,
+        )
 
     return revision
+
+
+def _translate_cornerstone(group, coordinate_system):
+    """The default translation: Cornerstone annotation state to descriptors."""
+    descriptor_list = []
+    for order, entry in enumerate(group["annotations"]):
+        descriptor_list.extend(
+            cs_adapter.descriptors_for_annotation(
+                entry, coordinate_system=coordinate_system, order=order
+            )
+        )
+    return descriptor_list
 
 
 def _state_payload(groups, targets, previous_revision, carry_forward):
