@@ -48,6 +48,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing the URL *pathname* for a `.gz` suffix, which a query parameter cannot carry.
   Same view, same ACL; the filename segment never takes part in resolving the file.
 
+- **Teleradiography renders through Cornerstone3D**, replacing an `<img>` that could not
+  measure anything. Lengths are honest about their unit: `px` until somebody calibrates
+  the image against a known distance, `mm User` afterwards, and never a fabricated
+  millimetre -- the metadata provider *omits* `pixelSpacing` rather than defaulting it,
+  which is what makes Cornerstone report pixels. A new
+  `POST .../images/<file_id>/calibration/` records the scale, recomputed by the server
+  from the two points the user drew and stored with its provenance in
+  `FileRegistry.metadata['pixel_spacing_mm']` -- no migration.
+  `modality_viewers/teleradiography.js` is deleted.
+- **One annotation revision can span several resources.** `AnnotationSet` is keyed
+  `(domain, patient, kind)` and a revision replaces the whole set, so a patient with two
+  annotatable resources lost one when the other was saved. A save now replaces the
+  resources it names and carries the rest forward, on one revision inside one
+  transaction. Latent for a brain patient with two series; it would have been reachable
+  on every save for a photo stack.
+- **Tooth segmentation writes through `annotations/`.** Its own set kind, the FDI
+  vocabulary seeded by `annotations/migrations/0002`, labels required rather than
+  defaulted -- an FDI code decides a polygon's export segment -- and the same conversion
+  `annotations_convert_legacy` uses, as one function, so the converted and the live rows
+  cannot drift apart and `annotations_crosscheck` keeps comparing like with like. The
+  interactive editor is **not** replaced yet and `intraoral_segmentation.js` stays; see
+  `docs/cornerstone-roadmap.md` for why the boundary is there.
+
 ### Changed
 - **CBCT annotation is a mode now, and it is off by default.** One switch reading
   `Annotations on` / `Annotations off` replaces the eye button: turning it on reveals the
@@ -97,6 +120,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by 1024 HU.
 
 ### Fixed
+- **Tooth polygons silently detached from rotated photographs.** The image editor can
+  crop, mirror and rotate an intraoral photo, and both the client and the server
+  re-project the stored polygons through those operations -- except the server
+  implemented `flip-h`, `flip-v` and `crop` and **neither rotate case**, so a rotated
+  photograph read back polygons nothing had re-projected. The preview was right and the
+  stored read was wrong, which is the worse way round: whoever drew them saw them in the
+  right place. **7 of the 68 edited intraoral files in production carry a rotate and are
+  affected.** The projection is correct from here on; those studies still need looking
+  at, because nothing has re-derived what was displayed in the meantime. Both
+  implementations are now driven by `common/fixtures/image_edit_replay.json` so they
+  cannot drift again.
 - **Restored measurements were not drawn until a tool button was clicked.** The switch
   showed them and nothing appeared; switching it off and on again "fixed" it only
   because a tool button had been clicked in between. `ToolGroup.addTool` instantiates a
