@@ -32,6 +32,7 @@ import {
     addTool,
     ToolGroupManager,
     Enums as toolsEnums,
+    utilities as toolsUtilities,
     segmentation,
     // Navigation.
     PanTool,
@@ -42,6 +43,8 @@ import {
     // The 3D window's primary. Phase 6 uses the same tool for IOS meshes, where it
     // replaces THREE.TrackballControls; the volume render needs it first.
     TrackballRotateTool,
+    // The coloured axes in the corner of the 3D view.
+    OrientationMarkerTool,
     // Measurement -- the whole point of the migration. Today there is exactly one
     // tool (static/js/viewer_grid.js:88-91) and it is never persisted.
     LengthTool,
@@ -187,6 +190,7 @@ export const GRID_TOOLS = {
     EllipticalROI: EllipticalROITool,
     CircleROI: CircleROITool,
     TrackballRotate: TrackballRotateTool,
+    OrientationMarker: OrientationMarkerTool,
 };
 
 /**
@@ -221,6 +225,9 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
             addTool,
             ToolGroupManager,
             tools: GRID_TOOLS,
+            // `getOrientationStringLPS` / `invertOrientationStringLPS`: Cornerstone's
+            // own, so the overlay letters are its answer and not our table.
+            orientationUtilities: toolsUtilities.orientation,
             volumeLoader,
             createNiftiImageIdsAndCacheMetadata,
             setVolumesForViewports,

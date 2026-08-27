@@ -72,18 +72,17 @@
                 `min=0 max=100` percent-of-this-volume's-data-range sliders, which is not a
                 clinical quantity: two scans of the same patient on the same machine give
                 different percentages for the same bone, so no window could be written down
-                or compared. Window/level is now dragged directly on the image, and the
-                readout below reports it in the volume's own modality units -- with the unit
-                named, or omitted where there is not one. CBCT greyscale is deliberately
-                unlabelled: it is vendor-dependent and is not calibrated Hounsfield.
+                or compared. Window/level is now Shift+drag on the image, and the value is
+                reported in each viewport's own overlay in modality units -- next to the
+                image it describes, rather than in a toolbar.
                 {% endcomment %}
-                <div class="cbct-window-controls" aria-label="CBCT contrast readout">
-                    <output class="cbct-window-readout" id="cbctWindowReadout" role="status" aria-live="polite"></output>
-                </div>
+                <span class="cbct-window-hint">Shift+drag to adjust brightness</span>
                 <div class="viewer-toolbar__divider"></div>
-                <button type="button" class="cbct-3d-toggle" id="toggleCBCT3DOnly" aria-pressed="false" title="Load and focus the 3D renderer">
-                    <i class="fas fa-cube" aria-hidden="true"></i><span>3D only</span>
-                </button>
+                {% comment %}
+                The "Load 3D" toggle is gone: the volume render is built with the three
+                slice views now, because the volume is already decoded and in GPU memory
+                for them and the render costs a transfer function rather than a load.
+                {% endcomment %}
                 <label class="cbct-render-select" for="cbctRenderMode">
                     <span>Render</span>
                     <select id="cbctRenderMode">
@@ -93,7 +92,6 @@
                     </select>
                 </label>
                 <button type="button" class="icon-btn cbct-render-action" id="resetCBCT3DCamera" title="Reset 3D camera"><i class="fas fa-arrows-rotate" aria-hidden="true"></i></button>
-                <button type="button" class="cbct-render-action cbct-exit-focus" id="exitCBCT3DFocus" hidden>Exit 3D</button>
                 <span class="cbct-render-status" id="cbctRenderStatus" role="status" aria-live="polite"></span>
             </div>
         </div>

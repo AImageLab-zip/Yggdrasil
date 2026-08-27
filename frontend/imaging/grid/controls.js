@@ -17,17 +17,13 @@
  */
 
 import { DEFAULT_RENDER_MODE, RENDER_MODES } from './renderModes.js';
-import { formatWindow } from './voi.js';
 
 /** Element ids the template provides, and what each is for. */
 export const CONTROL_IDS = Object.freeze({
     resetView: 'resetCBCTView',
     renderMode: 'cbctRenderMode',
-    toggle3D: 'toggleCBCT3DOnly',
     reset3DCamera: 'resetCBCT3DCamera',
-    exit3D: 'exitCBCT3DFocus',
     status: 'cbctRenderStatus',
-    windowReadout: 'cbctWindowReadout',
 });
 
 /** The grid window the 3D render occupies, per `FIXED_CBCT_LAYOUT`. */
@@ -78,16 +74,6 @@ export function bindControls({ grid, doc = globalThis.document }) {
         }
     };
 
-    // 3D is lazy, so the first interaction with any 3D control has to bring it up.
-    let renderReady = false;
-    const ensureRender = async (mode) => {
-        if (!renderReady) {
-            setStatus('Loading 3D…');
-            await grid.enable3DWindow(RENDER_WINDOW, mode);
-            renderReady = true;
-        }
-        return renderReady;
-    };
 
     if (plan.resetView) {
         plan.resetView.addEventListener(
@@ -110,10 +96,10 @@ export function bindControls({ grid, doc = globalThis.document }) {
 
         plan.renderMode.addEventListener(
             'change',
-            guarded('Render mode', async (event) => {
-                const mode = event.target.value;
-                await ensureRender(mode);
-                const spec = grid.setRenderMode(RENDER_WINDOW, mode);
+            guarded('Render mode', (event) => {
+                // The 3D window is built with the rest of the grid now, so there is
+                // nothing to bring up first.
+                const spec = grid.setRenderMode(RENDER_WINDOW, event.target.value);
                 setStatus(spec.label);
             })
         );
@@ -121,80 +107,25 @@ export function bindControls({ grid, doc = globalThis.document }) {
         bound.push('renderMode');
     }
 
-    if (plan.toggle3D) {
-        plan.toggle3D.addEventListener(
-            'click',
-            guarded('Load 3D', async () => {
-                const mode = plan.renderMode?.value || DEFAULT_RENDER_MODE;
-                await ensureRender(mode);
-                plan.toggle3D.setAttribute('aria-pressed', 'true');
-                if (plan.exit3D) {
-                    plan.exit3D.hidden = false;
-                }
-                setStatus(`3D: ${mode}`);
-            })
-        );
-        bound.push('toggle3D');
-    }
-
     if (plan.reset3DCamera) {
+        // Now that the render is always there, this resets it -- which is what the
+        // button always claimed to do.
         plan.reset3DCamera.addEventListener(
             'click',
             guarded('Reset 3D camera', () => {
-                if (!renderReady) {
-                    // Nothing to reset, and bringing 3D up because somebody asked to
-                    // reset it would be the most expensive possible reading of a click.
-                    setStatus('3D is not loaded.');
-                    return;
-                }
                 grid.resetCameras(RENDER_WINDOW);
+                setStatus('');
             })
         );
         bound.push('reset3DCamera');
     }
 
-    if (plan.exit3D) {
-        plan.exit3D.addEventListener(
-            'click',
-            guarded('Exit 3D', () => {
-                plan.toggle3D?.setAttribute('aria-pressed', 'false');
-                plan.exit3D.hidden = true;
-                setStatus('');
-            })
-        );
-        bound.push('exit3D');
-    }
-
     return { bound, setStatus, plan };
 }
 
-/**
- * Keep the window/level readout in step with the viewport.
- *
- * This is what replaced the percent sliders (decision #5). It is a *readout*, not a
- * control: window/level is dragged on the image, and the number shown is in the
- * volume's own modality units with the unit named — or omitted, for CBCT, whose
- * greyscale is not calibrated Hounsfield.
- *
- * @param {object} options
- * @param {object} options.grid
- * @param {HTMLElement} options.element the `<output>` to write into.
- * @param {number} [options.windowIndex] which window to report.
- * @returns {() => void} call to refresh.
+/*
+ * The window/level readout used to live here, writing into a toolbar `<output>`. It
+ * moved into each viewport's own overlay (`viewportOverlay.js`): the number belongs
+ * next to the image it describes, and as a lone `<output>` in a toolbar it looked like
+ * exactly what it was -- a slider's label with the slider taken away.
  */
-export function windowReadout({ grid, element, windowIndex = 0 }) {
-    return function refresh() {
-        if (!element) {
-            return;
-        }
-        let current = null;
-        try {
-            current = grid.readWindow(windowIndex);
-        } catch {
-            current = null;
-        }
-        // Blank rather than "W 0 / L 0" when there is nothing loaded: a zero window is
-        // a real setting and would read as one.
-        element.textContent = current ? formatWindow(current, current.unit) : '';
-    };
-}

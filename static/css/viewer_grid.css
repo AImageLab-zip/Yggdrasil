@@ -838,3 +838,119 @@
 .orientation-warning__action:hover {
     background: rgba(255, 193, 7, 0.15);
 }
+
+/* ---------------------------------------------------------------------------
+ * Viewport overlay (Cornerstone3D grid, roadmap Phase 3).
+ *
+ * Panel name, orientation letters, slice counter and window/level, drawn over the
+ * canvas. Built by frontend/imaging/grid/viewportOverlay.js.
+ *
+ * `pointer-events: none` on the root is load-bearing: the overlay covers the whole
+ * viewport, and without it every drag meant for the image -- crosshairs, window/level,
+ * pan -- would land on a label instead.
+ * ------------------------------------------------------------------------- */
+
+.ygg-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+
+.ygg-overlay__panel {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Bottom-left, matching where every viewer puts it. */
+.ygg-overlay__slice {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.6rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Bottom-right, out of the way of the slice counter. Quiet by default: it is a
+ * readout, not a control, and it should not compete with the image. */
+.ygg-overlay__window {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.6rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.7rem;
+}
+
+/* The anatomical letters. Centred on each edge, and deliberately brighter than the
+ * numbers: getting left and right the wrong way round is the error that matters. */
+.ygg-overlay__edge {
+  position: absolute;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ygg-overlay__edge--top {
+  top: 0.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ygg-overlay__edge--bottom {
+  bottom: 0.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ygg-overlay__edge--left {
+  left: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ygg-overlay__edge--right {
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* The viewport element Cornerstone renders into has to establish a containing block
+ * for the absolutely positioned overlay above. */
+.viewer-window {
+  position: relative;
+}
+
+/* Load failures and the F2 orientation warning. */
+.viewer-window__message {
+  position: absolute;
+  inset: auto 0.6rem 2rem 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.viewer-window__message--warning {
+  background: rgba(120, 85, 0, 0.85);
+  color: #ffe9b0;
+}
+
+.viewer-window__message--error {
+  background: rgba(120, 20, 20, 0.9);
+  color: #ffd9d9;
+}
+
+/* Replaces the percent Level/Window sliders (decision #5). Window/level is dragged on
+ * the image with Shift; the number lives in each viewport's overlay. */
+.cbct-window-hint {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color, #8a94a6);
+}

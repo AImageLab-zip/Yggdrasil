@@ -110,18 +110,19 @@ test('an unknown orientation is refused rather than defaulted to axial', () => {
     assert.throws(() => viewportSpecFor(undefined), /Unknown orientation/);
 });
 
-test('the fixed CBCT layout is three orthogonal planes plus lazy 3D', () => {
-    // Reproduces maxillo_cbct_grid_adapter.js initFixedCbctGrid. The laziness is not
-    // cosmetic: a volume render of a full CBCT is the most expensive thing the page
-    // can do, and most visits never need it.
+test('the fixed CBCT layout is three orthogonal planes plus a volume render', () => {
     assert.equal(FIXED_CBCT_LAYOUT.length, GRID_WINDOWS);
     assert.deepEqual(
         FIXED_CBCT_LAYOUT.map((entry) => entry.orientation),
         ['axial', 'sagittal', 'coronal', 'render']
     );
+    // Nothing is lazy. The old adapter hid 3D behind a "Load 3D" button on the grounds
+    // that a volume render is expensive, but the volume is already decoded and in GPU
+    // memory for the three slice views, so the render costs a transfer function rather
+    // than a second load.
     assert.deepEqual(
         FIXED_CBCT_LAYOUT.map((entry) => entry.lazy),
-        [false, false, false, true]
+        [false, false, false, false]
     );
     assert.equal(FREE_LAYOUT.length, GRID_WINDOWS);
     assert.ok(FREE_LAYOUT.every((entry) => entry.orientation === ORIENTATIONS.AXIAL && !entry.lazy));
@@ -165,7 +166,7 @@ test('a fresh grid has four empty windows in the layout given', () => {
     );
     assert.deepEqual(loadedWindows(state), []);
     assert.deepEqual(activeVolumeIds(state), []);
-    assert.equal(windowAt(state, 3).lazy, true);
+    assert.equal(windowAt(state, 3).lazy, false);
 });
 
 test('a superseded load cannot write back over the one that replaced it', () => {

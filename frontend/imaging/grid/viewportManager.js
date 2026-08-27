@@ -45,6 +45,8 @@ import {
 } from './windowState.js';
 import { modalityWindowFromVoiRange, openingVoi, unitFor } from './voi.js';
 import { DEFAULT_RENDER_MODE, applyRenderMode } from './renderModes.js';
+import { createOverlay, updateOverlay } from './viewportOverlay.js';
+import { formatWindow } from './voi.js';
 import { residualModalityLut } from '../metadata/modalityLutModule.js';
 import { awaitVolumeLoad, readScalarData } from './volumeLoading.js';
 import { describeGeometry } from '../geometry/orientation.js';
@@ -110,6 +112,7 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         addTool,
         ToolGroupManager,
         tools,
+        orientationUtilities,
     } = cornerstone;
 
     // The inlined enum strings in layout.js are a copy; check it before anything is
@@ -139,6 +142,17 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         });
     renderingEngine.setViewports(viewportInputs);
 
+    // One overlay per window, built with the viewports rather than after the volume
+    // arrives: the panel name and the edge letters are properties of the *plane*, and
+    // showing them immediately is what makes an empty grid look deliberate.
+    const overlays = new Map();
+    for (const entry of layout) {
+        if (entry.lazy || !elements[entry.window]) {
+            continue;
+        }
+        overlays.set(entry.window, createOverlay(elements[entry.window], { orientation: entry.orientation }));
+    }
+
     const toolGroups = createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums });
     for (const entry of layout) {
         if (entry.lazy) {
@@ -150,11 +164,51 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         );
     }
 
+    /**
+     * Refresh one window's overlay from its viewport.
+     *
+     * Reads the camera each time rather than caching it: the edge letters follow the
+     * camera, which is the whole reason they come from `getOrientationStringLPS` and
+     * not from a per-plane table.
+     */
+    const refreshOverlay = (windowIndex) => {
+        const nodes = overlays.get(windowIndex);
+        const viewport = renderingEngine.getViewport(viewportId(windowIndex));
+        if (!nodes || !viewport) {
+            return;
+        }
+        const window = windowAt(state, windowIndex);
+        let windowText = '';
+        if (isSliceOrientation(window.orientation)) {
+            const current = readWindow({ renderingEngine, state, windowIndex, volumeCache });
+            windowText = current ? formatWindow(current, current.unit) : '';
+        }
+        updateOverlay(nodes, {
+            camera: viewport.getCamera?.(),
+            sliceIndex: viewport.getSliceIndex?.(),
+            sliceCount: viewport.getImageIds?.()?.length,
+            windowText,
+            utilities: orientationUtilities,
+        });
+    };
+
+    // Cornerstone dispatches these on the viewport's own element, so the overlay stays
+    // in step with scrolling, crosshair drags, zoom and window/level without polling.
+    for (const [windowIndex, ] of overlays) {
+        const element = elements[windowIndex];
+        for (const eventName of ['CORNERSTONE_CAMERA_MODIFIED', 'CORNERSTONE_VOI_MODIFIED']) {
+            element.addEventListener(eventName, () => refreshOverlay(windowIndex));
+        }
+    }
+
     return {
         state,
         renderingEngine,
         toolGroups,
         elements,
+        overlays,
+        refreshOverlay,
+        refreshOverlays: () => overlays.forEach((unused, index) => refreshOverlay(index)),
         volumeCache,
 
         /** Load one volume into one or more windows. Returns the F2 warning, if any. */
@@ -224,7 +278,7 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
     // with no pan and no zoom. The measurement tools stay 2D-only, and the trackball
     // stays 3D-only, because neither means anything in the other.
     for (const [name, tool] of Object.entries(tools)) {
-        if (name === 'TrackballRotate') {
+        if (name === 'TrackballRotate' || name === 'OrientationMarker') {
             threeD.addTool(tool.toolName);
             continue;
         }
@@ -234,7 +288,7 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
         }
     }
 
-    const { MouseBindings } = toolsEnums;
+    const { MouseBindings, KeyboardBindings } = toolsEnums;
 
     // Permanent bindings. A user who has picked the length tool still has to navigate,
     // so pan, zoom and scroll are never the thing the toolbar swaps.
@@ -246,10 +300,20 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
     });
     twoD.setToolActive(tools.StackScroll.toolName, { bindings: [{ mouseButton: MouseBindings.Wheel }] });
 
-    // The opening primary tool. Window/level rather than a measurement: the first
-    // thing anyone does with a new volume is find the tissue.
-    twoD.setToolActive(tools.WindowLevel.toolName, {
+    // Crosshairs is the opening primary tool, and it is the reason the three slice
+    // views feel like one study rather than three pictures: it draws the coloured
+    // reference lines showing where each plane cuts the others, and dragging them
+    // navigates all three at once. `viewer_grid.js` synchronised NiiVue's crosshairPos
+    // by hand to get this; Cornerstone ships it.
+    twoD.setToolActive(tools.Crosshairs.toolName, {
         bindings: [{ mouseButton: MouseBindings.Primary }],
+    });
+
+    // Window/level keeps the primary button too, behind Shift. It was the default
+    // before crosshairs took the button, and it is the second thing anybody does with
+    // a new volume -- putting it behind a toolbar mode switch would be a regression.
+    twoD.setToolActive(tools.WindowLevel.toolName, {
+        bindings: [{ mouseButton: MouseBindings.Primary, modifierKey: KeyboardBindings.Shift }],
     });
 
     threeD.setToolActive(tools.TrackballRotate.toolName, {
@@ -257,6 +321,12 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums }) {
     });
     threeD.setToolActive(tools.Zoom.toolName, { bindings: [{ mouseButton: MouseBindings.Secondary }] });
     threeD.setToolActive(tools.Pan.toolName, { bindings: [{ mouseButton: MouseBindings.Auxiliary }] });
+
+    // The coloured axes in the corner of the 3D view. `enabled` rather than `active`:
+    // it is an indicator, not something to drag.
+    if (tools.OrientationMarker) {
+        threeD.setToolEnabled(tools.OrientationMarker.toolName);
+    }
 
     return {
         [toolGroupIdFor(ORIENTATIONS.AXIAL)]: twoD,
@@ -348,8 +418,23 @@ async function loadVolumeIntoWindows({
         await setVolumesForViewports(renderingEngine, [{ volumeId }], ids);
 
         const voi = openingVoi({ scalarData, header, modality });
-        for (const id of ids) {
-            renderingEngine.getViewport(id)?.setProperties({ voiRange: voi.range });
+        for (const index of live) {
+            const id = viewportId(index);
+            if (isSliceOrientation(windowAt(state, index).orientation)) {
+                // A slice viewport clips against the scalar data, so the VOI is what
+                // decides what is visible.
+                renderingEngine.getViewport(id)?.setProperties({ voiRange: voi.range });
+                continue;
+            }
+            // A volume render has no VOI: what it shows is decided by the blend mode
+            // and the transfer function. Setting `voiRange` on it does nothing, and
+            // leaving it unconfigured renders an opaque block.
+            try {
+                setRenderMode({ renderingEngine, windowIndex: index, mode: DEFAULT_RENDER_MODE });
+            } catch (error) {
+                // A 3D view that will not configure must not cost the slice views.
+                console.warn(`[ygg-grid] 3D render mode: ${error.message}`);
+            }
         }
         renderingEngine.renderViewports(ids);
 

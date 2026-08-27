@@ -24,7 +24,7 @@ import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, volumeIdFor } from './lay
 import { windowAt } from './windowState.js';
 import { volumeUrl } from '../ids/imageIds.js';
 import { announceVolumeReady, installPanoramicBridge, nativeRawVolumeDescriptor } from './panoramicSource.js';
-import { CONTROL_IDS, bindControls, windowReadout } from './controls.js';
+import { bindControls } from './controls.js';
 
 /** The element `viewer_grid_data` is rendered into by both content templates. */
 export const DATA_ELEMENT_ID = 'viewerGridData';
@@ -240,6 +240,7 @@ export async function bootstrapVolumeGrid({ mount, doc = globalThis.document }) 
             if (!sized) {
                 sized = true;
                 grid.resetCameras?.();
+                grid.refreshOverlays?.();
                 report('sized to the visible container.');
             }
         } catch (error) {
@@ -345,21 +346,15 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         }
     }
 
-    // Bound after the load so the first readout has something to report, and bound at
-    // all only on pages that have a toolbar -- `bindControls` returns an empty plan on
-    // the brain page, which carries the grid without the CBCT controls.
+    // Bound after the load, and bound at all only on pages that have a toolbar --
+    // `bindControls` returns an empty plan on the brain page, which carries the grid
+    // without the CBCT controls.
     const controls = bindControls({ grid, doc });
-    const refreshReadout = windowReadout({
-        grid,
-        element: doc.getElementById(CONTROL_IDS.windowReadout),
-        windowIndex: targets[0],
-    });
-    refreshReadout();
-    for (const element of elements) {
-        // Window/level is dragged on the image now that the percent sliders are gone,
-        // so the readout follows the pointer rather than a control's change event.
-        element.addEventListener('pointerup', refreshReadout);
-    }
+
+    // The window/level readout now lives in each viewport's own overlay rather than in
+    // the toolbar: it belongs to the image it describes, and the toolbar `<output>` it
+    // replaced looked like what it was -- a slider's label with the slider removed.
+    grid.refreshOverlays?.();
 
     if (loaded) {
         report(`loaded ${volume.modality} #${volume.fileId} into ${targets.length} window(s).`);
@@ -368,7 +363,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
             view
         );
     }
-    return { ...grid, controls, refreshReadout };
+    return { ...grid, controls };
 }
 
 /**

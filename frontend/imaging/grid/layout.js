@@ -81,18 +81,20 @@ export function isSliceOrientation(orientation) {
 }
 
 /**
- * The fixed maxillo CBCT layout: three orthogonal slices and 3D on demand.
+ * The fixed maxillo CBCT layout: three orthogonal slices and a volume render.
  *
- * Reproduces `maxillo_cbct_grid_adapter.js` `initFixedCbctGrid`, which loads the CBCT
- * into windows 0-2 as axial/sagittal/coronal and leaves window 3 showing a "Load 3D"
- * button. The laziness is not cosmetic: a volume render of a full CBCT is the most
- * expensive thing the page can do, and most visits never need it.
+ * `maxillo_cbct_grid_adapter.js` made the 3D window lazy behind a "Load 3D" button,
+ * on the reasoning that a volume render of a full CBCT is the most expensive thing the
+ * page can do. In practice the volume is already decoded and in GPU memory for the
+ * three slice views, so the render costs a transfer function rather than a second
+ * load -- and the maintainer's call is that it should simply be there. Nothing is
+ * lazy any more.
  */
 export const FIXED_CBCT_LAYOUT = Object.freeze([
     Object.freeze({ window: 0, orientation: ORIENTATIONS.AXIAL, lazy: false }),
     Object.freeze({ window: 1, orientation: ORIENTATIONS.SAGITTAL, lazy: false }),
     Object.freeze({ window: 2, orientation: ORIENTATIONS.CORONAL, lazy: false }),
-    Object.freeze({ window: 3, orientation: ORIENTATIONS.RENDER, lazy: true }),
+    Object.freeze({ window: 3, orientation: ORIENTATIONS.RENDER, lazy: false }),
 ]);
 
 /** The free layout brain uses: four independent windows, all axial to begin with. */
