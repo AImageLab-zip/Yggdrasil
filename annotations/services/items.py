@@ -303,3 +303,133 @@ def add_event(
         order=order,
         attributes=attributes or {},
     )
+
+
+@transaction.atomic
+def copy_items_to_revision(previous_revision, revision, *, targets):
+    """Carry a revision's items forward onto the next one, for the targets named.
+
+    A revision is the state of the work at a moment, and a save replaces the whole
+    set -- which is right when one viewer holds the whole set, and wrong the moment a
+    patient owns several annotatable resources. A photo stack saves the image on
+    screen; a patient with a CBCT *and* a teleradiography saves whichever one they are
+    looking at. Without this, the resources the save did not mention would vanish from
+    the new revision, and the loss would look exactly like a deliberate deletion.
+
+    So: the caller writes the targets it was given, and calls this for the rest. The
+    two together are the new state.
+
+    Canonical rows in, canonical rows out, through the same ``add_*`` services -- not
+    through ``queryset.update(revision=...)``, which would move the originals rather
+    than copy them, and not from the ``cornerstone_state`` payload, which is explicitly
+    a scratch copy allowed to go stale. Every validator runs again, so a row that could
+    no longer be written is refused here rather than propagated silently forward.
+
+    Selectors are reused rather than recreated: a selector hangs off the *target*, not
+    the revision, so the same row is still the right one.
+
+    :param previous_revision: the revision to copy from, or ``None`` (a no-op, which is
+        what the first save on a set gets).
+    :param targets: the ``AnnotationTarget`` rows to carry. Anything else on
+        ``previous_revision`` is deliberately dropped -- that is the caller replacing it.
+    :returns: the newly written items.
+    """
+    if previous_revision is None:
+        return []
+    target_ids = {target.pk for target in targets}
+    if not target_ids:
+        return []
+
+    written = []
+    # Keyed by the *original* row so a measurement can find the copy of the shape it
+    # describes. Built as we go rather than by zipping two lists, because a zip would
+    # silently mis-pair the moment either query's ordering changed.
+    copies = {}
+
+    for item in previous_revision.geometry2ditems.filter(target_id__in=target_ids):
+        copy = add_geometry_2d(
+            revision,
+            item.target,
+            geometry_type=item.geometry_type,
+            coordinate_system=item.coordinate_system,
+            points=item.points,
+            closed=item.closed,
+            selector=item.selector,
+            label=item.label,
+            stroke_width=item.stroke_width,
+            order=item.order,
+            attributes=item.attributes,
+        )
+        copies[("geometry_2d", item.pk)] = copy
+        written.append(copy)
+
+    for item in previous_revision.spatialannotation3ditems.filter(target_id__in=target_ids):
+        copy = add_spatial_3d(
+            revision,
+            item.target,
+            geometry_type=item.geometry_type,
+            coordinate_system=item.coordinate_system,
+            points=item.points,
+            frame_of_reference_uid=item.frame_of_reference_uid,
+            selector=item.selector,
+            label=item.label,
+            order=item.order,
+            attributes=item.attributes,
+        )
+        copies[("spatial_3d", item.pk)] = copy
+        written.append(copy)
+
+    for item in previous_revision.measurementitems.filter(target_id__in=target_ids):
+        # The shape this number describes has just been rewritten as a new row, so the
+        # back-link is re-pointed at the copy. Left alone it would name a shape on the
+        # *previous* revision, which ``add_measurement`` refuses outright -- and rightly:
+        # a number whose geometry lives in another revision is a number nobody can check.
+        written.append(
+            add_measurement(
+                revision,
+                item.target,
+                kind=item.kind,
+                value=item.value,
+                unit=item.unit,
+                is_calibrated=item.is_calibrated,
+                calibration_note=item.calibration_note,
+                geometry_2d_item=copies.get(("geometry_2d", item.geometry_2d_item_id)),
+                spatial_3d_item=copies.get(("spatial_3d", item.spatial_3d_item_id)),
+                sample_count=item.sample_count,
+                selector=item.selector,
+                label=item.label,
+                order=item.order,
+                attributes=item.attributes,
+            )
+        )
+
+    for item in previous_revision.temporalannotationitems.filter(target_id__in=target_ids):
+        written.append(
+            add_temporal(
+                revision,
+                item.target,
+                start_time_ms=item.start_time_ms,
+                end_time_ms=item.end_time_ms,
+                selector=item.selector,
+                label=item.label,
+                order=item.order,
+                attributes=item.attributes,
+            )
+        )
+
+    for item in previous_revision.eventannotationitems.filter(target_id__in=target_ids):
+        written.append(
+            add_event(
+                revision,
+                item.target,
+                event_type=item.event_type,
+                value=item.value,
+                time_ms=item.time_ms,
+                selector=item.selector,
+                label=item.label,
+                order=item.order,
+                attributes=item.attributes,
+            )
+        )
+
+    return written

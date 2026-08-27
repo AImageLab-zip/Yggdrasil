@@ -42,6 +42,7 @@ from django.core.exceptions import ValidationError
 from annotations.adapters import descriptors as d
 from annotations.constants import (
     CoordinateSystem,
+    Geometry2DType,
     Geometry3DType,
     MeasurementKind,
     MeasurementUnit,
@@ -79,10 +80,10 @@ RESOURCE_SCOPED_FRAMES = frozenset(
 )
 
 
-def _point(value):
-    if not isinstance(value, (list, tuple)) or len(value) != 3:
+def _point(value, *, dimensions=3):
+    if not isinstance(value, (list, tuple)) or len(value) != dimensions:
         raise ValidationError(
-            f"a patient-space handle must be three coordinates, got {value!r}"
+            f"a handle in this frame must be {dimensions} coordinates, got {value!r}"
         )
     out = []
     for ordinate in value:
@@ -94,21 +95,38 @@ def _point(value):
     return out
 
 
-def handle_points(annotation):
-    """The tool's handles, validated, in patient LPS millimetres.
+def handle_points(annotation, *, dimensions=3):
+    """The tool's handles, validated, in the frame the caller declares.
 
     Cornerstone's handles are already in the viewport's world frame, which for a volume
     viewport is DICOM patient space. That is why nothing here converts: the numbers
     arrive in the frame the descriptor declares. What it *does* do is refuse anything
-    that is not three finite numbers, because a NaN handle reaches the database as a
-    perfectly storable null island.
+    that is not the right count of finite numbers, because a NaN handle reaches the
+    database as a perfectly storable null island.
+
+    ``dimensions=2`` is for the stack surfaces, whose world frame is the image plane.
+    The count is enforced rather than truncated: a three-ordinate handle arriving in a
+    two-dimensional frame means the caller converted nothing and the third number is a
+    depth nobody asked for, which is a bug to report and not a coordinate to drop.
     """
     data = annotation.get("data") or {}
     handles = data.get("handles") or {}
     points = handles.get("points")
     if not isinstance(points, (list, tuple)) or not points:
         raise ValidationError("a Cornerstone annotation must carry at least one handle")
-    return [_point(point) for point in points]
+    return [_point(point, dimensions=dimensions) for point in points]
+
+
+def _as3(point):
+    """Zero-extend a planar handle so the shared geometry maths can consume it.
+
+    Deliberately one arithmetic path for a photograph and a CBCT. A separate 2D
+    shoelace and a separate 2D distance would be two more places for the two surfaces
+    to disagree about what a length is, and the generalised formulae are already
+    correct on a plane -- ``polygon_area`` in particular reduces to the ordinary
+    shoelace when every z is zero.
+    """
+    return [point[0], point[1], 0.0] if len(point) == 2 else list(point)
 
 
 def strip_runtime_identifiers(value):
@@ -242,12 +260,51 @@ def _require_points(tool_name, points, expected):
         )
 
 
-def _geometry(geometry_type, points, *, coordinate_system, frame_of_reference_uid, **kwargs):
+#: The 2D shape that expresses the same thing as each 3D one. A photograph's Length is
+#: the same polyline as a CBCT's; only the frame differs, which is the whole reason the
+#: tool branches below are shared rather than duplicated per surface.
+_TWO_D_GEOMETRY = {
+    Geometry3DType.POLYLINE: Geometry2DType.POLYLINE,
+    Geometry3DType.POINT: Geometry2DType.POINT,
+    Geometry3DType.SPHERE: Geometry2DType.CIRCLE,
+}
+
+
+def _geometry(
+    geometry_type,
+    points,
+    *,
+    two_d,
+    coordinate_system,
+    frame_of_reference_uid,
+    attributes=None,
+    **kwargs,
+):
+    """One geometry descriptor, in whichever dimensionality the frame is.
+
+    ``geometry_type`` is always named in 3D terms and translated here, so a tool branch
+    reads the same either way. The 2D form is not merely the 3D one with a coordinate
+    dropped: ``Geometry2DItem`` is a separate table with its own invariants, which is
+    why the two are separate models rather than one with a nullable z.
+    """
+    if two_d:
+        return d.geometry_2d(
+            geometry_type=_TWO_D_GEOMETRY[geometry_type],
+            coordinate_system=coordinate_system,
+            points=points,
+            # These are tool *handles*, not a ring. A polygon is closed by definition
+            # and the validator says so; a handle list that happens to enclose an area
+            # is not one.
+            closed=False,
+            attributes=attributes,
+            **kwargs,
+        )
     return d.spatial_3d(
         geometry_type=geometry_type,
         coordinate_system=coordinate_system,
         points=points,
         frame_of_reference_uid=frame_of_reference_uid,
+        attributes=attributes,
         **kwargs,
     )
 
@@ -295,9 +352,16 @@ def descriptors_for_annotation(
     if coordinate_system not in CoordinateSystem.ALL:
         raise ValidationError(f"unknown coordinate system {coordinate_system!r}")
 
-    points = handle_points(annotation)
+    two_d = coordinate_system in CoordinateSystem.TWO_D
+    points = handle_points(annotation, dimensions=2 if two_d else 3)
+    # Every length, area and angle below is computed from these, never from `points`
+    # directly, so a photograph and a CBCT go through one arithmetic path.
+    maths = [_as3(point) for point in points]
     # Only a millimetre frame earns millimetre units -- the same rule
-    # ``MeasurementItem``'s CHECK constraint enforces in the database.
+    # ``MeasurementItem``'s CHECK constraint enforces in the database. A photograph is
+    # ``image_pixel`` even after the user calibrates it: the millimetres-per-pixel lives
+    # on the resource, and re-expressing stored numbers in millimetres would mean a
+    # later recalibration silently reinterpreted every measurement already taken.
     calibrated = coordinate_system in CoordinateSystem.MILLIMETRE
     length_unit = MeasurementUnit.MM if calibrated else MeasurementUnit.PX
     area_unit = MeasurementUnit.MM2 if calibrated else MeasurementUnit.PX2
@@ -308,6 +372,7 @@ def descriptors_for_annotation(
         "order": order,
     }
     geometry_kwargs = dict(
+        two_d=two_d,
         coordinate_system=coordinate_system,
         # A Frame of Reference UID asserts these coordinates are comparable with any
         # other series carrying it. That is true in patient space and false in a
@@ -317,6 +382,9 @@ def descriptors_for_annotation(
         # false claim is worse than none, because a later fusion would trust it.
         # ``annotations.validators.geometry`` refuses it outright, so this is the
         # adapter agreeing with the validator rather than working around it.
+        # In a two-dimensional frame it is dropped by ``_geometry`` regardless --
+        # ``Geometry2DItem`` has no column for it, which is the model agreeing that a
+        # photograph has no Frame of Reference to be comparable within.
         frame_of_reference_uid=(
             str(metadata.get("FrameOfReferenceUID") or "")
             if coordinate_system not in RESOURCE_SCOPED_FRAMES
@@ -331,7 +399,7 @@ def descriptors_for_annotation(
             _geometry(Geometry3DType.POLYLINE, points, **geometry_kwargs),
             _measurement(
                 MeasurementKind.LENGTH,
-                polyline_length(points),
+                polyline_length(maths),
                 length_unit,
                 calibrated=calibrated,
                 **shared,
@@ -344,7 +412,7 @@ def descriptors_for_annotation(
             _geometry(Geometry3DType.POLYLINE, points, **geometry_kwargs),
             _measurement(
                 MeasurementKind.ANGLE,
-                angle_at_vertex(points),
+                angle_at_vertex(maths),
                 MeasurementUnit.DEG,
                 calibrated=True,  # an angle is dimensionless; no scale is needed
                 **shared,
@@ -357,7 +425,7 @@ def descriptors_for_annotation(
             _geometry(Geometry3DType.POLYLINE, points, **geometry_kwargs),
             _measurement(
                 MeasurementKind.ANGLE,
-                angle_between_lines(points),
+                angle_between_lines(maths),
                 MeasurementUnit.DEG,
                 calibrated=True,
                 **shared,
@@ -368,8 +436,8 @@ def descriptors_for_annotation(
         _require_points(tool_name, points, 4)
         # Two independent axes, not one polyline: the long axis is handles 0-1 and the
         # short axis 2-3. Summing them as a polyline would report a meaningless total.
-        long_axis = _distance(points[0], points[1])
-        short_axis = _distance(points[2], points[3])
+        long_axis = _distance(maths[0], maths[1])
+        short_axis = _distance(maths[2], maths[3])
         return [
             _geometry(Geometry3DType.POLYLINE, points, **geometry_kwargs),
             _measurement(
@@ -397,7 +465,7 @@ def descriptors_for_annotation(
         # (bottomLeft, bottomRight, topLeft, topRight), so index order 0,1,2,3 traces a
         # bow-tie -- whose shoelace area is zero, not merely wrong. The perimeter walk
         # is 0, 1, 3, 2.
-        ordered = [points[0], points[1], points[3], points[2]]
+        ordered = [maths[0], maths[1], maths[3], maths[2]]
         return [
             # The handles are stored as Cornerstone gave them; only the *measurement*
             # walks them in perimeter order. Reordering the stored geometry would make
@@ -421,12 +489,19 @@ def descriptors_for_annotation(
 
     if tool_name == "CircleROI":
         _require_points(tool_name, points, 2)
-        radius = circle_radius(points)
+        radius = circle_radius(maths)
         return [
+            # The only shape whose stored form differs between the two frames, and
+            # deliberately so. ``SPHERE`` keeps the centre and puts the radius in
+            # ``attributes``, which needs a unit that every read path then has to agree
+            # with the coordinate system about. ``CIRCLE`` keeps the centre and the
+            # circumference handle, so the radius is derivable and both of Cornerstone's
+            # handles round-trip back into the viewer. The 2D validator wants exactly
+            # those two points.
             _geometry(
                 Geometry3DType.SPHERE,
-                [points[0]],
-                attributes={"radius": radius, "radius_unit": length_unit},
+                points if two_d else [points[0]],
+                attributes=None if two_d else {"radius": radius, "radius_unit": length_unit},
                 **geometry_kwargs,
             ),
             _measurement(
@@ -447,7 +522,7 @@ def descriptors_for_annotation(
 
     if tool_name == "EllipticalROI":
         _require_points(tool_name, points, 4)
-        semi_major, semi_minor = ellipse_semi_axes(points)
+        semi_major, semi_minor = ellipse_semi_axes(maths)
         return [
             _geometry(Geometry3DType.POLYLINE, points, **geometry_kwargs),
             _measurement(

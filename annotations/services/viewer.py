@@ -27,14 +27,25 @@ from annotations.constants import (
     CoordinateSystem,
     PayloadFormat,
 )
+from annotations.constants import ResourceKind
 from annotations.services.apply import apply_descriptors
-from annotations.services.resources import register_logical_volume
+from annotations.services.items import copy_items_to_revision
+from annotations.services.resources import register_file, register_logical_volume
 from annotations.services.sets import (
     add_payload,
     attach_target,
     get_or_create_set,
     record_revision,
 )
+
+#: How a group's resource is registered. A volume is "this voxel grid with this affine",
+#: which is what a patient-space coordinate was measured against; a photograph is just
+#: bytes. They get different identity namespaces on purpose, so the two can never
+#: collide on one ``FileRegistry`` row.
+_REGISTRARS = {
+    ResourceKind.LOGICAL_VOLUME: register_logical_volume,
+    ResourceKind.FILE: register_file,
+}
 
 #: The set kind measurements are filed under.
 MEASUREMENTS_KIND = "measurements"
@@ -83,26 +94,106 @@ def save_measurements(
         volume being resampled underneath them.
     :returns: the new ``AnnotationRevision``.
     """
-    if not isinstance(annotations, (list, tuple)):
-        raise ValidationError("annotations must be a list")
-    if len(annotations) > MAX_ANNOTATIONS_PER_REVISION:
+    return save_measurement_groups(
+        patient,
+        groups=[
+            {
+                "file_obj": file_obj,
+                "file_key": file_key,
+                "annotations": annotations,
+                "descriptor": volume_descriptor or {},
+                "resource_kind": ResourceKind.LOGICAL_VOLUME,
+            }
+        ],
+        author=author,
+        expected_revision=expected_revision,
+        coordinate_system=coordinate_system,
+        annotation_method=annotation_method,
+        note=note,
+    )
+
+
+@transaction.atomic
+def save_measurement_groups(
+    patient,
+    *,
+    groups,
+    primary_index=0,
+    author=None,
+    expected_revision=None,
+    coordinate_system=CoordinateSystem.PATIENT_LPS_MM,
+    annotation_method=None,
+    note="",
+    reclaim_primary=True,
+    carry_forward=True,
+):
+    """Write one revision holding the state of every resource the caller names.
+
+    One group is one annotatable resource and the annotations drawn on it::
+
+        {"file_obj": <FileRegistry>, "annotations": [...], "file_key": None,
+         "descriptor": {...}, "resource_kind": ResourceKind.LOGICAL_VOLUME,
+         "role": "", "order": 0}
+
+    **Why this exists.** ``AnnotationSet`` is keyed ``(domain, patient, kind)`` and a
+    revision replaces the whole set. That is right while one viewer holds the whole set,
+    and wrong as soon as a patient owns more than one annotatable resource -- a photo
+    stack of N images, or simply a CBCT *and* a teleradiography. The viewer saves what is
+    on screen, and everything else would vanish from the new revision in a way
+    indistinguishable from a deliberate deletion.
+
+    So a save is: replace the groups named, and carry the rest forward
+    (:func:`~annotations.services.items.copy_items_to_revision`). Both halves land on one
+    revision inside one transaction, because a revision *is* the state of the work at a
+    moment and a half-written one would be a state that never existed.
+
+    ``reclaim_primary=False`` leaves the primary slot where it is. Without it a patient
+    with both a volume and photographs would have the primary target ping-pong between
+    modalities on every save, and the slot is meant to answer "what is this set mostly
+    about", not "what was saved last".
+
+    :param primary_index: which group claims the primary slot, when one is claimed.
+    :param carry_forward: set false only for a caller that genuinely owns the whole set.
+    :returns: the new ``AnnotationRevision``.
+    """
+    groups = list(groups or [])
+    if not groups:
+        raise ValidationError("a save must name at least one resource")
+    if not 0 <= primary_index < len(groups):
+        raise ValidationError("primary_index does not name one of the groups given")
+
+    total = 0
+    for index, group in enumerate(groups):
+        annotations = group.get("annotations")
+        if not isinstance(annotations, (list, tuple)):
+            raise ValidationError(f"group {index}: annotations must be a list")
+        if group.get("file_obj") is None:
+            raise ValidationError(f"group {index}: no file to anchor the annotations to")
+        total += len(annotations)
+    # Counted across the whole save, not per group: the guard is against a client
+    # resending its buffer, and a loop that does so would spread it over the groups.
+    if total > MAX_ANNOTATIONS_PER_REVISION:
         raise ValidationError(
-            f"{len(annotations)} annotations in one save exceeds the "
+            f"{total} annotations in one save exceeds the "
             f"{MAX_ANNOTATIONS_PER_REVISION} limit; this is almost certainly a client "
             "resending its buffer rather than a real session"
         )
 
-    # Translate first, write second. An annotation the adapter refuses -- an unmapped
-    # tool, an incomplete handle set, a NaN coordinate -- must abort the whole save
-    # before any row exists, or the user is left with a revision that silently holds
-    # some of what was on screen.
-    descriptor_list = []
-    for order, entry in enumerate(annotations):
-        descriptor_list.extend(
-            cs_adapter.descriptors_for_annotation(
-                entry, coordinate_system=coordinate_system, order=order
+    # Translate every group first, write second. An annotation the adapter refuses -- an
+    # unmapped tool, an incomplete handle set, a NaN coordinate -- must abort the whole
+    # save before any row exists, or the user is left with a revision that silently holds
+    # some of what was on screen. With several groups this matters more, not less: a
+    # partial write would also look like a deletion on the groups that never got written.
+    translated = []
+    for group in groups:
+        descriptor_list = []
+        for order, entry in enumerate(group["annotations"]):
+            descriptor_list.extend(
+                cs_adapter.descriptors_for_annotation(
+                    entry, coordinate_system=coordinate_system, order=order
+                )
             )
-        )
+        translated.append(descriptor_list)
 
     annotation_set = get_or_create_set(
         patient,
@@ -110,13 +201,27 @@ def save_measurements(
         annotation_method=annotation_method,
         created_by=author,
     )
+    # Read before the new revision exists; afterwards "the latest" would be the empty
+    # one being written.
+    previous_revision = annotation_set.revisions.order_by("-revision_number").first()
 
-    # The *volume*, not the file: a measurement was taken against a voxel grid with an
-    # affine, and a `cbct_processed` bundle holds several of those behind one file row.
-    resource = register_logical_volume(
-        file_obj, file_key=file_key, descriptor=volume_descriptor or {}
-    )
-    target = attach_target(annotation_set, resource, primary=True)
+    targets = []
+    for index, group in enumerate(groups):
+        register = _REGISTRARS[group.get("resource_kind") or ResourceKind.LOGICAL_VOLUME]
+        resource = register(
+            group["file_obj"],
+            file_key=group.get("file_key"),
+            descriptor=group.get("descriptor") or {},
+        )
+        targets.append(
+            attach_target(
+                annotation_set,
+                resource,
+                role=group.get("role", ""),
+                primary=reclaim_primary and index == primary_index,
+                order=group.get("order", index),
+            )
+        )
 
     revision = record_revision(
         annotation_set,
@@ -128,15 +233,61 @@ def save_measurements(
 
     # Labels are not required: a measurement is meaningful without one, unlike a tooth
     # polygon whose FDI code decides its export segment.
-    apply_descriptors(revision, target, descriptor_list, require_labels=False)
+    for target, descriptor_list in zip(targets, translated):
+        apply_descriptors(revision, target, descriptor_list, require_labels=False)
+
+    if carry_forward:
+        named = {target.pk for target in targets}
+        untouched = [
+            target for target in annotation_set.targets.all() if target.pk not in named
+        ]
+        copy_items_to_revision(previous_revision, revision, targets=untouched)
 
     # The resumable scratch copy. Never canonical, free to go stale, and stripped of
     # every runtime identifier on the way in.
     add_payload(
         revision,
         format=PayloadFormat.CORNERSTONE_STATE,
-        data=cs_adapter.cornerstone_state_payload(annotations),
+        data=_state_payload(groups, targets, previous_revision, carry_forward),
         canonical=False,
     )
 
     return revision
+
+
+def _state_payload(groups, targets, previous_revision, carry_forward):
+    """The ``cornerstone_state`` payload: per resource, plus the flat legacy key.
+
+    ``annotations`` is emitted **only for a single-group save**, so the volume grid and
+    ``measurements_state_api`` see byte-for-byte what they saw before. ``images`` is
+    always emitted and is what a multi-resource viewer reads.
+
+    Groups the save did not name have their payload entries copied forward verbatim, to
+    match what :func:`~annotations.services.items.copy_items_to_revision` did to their
+    canonical rows. The two must agree: a resume point that disagrees with the record is
+    how a user comes back to a study and finds work missing that the database still has.
+    """
+    images = [
+        {
+            "fileId": group["file_obj"].pk,
+            "fileKey": group.get("file_key") or None,
+            "annotations": cs_adapter.strip_runtime_identifiers(list(group["annotations"])),
+        }
+        for group in groups
+    ]
+
+    if carry_forward and previous_revision is not None:
+        named = {(entry["fileId"], entry["fileKey"]) for entry in images}
+        payload = previous_revision.payloads.filter(
+            format=PayloadFormat.CORNERSTONE_STATE
+        ).first()
+        for entry in (payload.data or {}).get("images", []) if payload else []:
+            if not isinstance(entry, dict):
+                continue
+            if (entry.get("fileId"), entry.get("fileKey")) not in named:
+                images.append(entry)
+
+    state = {"images": images}
+    if len(groups) == 1:
+        state["annotations"] = images[0]["annotations"]
+    return state

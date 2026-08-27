@@ -37,8 +37,11 @@ from annotations.services import (
     current_revision_number,
     save_measurements,
 )
-from annotations.constants import PayloadFormat
-from annotations.services.viewer import MAX_ANNOTATIONS_PER_REVISION
+from annotations.constants import PayloadFormat, ResourceKind
+from annotations.services.viewer import (
+    MAX_ANNOTATIONS_PER_REVISION,
+    save_measurement_groups,
+)
 from common.models import FileRegistry
 from common.permissions import user_can_write_annotations, user_is_project_admin
 
@@ -110,20 +113,6 @@ def save_measurements_api(request, patient_id):
     if not isinstance(body, dict):
         return JsonResponse({"error": "Body must be a JSON object"}, status=400)
 
-    file_id = body.get("fileId")
-    if not isinstance(file_id, int) or isinstance(file_id, bool):
-        return JsonResponse({"error": "fileId must be an integer"}, status=400)
-
-    file_obj = _file_for_patient(file_id, patient)
-    if file_obj is None:
-        return JsonResponse(
-            {"error": "That file does not belong to this patient."}, status=403
-        )
-
-    annotations = body.get("annotations")
-    if not isinstance(annotations, list):
-        return JsonResponse({"error": "annotations must be a list"}, status=400)
-
     expected_revision = body.get("expectedRevision")
     if expected_revision is not None and (
         not isinstance(expected_revision, int) or isinstance(expected_revision, bool)
@@ -132,19 +121,38 @@ def save_measurements_api(request, patient_id):
             {"error": "expectedRevision must be an integer or null"}, status=400
         )
 
+    has_images = "images" in body
+    has_single = "fileId" in body or "annotations" in body
+    if has_images and has_single:
+        # Not a precedence rule. The two shapes name different sets of resources, and
+        # the failure being prevented is a viewer that meant to save three images
+        # having one of them silently ignored.
+        return JsonResponse(
+            {
+                "error": "send either images or fileId/annotations, not both; "
+                "they name different resources and there is no rule for which wins"
+            },
+            status=400,
+        )
+
+    try:
+        groups = _groups_from_body(body, patient)
+    except _BadRequest as exc:
+        return JsonResponse({"error": str(exc)}, status=exc.status)
+
     kwargs = {
-        "file_obj": file_obj,
-        "file_key": body.get("fileKey") or None,
-        "annotations": annotations,
+        "groups": groups,
         "author": request.user,
         "expected_revision": expected_revision,
-        "volume_descriptor": body.get("volumeDescriptor") or {},
+        # A photo stack must not take the primary slot from a volume that already has
+        # it; a volume grid keeps today's behaviour of claiming it.
+        "reclaim_primary": not has_images,
     }
     if body.get("coordinateSystem"):
         kwargs["coordinate_system"] = body["coordinateSystem"]
 
     try:
-        revision = save_measurements(patient, **kwargs)
+        revision = save_measurement_groups(patient, **kwargs)
     except AnnotationConflict as exc:
         # The optimistic-concurrency primitive is the unique constraint on
         # (annotation_set, revision_number). The loser reloads and reapplies; it does
@@ -160,10 +168,87 @@ def save_measurements_api(request, patient_id):
     return JsonResponse(
         {
             "revision": revision.revision_number,
-            "annotations": len(annotations),
+            "annotations": sum(len(group["annotations"]) for group in groups),
             "setId": revision.annotation_set_id,
         }
     )
+
+
+class _BadRequest(Exception):
+    """A body the view can name a problem with, and the status it deserves."""
+
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.status = status
+
+
+def _groups_from_body(body, patient):
+    """The save's resource groups, from either body shape.
+
+    The legacy shape -- ``fileId`` + ``annotations`` + ``volumeDescriptor`` -- is one
+    group holding a *logical volume*, and is validated exactly as it was before. The
+    ``images`` shape is N groups holding *files*, which is the honest registration for a
+    photograph: a PNG is bytes, not a voxel grid with an affine, and giving them separate
+    identity namespaces means the two can never collide on one ``FileRegistry`` row.
+
+    Every group's file is checked against the patient here, before anything is written,
+    so one bad group aborts the save rather than writing the others.
+    """
+    if "images" in body:
+        images = body["images"]
+        if not isinstance(images, list) or not images:
+            raise _BadRequest("images must be a non-empty list")
+        groups = []
+        seen = set()
+        for index, entry in enumerate(images):
+            if not isinstance(entry, dict):
+                raise _BadRequest(f"images[{index}] must be an object")
+            file_obj = _checked_file(entry.get("fileId"), patient, f"images[{index}]")
+            key = (file_obj.pk, entry.get("fileKey") or None)
+            if key in seen:
+                # Two groups for one resource would each be "the state of that image",
+                # and the second would silently replace the first within one revision.
+                raise _BadRequest(f"images[{index}] names a resource already in this save")
+            seen.add(key)
+            annotations = entry.get("annotations")
+            if not isinstance(annotations, list):
+                raise _BadRequest(f"images[{index}].annotations must be a list")
+            groups.append(
+                {
+                    "file_obj": file_obj,
+                    "file_key": entry.get("fileKey") or None,
+                    "annotations": annotations,
+                    "descriptor": entry.get("imageDescriptor") or {},
+                    "resource_kind": ResourceKind.FILE,
+                    "order": index,
+                }
+            )
+        return groups
+
+    file_obj = _checked_file(body.get("fileId"), patient, "fileId")
+    annotations = body.get("annotations")
+    if not isinstance(annotations, list):
+        raise _BadRequest("annotations must be a list")
+    return [
+        {
+            "file_obj": file_obj,
+            "file_key": body.get("fileKey") or None,
+            "annotations": annotations,
+            "descriptor": body.get("volumeDescriptor") or {},
+            "resource_kind": ResourceKind.LOGICAL_VOLUME,
+        }
+    ]
+
+
+def _checked_file(file_id, patient, where):
+    if not isinstance(file_id, int) or isinstance(file_id, bool):
+        raise _BadRequest(
+            "fileId must be an integer" if where == "fileId" else f"{where}.fileId must be an integer"
+        )
+    file_obj = _file_for_patient(file_id, patient)
+    if file_obj is None:
+        raise _BadRequest("That file does not belong to this patient.", status=403)
+    return file_obj
 
 
 @login_required
@@ -203,40 +288,104 @@ def measurements_state_api(request, patient_id):
     )
 
     if annotation_set is None:
-        return JsonResponse(
-            {
-                "revision": 0,
-                "setId": None,
-                "annotations": [],
-                "maxAnnotations": MAX_ANNOTATIONS_PER_REVISION,
-            }
-        )
-
-    return JsonResponse(
-        {
-            "revision": current_revision_number(annotation_set),
-            "setId": annotation_set.id,
-            "everAnnotated": annotation_set.ever_annotated,
-            "annotations": _latest_viewer_state(annotation_set),
+        empty = {
+            "revision": 0,
+            "setId": None,
+            "annotations": [],
             "maxAnnotations": MAX_ANNOTATIONS_PER_REVISION,
         }
-    )
+        # A caller that asked per-resource gets the per-resource shape back, empty. A
+        # client should not have to handle two response shapes depending on whether the
+        # patient happens to have been annotated before.
+        wanted = request.GET.get("fileIds")
+        if wanted is not None:
+            ids = _parse_file_ids(wanted)
+            if ids is None:
+                return JsonResponse(
+                    {"error": "fileIds must be a comma-separated list of integers"},
+                    status=400,
+                )
+            empty["images"] = [
+                {"fileId": file_id, "fileKey": None, "annotations": []} for file_id in ids
+            ]
+        return JsonResponse(empty)
+
+    state = _latest_viewer_state(annotation_set)
+    payload = {
+        "revision": current_revision_number(annotation_set),
+        "setId": annotation_set.id,
+        "everAnnotated": annotation_set.ever_annotated,
+        "maxAnnotations": MAX_ANNOTATIONS_PER_REVISION,
+    }
+
+    wanted = request.GET.get("fileIds")
+    single = request.GET.get("fileId")
+    if wanted is not None:
+        ids = _parse_file_ids(wanted)
+        if ids is None:
+            return JsonResponse({"error": "fileIds must be a comma-separated list of integers"}, status=400)
+        payload["images"] = [_group_for(state, file_id) for file_id in ids]
+    elif single is not None:
+        ids = _parse_file_ids(single)
+        if ids is None or len(ids) != 1:
+            return JsonResponse({"error": "fileId must be an integer"}, status=400)
+        payload["annotations"] = _group_for(state, ids[0])["annotations"]
+    else:
+        # No narrowing asked for: byte-for-byte what this endpoint returned before it
+        # learned about multiple resources.
+        payload["annotations"] = state.get("annotations", [])
+
+    return JsonResponse(payload)
+
+
+def _parse_file_ids(raw):
+    """``"1,2,3"`` -> ``[1, 2, 3]``, or ``None`` if any part is not an integer."""
+    try:
+        return [int(part) for part in raw.split(",") if part.strip() != ""]
+    except (TypeError, ValueError):
+        return None
+
+
+def _group_for(state, file_id):
+    """One resource's entry from the stored viewer state, empty if it has none.
+
+    Empty rather than absent, and never a fallback to the flat ``annotations`` key: a
+    resource with no entry has no measurements on it, and borrowing another resource's
+    would draw one image's work on top of a different image.
+    """
+    for entry in state.get("images", []):
+        if isinstance(entry, dict) and entry.get("fileId") == file_id:
+            return {
+                "fileId": file_id,
+                "fileKey": entry.get("fileKey"),
+                "annotations": entry.get("annotations") or [],
+            }
+    return {"fileId": file_id, "fileKey": None, "annotations": []}
 
 
 def _latest_viewer_state(annotation_set):
-    """The viewer state stored on the newest revision, or an empty list.
+    """The viewer state stored on the newest revision, or an empty mapping.
 
-    An empty list is the right answer for a set whose latest revision deliberately holds
+    Empty is the right answer for a set whose latest revision deliberately holds
     nothing -- that is how a deletion is recorded -- so "no payload" and "a payload with
     no annotations" both come back the same way, and neither falls back to an older
     revision. Falling back would resurrect measurements the user deleted.
+
+    Returns the stored shape as it stands: ``annotations`` (written only when the save
+    named a single resource) and/or ``images``. Projecting one resource out of it is the
+    caller's job, so this function has no opinion about which the client asked for.
     """
     revision = annotation_set.revisions.order_by("-revision_number").first()
     if revision is None:
-        return []
+        return {}
     payload = revision.payloads.filter(format=PayloadFormat.CORNERSTONE_STATE).first()
-    annotations = (payload.data or {}).get("annotations") if payload else None
-    return annotations if isinstance(annotations, list) else []
+    data = (payload.data or {}) if payload else {}
+    state = {}
+    if isinstance(data.get("annotations"), list):
+        state["annotations"] = data["annotations"]
+    if isinstance(data.get("images"), list):
+        state["images"] = data["images"]
+    return state
 
 
 def _first_message(exc):

@@ -19,6 +19,7 @@ from annotations.adapters import cornerstone as cs
 from annotations.adapters import descriptors as d
 from annotations.constants import (
     CoordinateSystem,
+    Geometry2DType,
     Geometry3DType,
     MeasurementKind,
     MeasurementUnit,
@@ -421,3 +422,126 @@ class FrameOfReferenceScopeTests(SimpleTestCase):
                 "",
                 f"{frame} must not claim a frame of reference",
             )
+
+
+class PlanarFrameTests(SimpleTestCase):
+    """The same tools, on a photograph rather than a volume.
+
+    One arithmetic path serves both -- the handles are zero-extended and the existing
+    generalised formulae consume them -- so what is worth pinning here is everything
+    that is *not* shared: which table the shape lands in, which unit the number earns,
+    and the two shapes whose stored form genuinely differs between the frames.
+    """
+
+    def descriptors(self, tool, points, frame=CoordinateSystem.IMAGE_PIXEL):
+        return cs.descriptors_for_annotation(
+            annotation(tool, points), coordinate_system=frame
+        )
+
+    def test_a_length_becomes_a_2d_polyline_and_never_a_3d_row(self):
+        descriptors = self.descriptors("Length", [[0, 0], [3, 4]])
+        self.assertEqual(by_item(descriptors, d.SPATIAL_3D), [])
+        geometry = by_item(descriptors, d.GEOMETRY_2D)[0]
+        self.assertEqual(geometry["geometry_type"], Geometry2DType.POLYLINE)
+        self.assertEqual(geometry["points"], [[0.0, 0.0], [3.0, 4.0]])
+        self.assertFalse(
+            geometry["closed"],
+            "these are tool handles; a polygon is closed by definition and these are not",
+        )
+
+    def test_the_number_is_the_same_arithmetic_the_volume_path_uses(self):
+        planar = by_item(self.descriptors("Length", [[0, 0], [3, 4]]), d.MEASUREMENT)[0]
+        spatial = by_item(
+            cs.descriptors_for_annotation(annotation("Length", [[0, 0, 0], [3, 4, 0]])),
+            d.MEASUREMENT,
+        )[0]
+        self.assertAlmostEqual(planar["value"], spatial["value"], places=12)
+        self.assertAlmostEqual(planar["value"], 5.0, places=12)
+
+    def test_pixels_are_reported_as_pixels_and_are_not_calibrated(self):
+        """A photograph has no millimetre scale, and the database enforces that pairing.
+
+        It keeps reporting pixels *after* the user calibrates the image, too: the
+        millimetres-per-pixel lives on the resource, and re-expressing stored numbers in
+        millimetres would mean a later recalibration silently reinterpreted every
+        measurement already taken.
+        """
+        measurement = by_item(self.descriptors("Length", [[0, 0], [3, 4]]), d.MEASUREMENT)[0]
+        self.assertEqual(measurement["unit"], MeasurementUnit.PX)
+        self.assertFalse(measurement["is_calibrated"])
+        self.assertIn("uncalibrated", measurement["calibration_note"])
+
+    def test_an_area_is_reported_in_square_pixels(self):
+        # The four corners Cornerstone gives, in its own (BL, BR, TL, TR) order.
+        descriptors = self.descriptors(
+            "RectangleROI", [[0, 0], [4, 0], [0, 3], [4, 3]]
+        )
+        area = [m for m in by_item(descriptors, d.MEASUREMENT) if m["kind"] == MeasurementKind.AREA][0]
+        self.assertEqual(area["unit"], MeasurementUnit.PX2)
+        self.assertAlmostEqual(
+            area["value"], 12.0, places=9,
+            msg="index order 0,1,2,3 traces a bow-tie whose signed area cancels to 0",
+        )
+
+    def test_an_angle_is_still_calibrated_because_it_is_dimensionless(self):
+        measurement = by_item(
+            self.descriptors("Angle", [[1, 0], [0, 0], [0, 1]]), d.MEASUREMENT
+        )[0]
+        self.assertAlmostEqual(measurement["value"], 90.0, places=9)
+        self.assertEqual(measurement["unit"], MeasurementUnit.DEG)
+        self.assertTrue(measurement["is_calibrated"], "an angle needs no scale")
+
+    def test_a_circle_keeps_both_handles_instead_of_a_radius_attribute(self):
+        """The one shape whose stored form differs between the frames, deliberately.
+
+        ``SPHERE`` keeps the centre and puts the radius in ``attributes``, which needs a
+        unit every read path then has to agree with the coordinate system about.
+        ``CIRCLE`` keeps the centre and the circumference handle, so the radius is
+        derivable, both of Cornerstone's handles round-trip, and no unit is stored.
+        """
+        descriptors = self.descriptors("CircleROI", [[10, 10], [13, 14]])
+        geometry = by_item(descriptors, d.GEOMETRY_2D)[0]
+        self.assertEqual(geometry["geometry_type"], Geometry2DType.CIRCLE)
+        self.assertEqual(geometry["points"], [[10.0, 10.0], [13.0, 14.0]])
+        self.assertNotIn("radius", geometry["attributes"])
+
+        diameter = [
+            m for m in by_item(descriptors, d.MEASUREMENT) if m["kind"] == MeasurementKind.DIAMETER
+        ][0]
+        self.assertAlmostEqual(diameter["value"], 10.0, places=9)
+
+        spatial = cs.descriptors_for_annotation(
+            annotation("CircleROI", [[10, 10, 0], [13, 14, 0]])
+        )
+        self.assertEqual(
+            by_item(spatial, d.SPATIAL_3D)[0]["attributes"]["radius"], 5.0,
+            "the three-space form is unchanged",
+        )
+
+    def test_a_probe_keeps_its_point_and_still_refuses_the_number(self):
+        descriptors = self.descriptors("Probe", [[7, 9]])
+        self.assertEqual(by_item(descriptors, d.MEASUREMENT), [])
+        geometry = by_item(descriptors, d.GEOMETRY_2D)[0]
+        self.assertEqual(geometry["geometry_type"], Geometry2DType.POINT)
+        self.assertEqual(geometry["points"], [[7.0, 9.0]])
+
+    def test_a_three_ordinate_handle_is_refused_not_truncated(self):
+        """A third number means the caller converted nothing, which is a bug to report.
+
+        Dropping it would store a z the viewer never measured as though it had, and the
+        annotation would land on the right pixels for the wrong reason.
+        """
+        with self.assertRaisesMessage(ValidationError, "2 coordinates"):
+            self.descriptors("Length", [[0, 0, 0], [3, 4, 0]])
+
+    def test_a_two_ordinate_handle_is_refused_in_a_patient_frame(self):
+        with self.assertRaisesMessage(ValidationError, "3 coordinates"):
+            cs.descriptors_for_annotation(annotation("Length", [[0, 0], [3, 4]]))
+
+    def test_every_planar_frame_takes_the_two_dimensional_path(self):
+        for frame in CoordinateSystem.TWO_D:
+            descriptors = self.descriptors("Length", [[0, 0], [3, 4]], frame=frame)
+            self.assertEqual(
+                by_item(descriptors, d.SPATIAL_3D), [], f"{frame} must not produce a 3D row"
+            )
+            self.assertEqual(by_item(descriptors, d.GEOMETRY_2D)[0]["coordinate_system"], frame)
