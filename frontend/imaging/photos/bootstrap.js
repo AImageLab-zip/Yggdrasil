@@ -28,6 +28,8 @@ import {
     formatCalibration,
     recalibrationWarning,
 } from './calibration.js';
+import { askForNumber, openPanel } from './dialog.js';
+import { checkRoundTrip } from './coordinates.js';
 
 export const LOG_PREFIX = '[ygg-photo]';
 
@@ -179,15 +181,32 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
     }
 
     const registry = new Map(records.map((record) => [record.imageId, record]));
-    const stack = await mount({ element: plan.viewport, registry });
-    if (!stack) {
+    const mounted = await mount({ element: plan.viewport, registry });
+    if (!mounted) {
         return null;
     }
+    const { stack, worldToImage, imageToWorld } = mounted;
 
     await stack.setStack(
         records.map((record) => record.imageId),
         0
     );
+
+    // One assertion per mount, on the *plane module* rather than the arithmetic: the two
+    // converters are inverses by construction, so a round trip that does not close means
+    // the metadata provider handed them something they cannot both work from -- a missing
+    // imagePositionPatient, or cosines that are not orthonormal. That produces a mapping
+    // silently wrong in a way no single measurement would reveal.
+    const trip = checkRoundTrip(records[0].imageId, { worldToImage, imageToWorld });
+    if (!trip.ok) {
+        report(`world/image round trip is off by ${trip.deviation}; refusing to measure.`);
+        showMessage(
+            plan.viewport,
+            'This image cannot be measured: its geometry does not round-trip. ' +
+                'Nothing has been saved.'
+        );
+        return null;
+    }
 
     const measurementsUrl = (suffix, params) => {
         const url = new URL(
@@ -213,7 +232,8 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
             revision = Number(body.revision) || 0;
             const restorable = restorablesByImageId(
                 body.images,
-                new Map(records.map((record) => [record.fileId, record.imageId]))
+                new Map(records.map((record) => [record.fileId, record.imageId])),
+                imageToWorld
             );
             const restored = stack.restoreAnnotations(restorable);
             report(`restored ${restored} measurement(s) at revision ${revision}.`);
@@ -247,6 +267,7 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
                     images: records,
                     annotations: stack.readAnnotations(),
                     expectedRevision: revision,
+                    toImage: worldToImage,
                 });
                 const response = await fetch(measurementsUrl('/'), {
                     method: 'POST',
@@ -261,46 +282,67 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
                 const outcome = interpretSaveResponse(response, parsed);
                 if (outcome.saved) {
                     revision = outcome.revision;
-                    return { level: 'success', message: 'Measurements saved.' };
+                    return { type: 'success', message: 'Measurements saved.' };
                 }
+                // A failure is still reported. The toast is green on success and red on
+                // failure, which is the fix; making a failed save *look* successful would
+                // mean a clinician closing the tab believing work is stored.
                 return {
-                    level: outcome.reload ? 'warning' : 'danger',
+                    type: outcome.reload ? 'warning' : 'danger',
                     message: outcome.message,
                 };
             } catch (error) {
-                return { level: 'danger', message: error.message };
+                return { type: 'danger', message: error.message };
             }
         },
         onClear: async () => {
             const removed = stack.clearAnnotations(PHOTO_MEASUREMENT_TOOLS);
             if (!removed) {
                 return {
-                    level: 'info',
+                    type: 'info',
                     message: 'There are no measurements on this study to remove.',
                 };
             }
             return {
-                level: 'success',
+                type: 'success',
                 message: 'Measurements removed. Save to make it permanent.',
             };
         },
         onCalibrate: async () => {
             const record = current();
-            const line = pendingCalibrationLine(stack);
+            const line = pendingCalibrationLine(stack, worldToImage, record.imageId);
             if (!line) {
+                // Guidance, not an error. The tool needed is already on the toolbar, so
+                // saying which one and what to do with it is the whole of the fix.
                 controls.report(
                     'info',
-                    'Draw a Length measurement over something whose real size you know, ' +
-                        'then press Calibrate.'
+                    'First switch annotations on and draw a Length line across something ' +
+                        'whose real size you know -- a ruler, a known implant, a scale bar. ' +
+                        'Then press Calibrate and enter that length.'
                 );
                 return;
             }
-            const knownLengthMm = Number(
-                globalThis.prompt?.('How long is that line, in millimetres?')
-            );
+
+            const knownLengthMm = await askForNumber({
+                title: 'Calibrate this image',
+                message:
+                    `The line you drew is ${Math.round(line.pixelDistance)} px long. ` +
+                    'How long is it in reality?',
+                unit: 'mm',
+                min: 0,
+                placeholder: 'e.g. 10',
+            });
+            if (knownLengthMm === null) {
+                return;
+            }
+
             let body;
             try {
-                body = calibrationRequest({ ...line, knownLengthMm });
+                body = calibrationRequest({
+                    pointA: line.pointA,
+                    pointB: line.pointB,
+                    knownLengthMm,
+                });
             } catch (error) {
                 controls.report('danger', error.message);
                 return;
@@ -333,10 +375,10 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
                 const warning = recalibrationWarning(parsed.affectedMeasurements);
                 controls.report(
                     warning ? 'warning' : 'success',
-                    warning || 'Calibrated. Lengths on this image are now in millimetres.'
+                    warning || 'Calibrated. Lengths on this image now read in millimetres.'
                 );
-                // The metadata provider reads the registry, but Cornerstone has already
-                // cached the module for this image, so the stack is reset to pick it up.
+                // The provider reads the registry, but Cornerstone has already cached the
+                // plane module for this image, so the stack is reset to make it re-ask.
                 await stack.setStack(
                     records.map((entry) => entry.imageId),
                     stack.currentIndex()
@@ -348,20 +390,71 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
         onEdit: () => {
             const record = current();
             const editor = globalThis.RGBImageEditor;
-            if (!editor?.attachToImage) {
-                controls.report('danger', 'The image editor is not available on this page.');
+            // `attachToImage(img, options)` is the editor's ONLY public method. The first
+            // version of this called a guessed `openForFile()` behind optional chaining,
+            // so the button did nothing at all and said nothing about it.
+            if (typeof editor?.attachToImage !== 'function') {
+                controls.report(
+                    'danger',
+                    'The image editor is not loaded on this page, so this image cannot be ' +
+                        'cropped or rotated here.'
+                );
                 return;
             }
-            report('handing off to RGBImageEditor', { fileId: record.fileId });
-            editor.openForFile?.({
-                patientId: data.patientId,
-                modalitySlug: data.modalitySlug,
-                sourceFileId: record.fileId,
-                url: record.url,
-                // The editor writes a NEW FileRegistry row, so the stack has to be
-                // rebuilt around the new id rather than refreshed in place.
-                onSaved: () => globalThis.location?.reload?.(),
+            if (!record.url) {
+                controls.report('danger', 'This image has no served URL to edit.');
+                return;
+            }
+
+            let edited = false;
+            const panel = openPanel({
+                title: 'Crop, mirror or rotate',
+                icon: 'fa-crop',
+                doc,
+                onClose: async () => {
+                    if (!edited) {
+                        return;
+                    }
+                    // The editor writes a NEW FileRegistry row, so the stack has to be
+                    // rebuilt around the new id rather than refreshed in place -- the old
+                    // imageId now names a superseded file.
+                    controls.report('info', 'Reloading the image…');
+                    globalThis.location?.reload?.();
+                },
             });
+
+            // The editor mounts its own toolbar into the image's container and needs the
+            // image to have loaded before it can read naturalWidth, so it is attached on
+            // load rather than immediately.
+            const host = doc.createElement('div');
+            host.style.position = 'relative';
+            const img = doc.createElement('img');
+            img.className = 'img-fluid';
+            img.style.maxWidth = '100%';
+            img.alt = record.originalFilename || 'Image being edited';
+            host.appendChild(img);
+            panel.body.appendChild(host);
+
+            img.addEventListener(
+                'load',
+                () => {
+                    editor.attachToImage(img, {
+                        patientId: data.patientId,
+                        modalitySlug: data.modalitySlug,
+                        sourceFileId: record.fileId,
+                        container: host,
+                        onSaved: () => {
+                            edited = true;
+                        },
+                    });
+                },
+                { once: true }
+            );
+            img.addEventListener('error', () => {
+                controls.report('danger', 'That image could not be loaded for editing.');
+                panel.close();
+            });
+            img.src = new URL(record.url, origin).href;
         },
     });
 
@@ -384,7 +477,7 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
  * already learned to draw a line, and a second line-drawing interaction that looked the
  * same but behaved differently would be worse than reusing the first.
  */
-export function pendingCalibrationLine(stack) {
+export function pendingCalibrationLine(stack, worldToImage, imageId) {
     const lengths = stack
         .readAnnotations()
         .filter((entry) => entry?.metadata?.toolName === 'Length')
@@ -393,8 +486,17 @@ export function pendingCalibrationLine(stack) {
     if (!last) {
         return null;
     }
-    const [pointA, pointB] = last.data.handles.points;
-    return { pointA: [pointA[0], pointA[1]], pointB: [pointB[0], pointB[1]] };
+    // Converted to pixels here, not sent as world coordinates: the endpoint derives
+    // millimetres *per pixel*, so a world-space distance would produce a scale wrong by
+    // whatever the current spacing is -- and on an already-calibrated image that is not 1.
+    const [a, b] = last.data.handles.points.map((point) => worldToImage(imageId, point));
+    const pointA = [Number(a[0]), Number(a[1])];
+    const pointB = [Number(b[0]), Number(b[1])];
+    return {
+        pointA,
+        pointB,
+        pixelDistance: Math.hypot(pointB[0] - pointA[0], pointB[1] - pointA[1]),
+    };
 }
 
 function showMessage(element, message) {

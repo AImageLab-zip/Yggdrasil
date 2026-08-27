@@ -135,41 +135,72 @@ function stackWith(annotations) {
     return { readAnnotations: () => annotations };
 }
 
+/** Identity conversion, as this surface's cosines produce. */
+const toImage = (imageId, point) => [point[0], point[1]];
+
 test('calibration reuses the most recent Length, so no second line tool is needed', () => {
-    // The user has already learned to draw a line; a second line-drawing interaction
-    // that looked the same and behaved differently would be worse than reusing the first.
+    // The user has already learned to draw a line; a second line-drawing interaction that
+    // looked the same but behaved differently would be worse than reusing the first.
     const line = pendingCalibrationLine(
         stackWith([
-            { metadata: { toolName: 'Length' }, data: { handles: { points: [[0, 0], [10, 0]] } } },
-            { metadata: { toolName: 'Length' }, data: { handles: { points: [[5, 5], [5, 55]] } } },
-        ])
+            { metadata: { toolName: 'Length' }, data: { handles: { points: [[0, 0, 0], [10, 0, 0]] } } },
+            { metadata: { toolName: 'Length' }, data: { handles: { points: [[5, 5, 0], [5, 55, 0]] } } },
+        ]),
+        toImage,
+        'yggweb:https://h/a.jpg'
     );
-    assert.deepEqual(line, { pointA: [5, 5], pointB: [5, 55] });
+    assert.deepEqual(line.pointA, [5, 5]);
+    assert.deepEqual(line.pointB, [5, 55]);
+});
+
+test('the line is measured in PIXELS, not world units', () => {
+    // The endpoint derives millimetres *per pixel*, so a world-space distance would give a
+    // scale wrong by whatever the current spacing is -- and on an already-calibrated image
+    // that is not 1. The reported distance is also what the dialog shows the user, so a
+    // wrong one would look like a wrong drawing rather than a wrong conversion.
+    const line = pendingCalibrationLine(
+        stackWith([
+            { metadata: { toolName: 'Length' }, data: { handles: { points: [[0, 0, 0], [3, 4, 0]] } } },
+        ]),
+        // A 0.5 mm/px image: 3 mm across is 6 px across.
+        (imageId, point) => [point[0] / 0.5, point[1] / 0.5],
+        'id'
+    );
+    assert.deepEqual(line.pointA, [0, 0]);
+    assert.deepEqual(line.pointB, [6, 8]);
+    assert.equal(line.pixelDistance, 10, 'ten pixels, not the five world units');
 });
 
 test('an unfinished or absent Length yields no line', () => {
-    assert.equal(pendingCalibrationLine(stackWith([])), null);
+    assert.equal(pendingCalibrationLine(stackWith([]), toImage, 'id'), null);
     assert.equal(
         pendingCalibrationLine(
-            stackWith([{ metadata: { toolName: 'Angle' }, data: { handles: { points: [[0, 0], [1, 1], [2, 2]] } } }])
+            stackWith([{ metadata: { toolName: 'Angle' }, data: { handles: { points: [[0, 0, 0], [1, 1, 0], [2, 2, 0]] } } }]),
+            toImage,
+            'id'
         ),
         null,
         'an angle is not a calibration line'
     );
     assert.equal(
         pendingCalibrationLine(
-            stackWith([{ metadata: { toolName: 'Length' }, data: { handles: { points: [[0, 0]] } } }])
+            stackWith([{ metadata: { toolName: 'Length' }, data: { handles: { points: [[0, 0, 0]] } } }]),
+            toImage,
+            'id'
         ),
         null,
         'a half-drawn line has one handle'
     );
 });
 
-test('only the two ordinates are taken, so a third cannot leak into the request', () => {
+test('the converted point carries exactly two ordinates', () => {
     const line = pendingCalibrationLine(
         stackWith([
             { metadata: { toolName: 'Length' }, data: { handles: { points: [[1, 2, 3], [4, 5, 6]] } } },
-        ])
+        ]),
+        toImage,
+        'id'
     );
-    assert.deepEqual(line, { pointA: [1, 2], pointB: [4, 5] });
+    assert.equal(line.pointA.length, 2);
+    assert.equal(line.pointB.length, 2);
 });

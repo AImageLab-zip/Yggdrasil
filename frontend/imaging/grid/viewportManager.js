@@ -120,7 +120,12 @@ export const PRIMARY_TOOLS = Object.freeze([
  * @param {object[]} [options.layout]
  * @returns {object} a grid handle.
  */
-export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LAYOUT }) {
+export function createVolumeGrid({
+    cornerstone,
+    elements,
+    layout = FIXED_CBCT_LAYOUT,
+    toolConfiguration = new Map(),
+}) {
     const {
         RenderingEngine,
         coreEnums,
@@ -172,6 +177,7 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
     }
 
     const toolGroups = createToolGroups({
+        toolConfiguration,
         addTool,
         ToolGroupManager,
         tools,
@@ -497,7 +503,14 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
  * meaning in a volume render, and a trackball has none in a slice. One group with
  * everything in it would put tools on a toolbar that cannot act.
  */
-function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums, orientationMarkerUrl }) {
+function createToolGroups({
+    addTool,
+    ToolGroupManager,
+    tools,
+    toolsEnums,
+    orientationMarkerUrl,
+    toolConfiguration = new Map(),
+}) {
     for (const tool of Object.values(tools)) {
         addTool(tool);
     }
@@ -511,13 +524,19 @@ function createToolGroups({ addTool, ToolGroupManager, tools, toolsEnums, orient
     // with no pan and no zoom. The measurement tools stay 2D-only, and the trackball
     // stays 3D-only, because neither means anything in the other.
     for (const [name, tool] of Object.entries(tools)) {
+        // Per-tool configuration goes to the *group*'s addTool, because that is what
+        // builds the instance the viewport uses -- a config set on the class is read by
+        // nothing. The ROI tools use it to print the area and not four intensity
+        // statistics; see `annotations/roiTextLines.js` for why those are misleading on a
+        // CBCT specifically.
+        const configuration = toolConfiguration.get(tool.toolName) ?? {};
         if (name === 'TrackballRotate' || name === 'OrientationMarker') {
-            threeD.addTool(tool.toolName);
+            threeD.addTool(tool.toolName, configuration);
             continue;
         }
-        twoD.addTool(tool.toolName);
+        twoD.addTool(tool.toolName, configuration);
         if (SHARED_NAVIGATION_TOOLS.includes(name)) {
-            threeD.addTool(tool.toolName);
+            threeD.addTool(tool.toolName, configuration);
         }
     }
 

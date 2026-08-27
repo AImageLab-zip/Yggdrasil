@@ -124,11 +124,16 @@ export function bindControls({
     confirm = (message) => globalThis.confirm?.(message) ?? false,
     notify,
 }) {
-    const report = (level, message) => {
+    // `window.appNotify(type, message, options)` -- **type first**. Getting this backwards
+    // is what produced a toast titled "Info" whose body read "danger": the level was being
+    // passed as the message and the message as the level, and `normalizeType` fell back to
+    // 'info' for an unrecognised string. Named `type` here rather than `level` so the
+    // argument order is legible at the call site.
+    const report = (type, message) => {
         if (!message) return;
         const toast = notify ?? globalThis.appNotify;
         if (typeof toast === 'function') {
-            toast(message, level);
+            toast(type, message);
             return;
         }
         if (plan.status) {
@@ -159,7 +164,7 @@ export function bindControls({
         setBusy(plan.save, true);
         try {
             const result = await onSave?.();
-            report(result?.level ?? 'success', result?.message ?? SAVED_MESSAGE);
+            report(result?.type ?? 'success', result?.message ?? SAVED_MESSAGE);
         } finally {
             setBusy(plan.save, false);
         }
@@ -170,7 +175,7 @@ export function bindControls({
             return;
         }
         const result = await onClear?.();
-        report(result?.level ?? 'success', result?.message ?? CLEARED_MESSAGE);
+        report(result?.type ?? 'success', result?.message ?? CLEARED_MESSAGE);
     });
 
     plan.annotationMode?.addEventListener?.('click', () => {

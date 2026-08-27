@@ -150,8 +150,8 @@ test('a save reports through the toast, at the level the handler chose', async (
     const notified = [];
     bindControls({
         plan,
-        notify: (message, level) => notified.push([level, message]),
-        onSave: () => ({ level: 'danger', message: 'nope' }),
+        notify: (type, message) => notified.push([type, message]),
+        onSave: () => ({ type: 'danger', message: 'nope' }),
     });
     await plan.save.click();
     assert.deepEqual(notified, [['danger', 'nope']]);
@@ -160,7 +160,7 @@ test('a save reports through the toast, at the level the handler chose', async (
 test('a save with no message falls back to the success wording', async () => {
     const plan = controlPlan(fakeDoc());
     const notified = [];
-    bindControls({ plan, notify: (m, l) => notified.push([l, m]), onSave: () => ({}) });
+    bindControls({ plan, notify: (type, message) => notified.push([type, message]), onSave: () => ({}) });
     await plan.save.click();
     assert.deepEqual(notified, [['success', SAVED_MESSAGE]]);
 });
@@ -213,7 +213,7 @@ test('accepting the confirmation clears and reports', async () => {
     bindControls({
         plan,
         confirm: () => true,
-        notify: (m, l) => notified.push([l, m]),
+        notify: (type, message) => notified.push([type, message]),
         onClear: () => ({}),
     });
     await plan.clear.click();

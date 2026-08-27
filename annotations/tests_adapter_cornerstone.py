@@ -545,3 +545,66 @@ class PlanarFrameTests(SimpleTestCase):
                 by_item(descriptors, d.SPATIAL_3D), [], f"{frame} must not produce a 3D row"
             )
             self.assertEqual(by_item(descriptors, d.GEOMETRY_2D)[0]["coordinate_system"], frame)
+
+
+class LabelToolTests(SimpleTestCase):
+    """A point with a name, and the reason it exists.
+
+    ``ArrowAnnotate`` had no mapping, so one arrow made the adapter refuse the *whole*
+    save -- correct behaviour for an unmapped tool, but it meant the toolbar offered a
+    button that broke saving. ``Label`` is the mapped replacement, and a named landmark is
+    what the surface wanted anyway: an arrow points at something without saying what.
+    """
+
+    def descriptors(self, points, label, frame=CoordinateSystem.IMAGE_PIXEL):
+        entry = annotation("Label", points)
+        entry["data"]["label"] = label
+        return cs.descriptors_for_annotation(entry, coordinate_system=frame)
+
+    def test_a_named_point_becomes_a_point_carrying_its_text(self):
+        descriptors = self.descriptors([[7, 9]], "Nasion")
+        self.assertEqual(len(descriptors), 1, "a marker measures nothing")
+        geometry = by_item(descriptors, d.GEOMETRY_2D)[0]
+        self.assertEqual(geometry["geometry_type"], Geometry2DType.POINT)
+        self.assertEqual(geometry["points"], [[7.0, 9.0]])
+        self.assertEqual(geometry["attributes"]["text"], "Nasion")
+
+    def test_the_text_is_an_attribute_not_a_label_definition(self):
+        """A controlled vocabulary is right for an FDI code and wrong for free text.
+
+        An FDI code decides an export segment, so it must resolve against a schema. "root
+        apex", typed by a clinician on one study, must not need a migration to exist.
+        """
+        descriptors = self.descriptors([[7, 9]], "root apex")
+        self.assertNotIn("label_code", descriptors[0])
+
+    def test_an_unnamed_marker_is_refused(self):
+        # Cornerstone draws no text box for an empty label, so the annotation would exist,
+        # render as a bare dot, and mean nothing.
+        for label in ("", "   ", None):
+            with self.assertRaisesMessage(ValidationError, "unnamed one"):
+                self.descriptors([[7, 9]], label)
+
+    def test_it_works_in_a_patient_frame_too(self):
+        descriptors = self.descriptors(
+            [[7, 9, 11]], "Sella", frame=CoordinateSystem.PATIENT_LPS_MM
+        )
+        geometry = by_item(descriptors, d.SPATIAL_3D)[0]
+        self.assertEqual(geometry["geometry_type"], Geometry3DType.POINT)
+        self.assertEqual(geometry["attributes"]["text"], "Sella")
+
+    def test_more_than_one_handle_is_refused(self):
+        with self.assertRaises(ValidationError):
+            self.descriptors([[7, 9], [8, 10]], "Nasion")
+
+    def test_an_arrow_is_still_refused_loudly(self):
+        """The refusal is right; what was wrong was offering the button.
+
+        An unmapped tool stored as a bare payload is data the canonical document cannot
+        read, so refusing the save is correct. This pins that the refusal names the tool,
+        because the message is the only thing that made the cause findable.
+        """
+        with self.assertRaisesMessage(ValidationError, "ArrowAnnotate"):
+            cs.descriptors_for_annotation(
+                annotation("ArrowAnnotate", [[0, 0, 0], [1, 1, 1]])
+            )

@@ -73,6 +73,15 @@ GEOMETRIC_TOOLS = frozenset(
 #: Tools that carry geometry but whose *number* needs the voxels. See the module note.
 INTENSITY_TOOLS = frozenset({"Probe"})
 
+#: Tools that mark a place and name it, and measure nothing.
+#:
+#: ``Label`` is Cornerstone's one-handle text marker. It is a *point with a name* -- the
+#: name is the annotation, so unlike every tool above there is no number to recompute and
+#: nothing to refuse. The text travels in ``attributes['text']`` rather than becoming a
+#: ``LabelDefinition``: a controlled vocabulary is right for a tooth's FDI code, which
+#: decides an export segment, and wrong for "root apex" typed by a clinician on one study.
+LABEL_TOOLS = frozenset({"Label"})
+
 #: Frames whose coordinates mean nothing outside the one resource that defines them,
 #: and which therefore cannot carry a DICOM Frame of Reference UID.
 RESOURCE_SCOPED_FRAMES = frozenset(
@@ -532,6 +541,26 @@ def descriptors_for_annotation(
                 calibrated=calibrated,
                 **shared,
             ),
+        ]
+
+    if tool_name in LABEL_TOOLS:
+        _require_points(tool_name, points, 1)
+        text = str((annotation.get("data") or {}).get("label") or "").strip()
+        if not text:
+            # An unnamed marker is indistinguishable from a stray click, and Cornerstone
+            # draws no text box for an empty label -- so the annotation would exist,
+            # render as a bare dot, and mean nothing. Refused rather than stored.
+            raise ValidationError(
+                "a Label annotation carries its name in data.label, and an unnamed one "
+                "is a marker nobody can interpret"
+            )
+        return [
+            _geometry(
+                Geometry3DType.POINT,
+                points,
+                attributes={"text": text},
+                **geometry_kwargs,
+            )
         ]
 
     if tool_name in INTENSITY_TOOLS:

@@ -61,7 +61,7 @@ export const PHOTO_MEASUREMENT_TOOLS = Object.freeze([
     'RectangleROI',
     'EllipticalROI',
     'CircleROI',
-    'ArrowAnnotate',
+    'Label',
 ]);
 
 /**
@@ -72,7 +72,7 @@ export const PHOTO_MEASUREMENT_TOOLS = Object.freeze([
  * @param {HTMLElement} options.element the viewport host.
  * @returns {object} the handle.
  */
-export function createPhotoStack({ cornerstone, element }) {
+export function createPhotoStack({ cornerstone, element, toolConfiguration = new Map() }) {
     const {
         RenderingEngine,
         coreEnums,
@@ -94,7 +94,13 @@ export function createPhotoStack({ cornerstone, element }) {
     ]);
     const viewport = renderingEngine.getViewport(PHOTO_VIEWPORT_ID);
 
-    const toolGroup = createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums });
+    const toolGroup = createToolGroup({
+        addTool,
+        ToolGroupManager,
+        tools,
+        toolsEnums,
+        toolConfiguration,
+    });
     toolGroup.addViewport(PHOTO_VIEWPORT_ID, PHOTO_RENDERING_ENGINE_ID);
 
     let imageIds = [];
@@ -289,7 +295,7 @@ export function createPhotoStack({ cornerstone, element }) {
     return stack;
 }
 
-function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums }) {
+function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums, toolConfiguration }) {
     for (const name of [...NAVIGATION_TOOLS, ...PHOTO_MEASUREMENT_TOOLS, 'WindowLevel']) {
         if (tools[name]) {
             addTool(tools[name]);
@@ -307,7 +313,10 @@ function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums }) {
 
     for (const name of [...NAVIGATION_TOOLS, ...PHOTO_MEASUREMENT_TOOLS, 'WindowLevel']) {
         if (tools[name]) {
-            toolGroup.addTool(tools[name].toolName);
+            // Per-tool configuration goes in here, not on the tool class: `addTool` on the
+            // *group* is what builds the instance the viewport uses, so a config set
+            // anywhere else is read by nothing.
+            toolGroup.addTool(tools[name].toolName, toolConfiguration.get(tools[name].toolName) ?? {});
         }
     }
 

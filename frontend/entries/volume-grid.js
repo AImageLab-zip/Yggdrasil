@@ -82,6 +82,7 @@ import { init as polySegInit } from '@cornerstonejs/polymorphic-segmentation';
 import { interpolate as interpolateLabelmap } from '@cornerstonejs/labelmap-interpolation';
 
 import { initImaging } from '../imaging/runtime/init.js';
+import { areaOnlyConfiguration } from '../imaging/annotations/roiTextLines.js';
 import { GRID_VIEWPORT_COUNT } from '../imaging/runtime/config.js';
 
 // F3: the loader throws on a relative URL and reads `.gz` off the pathname only.
@@ -220,6 +221,12 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
     imageLoader.registerImageLoader(IMAGE_LOADER_SCHEME, cornerstoneNiftiImageLoader);
 
     return createVolumeGrid({
+        // The ROI tools print the area only. Mean/Max/Min/Std Dev on a CBCT are not
+        // Hounsfield -- CBCT greyscale is vendor-dependent and uncalibrated -- and this
+        // codebase already refuses to *store* those numbers from the client for exactly
+        // that reason. Printing them in the overlay while refusing to store them would be
+        // one claim made in two voices.
+        toolConfiguration: areaOnlyConfiguration(GRID_TOOLS, coreUtilities.roundNumber),
         cornerstone: {
             RenderingEngine,
             coreEnums,

@@ -24,12 +24,23 @@
  * Only geometry. The server recomputes every value from the handles
  * (`annotations/adapters/cornerstone.py`), so a length sent from here would be ignored
  * at best and believed at worst.
+ *
+ * ## It does send *pixels*, and that took a fix
+ *
+ * A `StackViewport` is 2D on screen and not in its data: Cornerstone puts every handle in
+ * world space, three ordinates, for a photograph as for a volume. The first version
+ * declared `image_pixel` and sent the handles untouched, so the server -- correctly
+ * refusing a three-ordinate handle in a planar frame -- rejected every save. The
+ * declaration was the honest part and the conversion was missing; `./coordinates.js` is
+ * where world becomes pixels now, and `toImage` is required rather than optional so it
+ * cannot be forgotten again.
  */
 
 import {
     assertSavable,
     measurementAnnotations,
 } from '../annotations/protocol.js';
+import { annotationToImagePixels, annotationToWorld } from './coordinates.js';
 
 /** The frame a stack viewport reports handles in. */
 export const PHOTO_COORDINATE_SYSTEM = 'image_pixel';
@@ -95,11 +106,19 @@ export function groupAnnotationsByFile(annotations, imageIdToFileId) {
  * @param {object[]} options.images `{fileId, imageId, width, height, pixelSpacingMm}`.
  * @param {object[]} options.annotations the viewer's annotation list, verbatim.
  * @param {number} options.expectedRevision the revision the client loaded.
+ * @param {Function} options.toImage `(imageId, worldPoint) => [x, y]`. **Required** --
+ *   without it the handles go out in world space and the server refuses the whole save.
  * @returns {object} ready for `JSON.stringify`.
  */
-export function buildStackSaveRequest({ images, annotations, expectedRevision }) {
+export function buildStackSaveRequest({ images, annotations, expectedRevision, toImage }) {
     if (!Array.isArray(images) || images.length === 0) {
         throw new Error('A stack save must name at least one image.');
+    }
+    if (typeof toImage !== 'function') {
+        throw new Error(
+            'toImage is required: Cornerstone reports handles in world space, and a save ' +
+                'declaring image_pixel must convert them or the server refuses all of it.'
+        );
     }
     const imageIdToFileId = new Map(images.map((image) => [image.imageId, image.fileId]));
     const grouped = groupAnnotationsByFile(annotations, imageIdToFileId);
@@ -114,7 +133,9 @@ export function buildStackSaveRequest({ images, annotations, expectedRevision })
         coordinateSystem: PHOTO_COORDINATE_SYSTEM,
         images: images.map((image) => ({
             fileId: image.fileId,
-            annotations: grouped.get(image.fileId) ?? [],
+            annotations: (grouped.get(image.fileId) ?? []).map((annotation) =>
+                annotationToImagePixels(annotation, image.imageId, toImage)
+            ),
             imageDescriptor: imageDescriptor(image),
         })),
     };
@@ -128,13 +149,23 @@ export function buildStackSaveRequest({ images, annotations, expectedRevision })
  *
  * @param {object[]} stateImages the `images` array from the state endpoint.
  * @param {Map<number, string>} fileIdToImageId
+ * @param {Function} toWorld `(imageId, [x, y]) => [x, y, z]`; the inverse of the save's
+ *   conversion, because stored handles are pixels and Cornerstone renders world space.
  * @returns {Map<string, object[]>}
  */
-export function restorablesByImageId(stateImages, fileIdToImageId) {
+export function restorablesByImageId(stateImages, fileIdToImageId, toWorld) {
     const out = new Map();
     for (const [fileId, imageId] of fileIdToImageId) {
         const entry = (stateImages ?? []).find((candidate) => candidate?.fileId === fileId);
-        out.set(imageId, Array.isArray(entry?.annotations) ? entry.annotations : []);
+        const stored = Array.isArray(entry?.annotations) ? entry.annotations : [];
+        out.set(
+            imageId,
+            typeof toWorld === 'function'
+                ? stored
+                      .filter((annotation) => Array.isArray(annotation?.data?.handles?.points))
+                      .map((annotation) => annotationToWorld(annotation, imageId, toWorld))
+                : stored
+        );
     }
     return out;
 }

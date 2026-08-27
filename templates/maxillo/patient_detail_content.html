@@ -389,7 +389,7 @@
 
                     <div class="photo-toolbar-group" role="group" aria-label="Calibration">
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="photoCalibrate"
-                                title="Draw a Length over something of known size, then set its real length">
+                                title="Draw a Length line over something of known size, then press this and enter its real length">
                             <i class="fas fa-ruler"></i> Calibrate
                         </button>
                         <span class="photo-calibration" id="photoCalibration"></span>
@@ -420,8 +420,9 @@
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="EllipticalROI" title="Ellipse">
                             <i class="far fa-circle"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="ArrowAnnotate" title="Arrow with a note">
-                            <i class="fas fa-location-arrow"></i>
+                        {# A named point, not an arrow: an arrow says where and not what. #}
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Label" title="Named point">
+                            <i class="fas fa-map-pin"></i>
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-danger" id="photoClearMeasurements" title="Remove every measurement">
                             <i class="fas fa-trash"></i>

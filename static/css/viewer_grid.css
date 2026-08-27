@@ -1168,3 +1168,26 @@
 .photo-viewport canvas {
   display: block;
 }
+
+/* The photo surface's own dialogs (calibration, naming a point, the image editor).
+   `.modal` is the app's convention and is styled in the Tailwind layer; these two
+   rules are the parts a dynamically-created dialog needs that a template-declared
+   one gets from its markup. */
+.ygg-photo-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1060;
+  overflow-y: auto;
+  background: rgb(0 0 0 / 45%);
+}
+
+.ygg-photo-dialog .modal-dialog {
+  margin: 3rem auto;
+  max-width: 32rem;
+}
+
+/* The editor panel hosts an image and the editor's own toolbar, so it needs room the
+   question dialogs do not. */
+.ygg-photo-dialog:has(.modal-title .fa-crop) .modal-dialog {
+  max-width: min(64rem, 92vw);
+}

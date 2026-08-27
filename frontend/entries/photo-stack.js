@@ -35,7 +35,7 @@ import {
     RectangleROITool,
     EllipticalROITool,
     CircleROITool,
-    ArrowAnnotateTool,
+    LabelTool,
 } from '@cornerstonejs/tools';
 
 import { initImaging } from '../imaging/runtime/init.js';
@@ -52,6 +52,8 @@ import {
     createPhotoStack,
 } from '../imaging/photos/stackViewport.js';
 import { bootstrapPhotoStack } from '../imaging/photos/bootstrap.js';
+import { areaOnlyConfiguration } from '../imaging/annotations/roiTextLines.js';
+import { askForText } from '../imaging/photos/dialog.js';
 
 export const SURFACE = 'photo-stack';
 
@@ -63,6 +65,11 @@ export const SURFACE = 'photo-stack';
  * nobody should take. `ScaleOverlayTool` and `MagnifyTool` are absent for a duller
  * reason -- neither is wired to a control yet, and a tool nothing can reach is dead
  * weight in a 4 MB bundle.
+ *
+ * `LabelTool` replaces `ArrowAnnotateTool`: a named point says *what* it is pointing at,
+ * where an arrow leaves the reader inferring. It is also the mapped one -- an arrow had no
+ * entry in `annotations/adapters/cornerstone.py`, so a single one made the adapter refuse
+ * the entire save.
  */
 export const STACK_TOOLS = Object.freeze({
     Pan: PanTool,
@@ -76,8 +83,44 @@ export const STACK_TOOLS = Object.freeze({
     RectangleROI: RectangleROITool,
     EllipticalROI: EllipticalROITool,
     CircleROI: CircleROITool,
-    ArrowAnnotate: ArrowAnnotateTool,
+    Label: LabelTool,
 });
+
+/**
+ * Per-tool configuration, built once.
+ *
+ * Two things, both about what the overlay says rather than what is stored:
+ *
+ * - The ROI tools print the **area only**. Upstream's default adds Mean, Max, Min and Std
+ *   Dev, which on a photograph are statistics about the JPEG and on a CBCT are not
+ *   Hounsfield -- and which this codebase already refuses to *store* from the client for
+ *   that reason. Printing them while refusing to store them is one claim in two voices.
+ * - `LabelTool` asks for its text through the app's own dialog. Its default
+ *   `getTextCallback` calls `prompt()`, which is unstyled, sits outside the page, and can
+ *   be permanently suppressed by the browser -- after which naming a point silently stops
+ *   working with no error to explain it.
+ */
+function toolConfiguration() {
+    const configuration = areaOnlyConfiguration(STACK_TOOLS, coreUtilities.roundNumber);
+    const getTextCallback = (done) =>
+        askForText({
+            title: 'Name this point',
+            message: 'What is this point? The name is what the marker shows.',
+            placeholder: 'e.g. Nasion',
+        }).then((text) => done(text ?? undefined));
+
+    configuration.set(LabelTool.toolName, {
+        getTextCallback,
+        // Double-clicking an existing marker renames it, through the same dialog.
+        changeTextCallback: (data, event, done) =>
+            askForText({
+                title: 'Rename this point',
+                message: 'What is this point?',
+                initial: data?.label ?? '',
+            }).then((text) => done(text ?? undefined)),
+    });
+    return configuration;
+}
 
 /** Registered once per page, not once per mount. */
 let registered = false;
@@ -110,7 +153,8 @@ export async function mountPhotoStack({ element, registry }) {
         registered = true;
     }
 
-    return createPhotoStack({
+    const stack = createPhotoStack({
+        toolConfiguration: toolConfiguration(),
         cornerstone: {
             RenderingEngine,
             coreEnums,
@@ -123,6 +167,16 @@ export async function mountPhotoStack({ element, registry }) {
         },
         element,
     });
+
+    // Cornerstone's own converters, handed out rather than re-implemented. They are exact
+    // inverses derived from the same `imagePlaneModule` the viewport renders from; a third
+    // implementation would be the one that disagrees, silently, by half a pixel -- both of
+    // these offset by half a spacing and it is easy not to notice.
+    return {
+        stack,
+        worldToImage: coreUtilities.worldToImageCoords,
+        imageToWorld: coreUtilities.imageToWorldCoords,
+    };
 }
 
 /**
