@@ -21,8 +21,12 @@
 export const CONTROL_IDS = Object.freeze({
     resetView: 'resetCBCTView',
     save: 'cbctSaveMeasurements',
+    expand3D: 'cbctExpand3D',
     status: 'cbctRenderStatus',
 });
+
+/** Class on the grid container while the 3D view fills it. */
+export const EXPANDED_CLASS = 'is-3d-expanded';
 
 /** Selector for the measurement-tool buttons. */
 export const TOOL_BUTTON_SELECTOR = '[data-ygg-tool]';
@@ -114,6 +118,24 @@ export function bindControls({ grid, doc = globalThis.document, onSave }) {
     }
     if (plan.tools.length) {
         bound.push('tools');
+    }
+
+    if (plan.expand3D) {
+        // Hides the three slice views and gives their space to the render. The grid is
+        // a CSS grid, so this is a class on the container -- and Cornerstone has to be
+        // told afterwards, because a viewport whose element changed size renders at the
+        // old size until `resize()` says otherwise.
+        plan.expand3D.addEventListener(
+            'click',
+            guarded('Expand 3D', () => {
+                const container = plan.expand3D.ownerDocument.querySelector('.viewer-grid');
+                const expanded = container?.classList.toggle(EXPANDED_CLASS) ?? false;
+                plan.expand3D.setAttribute('aria-pressed', String(expanded));
+                grid.resize?.();
+                setStatus(expanded ? '3D fills the grid' : '');
+            })
+        );
+        bound.push('expand3D');
     }
 
     if (plan.save && onSave) {

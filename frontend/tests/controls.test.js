@@ -11,6 +11,11 @@ import {
 
 /** A DOM stub: enough of Document and Element for the binding, and nothing more. */
 function fakeDoc(ids, toolNames = []) {
+    const container = { classes: new Set(), classList: { toggle(name) {
+        const has = container.classes.has(name);
+        if (has) { container.classes.delete(name); } else { container.classes.add(name); }
+        return !has;
+    } } };
     const elements = new Map();
     const tools = toolNames.map((name) => ({
         dataset: { yggTool: name },
@@ -27,6 +32,7 @@ function fakeDoc(ids, toolNames = []) {
     for (const id of ids) {
         elements.set(id, {
             id,
+            ownerDocument: null,
             value: '',
             hidden: false,
             dataset: {},
@@ -56,8 +62,10 @@ function fakeDoc(ids, toolNames = []) {
                 this.removed = true;
             },
         }),
+        querySelector: () => container,
         elements,
         tools,
+        container,
     };
 }
 
@@ -193,7 +201,7 @@ test('a handler that throws reports into the status line, not only the console',
 test('every control the template offers is bound', () => {
     const doc = fakeDoc(ALL_IDS, ['Length']);
     const result = bindControls({ grid: fakeGrid(), doc, onSave: async () => ({}) });
-    assert.deepEqual(result.bound.sort(), ['resetView', 'save', 'tools']);
+    assert.deepEqual(result.bound.sort(), ['expand3D', 'resetView', 'save', 'tools']);
 });
 
 
@@ -258,4 +266,39 @@ test('an indicator on a missing element is a harmless no-op', () => {
 test('markActiveTool tolerates a button with no classList', () => {
     const buttons = [{ dataset: { yggTool: 'Length' }, setAttribute() {} }];
     assert.doesNotThrow(() => markActiveTool(buttons, 'Length'));
+});
+
+test('expanding gives the 3D window the whole grid, and re-sizes Cornerstone', () => {
+    // The grid is a CSS grid, so this is a class on the container. Cornerstone has to
+    // be told afterwards: a viewport whose element changed size keeps rendering at the
+    // old size until `resize()` says otherwise.
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const grid = fakeGrid();
+    let resized = 0;
+    grid.resize = () => {
+        resized += 1;
+    };
+    bindControls({ grid, doc });
+
+    doc.elements.get(CONTROL_IDS.expand3D).ownerDocument = doc;
+    doc.elements.get(CONTROL_IDS.expand3D).handlers.click({});
+
+    assert.ok(doc.container.classes.has('is-3d-expanded'));
+    assert.equal(doc.elements.get(CONTROL_IDS.expand3D).attributes['aria-pressed'], 'true');
+    assert.equal(resized, 1);
+});
+
+test('expanding again collapses back to the four-panel grid', () => {
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const grid = fakeGrid();
+    grid.resize = () => {};
+    bindControls({ grid, doc });
+
+    const button = doc.elements.get(CONTROL_IDS.expand3D);
+    button.ownerDocument = doc;
+    button.handlers.click({});
+    button.handlers.click({});
+
+    assert.ok(!doc.container.classes.has('is-3d-expanded'));
+    assert.equal(button.attributes['aria-pressed'], 'false');
 });

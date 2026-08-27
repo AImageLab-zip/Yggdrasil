@@ -464,7 +464,7 @@ async function saveMeasurements({ grid, data, volume, view, origin, namespace })
     const response = await fetch(measurementsUrl(data, volume, namespace, origin, '/'), {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken(view) },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken(view?.document) },
         body: JSON.stringify(body),
     });
     const payload = await response.json().catch(() => null);
@@ -483,8 +483,20 @@ function measurementsUrl(data, volume, namespace, origin, suffix) {
     return new URL(`${prefix}/patients/${data.scanId}/measurements${suffix}`, origin).href;
 }
 
-/** Django's CSRF cookie. A POST without it is a 403 with no explanation on screen. */
-function csrfToken(view) {
-    const match = /(?:^|;\s*)csrftoken=([^;]*)/.exec(view?.document?.cookie ?? '');
-    return match ? decodeURIComponent(match[1]) : '';
+/**
+ * Django's CSRF token, the way this project actually issues it.
+ *
+ * **Not the cookie.** `yggdrasil/settings.py` sets `CSRF_USE_SESSIONS = True`, so the
+ * token lives in the session and there is no `csrftoken` cookie to read at all;
+ * `CSRF_COOKIE_HTTPONLY = True` would block reading one even if there were. The first
+ * version read the cookie, always found nothing, and every save was a bare 403 with
+ * Django's HTML error page rather than a message from the endpoint.
+ *
+ * The hidden input rendered by `{% csrf_token %}` is the source that works, and it is
+ * what `static/js/patient_detail.js:183-189` already uses -- so this matches the
+ * convention on the page rather than inventing a second one.
+ */
+export function csrfToken(doc) {
+    const input = doc?.querySelector?.('input[name="csrfmiddlewaretoken"]');
+    return input?.value ?? '';
 }

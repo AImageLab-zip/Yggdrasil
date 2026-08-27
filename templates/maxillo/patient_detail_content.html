@@ -98,7 +98,17 @@
                 </div>
                 {% if can_modify_segmentation %}
                 <button type="button" class="icon-btn" id="cbctSaveMeasurements" title="Save measurements"><i class="fas fa-floppy-disk" aria-hidden="true"></i></button>
+                {% comment %}
+                `CSRF_USE_SESSIONS = True` in settings, so there is no `csrftoken`
+                cookie to read -- the hidden input is the only source, and the only
+                other `{% csrf_token %}` on this page is inside the IOS branch, which
+                does not render for a CBCT-only patient. Without this every save was a
+                bare 403.
+                {% endcomment %}
+                <div hidden>{% csrf_token %}</div>
                 {% endif %}
+                <div class="viewer-toolbar__divider"></div>
+                <button type="button" class="icon-btn" id="cbctExpand3D" aria-pressed="false" title="Expand the 3D view to fill the grid"><i class="fas fa-expand" aria-hidden="true"></i></button>
                 <span class="cbct-render-status" id="cbctRenderStatus" role="status" aria-live="polite"></span>
             </div>
         </div>

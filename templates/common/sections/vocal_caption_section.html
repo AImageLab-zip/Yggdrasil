@@ -56,7 +56,7 @@
                         <div class="recording-info">
                             {% if ns != 'brain' %}
                             <small class="text-muted me-2">Modality:</small>
-                            <span class="badge bg-secondary" id="modalityIndicator">Voice</span>
+                            <span class="badge-ygg badge-neutral" id="modalityIndicator">Voice</span>
                             {% else %}
                             <small class="text-muted me-2">Recording...</small>
                             {% endif %}
@@ -104,7 +104,7 @@
                                     <small class="text-primary me-2">{{ c.user.username }}</small>
                                     {% if ns != 'brain' %}
                                     <div class="dropdown d-inline-block me-2">
-                                        <span class="badge bg-secondary {% if c.can_edit_content %}dropdown-toggle modality-badge-clickable{% endif %}"
+                                        <span class="badge-ygg badge-neutral {% if c.can_edit_content %}dropdown-toggle modality-badge-clickable{% endif %}"
                                               id="modalityDropdown{{ c.id }}"
                                               {% if c.can_edit_content %}data-ygg-toggle="dropdown"{% endif %}
                                               aria-expanded="false"
@@ -131,7 +131,7 @@
                                         {% endif %}
                                     </div>
                                     {% endif %}
-                                    <span class="badge bg-secondary me-2">{{ c.get_display_duration|default:'Audio' }}</span>
+                                    <span class="badge-ygg badge-neutral me-2">{{ c.get_display_duration|default:'Audio' }}</span>
                                     <small class="text-muted">{{ c.created_at|date:"M d, H:i" }}</small>
                                 </div>
                                 <div class="caption-actions">

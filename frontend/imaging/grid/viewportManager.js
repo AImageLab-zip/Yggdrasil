@@ -55,6 +55,20 @@ import { describeGeometry } from '../geometry/orientation.js';
 export const RENDERING_ENGINE_ID = 'ygg-volume-grid';
 
 /**
+ * The volume render opens looking at the patient's front.
+ *
+ * Cornerstone's default for a 3D viewport looks down the superior axis -- straight at
+ * the top of the head, which for a CBCT is a view of the skull vault and tells a
+ * clinician nothing. These are Cornerstone's own `coronal` MPR vectors: the camera sits
+ * anterior of the patient (`viewPlaneNormal` points from the focal point back toward
+ * it) with superior up.
+ */
+export const RENDER_DEFAULT_CAMERA = Object.freeze({
+    viewPlaneNormal: Object.freeze([0, -1, 0]),
+    viewUp: Object.freeze([0, 0, 1]),
+});
+
+/**
  * Navigation that belongs to **both** tool groups.
  *
  * A tool has to be *added* to a group before it can be made active in it.
@@ -255,6 +269,18 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
         /** Switch the volume render between mip / amip / shaded. */
         setRenderMode: (windowIndex, mode) =>
             setRenderMode({ renderingEngine, windowIndex, mode }),
+
+        /**
+         * Re-fit every viewport to its element.
+         *
+         * Needed whenever the layout changes under Cornerstone -- expanding the 3D
+         * view, showing a hidden tab -- because a viewport whose element changed size
+         * keeps rendering at the old one until it is told.
+         */
+        resize: () => {
+            renderingEngine.resize(true, true);
+            overlays.forEach((unused, index) => refreshOverlay(index));
+        },
 
         /** Reset the camera on one window, or on all of them. */
         resetCameras: (windowIndex) => resetCameras({ renderingEngine, state, windowIndex }),
@@ -492,6 +518,15 @@ async function loadVolumeIntoWindows({
             // leaving it unconfigured renders an opaque block.
             try {
                 setRenderMode({ renderingEngine, windowIndex: index, mode: DEFAULT_RENDER_MODE });
+                // Frontal, not superior. Set after the volume so `resetCamera` has real
+                // bounds to fit, and before the render so the first frame is already
+                // the right way round.
+                const render = renderingEngine.getViewport(id);
+                render?.setCamera?.({
+                    viewPlaneNormal: [...RENDER_DEFAULT_CAMERA.viewPlaneNormal],
+                    viewUp: [...RENDER_DEFAULT_CAMERA.viewUp],
+                });
+                render?.resetCamera?.({ resetPan: true, resetZoom: true });
             } catch (error) {
                 // A 3D view that will not configure must not cost the slice views.
                 console.warn(`[ygg-grid] 3D render mode: ${error.message}`);

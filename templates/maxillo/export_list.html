@@ -85,9 +85,9 @@
                                     </td>
                                     <td>
                                         {% if export.status == 'pending' %}
-                                            <span class="badge bg-secondary">Pending</span>
+                                            <span class="badge-ygg badge-neutral">Pending</span>
                                         {% elif export.status == 'processing' %}
-                                            <span class="badge bg-info" id="status-badge-{{ export.id }}">Processing</span>
+                                            <span class="badge-ygg badge-neutral" id="status-badge-{{ export.id }}">Processing</span>
                                             <div class="mt-2" id="export-progress-wrap-{{ export.id }}">
                                                 <div class="d-flex justify-content-between align-items-center mb-1">
                                                     <small class="text-muted" id="export-progress-msg-{{ export.id }}">{{ export.progress_message|default:"Processing..." }}</small>
@@ -106,9 +106,9 @@
                                                 </div>
                                             </div>
                                         {% elif export.status == 'completed' %}
-                                            <span class="badge bg-success">Completed</span>
+                                            <span class="badge-ygg badge-ok">Completed</span>
                                         {% elif export.status == 'failed' %}
-                                            <span class="badge bg-danger">Failed</span>
+                                            <span class="badge-ygg badge-danger">Failed</span>
                                         {% endif %}
                                     </td>
                                     <td>

@@ -11,7 +11,7 @@
             <ul class="list-unstyled mb-0">
                 {% for ev in activity_events %}
                 <li class="d-flex gap-2 mb-3">
-                    <span class="badge rounded-pill bg-secondary" style="align-self:flex-start;">{{ ev.verb }}</span>
+                    <span class="badge-ygg badge-neutral" style="align-self:flex-start;">{{ ev.verb }}</span>
                     <div>
                         <div style="font-size:0.85rem;">
                             {% if ev.actor %}<strong>{{ ev.actor.username }}</strong>{% else %}System{% endif %}

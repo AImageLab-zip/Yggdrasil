@@ -952,7 +952,7 @@
  * the image with Shift; the number lives in each viewport's overlay. */
 .cbct-window-hint {
   font-size: 0.75rem;
-  color: var(--bs-secondary-color, #8a94a6);
+  color: var(--ygg-text-muted);
 }
 
 /* --- Loading indicator ---------------------------------------------------- */
@@ -998,8 +998,25 @@
   align-items: center;
 }
 
+/* This project's design tokens are `--ygg-*` (Tailwind), not Bootstrap's `--bs-*`.
+ * The first version of this rule used `var(--bs-primary, …)`, which does not exist
+ * here, so the fallback hex was always what showed -- a blue that belongs to a
+ * different design system. */
 .cbct-tool.is-active,
 .cbct-tool[aria-pressed='true'] {
-  background: var(--bs-primary, #0d6efd);
-  color: #fff;
+  background: var(--ygg-primary);
+  color: var(--ygg-on-primary);
+}
+
+/* --- 3D expanded to fill the grid ----------------------------------------- */
+
+/* Hides the three slice views and gives their space to the render. Display rather
+ * than opacity: a hidden-but-laid-out viewport still costs Cornerstone a render. */
+.viewer-grid.is-3d-expanded .viewer-window:not([data-window-index='3']) {
+  display: none;
+}
+
+.viewer-grid.is-3d-expanded .viewer-window[data-window-index='3'] {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
 }
