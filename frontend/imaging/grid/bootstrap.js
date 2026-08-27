@@ -368,6 +368,22 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         }
     }
 
+    // Draw whatever the study already has. After the load, because an annotation needs
+    // a viewport with a volume in it to be drawn against.
+    try {
+        const stored = await fetch(measurementsUrl(data, volume, namespace, origin, '/state/'), {
+            credentials: 'same-origin',
+        }).then((response) => (response.ok ? response.json() : null));
+        const restored = grid.restoreAnnotations?.(stored?.annotations ?? []) ?? 0;
+        if (restored) {
+            report(`restored ${restored} saved measurement(s).`);
+        }
+    } catch (error) {
+        // A study whose measurements cannot be fetched is still usable; failing to
+        // draw them must not cost the images.
+        report(`could not restore measurements: ${error.message}`);
+    }
+
     // Bound after the load, and bound at all only on pages that have a toolbar --
     // `bindControls` returns an empty plan on the brain page, which carries the grid
     // without the CBCT controls.
@@ -375,6 +391,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         grid,
         doc,
         onSave: () => saveMeasurements({ grid, data, volume, view, origin, namespace }),
+        onToggleAnnotations: (visible) => grid.setAnnotationsVisible?.(visible),
     });
     // The template marks Crosshairs pressed; make the grid agree rather than trusting
     // two places to say the same thing.
@@ -473,8 +490,11 @@ async function saveMeasurements({ grid, data, volume, view, origin, namespace })
     const result = interpretSaveResponse(response, payload);
 
     return {
+        // No revision number. Revisions are the audit trail and stay in the database;
+        // they are not a concept a clinician should have to hold. What matters is that
+        // the save landed and how much it covered.
         message: result.saved
-            ? `Saved ${annotations.length} measurement${annotations.length === 1 ? '' : 's'} as revision ${result.revision}.`
+            ? `Saved ${annotations.length} measurement${annotations.length === 1 ? '' : 's'}.`
             : result.message,
     };
 }

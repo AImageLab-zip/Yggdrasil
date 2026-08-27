@@ -37,6 +37,7 @@ from annotations.services import (
     current_revision_number,
     save_measurements,
 )
+from annotations.constants import PayloadFormat
 from annotations.services.viewer import MAX_ANNOTATIONS_PER_REVISION
 from common.models import FileRegistry
 from common.permissions import user_can_write_annotations, user_is_project_admin
@@ -167,11 +168,24 @@ def save_measurements_api(request, patient_id):
 
 @login_required
 def measurements_state_api(request, patient_id):
-    """The revision number a client must quote to save, and how much is stored.
+    """What the viewer should show, and the revision it must quote to save.
 
-    Read-only. Exists so a viewer opening a study knows what to put in
-    ``expectedRevision`` without guessing zero -- guessing zero means every second
-    editor loses a 409 they could have avoided.
+    One endpoint for both because a viewer needs both at the same moment: it opens a
+    study, draws what is already there, and has to know what to put in
+    ``expectedRevision`` when the user saves. Guessing zero means every second editor
+    loses a 409 they could have avoided.
+
+    **Only the latest revision is returned.** Revisions are the audit trail and stay in
+    the database -- they are what make the raw-data lock defensible and what a
+    cross-check reads -- but they are not a concept the viewer exposes. A clinician
+    opening a scan sees the measurements that are on it, not a history to navigate.
+
+    The annotations come from the revision's ``cornerstone_state`` payload, which exists
+    for exactly this: a non-canonical, editable copy of the viewer's own state, kept so
+    a user can resume where they left off. The canonical items are the record; this is
+    the resume point. Rebuilding viewer state from the canonical items instead would
+    mean inventing handle positions for shapes the model stores as, say, a sphere and a
+    radius -- the payload is the honest source.
     """
     Patient = _patient_model(request)
     patient = get_object_or_404(Patient, patient_id=patient_id)
@@ -189,16 +203,40 @@ def measurements_state_api(request, patient_id):
     )
 
     if annotation_set is None:
-        return JsonResponse({"revision": 0, "setId": None, "maxAnnotations": MAX_ANNOTATIONS_PER_REVISION})
+        return JsonResponse(
+            {
+                "revision": 0,
+                "setId": None,
+                "annotations": [],
+                "maxAnnotations": MAX_ANNOTATIONS_PER_REVISION,
+            }
+        )
 
     return JsonResponse(
         {
             "revision": current_revision_number(annotation_set),
             "setId": annotation_set.id,
             "everAnnotated": annotation_set.ever_annotated,
+            "annotations": _latest_viewer_state(annotation_set),
             "maxAnnotations": MAX_ANNOTATIONS_PER_REVISION,
         }
     )
+
+
+def _latest_viewer_state(annotation_set):
+    """The viewer state stored on the newest revision, or an empty list.
+
+    An empty list is the right answer for a set whose latest revision deliberately holds
+    nothing -- that is how a deletion is recorded -- so "no payload" and "a payload with
+    no annotations" both come back the same way, and neither falls back to an older
+    revision. Falling back would resurrect measurements the user deleted.
+    """
+    revision = annotation_set.revisions.order_by("-revision_number").first()
+    if revision is None:
+        return []
+    payload = revision.payloads.filter(format=PayloadFormat.CORNERSTONE_STATE).first()
+    annotations = (payload.data or {}).get("annotations") if payload else None
+    return annotations if isinstance(annotations, list) else []
 
 
 def _first_message(exc):

@@ -232,6 +232,7 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
             orientationUtilities: toolsUtilities.orientation,
             createVOISynchronizer: synchronizers.createVOISynchronizer,
             annotationState: annotationApi.state,
+            annotationVisibility: annotationApi.visibility,
             // The vendored 3D Slicer human figure. Resolved from this module's own URL,
             // the same way the web workers resolve theirs, so it follows the build
             // directory and never reaches raw.githubusercontent.com. See

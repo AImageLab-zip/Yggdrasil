@@ -317,6 +317,56 @@ export function createVolumeGrid({ cornerstone, elements, layout = FIXED_CBCT_LA
             return Array.isArray(groups) ? groups : Object.values(groups).flat();
         },
 
+        /**
+         * Draw the measurements a study already has.
+         *
+         * Added against a viewport element so Cornerstone files them under that
+         * viewport's group; the annotations carry no `annotationUID` (it is stripped
+         * before storage, being session-scoped) and `addAnnotation` mints a fresh one.
+         */
+        restoreAnnotations: (annotations) => {
+            const add = cornerstone.annotationState?.addAnnotation;
+            if (!add || !Array.isArray(annotations)) {
+                return 0;
+            }
+            const element = elements[0];
+            let restored = 0;
+            for (const entry of annotations) {
+                try {
+                    add(structuredClone(entry), element);
+                    restored += 1;
+                } catch (error) {
+                    // One malformed stored annotation must not cost the others.
+                    console.warn(`[ygg-grid] could not restore an annotation: ${error.message}`);
+                }
+            }
+            renderingEngine.renderViewports(
+                state.windows.filter((w) => w.volumeId).map((w) => viewportId(w.index))
+            );
+            return restored;
+        },
+
+        /**
+         * Show or hide every measurement at once.
+         *
+         * Visibility, not deletion: the annotations stay in Cornerstone's state, so
+         * hiding and showing cannot lose work, and a save while hidden still writes
+         * everything that is there.
+         */
+        setAnnotationsVisible: (visible) => {
+            const visibility = cornerstone.annotationVisibility;
+            const all = cornerstone.annotationState?.getAllAnnotations?.() ?? [];
+            for (const entry of all) {
+                if (entry?.annotationUID) {
+                    visibility?.setAnnotationVisibility(entry.annotationUID, visible);
+                }
+            }
+            renderingEngine.renderViewports(
+                state.windows.filter((w) => w.volumeId).map((w) => viewportId(w.index))
+            );
+            return visible;
+        },
+
         /** Drop volumes no window is showing any more. */
         releaseUnusedVolumes: () => releaseUnusedVolumes({ cornerstone, state, volumeCache }),
 

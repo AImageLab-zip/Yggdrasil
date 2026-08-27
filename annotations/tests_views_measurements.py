@@ -300,3 +300,75 @@ class MeasurementApiTests(TestCase):
         measurement = MeasurementItem.objects.get()
         self.assertEqual(measurement.unit, "px")
         self.assertFalse(measurement.is_calibrated)
+
+
+class MeasurementReloadTests(MeasurementApiTests):
+    """What a viewer sees when it opens a study that already has measurements.
+
+    Saving without loading is not a feature: the measurements went into the database
+    and never came back on screen, which is indistinguishable from not having saved.
+    """
+
+    def test_a_fresh_patient_has_nothing_to_draw(self):
+        payload = self.client.get(self.state_url).json()
+        self.assertEqual(payload["annotations"], [])
+        self.assertEqual(payload["revision"], 0)
+
+    def test_saved_measurements_come_back(self):
+        self._save([cornerstone_length([[0, 0, 0], [3, 4, 0]])])
+
+        payload = self.client.get(self.state_url).json()
+        self.assertEqual(len(payload["annotations"]), 1)
+        self.assertEqual(
+            payload["annotations"][0]["data"]["handles"]["points"],
+            [[0, 0, 0], [3, 4, 0]],
+            "the handles are what let the viewer redraw the shape",
+        )
+
+    def test_only_the_latest_revision_is_returned(self):
+        """The viewer shows the current state, never a history to navigate."""
+        self._save([cornerstone_length([[0, 0, 0], [3, 4, 0]])])
+        self._save(
+            [
+                cornerstone_length([[0, 0, 0], [6, 8, 0]]),
+                cornerstone_length([[1, 1, 1], [2, 2, 2]]),
+            ],
+            expectedRevision=1,
+        )
+
+        payload = self.client.get(self.state_url).json()
+        self.assertEqual(payload["revision"], 2)
+        self.assertEqual(len(payload["annotations"]), 2)
+        self.assertEqual(
+            payload["annotations"][0]["data"]["handles"]["points"],
+            [[0, 0, 0], [6, 8, 0]],
+            "the first revision's geometry must not leak through",
+        )
+
+    def test_a_deletion_stays_deleted_on_reload(self):
+        """An empty save is how a measurement is removed.
+
+        The tempting implementation walks back to the last revision that *had* a
+        payload, which would resurrect exactly what the user deleted.
+        """
+        self._save([cornerstone_length([[0, 0, 0], [3, 4, 0]])])
+        self._save([], expectedRevision=1)
+
+        payload = self.client.get(self.state_url).json()
+        self.assertEqual(payload["annotations"], [])
+        self.assertEqual(payload["revision"], 2, "the deletion is itself a revision")
+
+    def test_the_returned_state_carries_no_runtime_identifiers(self):
+        """It is a resume point, not an identity. See the governing rule."""
+        self._save([cornerstone_length([[0, 0, 0], [3, 4, 0]])])
+        text = json.dumps(self.client.get(self.state_url).json())
+        for key in ("annotationUID", "cachedStats", "referencedImageId"):
+            self.assertNotIn(key, text)
+
+    def test_reading_the_state_needs_no_write_permission(self):
+        """A viewer with read access must still see what is on the scan."""
+        self._save([cornerstone_length([[0, 0, 0], [3, 4, 0]])])
+        self.client.force_login(self._user(role="viewer"))
+        response = self.client.get(self.state_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["annotations"]), 1)

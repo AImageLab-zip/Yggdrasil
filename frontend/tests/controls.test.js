@@ -200,8 +200,19 @@ test('a handler that throws reports into the status line, not only the console',
 
 test('every control the template offers is bound', () => {
     const doc = fakeDoc(ALL_IDS, ['Length']);
-    const result = bindControls({ grid: fakeGrid(), doc, onSave: async () => ({}) });
-    assert.deepEqual(result.bound.sort(), ['expand3D', 'resetView', 'save', 'tools']);
+    const result = bindControls({
+        grid: fakeGrid(),
+        doc,
+        onSave: async () => ({}),
+        onToggleAnnotations: () => {},
+    });
+    assert.deepEqual(result.bound.sort(), [
+        'expand3D',
+        'resetView',
+        'save',
+        'toggleAnnotations',
+        'tools',
+    ]);
 });
 
 
@@ -301,4 +312,30 @@ test('expanding again collapses back to the four-panel grid', () => {
 
     assert.ok(!doc.container.classes.has('is-3d-expanded'));
     assert.equal(button.attributes['aria-pressed'], 'false');
+});
+
+test('the measurements toggle hides and shows without deleting', () => {
+    // Visibility, not deletion: the annotations stay in Cornerstone's state, so hiding
+    // cannot lose work and a save while hidden still writes them all.
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const seen = [];
+    bindControls({ grid: fakeGrid(), doc, onToggleAnnotations: (v) => seen.push(v) });
+
+    const button = doc.elements.get(CONTROL_IDS.toggleAnnotations);
+    button.handlers.click({});
+    assert.deepEqual(seen, [false]);
+    assert.equal(button.attributes['aria-pressed'], 'false');
+
+    button.handlers.click({});
+    assert.deepEqual(seen, [false, true]);
+    assert.equal(button.attributes['aria-pressed'], 'true');
+});
+
+test('the toggle starts from visible, matching the template', () => {
+    // The template renders it pressed; the first click must therefore hide.
+    const doc = fakeDoc(ALL_IDS, []);
+    const seen = [];
+    bindControls({ grid: fakeGrid(), doc, onToggleAnnotations: (v) => seen.push(v) });
+    doc.elements.get(CONTROL_IDS.toggleAnnotations).handlers.click({});
+    assert.deepEqual(seen, [false]);
 });

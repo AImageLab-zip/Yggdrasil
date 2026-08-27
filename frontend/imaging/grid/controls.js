@@ -22,6 +22,7 @@ export const CONTROL_IDS = Object.freeze({
     resetView: 'resetCBCTView',
     save: 'cbctSaveMeasurements',
     expand3D: 'cbctExpand3D',
+    toggleAnnotations: 'cbctToggleAnnotations',
     status: 'cbctRenderStatus',
 });
 
@@ -75,7 +76,7 @@ export function markActiveTool(buttons, toolName) {
  * @param {() => Promise<object>} [options.onSave] invoked by the save button.
  * @returns {{bound: string[], setStatus: (message: string) => void, plan: object}}
  */
-export function bindControls({ grid, doc = globalThis.document, onSave }) {
+export function bindControls({ grid, doc = globalThis.document, onSave, onToggleAnnotations }) {
     const plan = controlPlan(doc);
     const bound = [];
 
@@ -135,6 +136,22 @@ export function bindControls({ grid, doc = globalThis.document, onSave }) {
             })
         );
         bound.push('expand3D');
+    }
+
+    if (plan.toggleAnnotations && onToggleAnnotations) {
+        // Visibility, not deletion: the measurements stay in Cornerstone's state, so
+        // hiding them cannot lose work and a save while hidden still writes them all.
+        let visible = true;
+        plan.toggleAnnotations.addEventListener(
+            'click',
+            guarded('Show measurements', () => {
+                visible = !visible;
+                onToggleAnnotations(visible);
+                plan.toggleAnnotations.setAttribute('aria-pressed', String(visible));
+                plan.toggleAnnotations.classList?.toggle('is-active', visible);
+            })
+        );
+        bound.push('toggleAnnotations');
     }
 
     if (plan.save && onSave) {
