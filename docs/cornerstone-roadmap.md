@@ -372,7 +372,8 @@ implemented, which is F7's original requirement and is unchanged.
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
 | 3 | CBCT + brain volume grid | ✅ done (`release/3.0`, `8758efa`…`768be15`) — grid wired in both namespaces, **NiiVue and `viewer_grid.js` deleted**, measurements persist and come back on reload behind an annotation *mode*. Tier 1 + Tier 2 pass 34/34; **F7's `amip` sign-off recorded on real studies by the maintainer**, which clears the last item the gate was held on. 22 brain studies remain unread on the staging box — an environment limit, not a finding |
-| 4+5 | Photo stacks **and** intraoral tooth segmentation — **merged**, see the note under *Phases 4–10* | ⬜ not started |
+| 4 | Photo stacks — teleradiography | ✅ done (`release/3.0`, `e713b28`, `7e2c4cc`) — `yggweb:` loader, calibration, stack viewport wired; `modality_viewers/teleradiography.js` deleted. Unrendered: see the gate note below |
+| 5 | Intraoral tooth segmentation | 🟡 **model shipped, editor not** (`d3815e3`) — the durable path, the FDI vocabulary wiring and the shared conversion are done and tested; the interactive editor is not, and `intraoral_segmentation.js` therefore **stays**. See the note under *Phases 4–10* |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
 | 7 | Panoramic live CPR | ⬜ not started |
 | 8 | Native DICOM ingestion and serving | ⬜ not started |
@@ -878,6 +879,52 @@ through the real code path. NiiVue 0.69 temporarily **vendored** for the compari
 Tier 1 compares two different header parsers.
 
 ## Phases 4–10 (summary)
+
+> **Shipped, and where it stopped.** Phase 4 is done: the `yggweb:` loader, the metadata
+> provider, calibration, the stack viewport and the toolbar are wired to
+> teleradiography, and `modality_viewers/teleradiography.js` is deleted. Phase 5's
+> *model* is done — the shared conversion, the FDI schema wiring, the save and read
+> endpoints — and its **editor is not**, so `intraoral.js` and
+> `intraoral_segmentation.js` both stay for now.
+>
+> That split is deliberate and is the Phase 3 lesson applied rather than repeated. The
+> editor being replaced is 1901 lines of Konva: three layers, `tension: 0.35` smoothed
+> rings whose midpoint handles reimplement Konva's own tension maths so they sit on the
+> drawn curve, zoom and pan with fixed-screen-size overlay counter-scaling, per-image
+> edit sessions, and a 32-button tooth grid with mirrored SVGs. Rebuilding that on
+> Cornerstone contours is a real piece of work, and **building it without ever rendering
+> a pixel and deleting the working one in the same commit is precisely what Phase 3 is on
+> record for** — except worse, because Phase 3 at least had a validated data path behind
+> it and a blind editor would have neither.
+>
+> So what shipped is everything that could be *verified* without a browser, and the
+> boundary is drawn at the honest place. What remains, in order:
+>
+> 1. The interactive editor, built against a real browser and real studies: contour
+>    drawing bound to an FDI code, vertex editing, the tooth grid, and the smoothing
+>    decision below.
+> 2. Wire `intraoral.js`'s tab to it, and delete both old files in that commit.
+> 3. Decide `tension: 0.35` deliberately. The drawn curve is **not** the stored polygon
+>    today; a Cornerstone `Contour` draws the stored points, so shapes will render tighter
+>    unless the smoothing is reproduced. Either answer is defensible; discovering it on a
+>    clinician's screen is not.
+>
+> **Both production checks the plan asked for have now been run, and one of them did not
+> come back clean.**
+>
+> - **The missing-rotate bug was active, not latent.** Of 68 processed intraoral files
+>   carrying edit operations, **7 carry a rotate** — so 7 real studies have been reading
+>   back polygons the server never re-projected, and their segmentations have been
+>   detached from the anatomy for as long as the rotation has existed. The client
+>   implemented both rotate cases and the server implemented neither, so the *preview* was
+>   right and the *stored read* was wrong, which is the worst arrangement of the two: the
+>   person who drew them saw them in the right place. Fixed in the same commit as the
+>   port, with both halves now driven by `common/fixtures/image_edit_replay.json`.
+>   **Those 7 studies need looking at**: the fix corrects the projection from here on, and
+>   nothing has re-derived what was displayed in the meantime.
+> - **The bare single-polygon shape does not occur.** 0 of 5,491
+>   `IntraoralToothSegmentation` rows use it, so the adapter's refusal cannot bite the
+>   existing corpus. Re-check if the corpus grows before the conversion is trusted.
 
 > **Phases 4 and 5 are merged**, on the maintainer's call. `intraoral.js` delegates its whole
 > grid to `IntraoralSegmentation.mount()`, so replacing the intraoral *viewer* without the
