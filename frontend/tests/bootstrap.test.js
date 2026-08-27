@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
     bootstrapVolumeGrid,
     isMeasurable,
+    measurementsUrl,
     observeSize,
     primaryVolumeFrom,
     readGridData,
@@ -332,4 +333,43 @@ test('the observer reports measurability on every size change', () => {
     element.clientWidth = 400;
     observed();
     assert.deepEqual(seen, [false, true]);
+});
+
+
+// ---------------------------------------------------------------------------
+// measurementsUrl
+// ---------------------------------------------------------------------------
+
+const URL_DATA = { scanId: 42 };
+const URL_VOLUME = { fileId: 7 };
+
+test('the state read names the volume it is reading for', () => {
+    // A measurement set is per *patient* and can hold work on several resources at once
+    // -- a CBCT and a teleradiography, or a stack of photographs. Unnarrowed, the
+    // response is whatever the last save happened to write, so the grid would draw
+    // another modality's measurements on this volume, or find none at all once a photo
+    // save had been the most recent one.
+    const url = new URL(measurementsUrl(URL_DATA, URL_VOLUME, 'maxillo', 'https://h', '/state/'));
+    assert.equal(url.pathname, '/maxillo/api/patients/42/measurements/state/');
+    assert.equal(url.searchParams.get('fileId'), '7');
+});
+
+test('the save posts to the bare endpoint, which names its file in the body', () => {
+    const url = new URL(measurementsUrl(URL_DATA, URL_VOLUME, 'maxillo', 'https://h', '/'));
+    assert.equal(url.pathname, '/maxillo/api/patients/42/measurements/');
+    assert.equal(url.search, '', 'a fileId query on the save would be a second source of truth');
+});
+
+test('the global api namespace is not doubled into /api/api/', () => {
+    const url = new URL(measurementsUrl(URL_DATA, URL_VOLUME, 'api', 'https://h', '/state/'));
+    assert.equal(url.pathname, '/api/patients/42/measurements/state/');
+});
+
+test('a volume with no file id still produces a usable url', () => {
+    // Narrowing is an optimisation over a correct default: with no fileId the endpoint
+    // returns what it always returned, so a missing id must not throw.
+    for (const volume of [null, undefined, {}, { fileId: 0 }]) {
+        const url = new URL(measurementsUrl(URL_DATA, volume, 'maxillo', 'https://h', '/state/'));
+        assert.equal(url.searchParams.has('fileId'), false);
+    }
 });

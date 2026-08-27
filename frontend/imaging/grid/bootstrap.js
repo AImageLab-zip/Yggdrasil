@@ -530,10 +530,23 @@ async function clearMeasurements({ grid }) {
     return { level: 'success', message: CLEARED_MESSAGE };
 }
 
-/** The domain-oriented measurement endpoint for this patient. */
-function measurementsUrl(data, volume, namespace, origin, suffix) {
+/**
+ * The domain-oriented measurement endpoint for this patient.
+ *
+ * The state read names the volume it is reading for. A measurement set is per *patient*
+ * and can now hold work on several resources at once -- a CBCT and a teleradiography,
+ * or a stack of photographs -- so the unnarrowed response is whatever the last save
+ * happened to write. Without `fileId` the grid would draw another modality's
+ * measurements on this volume, or find none at all once a photo save had been the most
+ * recent one.
+ */
+export function measurementsUrl(data, volume, namespace, origin, suffix) {
     const prefix = namespace === 'api' ? '/api' : `/${namespace}/api`;
-    return new URL(`${prefix}/patients/${data.scanId}/measurements${suffix}`, origin).href;
+    const url = new URL(`${prefix}/patients/${data.scanId}/measurements${suffix}`, origin);
+    if (suffix === '/state/' && volume?.fileId) {
+        url.searchParams.set('fileId', String(volume.fileId));
+    }
+    return url.href;
 }
 
 /**
