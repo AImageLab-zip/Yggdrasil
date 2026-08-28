@@ -32,16 +32,7 @@
     <link rel="manifest" href="{% static 'icons/site.webmanifest' %}">
 
     <!-- Viewer runtime globals (loaded on every page so patient-detail viewers
-         find THREE / fflate / nifti already present before their init) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
-            integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
-            crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"
-            integrity="sha384-QF8EmP6pyNE+i7WmcltzC4ddzFVKDxfn5WD5gXyKTSE4SCw0R25TI+q0LUlnf7tq"
-            crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js"
-            integrity="sha384-hf3oVtegKGVgPlVvpd9Lg2YX9MGMmV/Dn9iSbKOeIAvzwL2L3WLK4RWf7QNkNrfJ"
-            crossorigin="anonymous"></script>
+         find fflate / nifti already present before their init) -->
     {% comment %}
        fflate is served from static/, not a CDN, and that is a consolidation rather than
        a policy: static/js/vendor/fflate-0.8.2.min.js already has to exist because
@@ -59,9 +50,10 @@
 
     <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> components -> fonts.
 
-         Third-party CDNs are allowed here, and the three script tags above use them:
-         a CDN serves a static asset faster than this deployment can and takes the
-         bandwidth off it. (This replaces an earlier blanket no-CDN rule. That rule was
+         Third-party CDNs are allowed here. The three Three.js r128 tags that used to
+         sit above went with roadmap Phase 6, which moved the IOS meshes onto the
+         committed Cornerstone bundle; nothing on any page loads Three.js now.
+         (The CDN permission replaces an earlier blanket no-CDN rule. That rule was
          also never true — those script tags predate it.)
 
          Webfonts stay self-hosted, and that is a *different* rule, not a leftover of

@@ -16,7 +16,9 @@ from django.test import TestCase
 from common.modality_config import _processed_exists_for
 from common.models import FileRegistry, Job, Modality, ProcessingStep, Project
 from maxillo.file_utils import get_file_type_for_modality, mark_job_completed
-from maxillo.views.patient_data import _normalize_loaded_landmarks
+# Moved with the landmark storage (roadmap Phase 6): the views module that held this
+# is gone, and the conversion belongs beside the one the converter uses.
+from annotations.adapters.ios_landmarks import normalize_worker_document
 from maxillo.models import Patient
 
 
@@ -343,7 +345,9 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
             "in_upper_FDI_21": {"bracket": [4, 5, 6]},
         }
 
-        normalized = _normalize_loaded_landmarks(payload, self.patient.patient_id)
+        normalized = normalize_worker_document(
+            payload, patient_id=self.patient.patient_id
+        )
 
         self.assertEqual(
             set(normalized),

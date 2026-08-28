@@ -27,9 +27,18 @@
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
 {{ django_data|json_script:"django-data" }}
 {# Modality-specific viewers #}
-<script src="{% static 'js/modality_viewers/ios.js' %}"></script>
 <script src="{% static 'js/volume_metadata.js' %}"></script>
 {% if ns == 'maxillo' %}
+{% comment %}
+IOS meshes and the landmark tool (roadmap Phase 6). Replaces
+static/js/modality_viewers/ios.js and, with it, the three Three.js r128 CDN tags that
+used to sit in base.html -- that file was their only consumer.
+
+Inside the maxillo guard, unlike the script tag it replaces: ios.js was loaded on the
+brain and laparoscopy patient pages too, where it downloaded 1539 lines and then
+returned because #scan-viewer does not exist there.
+{% endcomment %}
+{% cornerstone_entry 'mesh-landmarks' %}
 {% comment %}
 Cornerstone3D volume grid (roadmap Phase 3). Replaces NiiVue, viewer_grid.js and
 maxillo_cbct_grid_adapter.js. `volume_metadata.js` above stays: the CBCT conversion

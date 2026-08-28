@@ -37,30 +37,67 @@
                 <div class="ygg-dropdown">
                     <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Grid size"><i class="fas fa-table-cells" aria-hidden="true"></i></button>
                     <div class="ygg-dropdown-menu">
-                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(3); document.getElementById('gridSize').value='3';">3x3</button>
-                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(9); document.getElementById('gridSize').value='9';">9x9</button>
-                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(15); document.getElementById('gridSize').value='15';">15x15</button>
-                        <button type="button" class="ygg-dropdown-item" onclick="IOSViewer.updateGridSize(20); document.getElementById('gridSize').value='20';">20x20</button>
+                        <button type="button" class="ygg-dropdown-item" data-grid-size="3">3x3</button>
+                        <button type="button" class="ygg-dropdown-item" data-grid-size="9">9x9</button>
+                        <button type="button" class="ygg-dropdown-item" data-grid-size="15">15x15</button>
+                        <button type="button" class="ygg-dropdown-item" data-grid-size="20">20x20</button>
                     </div>
-                    <select id="gridSize" style="display: none;">
-                        <option value="3">3x3</option>
-                        <option value="9" selected>9x9</option>
-                        <option value="15">15x15</option>
-                        <option value="20">20x20</option>
-                    </select>
+                </div>
+                {% comment %}
+                Visualization: how the scene is drawn, not what is annotated on it. Marker
+                size, the reference axes and the white background live here rather than in
+                the annotation workbench -- they change what a *reader* sees, and a reader
+                may have no annotation rights at all.
+                {% endcomment %}
+                <div class="ygg-dropdown">
+                    <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Visualization" aria-label="Visualization settings"><i class="fas fa-sliders" aria-hidden="true"></i></button>
+                    <div class="ygg-dropdown-menu ygg-dropdown-menu--visualization" id="iosVisualizationMenu" aria-label="Visualization settings">
+                        <div class="ios-vis-menu__section">
+                            <span class="ios-vis-menu__label">Landmark size</span>
+                            <div class="ios-vis-menu__row">
+                                <input type="range" id="landmarkSizeRange" min="0.2" max="2" step="0.05" value="0.65" aria-label="Landmark marker size">
+                                <output id="landmarkSizeValue" for="landmarkSizeRange">0.65</output>
+                            </div>
+                        </div>
+                        <div class="ios-vis-menu__section">
+                            <label class="ios-vis-menu__check">
+                                <input type="checkbox" id="toggleAxis" checked>
+                                <span>3D axes</span>
+                            </label>
+                            <label class="ios-vis-menu__check">
+                                <input type="checkbox" id="toggleWhiteBackground">
+                                <span>White background</span>
+                            </label>
+                        </div>
+                        <div class="ios-vis-menu__section">
+                            <span class="ios-vis-menu__label">Landmark types</span>
+                            <div class="ios-landmark-vis-grid" id="iosLandmarkVisibilityWorkbench" aria-label="Landmark type visibility"></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="viewer-toolbar__divider"></div>
+                {% comment %}
+                Landmark *visibility* is a viewer control and sits outside the annotation
+                gate: reading a study that has landmarks on it is not annotating it, and a
+                reader with no `ios_landmarks` permission could not previously see them at
+                all. A switch rather than an icon button, for the reason the measurement
+                toolbars already give -- "is this eye telling me the state or the action?"
+                is exactly the ambiguity that got reported.
+                {% endcomment %}
+                <button type="button" class="cbct-mode-toggle" id="toggleLandmarkVisibility" role="switch" aria-checked="false" title="Show the saved landmarks on this study">
+                    <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+                    <span class="cbct-mode-toggle__label">Landmarks</span>
+                    <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+                </button>
+                {% if 'ios_landmarks' in allowed_annotations or not allowed_annotations %}
                 <div class="viewer-toolbar__group" id="iosLandmarkControls">
-                    <span class="viewer-toolbar__label">Landmarks</span>
-                    {% if 'ios_landmarks' in allowed_annotations or not allowed_annotations %}
-                    <button type="button" class="icon-btn" id="toggleLandmarkVisibility" title="Show/hide saved landmarks" aria-pressed="false"><i class="fas fa-eye" aria-hidden="true"></i></button>
-                    <div class="ygg-dropdown">
-                        <button type="button" class="icon-btn" data-ygg-toggle="dropdown" title="Landmark visibility per type" aria-label="Filter landmark types"><i class="fas fa-sliders" aria-hidden="true"></i></button>
-                        <div class="ygg-dropdown-menu ygg-dropdown-menu--landmark-vis" id="iosLandmarkVisibilityDropdown" aria-label="Landmark type visibility"></div>
-                    </div>
-                    <button type="button" class="icon-btn" id="toggleLandmarkMode" title="Open landmark annotation tools" aria-controls="iosLandmarkWorkbench" aria-expanded="false" aria-pressed="false"><i class="fas fa-location-dot" aria-hidden="true"></i></button>
-                    {% endif %}
+                    <button type="button" class="cbct-mode-toggle" id="toggleLandmarkMode" role="switch" aria-checked="false" aria-controls="iosLandmarkWorkbench" title="Place and edit landmarks on this study">
+                        <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+                        <span class="cbct-mode-toggle__label">Annotate</span>
+                        <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+                    </button>
                 </div>
+                {% endif %}
 
             </div>
 
@@ -195,6 +232,12 @@
                         </div>
                     </div>
                 {% else %}
+                    {% if 'ios_landmarks' in allowed_annotations or not allowed_annotations %}
+                    {% comment %}
+                    The annotation half, gated. Landmark *visibility* and the visualization
+                    menu are in the toolbar and deliberately outside this gate: a reader
+                    with no landmark rights still needs to see the landmarks on a study.
+                    {% endcomment %}
                     <section class="ios-landmark-workbench" id="iosLandmarkWorkbench" aria-label="Landmark annotation tools" hidden>
                         <div hidden>{% csrf_token %}</div>
                         <div class="ios-landmark-workbench__header">
@@ -206,44 +249,32 @@
                                 <button type="button" class="ios-landmark-action active" id="landmarkPlaceTool" title="Place landmarks with Shift + left-click" aria-pressed="true"><i class="fas fa-location-dot" aria-hidden="true"></i><span>Place</span></button>
                                 <button type="button" class="ios-landmark-action" id="landmarkSelectTool" title="Select an existing landmark" aria-pressed="false"><i class="fas fa-arrow-pointer" aria-hidden="true"></i><span>Select</span></button>
                                 <button type="button" class="ios-landmark-action" id="undoLandmark" title="Undo last change" disabled><i class="fas fa-rotate-left" aria-hidden="true"></i><span>Undo</span></button>
+                                <button type="button" class="ios-landmark-action" id="redoLandmark" title="Redo last undone change" disabled><i class="fas fa-rotate-right" aria-hidden="true"></i><span>Redo</span></button>
                                 <button type="button" class="ios-landmark-action" id="deleteLandmark" title="Delete selected landmark" disabled><i class="fas fa-trash" aria-hidden="true"></i><span>Delete</span></button>
                                 <button type="button" class="ios-landmark-action ios-landmark-action--save" id="saveLandmarks" title="Save landmarks" disabled><i class="fas fa-floppy-disk" aria-hidden="true"></i><span>Save</span></button>
                             </div>
                         </div>
                         <div class="ios-landmark-workbench__body">
+                            {% comment %}
+                            The same FDI selector the intraoral segmentation editor uses --
+                            `intraoral-segmentation-teeth-grid`, rendered by
+                            `imaging/photos/toothGrid.js`.
+                            One tooth selector in the application: a clinician reads the
+                            arch by its colours and its icons, and two grids that name the
+                            same 32 teeth differently is two things to learn.
+                            {% endcomment %}
                             <div class="ios-landmark-section ios-landmark-section--teeth">
                                 <span class="ios-landmark-section__label">FDI tooth</span>
-                                <div class="ios-landmark-teeth" id="iosLandmarkTeeth" aria-label="Select FDI tooth"></div>
+                                <div class="intraoral-segmentation-teeth-grid" id="iosLandmarkTeeth" aria-label="Select FDI tooth"></div>
                             </div>
                             <div class="ios-landmark-section ios-landmark-section--types">
                                 <span class="ios-landmark-section__label">Landmark type</span>
                                 <div class="ios-landmark-types" id="iosLandmarkTypes" aria-label="Select landmark type"></div>
-                                <small>Hold Shift and left-click the matching jaw surface to place.</small>
-                            </div>
-                            <div class="ios-landmark-section ios-landmark-section--display">
-                                <span class="ios-landmark-section__label">Display</span>
-                                <div class="ios-landmark-display">
-                                    <div class="ios-landmark-display__block">
-                                        <span class="ios-landmark-section__label">Landmark visibility</span>
-                                        <div class="ios-landmark-vis-grid" id="iosLandmarkVisibilityWorkbench" aria-label="Landmark type visibility"></div>
-                                    </div>
-                                    <label class="ios-landmark-display__item">
-                                        <span>Landmark size</span>
-                                        <input type="range" id="landmarkSizeRange" min="0.2" max="2" step="0.05" value="0.65" aria-label="Landmark marker size">
-                                        <output id="landmarkSizeValue" for="landmarkSizeRange">0.65</output>
-                                    </label>
-                                    <label class="ios-landmark-display__item ios-landmark-display__check">
-                                        <input type="checkbox" id="toggleAxis" checked aria-label="Show 3D axes">
-                                        <span>3D axes</span>
-                                    </label>
-                                    <label class="ios-landmark-display__item ios-landmark-display__check">
-                                        <input type="checkbox" id="toggleWhiteBackground" aria-label="Use a white background">
-                                        <span>White background</span>
-                                    </label>
-                                </div>
                             </div>
                         </div>
                     </section>
+                    {% endif %}
+                    {{ mesh_landmark_data|json_script:"meshLandmarkData" }}
                     <div class="ios-scan-stage">
                         <div id="scan-viewer"></div>
                         <div class="viewer-controls">

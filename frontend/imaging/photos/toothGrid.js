@@ -182,14 +182,25 @@ export function polygonCount(teeth, code) {
  * @param {string|null} [options.selected] the selected FDI code.
  * @param {boolean} [options.onlySelected] hide every tooth but the selected one.
  * @param {boolean} [options.editable] false for a confirmed image or a read-only user.
+ * @param {(teeth: object, code: string) => number} [options.countFor] how many things this
+ *   tooth carries. Defaults to counting polygons; the IOS landmark workbench reuses this
+ *   grid and counts landmarks instead. The seam is here rather than in a second grid,
+ *   because "which tooth am I working on" is one question and the answer should look the
+ *   same wherever it is asked.
  * @returns {Array<object>} `{code, color, count, iconSource, mirrored, selected, hidden,
  *   disabled}`
  */
-export function toothButtons({ teeth = {}, selected = null, onlySelected = false, editable = true } = {}) {
+export function toothButtons({
+    teeth = {},
+    selected = null,
+    onlySelected = false,
+    editable = true,
+    countFor = polygonCount,
+} = {}) {
     return MOUTH_ORDER.map((code) => ({
         code,
         color: toothColor(code),
-        count: polygonCount(teeth, code),
+        count: countFor(teeth, code),
         iconSource: toothIconSource(code),
         mirrored: toothIconMirrored(code),
         selected: code === selected,
@@ -286,14 +297,20 @@ export function loadToothSvg(source, { fetchImpl = globalThis.fetch } = {}) {
  * @param {object} handlers
  * @param {(code: string) => void} handlers.onSelect
  * @param {(code: string) => void} [handlers.onZoom] double-click, to frame a tooth.
+ * @param {Document} [handlers.documentRef] injected so a second surface -- and a test --
+ *   can build the grid without reaching for the global.
  */
-export function renderToothGrid(container, buttons, { onSelect, onZoom } = {}) {
-    if (!container) {
+export function renderToothGrid(
+    container,
+    buttons,
+    { onSelect, onZoom, documentRef = globalThis.document } = {},
+) {
+    if (!container || !documentRef) {
         return;
     }
     container.replaceChildren();
     for (const button of buttons) {
-        const element = document.createElement('button');
+        const element = documentRef.createElement('button');
         element.type = 'button';
         element.className = 'seg-tooth-btn';
         element.classList.toggle('selected', button.selected);
@@ -310,7 +327,7 @@ export function renderToothGrid(container, buttons, { onSelect, onZoom } = {}) {
                 : `Tooth ${button.code}, no outline`
         );
 
-        const icon = document.createElement('span');
+        const icon = documentRef.createElement('span');
         icon.className = 'seg-tooth-icon';
         icon.classList.toggle('mirrored', button.mirrored);
         icon.setAttribute('aria-hidden', 'true');
@@ -323,20 +340,20 @@ export function renderToothGrid(container, buttons, { onSelect, onZoom } = {}) {
             }
         });
 
-        const label = document.createElement('span');
+        const label = documentRef.createElement('span');
         label.className = 'seg-tooth-code';
         label.textContent = button.code;
         element.appendChild(label);
 
         if (button.selected) {
-            const badge = document.createElement('span');
+            const badge = documentRef.createElement('span');
             badge.className = 'seg-selected-badge';
             badge.setAttribute('aria-hidden', 'true');
             badge.innerHTML = '<i class="fas fa-paint-brush"></i>';
             element.appendChild(badge);
         }
         if (button.count > 0) {
-            const badge = document.createElement('span');
+            const badge = documentRef.createElement('span');
             badge.className = 'seg-count';
             badge.textContent = String(button.count);
             element.appendChild(badge);

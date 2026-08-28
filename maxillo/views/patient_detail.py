@@ -679,6 +679,21 @@ def patient_detail(request, patient_id):
         'canModify': bool(can_modify),
     }
 
+    # The IOS mesh surface's payload. Deliberately the endpoints and the ids, not the
+    # scan URLs: the `/data/` endpoint the surface already has is what lists them, and a
+    # copy embedded in the page would be a stale one the moment a scan is re-uploaded.
+    # `canModify` is carried because the workbench disables its own controls for a reader;
+    # the server refuses the write regardless, and this only avoids offering an action
+    # that would then fail.
+    mesh_landmark_data = {
+        'patientId': patient.patient_id,
+        'projectNamespace': _namespace,
+        'modalitySlug': 'ios',
+        'meshEndpoint': f'/{_namespace}/api/patient/{patient.patient_id}/data/',
+        'landmarkEndpoint': f'/{_namespace}/api/patients/{patient.patient_id}/ios-landmarks/',
+        'canModify': bool(can_modify),
+    }
+
     # Processing steps possible for this patient's rerun ("Rerun" header action).
     try:
         from common.modality_config import rerunnable_steps_for_patient
@@ -698,6 +713,7 @@ def patient_detail(request, patient_id):
     context = {
         'patient': patient,
         'photo_stack_data': photo_stack_data,
+        'mesh_landmark_data': mesh_landmark_data,
         'intraoral_stack_data': intraoral_stack_data,
         'raw_data_locked': bool(raw_lock_reasons),
         'raw_lock_message': lock_message(raw_lock_reasons),

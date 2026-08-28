@@ -164,6 +164,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The landmark prediction job writes through the service too, with
     `origin=PREDICTION`, so model output never sets the monotonic `ever_annotated` flag and
     a nightly re-run cannot overwrite work somebody placed by hand.
+- **The IOS mesh viewer is Cornerstone3D, and Three.js is gone** (roadmap Phase 6).
+  `static/js/modality_viewers/ios.js` (1539 lines, including its own hand-rolled STL
+  parser) is deleted, and with it the three Three.js r128 CDN tags in `templates/base.html`
+  -- that file was their only consumer, so **no page loads Three.js any more**. The scans
+  render in a `VolumeViewport3D` through `cornerstoneMeshLoader`, `TrackballRotateTool`
+  replaces `THREE.TrackballControls`, and surface picking is `vtkCellPicker` with the
+  markers as vtk sphere actors, which is Yggdrasil's own state as decision #4 requires.
+  This was the last of the four frontend stacks the migration set out to replace.
+  - **The stored coordinates do not move, and that is asserted rather than assumed.** The
+    legacy viewer rotated each jaw 180° about Y and translated both by the negated centre
+    of their combined bounding box -- but it stored `mesh.worldToLocal(hit.point)`, which
+    inverts the *full* world matrix, so the stored numbers were always raw STL vertex
+    coordinates. Cornerstone's `Mesh` applies no transform to an STL actor, so leaving the
+    actors untransformed makes a picked world position identical to the value to store.
+    `frontend/tests/meshLandmarks.test.js` pins both halves of that identity *and* reads
+    the shipped `Mesh.js` to assert it still applies no transform -- a version bump that
+    started centring meshes would otherwise move every landmark on every historical study,
+    silently, and look entirely plausible doing it.
+  - **Landmarks have redo now**, over an action log rather than the previous stack of fifty
+    full-document copies. The roadmap lists undo/redo inconsistency across the four
+    surfaces as one of the defects this migration exists to close. The mechanics are shared
+    with the intraoral editor (`imaging/annotations/actionLog.js`), because "clear redo on
+    a new action" is a rule that dies quietly in a second copy -- both surfaces identify
+    edits positionally, so a stale redo replays against indices that have moved.
+  - **A crash that took the whole toolbar down is fixed.** `ios.js` bound
+    `toggleLandmarkMode` without a guard while the element sat behind
+    `{% if 'ios_landmarks' in allowed_annotations %}`, so a project with annotations
+    enabled but landmarks switched off threw before binding reset, wireframe, grid and all
+    seven camera buttons.
+  - The four inline `onclick="IOSViewer.updateGridSize(N)"` handlers and the
+    `window.IOSViewer` global they reached into are gone -- the same value-with-two-owners
+    shape that produced three of Phase 5's four browser-check defects. The entry also now
+    sits inside the `{% if ns == 'maxillo' %}` guard the other four Cornerstone surfaces
+    use; `ios.js` was downloaded on every brain and laparoscopy patient page, where it ran
+    and returned because `#scan-viewer` does not exist there.
+  - The legacy `GET/PUT /{ns}/api/patient/<id>/ios/landmarks/` endpoint and its three
+    normalisers are deleted (decision #3: the old path goes in the same commit). The
+    viewer reads and writes through the `annotations/` endpoints added above, so a save is
+    concurrency-checked instead of a whole-document overwrite.
+  - `maxillo/tests_ios_surface.py` renders the patient page and asserts every element id
+    the JavaScript resolves, that Three.js is absent, and that the entry loads only under
+    maxillo. Phase 5's lesson, applied: a template id joining two files is an untested
+    interface, and a rename leaves the JS holding `null` with nothing to say so.
+  - **Viewing and annotating are separated.** Landmark visibility is a switch in the
+    toolbar, outside the `ios_landmarks` gate: reading a study that has landmarks on it is
+    not annotating it, and a reader without landmark rights previously could not see them
+    at all. It is a `role="switch"` with a visible on/off word rather than an eye icon,
+    for the reason the measurement toolbars already give -- "is this icon telling me the
+    state or the action?". Marker size, the 3D axes, the white background and per-type
+    landmark visibility moved with it, into a **Visualization** menu; all four change what
+    a reader sees and none needs annotation rights. The annotation workbench is now gated
+    as a whole, so a project without the method renders no annotation DOM.
+  - **One FDI tooth selector in the application.** The workbench uses the intraoral
+    segmentation editor's grid -- the tinted, icon-bearing one -- instead of a second
+    32-button layout naming the same teeth differently. `toothGrid.js` gained two small
+    seams for it: `countFor`, because a landmark badge counts landmarks rather than
+    polygons, and an injected `documentRef`. The workbench stacks the tooth grid and the
+    landmark types vertically, each running the full width: it sits above the scan, so its
+    height is jaw the clinician cannot see, and side by side the type column forced the
+    arch narrow while the section stayed as tall as the taller half.
+  - **The white background never worked.** `viewport.setBackground?.()` was an optional
+    call on a method **no Cornerstone viewport has**, so it did nothing at all, silently --
+    `enableElement`'s `defaultOptions.background` is read once at creation. It goes through
+    the vtk renderer now. The default also follows the page's `data-theme` instead of a
+    hardcoded dark, and follows it live, so a scan no longer sits on a dark canvas inside a
+    light page.
+  - **Scroll wheel zooms.** `ZoomTool` was bound to the right button only -- copied from
+    the volume grid's 3D viewport, where a wheel event at least scrolls a stack. Here it
+    did nothing.
+  - **The reference axes were several times larger than the scans.** They were scaled by
+    half the *camera distance*, which is itself a multiple of the bounding diagonal; they
+    are a tenth of the scans' own radius now.
+  - **The jaws render in the colour they are given.** They came out scarlet whatever was
+    asked for, and the property colour was not the problem: `vtkSTLReader` unconditionally
+    writes cell scalars named "Attribute" from the binary STL's per-facet attribute-byte
+    field, and `vtkMapper` ships with `scalarVisibility: true` -- so the mapper coloured
+    the surface through its default blue-to-red lookup table and never consulted the
+    colour `Mesh` had set. That field is a padding word almost every exporter writes as
+    zero, so a whole jaw mapped to one end of the rainbow. Scalar colouring is off; a test
+    reads the shipped reader so the line cannot later be removed as pointless.
+  - **The arches are a rose upper and a deep blue lower** -- the same pairing the Three.js
+    viewer used, so anybody who learned the old one reads them the same way round, but with
+    its real flaw removed. The legacy light pink against light lilac differed by hue alone,
+    at 1.1:1 in relative luminance, which is to say not at all once vtk shades them: two
+    surfaces meeting at the occlusal plane are read through lighting that varies far more
+    than that. This pair is 2.8:1, so it survives the shading, a greyscale screenshot and a
+    red-green colour vision deficiency. Both stay desaturated, because the landmark palette
+    already spends red, orange, blue and purple on landmark *types* and those markers are
+    small.
+- **The occlusion classification dropdowns open at a sensible width.** `min-width: 100%`
+  stretched them to their field, and the bite-class field spans the whole grid row, so five
+  short options opened as a panel-wide sheet of empty space.
 
 ### Changed
 - **`Calibrate` is part of annotation mode now, on every 2D surface.** It only does

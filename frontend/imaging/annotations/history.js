@@ -35,8 +35,10 @@
  * genuinely starts over.
  */
 
+import * as log from './actionLog.js';
+
 /** The original's cap, kept: a session's worth of edits, not a document's history. */
-export const MAX_HISTORY = 100;
+export const MAX_HISTORY = log.MAX_ACTIONS;
 
 /** The action types the replay understands. An unknown one is an error, not a skip. */
 export const ACTION_TYPES = Object.freeze([
@@ -49,7 +51,7 @@ export const ACTION_TYPES = Object.freeze([
 
 /** A fresh, empty history. */
 export function createHistory() {
-    return { undo: [], redo: [] };
+    return log.createLog();
 }
 
 /**
@@ -63,24 +65,16 @@ export function createHistory() {
  * @returns {object} the same history, mutated.
  */
 export function record(history, action) {
-    if (!ACTION_TYPES.includes(action?.type)) {
-        throw new Error(`Unknown history action ${JSON.stringify(action?.type)}.`);
-    }
-    history.undo.push(action);
-    if (history.undo.length > MAX_HISTORY) {
-        history.undo.shift();
-    }
-    history.redo = [];
-    return history;
+    return log.record(history, action, { types: ACTION_TYPES, max: MAX_HISTORY });
 }
 
 /** Whether there is anything to undo / redo, for enabling the buttons. */
 export function canUndo(history) {
-    return history.undo.length > 0;
+    return log.canUndo(history);
 }
 
 export function canRedo(history) {
-    return history.redo.length > 0;
+    return log.canRedo(history);
 }
 
 /**
@@ -235,9 +229,7 @@ function withoutIndex(polygon, index) {
 
 /** Forget everything. For a caller that has genuinely started over. */
 export function clearHistory(history) {
-    history.undo = [];
-    history.redo = [];
-    return history;
+    return log.clear(history);
 }
 
 // ---------------------------------------------------------------------------
@@ -328,18 +320,10 @@ export function applyAction(teethByFile, action, direction) {
  *   and redraw -- an action can belong to an image that is not the one on screen.
  */
 export function undo(history, teethByFile) {
-    const action = history.undo.pop();
-    if (!action) return null;
-    applyAction(teethByFile, action, 'undo');
-    history.redo.push(action);
-    return action;
+    return log.undo(history, teethByFile, applyAction);
 }
 
 /** Redo one action. @returns {object|null} the action redone. */
 export function redo(history, teethByFile) {
-    const action = history.redo.pop();
-    if (!action) return null;
-    applyAction(teethByFile, action, 'redo');
-    history.undo.push(action);
-    return action;
+    return log.redo(history, teethByFile, applyAction);
 }

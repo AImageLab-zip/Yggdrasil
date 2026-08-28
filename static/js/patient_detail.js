@@ -477,10 +477,8 @@ function initViewerToggle() {
                 if (iosControls) iosControls.style.display = 'flex';
                 if (cbctControls) cbctControls.style.display = 'none';
                 
-                // Initialize IOS viewer if not already done
-                if (typeof window.IOSViewer !== 'undefined') {
-                    window.IOSViewer.init();
-                }
+                // The IOS mesh viewer is a Cornerstone module that starts itself, like
+                // teleradiography and intraoral. Nothing to initialise on a tab switch.
             } else if (modality === 'cbct') {
                 // Hide all image viewers
                 const imageViewers = ['intraoral-viewer', 'teleradiography-viewer', 'panoramic-viewer'];
@@ -669,10 +667,8 @@ function initViewerToggle() {
                 if (iosControls) iosControls.style.display = 'flex';
                 if (cbctControls) cbctControls.style.display = 'none';
                 
-                // Initialize IOS viewer if not already done
-                if (typeof window.IOSViewer !== 'undefined') {
-                    window.IOSViewer.init();
-                }
+                // The IOS mesh viewer is a Cornerstone module that starts itself, like
+                // teleradiography and intraoral. Nothing to initialise on a tab switch.
             }
         });
     }
@@ -847,14 +843,8 @@ document.addEventListener('DOMContentLoaded', function() {
     console.debug('Has CBCT:', window.hasCBCT);
     console.debug('Is CBCT processed:', window.isCBCTProcessed);
 
-    // Initialize modality viewers
-    if (window.hasIOS && typeof window.IOSViewer !== 'undefined') {
-        console.debug('Initializing IOS viewer');
-        window.IOSViewer.init();
-    }
-    
-    // Initialize image modality viewers. Intraoral is absent on purpose -- it is a
-    // Cornerstone module that starts itself, like teleradiography.
+    // Initialize image modality viewers. IOS and intraoral are absent on purpose -- both
+    // are Cornerstone modules that start themselves, like teleradiography.
     if (typeof window.PanoramicViewer !== 'undefined') {
         window.PanoramicViewer.init(window.scanId);
     }
