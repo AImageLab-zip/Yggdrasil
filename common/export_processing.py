@@ -375,24 +375,43 @@ class ExportProcessor:
         )
 
     def _collect_tooth_segmentation(self, patient, artifact):
+        """One JSON document per annotated photograph, from ``annotations/``.
+
+        Reads the durable record rather than ``maxillo.IntraoralToothSegmentation``, which
+        is now history: the editor and the segmentation job both write through
+        ``annotations.services.segmentation``, so the legacy table stops moving the moment
+        anybody edits a study and an export reading it would quietly serve the polygons
+        that were there before.
+
+        The document's shape is unchanged -- same keys, same order, same
+        ``json.dumps(indent=2)``, same ``<image stem>.json`` filename -- with one honest
+        exception. ``updated_at`` is now the *set's* last save rather than this image's:
+        items are rewritten as fresh rows on every revision, so the new model has no
+        per-image edit timestamp, and inventing one from a row's age would be a number
+        that looked per-image and was not.
+        """
         if self.domain != "maxillo":
             return
-        from maxillo.models import IntraoralToothSegmentation
+        from annotations.services.segmentation import tooth_segmentation_state
+        from common.models import FileRegistry
 
-        rows = IntraoralToothSegmentation.objects.filter(patient=patient).select_related(
-            "image_file"
+        state = tooth_segmentation_state(patient, domain_field="patient")
+        if not state["images"]:
+            return
+
+        updated_at = state["updatedAt"].isoformat() if state["updatedAt"] else None
+        paths = dict(
+            FileRegistry.objects.filter(id__in=state["images"]).values_list("id", "file_path")
         )
-        for row in rows:
-            image_name = os.path.basename((row.image_file.file_path or "").rstrip("/")) or str(
-                row.image_file_id
-            )
+        for file_id in sorted(state["images"]):
+            image_name = os.path.basename((paths.get(file_id) or "").rstrip("/")) or str(file_id)
             blob = {
                 "patient_id": patient.patient_id,
-                "image_file_id": row.image_file_id,
+                "image_file_id": file_id,
                 "image": image_name,
-                "is_confirmed": row.is_confirmed,
-                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "teeth": row.teeth or {},
+                "is_confirmed": bool(state["confirmations"].get(file_id)),
+                "updated_at": updated_at,
+                "teeth": state["images"][file_id],
             }
             content = json.dumps(blob, indent=2)
             stem = os.path.splitext(image_name)[0]

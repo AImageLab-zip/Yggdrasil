@@ -490,11 +490,6 @@ def patient_detail(request, patient_id):
     if not has_panoramic:
         patient_modalities = [m for m in patient_modalities if m.get('slug') != 'panoramic']
 
-    has_intraoral_modality = any(
-        (m.get('slug') in ['intraoral', 'intraoral-photo'])
-        for m in patient_modalities
-    )
-
     # Choose default modality: prefer first available (skip modalities marked as non-default)
     default_modality_slug = None
     try:
@@ -671,6 +666,18 @@ def patient_detail(request, patient_id):
         'modalitySlug': 'teleradiography',
         'endpoint': f'/{_namespace}/api/patient/{patient.patient_id}/teleradiography/?meta=1',
     }
+    # The intraoral photographs are the same surface plus tooth segmentation, so the
+    # payload is the same shape with `segmentation` switched on. `canModify` is carried
+    # because the editor disables its own controls for a reader; the server refuses the
+    # write regardless, and this only avoids offering an action that would then fail.
+    intraoral_stack_data = {
+        'patientId': patient.patient_id,
+        'projectNamespace': _namespace,
+        'modalitySlug': 'intraoral-photo',
+        'endpoint': f'/{_namespace}/api/patient/{patient.patient_id}/intraoral/',
+        'segmentation': True,
+        'canModify': bool(can_modify),
+    }
 
     # Processing steps possible for this patient's rerun ("Rerun" header action).
     try:
@@ -691,6 +698,7 @@ def patient_detail(request, patient_id):
     context = {
         'patient': patient,
         'photo_stack_data': photo_stack_data,
+        'intraoral_stack_data': intraoral_stack_data,
         'raw_data_locked': bool(raw_lock_reasons),
         'raw_lock_message': lock_message(raw_lock_reasons),
         'panoramic_locked': bool(panoramic_lock_reasons),
@@ -700,7 +708,6 @@ def patient_detail(request, patient_id):
         'management_form': management_form,
         'has_cbct': has_cbct,
         'has_panoramic': has_panoramic,
-        'has_intraoral_modality': has_intraoral_modality,
         'can_modify_segmentation': can_modify,
         'patient_modalities': patient_modalities,
         'default_modality_slug': default_modality_slug,

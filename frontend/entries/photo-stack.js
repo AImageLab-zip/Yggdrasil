@@ -14,6 +14,7 @@
 import {
     RenderingEngine,
     Enums as coreEnums,
+    eventTarget,
     imageLoader,
     metaData,
     utilities as coreUtilities,
@@ -36,6 +37,7 @@ import {
     EllipticalROITool,
     CircleROITool,
     LabelTool,
+    SplineROITool,
 } from '@cornerstonejs/tools';
 
 import { initImaging } from '../imaging/runtime/init.js';
@@ -52,10 +54,30 @@ import {
     createPhotoStack,
 } from '../imaging/photos/stackViewport.js';
 import { bootstrapPhotoStack } from '../imaging/photos/bootstrap.js';
+import {
+    INTRAORAL_CONTROL_IDS,
+    PHOTO_CONTROL_IDS,
+} from '../imaging/photos/controls.js';
 import { areaOnlyConfiguration } from '../imaging/annotations/roiTextLines.js';
 import { askForText } from '../imaging/photos/dialog.js';
+import {
+    KONVA_TENSION,
+    toothSplineConfiguration,
+} from '../imaging/annotations/tensionSpline.js';
 
 export const SURFACE = 'photo-stack';
+
+/**
+ * The tooth-outline tool: `SplineROITool` drawing Konva's tension curve.
+ *
+ * Subclassed only to give it its own `toolName`. Sharing `'SplineROI'` with a general
+ * spline tool would mean one entry in `toolOptions`, so binding the measurement spline
+ * would bind tooth outlining with it -- and every stored contour would come back under a
+ * name the segmentation reader does not recognise. Upstream's own
+ * `CatmullRomSplineROI`/`CardinalSplineROI` names exist for the same reason.
+ */
+class ToothOutlineTool extends SplineROITool {}
+ToothOutlineTool.toolName = 'ToothOutline';
 
 /**
  * The tools this surface binds, by the name `stackViewport.js` asks for them by.
@@ -84,6 +106,7 @@ export const STACK_TOOLS = Object.freeze({
     EllipticalROI: EllipticalROITool,
     CircleROI: CircleROITool,
     Label: LabelTool,
+    ToothOutline: ToothOutlineTool,
 });
 
 /**
@@ -119,6 +142,28 @@ function toolConfiguration() {
                 initial: data?.label ?? '',
             }).then((text) => done(text ?? undefined)),
     });
+
+    configuration.set(ToothOutlineTool.toolName, {
+        spline: toothSplineConfiguration(),
+        // A tooth outline is a segmentation, not a measurement. Its area is a number about
+        // a photograph -- meaningless without calibration and misleading with it, since a
+        // crown's outline is not its cross-section. Turning stats off is also what makes
+        // the label below the only text, rather than an area line above it.
+        calculateStats: false,
+        // A ring, always. An open tooth outline is not a shape the model can store: the
+        // adapter writes `closed=True` unconditionally, so allowing one here would let a
+        // user draw something the server silently closes for them.
+        allowOpenSplines: false,
+        /**
+         * The overlay text: the FDI code, and nothing else.
+         *
+         * Upstream's `defaultGetTextLines` destructures `data.cachedStats[targetId]`
+         * without a guard, which with `calculateStats: false` is `undefined` -- a
+         * `TypeError` on the first render rather than an empty label. So this is required,
+         * not a preference.
+         */
+        getTextLines: (data) => (data?.label ? [data.label] : []),
+    });
     return configuration;
 }
 
@@ -136,7 +181,7 @@ let registered = false;
  * @param {HTMLElement} options.element
  * @param {Map<string, object>} options.registry imageId -> image record.
  */
-export async function mountPhotoStack({ element, registry }) {
+export async function mountPhotoStack({ element, registry, instanceId = 'stack' }) {
     await initImaging();
 
     if (!registered) {
@@ -164,8 +209,11 @@ export async function mountPhotoStack({ element, registry }) {
             tools: STACK_TOOLS,
             annotationState: annotationApi.state,
             annotationVisibility: annotationApi.visibility,
+            imageToWorld: coreUtilities.imageToWorldCoords,
+            uuid: coreUtilities.uuidv4,
         },
         element,
+        instanceId,
     });
 
     // Cornerstone's own converters, handed out rather than re-implemented. They are exact
@@ -176,6 +224,34 @@ export async function mountPhotoStack({ element, registry }) {
         stack,
         worldToImage: coreUtilities.worldToImageCoords,
         imageToWorld: coreUtilities.imageToWorldCoords,
+        /** Everything `toothSegmentation.js` needs, so the bootstrap holds no Cornerstone. */
+        segmentation: {
+            toolName: ToothOutlineTool.toolName,
+            splineType: KONVA_TENSION,
+            worldToImage: coreUtilities.worldToImageCoords,
+            imageToWorld: coreUtilities.imageToWorldCoords,
+            readAnnotations: () => stack.readAnnotations(),
+            removeAnnotation: (uid) => annotationApi.state.removeAnnotation(uid),
+            /**
+             * Subscribe to the outline events, and return the unsubscriber.
+             *
+             * `ANNOTATION_COMPLETED` and `ANNOTATION_MODIFIED` are both routed to the same
+             * handler because the editor's response is the same for both: derive the action,
+             * re-read the map, queue a save. Distinguishing them would duplicate that.
+             */
+            onAnnotationChange: ({ onChange, onRemoved }) => {
+                const changed = (event) => onChange?.(event?.detail?.annotation);
+                const removed = (event) => onRemoved?.(event?.detail?.annotation);
+                eventTarget.addEventListener(toolsEnums.Events.ANNOTATION_COMPLETED, changed);
+                eventTarget.addEventListener(toolsEnums.Events.ANNOTATION_MODIFIED, changed);
+                eventTarget.addEventListener(toolsEnums.Events.ANNOTATION_REMOVED, removed);
+                return () => {
+                    eventTarget.removeEventListener(toolsEnums.Events.ANNOTATION_COMPLETED, changed);
+                    eventTarget.removeEventListener(toolsEnums.Events.ANNOTATION_MODIFIED, changed);
+                    eventTarget.removeEventListener(toolsEnums.Events.ANNOTATION_REMOVED, removed);
+                };
+            },
+        },
     };
 }
 
@@ -185,10 +261,36 @@ export async function mountPhotoStack({ element, registry }) {
  * A bootstrap that threw here would take the rest of the patient record with it -- the
  * tab this mounts into is one of several on a page a clinician needs the rest of.
  */
-const started = bootstrapPhotoStack({ mount: mountPhotoStack }).catch((error) => {
-    console.error('The photo stack failed to start:', error);
-    return null;
-});
+/**
+ * The surfaces this entry mounts, one per payload the page provides.
+ *
+ * Two of them, and they are the same code: teleradiography, and the intraoral photographs
+ * with tooth segmentation switched on. Each gets its own DOM ids, its own rendering engine
+ * and its own tool group, because a patient-detail page carries both at once -- only one is
+ * visible, but both mount, so hidden-tab state is right the moment it is shown.
+ *
+ * A page with neither payload mounts nothing and says so.
+ */
+export const SURFACES = Object.freeze([
+    { dataElementId: 'photoStackData', ids: PHOTO_CONTROL_IDS, instanceId: 'stack' },
+    { dataElementId: 'intraoralStackData', ids: INTRAORAL_CONTROL_IDS, instanceId: 'intraoral' },
+]);
+
+/**
+ * Start on import, and never throw into the page.
+ *
+ * A bootstrap that threw here would take the rest of the patient record with it -- the tab
+ * this mounts into is one of several on a page a clinician needs the rest of. Each surface
+ * is caught separately, so a broken intraoral payload cannot take teleradiography down.
+ */
+const started = Promise.all(
+    SURFACES.map((surface) =>
+        bootstrapPhotoStack({ mount: mountPhotoStack, ...surface }).catch((error) => {
+            console.error(`The ${surface.instanceId} photo stack failed to start:`, error);
+            return null;
+        })
+    )
+);
 
 export {
     started,

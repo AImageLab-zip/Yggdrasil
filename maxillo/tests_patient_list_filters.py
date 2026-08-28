@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
+from annotations.services.segmentation import save_tooth_segmentation
 from common.models import (
     AnnotationMethod,
     FileRegistry,
@@ -13,7 +14,6 @@ from common.models import (
 from maxillo.models import (
     Classification,
     Folder,
-    IntraoralToothSegmentation,
     Patient,
 )
 
@@ -146,8 +146,17 @@ class SegmentationPresenceFilterTests(TestCase):
             file_size=4,
             file_hash="1" * 64,
         )
-        IntraoralToothSegmentation.objects.create(
-            patient=segmented, image_file=image, teeth={"11": []}
+        # Through the service, because that is the only writer now: the filter reads
+        # `annotations/`, and a row poked into the legacy table would no longer be found
+        # -- which is the point of moving it.
+        save_tooth_segmentation(
+            segmented,
+            images=[
+                {
+                    "file_obj": image,
+                    "teeth": {"11": [[[1, 1], [9, 1], [9, 9], [1, 9]]]},
+                }
+            ],
         )
 
         response = self.client.get(reverse("maxillo:patient_list"), {"has_segmentation": "yes"})

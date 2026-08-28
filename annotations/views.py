@@ -37,7 +37,7 @@ from annotations.services import (
     current_revision_number,
     save_measurements,
 )
-from annotations.constants import PayloadFormat, ResourceKind
+from annotations.constants import AnnotationStatus, PayloadFormat, ResourceKind
 from annotations.services.segmentation import (
     save_tooth_segmentation,
     tooth_segmentation_state,
@@ -416,7 +416,8 @@ def save_tooth_segmentation_api(request, patient_id):
         {
           "expectedRevision": 4,
           "images": [
-            {"fileId": 12, "teeth": {"36": [[[x, y], ...], ...]}, "imageDescriptor": {...}}
+            {"fileId": 12, "teeth": {"36": [[[x, y], ...], ...]},
+             "imageDescriptor": {...}, "isConfirmed": true}
           ]
         }
 
@@ -424,6 +425,11 @@ def save_tooth_segmentation_api(request, patient_id):
     an image omitted from the body is carried forward by the server, so a client that
     sent only the image it had just edited would find a cleared tooth quietly restored.
     An empty ``teeth`` map is how a deletion is expressed.
+
+    ``isConfirmed`` is optional and tri-state on purpose: absent or ``null`` leaves the
+    image's confirmation alone, so an autosave cannot retract a claim it never mentioned.
+    Changing a confirmed image's polygons without ``isConfirmed: false`` in the same body
+    is a 409, which is the legacy editor's "Reopen before editing" behaviour kept.
     """
     Patient = _patient_model(request)
     patient = get_object_or_404(Patient, patient_id=patient_id)
@@ -467,11 +473,18 @@ def save_tooth_segmentation_api(request, patient_id):
                 {"error": f"images[{index}] names a file already in this save"}, status=400
             )
         seen.add(file_obj.pk)
+        confirmed = entry.get("isConfirmed")
+        if confirmed is not None and not isinstance(confirmed, bool):
+            return JsonResponse(
+                {"error": f"images[{index}]: isConfirmed must be true, false or null"},
+                status=400,
+            )
         images.append(
             {
                 "file_obj": file_obj,
                 "teeth": entry.get("teeth"),
                 "descriptor": entry.get("imageDescriptor") or {},
+                "confirmed": confirmed,
             }
         )
 
@@ -491,11 +504,22 @@ def save_tooth_segmentation_api(request, patient_id):
         # was written -- the translation runs before the first row.
         return JsonResponse({"error": _first_message(exc)}, status=400)
 
+    # The confirmations are echoed rather than left to the client to infer: it sent a
+    # tri-state, and after a save that left one alone the only way for it to know where
+    # confirmation ended up is to be told.
     return JsonResponse(
         {
             "revision": revision.revision_number,
             "setId": revision.annotation_set_id,
             "teeth": sum(len(image["teeth"]) for image in images),
+            "confirmations": {
+                str(target.source_resource.file_id): target.status
+                == AnnotationStatus.CONFIRMED
+                for target in revision.annotation_set.targets.select_related(
+                    "source_resource"
+                )
+                if target.source_resource.file_id is not None
+            },
         }
     )
 
@@ -523,6 +547,7 @@ def tooth_segmentation_state_api(request, patient_id):
     }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
 
     state = tooth_segmentation_state(patient, domain_field=domain_field)
+    updated_at = state.get("updatedAt")
     return JsonResponse(
         {
             **state,
@@ -530,5 +555,9 @@ def tooth_segmentation_state_api(request, patient_id):
             # them as numbers on one path and strings on another would have a bug that
             # only showed up for one image.
             "images": {str(key): value for key, value in state["images"].items()},
+            "confirmations": {
+                str(key): value for key, value in state["confirmations"].items()
+            },
+            "updatedAt": updated_at.isoformat() if updated_at else None,
         }
     )

@@ -25,6 +25,7 @@ second copy allowed to go stale would only ever disagree with them.
 
 from django.core.exceptions import ValidationError
 
+from annotations.adapters.image_edit_replay import transform_teeth
 from annotations.adapters.tooth_segmentation import (
     FDI_SCHEMA_SLUG,
     FDI_SCHEMA_VERSION,
@@ -32,8 +33,14 @@ from annotations.adapters.tooth_segmentation import (
     teeth_from_items,
     tooth_polygons,
 )
-from annotations.constants import CoordinateSystem, ResourceKind
+from annotations.constants import (
+    AnnotationOrigin,
+    AnnotationStatus,
+    CoordinateSystem,
+    ResourceKind,
+)
 from annotations.models import LabelSchema
+from annotations.services.exceptions import AnnotationConflict
 from annotations.services.viewer import save_measurement_groups
 from common.models import AnnotationMethod
 
@@ -75,6 +82,17 @@ def fdi_schema():
     return schema
 
 
+#: The target role this surface anchors under.
+#:
+#: Byte-identical to what ``annotations_convert_legacy`` passes, and that is the whole
+#: point. ``attach_target`` keys on ``(annotation_set, source_resource, role)``, so a live
+#: save under a different role would create a *second* target for the same photograph --
+#: and because ``tooth_segmentation_state`` groups items by file id, the converted
+#: polygons and the freshly drawn ones would both come back, doubled, on every study
+#: anybody had edited.
+IMAGE_ROLE = "image"
+
+
 def save_tooth_segmentation(
     patient,
     *,
@@ -83,34 +101,64 @@ def save_tooth_segmentation(
     expected_revision=None,
     annotation_method=None,
     note="",
+    origin=AnnotationOrigin.MANUAL,
 ):
     """Write one revision holding the tooth polygons on every image named.
 
     :param images: ``[{"file_obj": <FileRegistry>, "teeth": {FDI: [[[x, y], ...], ...]},
-        "descriptor": {...}}]``. An image with an empty ``teeth`` map is how a deletion is
-        expressed -- omitting it would have the server carry the old polygons forward.
+        "descriptor": {...}, "confirmed": True|False|None}]``. An image with an empty
+        ``teeth`` map is how a deletion is expressed -- omitting it would have the server
+        carry the old polygons forward. ``confirmed`` absent or ``None`` leaves the
+        image's confirmation exactly as it was; a save that never mentions it cannot
+        clear it.
     :param expected_revision: the revision the client loaded; stale raises
         :class:`~annotations.services.exceptions.AnnotationConflict` -> 409.
+    :param origin: ``PREDICTION`` for the segmentation job's output, which is what keeps
+        model output from setting the monotonic ``ever_annotated`` flag.
     :returns: the new ``AnnotationRevision``.
+    :raises AnnotationConflict: on an attempt to change a confirmed image's polygons
+        without reopening it in the same call -- the legacy editor's 409, kept.
     """
+    images = list(images or [])
+    current = tooth_segmentation_state(patient, domain_field=_domain_field(patient))
+
     groups = []
-    for index, image in enumerate(images or []):
+    for index, image in enumerate(images):
         teeth = image.get("teeth")
         if not isinstance(teeth, dict):
             raise ValidationError(f"images[{index}]: teeth must be an object keyed by FDI code")
-        groups.append(
-            {
-                "file_obj": image.get("file_obj"),
-                "file_key": None,
-                # Carried so the shared writer can count and validate uniformly; the
-                # translation below is what actually reads it.
-                "annotations": [],
-                "teeth": teeth,
-                "descriptor": image.get("descriptor") or {},
-                "resource_kind": ResourceKind.FILE,
-                "order": index,
-            }
-        )
+        file_obj = image.get("file_obj")
+        confirmed = image.get("confirmed")
+
+        # The confirmation gate, before anything is written. A confirmed image is a claim
+        # somebody signed; changing its polygons silently would retract that claim while
+        # leaving it displayed. Reopening in the same call is allowed, which is exactly
+        # what the "Reopen before editing" message tells the user to do.
+        file_id = getattr(file_obj, "pk", None)
+        was_confirmed = current["confirmations"].get(file_id) is True
+        if was_confirmed and confirmed is not False:
+            if _normalized(teeth) != _normalized(current["images"].get(file_id, {})):
+                raise AnnotationConflict(
+                    "Segmentation is confirmed. Reopen before editing."
+                )
+
+        group = {
+            "file_obj": file_obj,
+            "file_key": None,
+            # Carried so the shared writer can count and validate uniformly; the
+            # translation below is what actually reads it.
+            "annotations": [],
+            "teeth": teeth,
+            "descriptor": image.get("descriptor") or {},
+            "resource_kind": ResourceKind.FILE,
+            "role": IMAGE_ROLE,
+            "order": index,
+        }
+        if confirmed is not None:
+            group["status"] = (
+                AnnotationStatus.CONFIRMED if confirmed else AnnotationStatus.DRAFT
+            )
+        groups.append(group)
 
     return save_measurement_groups(
         patient,
@@ -120,6 +168,7 @@ def save_tooth_segmentation(
         coordinate_system=CoordinateSystem.IMAGE_PIXEL,
         annotation_method=annotation_method or segmentation_method(),
         note=note,
+        origin=origin,
         kind=SEGMENTATION_KIND,
         label_schema=fdi_schema(),
         require_labels=True,
@@ -134,15 +183,49 @@ def save_tooth_segmentation(
     )
 
 
+#: ``AnnotationSet``'s patient FK for each domain. Tooth segmentation is maxillo-only
+#: today, but resolving it from the model rather than hardcoding ``patient`` is what keeps
+#: this from being the line that breaks when a second domain grows photographs.
+_DOMAIN_FIELDS = {"maxillo": "patient", "brain": "brain_patient"}
+
+
+def _domain_field(patient):
+    return _DOMAIN_FIELDS.get(patient._meta.app_label, "laparoscopy_patient")
+
+
+def _normalized(teeth):
+    """One comparable form of a teeth map, for the confirmation gate only.
+
+    Floats to floats and tuples to lists, so ``[[1, 2]]`` and ``[[1.0, 2.0]]`` compare
+    equal. Without it a client that round-tripped its own polygons through JSON would trip
+    the confirmed-image refusal without having changed anything.
+    """
+    return {
+        str(code): [[[float(x), float(y)] for x, y in polygon] for polygon in polygons]
+        for code, polygons in sorted((teeth or {}).items())
+    }
+
+
 def tooth_segmentation_state(patient, *, domain_field):
-    """The latest polygons per file, and the revision a save must quote.
+    """The latest polygons per file, their confirmation, and the revision a save must quote.
 
     Rebuilt from the canonical items rather than a payload -- see the module note. Only the
     latest revision is read: revisions are the audit trail and stay in the database, but
     they are not a concept the editor exposes, and falling back to an older one would
     resurrect polygons somebody deleted.
 
-    :returns: ``{"revision": int, "setId": int|None, "images": {file_id: teeth}}``
+    Confirmation comes from the *target*, not the revision, because that is where a
+    per-image claim lives (migration ``0003``) -- and it is reported for every target the
+    set has, including images whose polygons were all deleted, so a confirmed-but-empty
+    image still reads as confirmed instead of vanishing.
+
+    ``updatedAt`` is the set's, not the image's. The new model has no per-image edit
+    timestamp: items carry forward as fresh rows on every revision, so their age says when
+    the last save happened, not when *that image* last changed. Reporting a set-level
+    timestamp is the honest version of a number the legacy row happened to have per image.
+
+    :returns: ``{"revision": int, "setId": int|None, "images": {file_id: teeth},
+        "confirmations": {file_id: bool}, "updatedAt": datetime|None}``
     """
     from annotations.models import AnnotationSet, Geometry2DItem
 
@@ -151,12 +234,30 @@ def tooth_segmentation_state(patient, *, domain_field):
         .order_by("id")
         .first()
     )
+    empty = {
+        "revision": 0,
+        "setId": None,
+        "images": {},
+        "confirmations": {},
+        "updatedAt": None,
+    }
     if annotation_set is None:
-        return {"revision": 0, "setId": None, "images": {}}
+        return empty
+
+    confirmations = {
+        target.source_resource.file_id: target.status == AnnotationStatus.CONFIRMED
+        for target in annotation_set.targets.select_related("source_resource")
+        if target.source_resource.file_id is not None
+    }
 
     revision = annotation_set.revisions.order_by("-revision_number").first()
     if revision is None:
-        return {"revision": 0, "setId": annotation_set.id, "images": {}}
+        return {
+            **empty,
+            "setId": annotation_set.id,
+            "confirmations": confirmations,
+            "updatedAt": annotation_set.updated_at,
+        }
 
     items = (
         Geometry2DItem.objects.filter(revision=revision)
@@ -170,9 +271,50 @@ def tooth_segmentation_state(patient, *, domain_field):
             continue
         by_file.setdefault(file_id, []).append(item)
 
+    stored = {file_id: teeth_from_items(rows) for file_id, rows in by_file.items()}
     return {
         "revision": revision.revision_number,
         "setId": annotation_set.id,
         "everAnnotated": annotation_set.ever_annotated,
-        "images": {file_id: teeth_from_items(rows) for file_id, rows in by_file.items()},
+        "images": _with_edited_descendants(patient, stored),
+        "confirmations": confirmations,
+        "updatedAt": annotation_set.updated_at,
     }
+
+
+def _with_edited_descendants(patient, stored):
+    """Add an entry for each photograph produced by *editing* one that has polygons.
+
+    ``rgb_editor.js`` writes a new ``FileRegistry`` row when a photograph is cropped,
+    mirrored or rotated, and records the operations in ``metadata['edit_meta']`` and the
+    original's id in ``metadata['source_file_id']``. The polygons stay attached to the row
+    they were drawn on, so without this the edited photograph reads back as unsegmented and
+    the original reads back as segmented but is no longer the image anybody looks at.
+
+    The legacy read did exactly this (``patient_intraoral_segmentation.py:437-450``), and
+    the replay it used is now :mod:`annotations.adapters.image_edit_replay`. Keeping it on
+    the *read* rather than rewriting the stored geometry is deliberate: a re-projection is
+    derived, and the roadmap records seven production studies whose rotations were never
+    applied and which a person still has to look at. Silently rewriting their polygons here
+    would file a machine's guess as if somebody had approved it.
+
+    A row that already has its own polygons is left alone -- somebody has drawn on the
+    edited image, and their work is the answer.
+    """
+    if not stored:
+        return stored
+
+    descendants = {}
+    for row in patient.files.filter(metadata__source_file_id__in=list(stored)).only(
+        "id", "metadata"
+    ):
+        metadata = row.metadata if isinstance(row.metadata, dict) else {}
+        source_id = metadata.get("source_file_id")
+        if source_id in stored and row.id not in stored:
+            descendants[row.id] = transform_teeth(
+                stored[source_id], metadata.get("edit_meta")
+            )
+
+    # Empty results dropped rather than stored as `{}`: a crop can remove every tooth from
+    # a photograph, and "this image has no polygons" is what no entry already means.
+    return {**stored, **{key: value for key, value in descendants.items() if value}}

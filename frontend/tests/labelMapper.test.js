@@ -80,11 +80,22 @@ test('mouth order and storage order are the same set in different orders', () =>
     );
 });
 
-test('the mouth order matches the editor being replaced', () => {
-    const source = readFileSync(join(REPO, 'static', 'js', 'intraoral_segmentation.js'), 'utf8');
-    const listed = [...source.matchAll(/'([1-4][1-8])'/g)].map((match) => match[1]);
-    // The first 32 quoted two-digit codes in that file are its `toothCodes` array.
-    assert.deepEqual(listed.slice(0, 32), [...MOUTH_ORDER]);
+test('the mouth order is the arch as a clinician reads it', () => {
+    // This used to be asserted against `static/js/intraoral_segmentation.js`'s own
+    // `toothCodes` array. Phase 5 deleted that file, so the parity it proved is now a
+    // literal here -- and what is left to check is that the literal is still a full,
+    // duplicate-free arch, which is what the grid depends on.
+    assert.equal(MOUTH_ORDER.length, 32);
+    assert.equal(new Set(MOUTH_ORDER).size, 32);
+    assert.deepEqual([...MOUTH_ORDER].sort(), [...FDI_CODES].sort(), 'same 32 teeth');
+
+    // Each quadrant appears as one unbroken run of eight, and the patient's right
+    // quadrants run inward to the midline. An order that interleaved quadrants would put
+    // the gradient and the icons on the wrong buttons together.
+    const quadrants = MOUTH_ORDER.map((code) => code[0]);
+    assert.deepEqual([...new Set(quadrants)], ['1', '2', '4', '3']);
+    assert.deepEqual(MOUTH_ORDER.slice(0, 8), ['18', '17', '16', '15', '14', '13', '12', '11']);
+    assert.deepEqual(MOUTH_ORDER.slice(8, 16), ['21', '22', '23', '24', '25', '26', '27', '28']);
 });
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ from annotations.services.sets import (
     attach_target,
     get_or_create_set,
     record_revision,
+    set_target_status,
 )
 
 #: How a group's resource is registered. A volume is "this voxel grid with this affine",
@@ -131,6 +132,7 @@ def save_measurement_groups(
     require_labels=False,
     translate=None,
     store_payload=True,
+    origin=AnnotationOrigin.MANUAL,
 ):
     """Write one revision holding the state of every resource the caller names.
 
@@ -167,9 +169,16 @@ def save_measurement_groups(
     Cornerstone annotation state. It takes one group and returns its descriptors.
 
     :param primary_index: which group claims the primary slot, when one is claimed.
+    A group may carry ``"status"``, which is applied to its target. Only a group that
+    *has the key* is touched, so a save that never mentions confirmation cannot clear it
+    as a side effect -- see :func:`~annotations.services.sets.set_target_status`.
+
     :param carry_forward: set false only for a caller that genuinely owns the whole set.
     :param store_payload: false for a surface whose items are its only representation --
         a resumable scratch copy that nothing reads is a second thing to keep in step.
+    :param origin: ``PREDICTION`` for model output, which is what keeps it from setting
+        the monotonic ``ever_annotated`` flag -- machine output has never frozen a
+        patient's raw data and must not start now.
     :returns: the new ``AnnotationRevision``.
     """
     groups = list(groups or [])
@@ -233,21 +242,22 @@ def save_measurement_groups(
             file_key=group.get("file_key"),
             descriptor=group.get("descriptor") or {},
         )
-        targets.append(
-            attach_target(
-                annotation_set,
-                resource,
-                role=group.get("role", ""),
-                primary=claim_primary and index == primary_index,
-                order=group.get("order", index),
-            )
+        target = attach_target(
+            annotation_set,
+            resource,
+            role=group.get("role", ""),
+            primary=claim_primary and index == primary_index,
+            order=group.get("order", index),
         )
+        if "status" in group:
+            set_target_status(target, group["status"])
+        targets.append(target)
 
     revision = record_revision(
         annotation_set,
         expected_revision=expected_revision,
         author=author,
-        origin=AnnotationOrigin.MANUAL,
+        origin=origin,
         note=note,
     )
 

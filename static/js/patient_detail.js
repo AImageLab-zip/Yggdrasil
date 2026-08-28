@@ -520,10 +520,11 @@ function initViewerToggle() {
                 
                 const intraoralViewer = document.getElementById('intraoral-viewer');
                 if (intraoralViewer) {
+                    // Same as teleradiography below: the Cornerstone photo stack mounts
+                    // itself on import and sizes itself from a ResizeObserver, so showing
+                    // the tab is all this has to do. There is no load() to call and no
+                    // window global to call it on -- the bundle is an ES module.
                     intraoralViewer.style.display = 'block';
-                    if (typeof window.IntraoralViewer !== 'undefined') {
-                        window.IntraoralViewer.load();
-                    }
                 }
             } else if (modality === 'teleradiography') {
                 // Handle teleradiography viewer
@@ -852,10 +853,8 @@ document.addEventListener('DOMContentLoaded', function() {
         window.IOSViewer.init();
     }
     
-    // Initialize image modality viewers
-    if (typeof window.IntraoralViewer !== 'undefined') {
-        window.IntraoralViewer.init(window.scanId);
-    }
+    // Initialize image modality viewers. Intraoral is absent on purpose -- it is a
+    // Cornerstone module that starts itself, like teleradiography.
     if (typeof window.PanoramicViewer !== 'undefined') {
         window.PanoramicViewer.init(window.scanId);
     }

@@ -948,8 +948,14 @@ def mark_job_completed(job_id, output_files, logs=None):
         logger.info(f"Registering output files for modality: {job.modality_slug}")
 
         if job.modality_slug == "intraoral-photo":
-            from .models import IntraoralToothSegmentation
-            from .views.intraoral_segmentation import _normalize_teeth_payload
+            from annotations.constants import AnnotationOrigin
+            from annotations.services import AnnotationNotAllowed
+            from annotations.services.segmentation import (
+                save_tooth_segmentation,
+                tooth_segmentation_state,
+            )
+
+            from .intraoral_teeth import _normalize_teeth_payload
 
             segmentation_key = _resolve_output_path_or_key(
                 (output_files or {}).get("segmentation_json")
@@ -971,45 +977,71 @@ def mark_job_completed(job_id, output_files, logs=None):
                     fh.close()
 
             segmentations = segmentation_payload.get("segmentations") or {}
-            valid_file_ids = set(
-                FileRegistry.objects.filter(
+            valid_files = {
+                row.id: row
+                for row in FileRegistry.objects.filter(
                     id__in=[int(str(file_id)) for file_id in segmentations.keys()],
                     file_type__in=["intraoral_raw", "intraoral_processed"],
                     **_job_entity_fk_kwargs(job),
-                ).values_list("id", flat=True)
-            )
+                )
+            }
 
-            updated_count = 0
+            # Confirmation now lives on the annotation *target* (annotations/0003), which
+            # is where a per-image claim belongs. The skip itself is unchanged: model
+            # output must never overwrite polygons somebody signed off.
+            confirmations = tooth_segmentation_state(
+                job_patient, domain_field="patient"
+            )["confirmations"]
+
+            images = []
             skipped_confirmed_count = 0
             for file_id_raw, teeth_payload in segmentations.items():
                 file_id = int(str(file_id_raw))
-                if file_id not in valid_file_ids:
+                if file_id not in valid_files:
                     continue
-
-                normalized_teeth = _normalize_teeth_payload(teeth_payload)
-                row = IntraoralToothSegmentation.objects.filter(
-                    patient=job_patient,
-                    image_file_id=file_id,
-                ).first()
-
-                if row and row.is_confirmed:
+                if confirmations.get(file_id):
                     skipped_confirmed_count += 1
                     continue
-
-                IntraoralToothSegmentation.objects.update_or_create(
-                    patient=job_patient,
-                    image_file_id=file_id,
-                    defaults={
-                        "teeth": normalized_teeth,
-                        "updated_by": None,
-                        "is_confirmed": False,
-                        "confirmed_by": None,
-                        "confirmed_at": None,
-                    },
+                # Normalised before the adapter sees it, deliberately. `tooth_polygons`
+                # *refuses* a malformed map, which is right for a person drawing and wrong
+                # for model output -- one two-point ring would otherwise fail the whole
+                # completion instead of being dropped, as it always has been.
+                images.append(
+                    {
+                        "file_obj": valid_files[file_id],
+                        "teeth": _normalize_teeth_payload(teeth_payload),
+                        "confirmed": False,
+                    }
                 )
-                updated_count += 1
 
+            updated_count = 0
             output_files = dict(output_files or {})
+            if images:
+                try:
+                    save_tooth_segmentation(
+                        job_patient,
+                        images=images,
+                        author=None,
+                        # No concurrent editor to lose a race to; this is an import.
+                        expected_revision=None,
+                        # `PREDICTION` is what keeps model output from setting the
+                        # monotonic `ever_annotated` flag -- a prediction has never frozen
+                        # a patient's raw data and must not start now.
+                        origin=AnnotationOrigin.PREDICTION,
+                        note=f"job:{job.id}",
+                    )
+                except AnnotationNotAllowed as exc:
+                    # The project has tooth segmentation switched off. Recorded and
+                    # skipped rather than failing the job: the pipeline did run, and a
+                    # completion that errored here would be retried forever against a
+                    # gate that is not going to move on its own.
+                    logger.warning(
+                        "Intraoral segmentation not written for job %s: %s", job.id, exc
+                    )
+                    output_files["segmentation_refused"] = str(exc)
+                else:
+                    updated_count = len(images)
+
             output_files["applied_segmentations"] = updated_count
             output_files["skipped_confirmed_segmentations"] = skipped_confirmed_count
             job.output_files = output_files

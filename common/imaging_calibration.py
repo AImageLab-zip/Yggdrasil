@@ -11,8 +11,8 @@ calibration, and the next person to open the study would get pixels again with n
 saying why.
 
 No migration: ``FileRegistry.metadata`` is a ``JSONField`` already carrying per-file data
-for this exact family of surfaces -- ``maxillo.views.intraoral_segmentation`` writes
-``image_width``/``image_height`` into it the first time it needs to bound-check a polygon.
+for this exact family of surfaces -- ``maxillo.views.patient_data`` writes
+``image_width``/``image_height`` into it when the RGB editor saves a processed image.
 """
 
 import math

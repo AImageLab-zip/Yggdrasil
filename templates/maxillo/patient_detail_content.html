@@ -339,24 +339,115 @@
                 {% endif %}
             </div>
 
-            <!-- Intraoral Photos Viewer -->
+            {% comment %}
+                Intraoral photographs, rendered by Cornerstone3D (roadmap Phase 5).
+
+                The same photo stack teleradiography uses, plus tooth segmentation --
+                which is why the ids are `intraoralPhoto*` rather than `photo*`: both
+                surfaces are on this page at once, and ids are unique per document.
+                Replaces `modality_viewers/intraoral.js` (a grid of <img> thumbnails) and
+                `intraoral_segmentation.js` (1901 lines of Konva).
+
+                Outlines draw at `tension: 0.35`, exactly as the Konva editor drew them --
+                the stored polygon is the vertex list and the curve is a spline through
+                it, so anything else would change the appearance of every existing
+                segmentation. See frontend/imaging/annotations/tensionSpline.js.
+            {% endcomment %}
             <div id="intraoral-viewer" class="viewer-container" {% if default_modality_slug != 'intraoral' and default_modality_slug != 'intraoral-photo' %}style="display: none;"{% endif %}>
-                <div class="intraoral-loading" id="intraoralLoading">
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status"></div>
-                        <p class="mt-2 text-muted">Loading intraoral photographs...</p>
+                {{ intraoral_stack_data|json_script:"intraoralStackData" }}
+                {% comment %}
+                    Its own token, not the teleradiography branch's. `CSRF_USE_SESSIONS`
+                    is on, so the hidden input is the only source, and `csrfToken()` finds
+                    whichever one is in the document -- borrowing another surface's works
+                    right up until that surface stops rendering. Repeated
+                    `{% csrf_token %}` tags in one response carry the same value, so this
+                    costs nothing.
+                {% endcomment %}
+                <div hidden>{% csrf_token %}</div>
+
+                <div class="photo-toolbar" role="toolbar" aria-label="Intraoral photograph tools">
+                    <div class="photo-toolbar-group" role="group" aria-label="View">
+                        <span class="photo-toolbar-label">View</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoPrev" title="Previous photograph">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span class="photo-counter" id="intraoralPhotoCounter"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoNext" title="Next photograph">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoEditImage" title="Crop, mirror or rotate this photograph">
+                            <i class="fas fa-crop"></i> Edit
+                        </button>
                     </div>
-                </div>
-                <div class="intraoral-content" id="intraoralContent" style="display: none;">
-                    <div class="row g-3" id="intraoralGrid"></div>
-                </div>
-                <div class="intraoral-error" id="intraoralError" style="display: none;">
-                    <div class="text-center py-5">
-                        <div class="mb-3"><i class="fas fa-triangle-exclamation fa-3x text-secondary"></i></div>
-                        <h5 class="text-secondary mb-2">No Intraoral Photos</h5>
-                        <p class="text-muted">Upload intraoral photographs to view them here.</p>
+
+                    <div class="photo-toolbar-group" role="group" aria-label="Calibration" id="intraoralPhotoCalibrationGroup" hidden>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoCalibrate"
+                                title="Draw a Length line over something of known size, then press this and enter its real length">
+                            <i class="fas fa-ruler"></i> Calibrate
+                        </button>
+                        <span class="photo-calibration" id="intraoralPhotoCalibration"></span>
                     </div>
+
+                    {# Two modes, never both: measuring and outlining teeth would fight over the primary button. #}
+                    <button type="button" class="cbct-mode-toggle" id="intraoralPhotoAnnotationMode"
+                            role="switch" aria-checked="false" aria-controls="intraoralPhotoAnnotationTools"
+                            title="Show the measurement tools and the measurements on this photograph">
+                        <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+                        <span class="cbct-mode-toggle__label">Measure</span>
+                        <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+                    </button>
+
+                    <div class="photo-toolbar-group cbct-annotation-tools" id="intraoralPhotoAnnotationTools" role="group" aria-label="Measure" hidden>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Length" title="Length">
+                            <i class="fas fa-ruler-horizontal"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Angle" title="Angle">
+                            <i class="fas fa-drafting-compass"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="RectangleROI" title="Rectangle">
+                            <i class="far fa-square"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="EllipticalROI" title="Ellipse">
+                            <i class="far fa-circle"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Label" title="Named point">
+                            <i class="fas fa-map-pin"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="intraoralPhotoClearMeasurements" title="Remove every measurement">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-primary" id="intraoralPhotoSaveMeasurements">
+                            <i class="fas fa-floppy-disk"></i> Save
+                        </button>
+                    </div>
+
+                    {% if 'intraoral_segmentation' in allowed_annotations or not allowed_annotations %}
+                    <button type="button" class="cbct-mode-toggle" id="segMode"
+                            role="switch" aria-checked="false" aria-controls="segTools"
+                            title="Draw and edit tooth outlines on this photograph">
+                        <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+                        <span class="cbct-mode-toggle__label">Teeth</span>
+                        <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+                    </button>
+                    {% endif %}
                 </div>
+
+                <div class="photo-viewport" id="intraoralPhotoViewport"></div>
+                <small class="text-muted d-block mt-1" id="intraoralPhotoStatus"></small>
+
+                {% if 'intraoral_segmentation' in allowed_annotations or not allowed_annotations %}
+                <section class="scan-management-box intraoral-segmentation-box" id="segTools" aria-label="Tooth segmentation" hidden>
+                    <div id="segTeethGrid" class="intraoral-segmentation-teeth-grid" aria-label="Select FDI tooth"></div>
+                    <div class="intraoral-segmentation-controls">
+                        <button type="button" class="seg-filter-btn" id="segConfirmBtn">Mark done</button>
+                        <button type="button" class="seg-filter-btn" id="segOnlySelectedBtn">Only selected</button>
+                        <button type="button" class="seg-filter-btn" id="segUndoBtn" title="Undo the last change"><i class="fas fa-rotate-left" aria-hidden="true"></i> Undo</button>
+                        <button type="button" class="seg-filter-btn" id="segRedoBtn" title="Redo"><i class="fas fa-rotate-right" aria-hidden="true"></i> Redo</button>
+                        <button type="button" class="seg-filter-btn" id="segResetViewBtn">Reset view</button>
+                    </div>
+                    <small class="text-muted d-block mt-2" id="segStatusText"></small>
+                </section>
+                {% endif %}
             </div>
 
             {% comment %}
@@ -387,7 +478,7 @@
                         </button>
                     </div>
 
-                    <div class="photo-toolbar-group" role="group" aria-label="Calibration">
+                    <div class="photo-toolbar-group" role="group" aria-label="Calibration" id="photoCalibrationGroup" hidden>
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="photoCalibrate"
                                 title="Draw a Length line over something of known size, then press this and enter its real length">
                             <i class="fas fa-ruler"></i> Calibrate
@@ -515,9 +606,13 @@
                 {% if 'bite_classification' in allowed_annotations or 'classification' in allowed_annotations %}
                 {% include 'maxillo/sections/bite_classification_section.html' %}
                 {% endif %}
-                {% if has_intraoral_modality and 'intraoral_segmentation' in allowed_annotations %}
-                {% include 'maxillo/sections/intraoral_segmentation_section.html' %}
-                {% endif %}
+                {% comment %}
+                    Tooth segmentation used to live here, in the sidebar, driving a grid of
+                    <img> thumbnails in the main pane. It is now part of the intraoral
+                    viewer itself (roadmap Phase 5) -- the outlines are drawn on the image
+                    being looked at, which is where they belong, and the workbench sits
+                    under it rather than in a tab beside it.
+                {% endcomment %}
             </div>
             <div class="side-tab-pane {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-pane="captions">
                 {% include 'common/sections/vocal_caption_section.html' %}

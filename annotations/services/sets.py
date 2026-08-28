@@ -104,6 +104,24 @@ def attach_target(annotation_set, source_resource, *, role="", primary=False, or
     return target
 
 
+@transaction.atomic
+def set_target_status(target, status):
+    """Move one target's lifecycle status, or clear it with ``None``.
+
+    Separate from :func:`attach_target` on purpose. Anchoring a set to a resource and
+    claiming the work on it is reviewed are different statements, and a combined
+    signature would let a save that never mentioned confirmation clear it as a side
+    effect of re-anchoring -- which is how a confirmed photograph silently becomes
+    editable again.
+    """
+    if status is not None and status not in AnnotationStatus.ALL:
+        raise ValueError(f"unknown annotation status {status!r}")
+    if target.status != status:
+        target.status = status
+        target.save(update_fields=["status"])
+    return target
+
+
 def current_revision_number(annotation_set):
     """The highest revision number on this set, or 0 when it has none.
 

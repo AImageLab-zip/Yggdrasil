@@ -223,7 +223,16 @@ class ToothSegmentationApiTests(TestCase):
 
     def test_a_patient_with_no_work_gets_an_empty_state_not_a_404(self):
         state = self.client.get(self.state_url).json()
-        self.assertEqual(state, {"revision": 0, "setId": None, "images": {}})
+        self.assertEqual(
+            state,
+            {
+                "revision": 0,
+                "setId": None,
+                "images": {},
+                "confirmations": {},
+                "updatedAt": None,
+            },
+        )
 
     # -- the multi-image behaviour, inherited from the shared writer ---------
 
@@ -373,4 +382,101 @@ class ToothSegmentationApiTests(TestCase):
         self.assertIn("disabled for this project", response.json()["error"])
         self.assertFalse(
             AnnotationSet.objects.filter(patient=self.patient, kind=SEGMENTATION_KIND).exists()
+        )
+
+    # -- per-image confirmation (migration 0003) -----------------------------
+
+    def test_confirmation_is_recorded_on_the_target_not_the_set(self):
+        """One legacy row was one photograph, and `AnnotationSet.status` is per patient.
+
+        The set-level flag cannot say *which* of six intraoral photographs a clinician
+        signed off, so confirming through it would have made the answer "all of them".
+        """
+        self._save(
+            [
+                {"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}, "isConfirmed": True},
+                {"fileId": self.photo_b.id, "teeth": {"11": [SQUARE]}},
+            ]
+        )
+        by_file = {
+            target.source_resource.file_id: target.status
+            for target in self._set().targets.select_related("source_resource")
+        }
+        self.assertEqual(by_file[self.photo_a.id], "confirmed")
+        self.assertEqual(by_file[self.photo_b.id], None)
+        self.assertEqual(
+            self._set().status, "draft", "the set's own status is untouched by one image"
+        )
+
+    def test_an_absent_isConfirmed_leaves_confirmation_alone(self):
+        # The autosave sends every image on screen on every keystroke-ish edit. If a body
+        # without `isConfirmed` cleared it, the first autosave after a confirmation would
+        # silently retract it.
+        self._save([{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}, "isConfirmed": True}])
+        self._save(
+            [{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}}],
+            expectedRevision=1,
+        )
+        state = self.client.get(self.state_url).json()
+        self.assertIs(state["confirmations"][str(self.photo_a.id)], True)
+
+    def test_changing_a_confirmed_image_is_a_409_until_it_is_reopened(self):
+        self._save([{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}, "isConfirmed": True}])
+
+        blocked = self._save(
+            [{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE, TRIANGLE]}}],
+            expectedRevision=1,
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.content)
+        self.assertIn("Reopen before editing", blocked.json()["error"])
+
+        reopened = self._save(
+            [
+                {
+                    "fileId": self.photo_a.id,
+                    "teeth": {"36": [SQUARE, TRIANGLE]},
+                    "isConfirmed": False,
+                }
+            ],
+            expectedRevision=1,
+        )
+        self.assertEqual(reopened.status_code, 200, reopened.content)
+        state = self.client.get(self.state_url).json()
+        self.assertIs(state["confirmations"][str(self.photo_a.id)], False)
+        self.assertEqual(state["images"][str(self.photo_a.id)], {"36": [SQUARE, TRIANGLE]})
+
+    def test_resending_a_confirmed_images_own_polygons_is_not_a_change(self):
+        # The client round-trips its polygons through JSON, so `[[10, 10]]` comes back as
+        # `[[10.0, 10.0]]`. Comparing raw would make every autosave of an untouched
+        # confirmed image a 409.
+        self._save([{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}, "isConfirmed": True}])
+        response = self._save(
+            [
+                {
+                    "fileId": self.photo_a.id,
+                    "teeth": {"36": [[[float(x), float(y)] for x, y in SQUARE]]},
+                }
+            ],
+            expectedRevision=1,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_a_non_boolean_isConfirmed_is_a_400(self):
+        response = self._save(
+            [{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}, "isConfirmed": "yes"}]
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_live_path_anchors_under_the_same_role_as_the_converter(self):
+        """Otherwise one photograph gets two targets and its polygons come back doubled.
+
+        `attach_target` keys on `(set, resource, role)`, and `tooth_segmentation_state`
+        groups items by *file* id -- so a converted study edited live would return the
+        converted polygons and the freshly drawn ones together, on every read.
+        """
+        from annotations.services.segmentation import IMAGE_ROLE
+
+        self._save([{"fileId": self.photo_a.id, "teeth": {"36": [SQUARE]}}])
+        self.assertEqual(
+            [target.role for target in self._set().targets.all()], [IMAGE_ROLE]
         )

@@ -67,11 +67,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vocabulary seeded by `annotations/migrations/0002`, labels required rather than
   defaulted -- an FDI code decides a polygon's export segment -- and the same conversion
   `annotations_convert_legacy` uses, as one function, so the converted and the live rows
-  cannot drift apart and `annotations_crosscheck` keeps comparing like with like. The
-  interactive editor is **not** replaced yet and `intraoral_segmentation.js` stays; see
-  `docs/cornerstone-roadmap.md` for why the boundary is there.
+  cannot drift apart and `annotations_crosscheck` keeps comparing like with like.
+- **The intraoral photographs and their tooth segmentation render through
+  Cornerstone3D**, replacing a grid of `<img>` thumbnails and 1901 lines of Konva. The
+  photographs are now the same photo stack teleradiography uses -- stack scroll, pan,
+  zoom, the measurement tools and calibration all come with them -- and outlines are drawn
+  on the image being looked at rather than in a sidebar tab beside it. Both
+  `static/js/intraoral_segmentation.js` and `static/js/modality_viewers/intraoral.js` are
+  deleted. Konva is not: the panoramic editor and the laparoscopy annotator still draw with
+  it.
+  - **Outlines render exactly as they always have.** The old editor drew each ring as a
+    Konva line with `tension: 0.35`, so the shape on screen was never the shape in the
+    database -- 5,491 stored segmentations were approved by looking at a spline through
+    their vertices. Konva's tension is weighted by chord length and Cornerstone's own
+    cardinal spline is uniform, which on a hand-drawn ring differs by up to ~4 px, so the
+    weighting is reproduced in a spline subclass instead. **The stored polygon is
+    unchanged** -- the control points *are* the vertices -- and a test asserts both the
+    curve parity and the upstream methods the subclass depends on, so a Cornerstone bump
+    that renames one fails the build rather than quietly redrawing every study.
+  - **Tooth polygons have one writer.** The segmentation job wrote
+    `maxillo.IntraoralToothSegmentation` and so did the editor, and the export read it;
+    all three now go through `annotations/`, which is where the polygons live. The legacy
+    table is read-only history for the cross-check release. The "has tooth segmentation"
+    filter was also written twice, in the patient list and the export builder, and is now
+    one function.
+  - **Confirmation is per photograph again.** It always was in the legacy row, but
+    `AnnotationSet.status` is per patient, so the conversion was collapsing six
+    photographs' sign-offs into one flag with the last row winning. `AnnotationTarget`
+    gains a nullable `status` (additive migration, no backfill -- the conversion has never
+    run against production), and a save that does not mention confirmation leaves it
+    alone: an autosave must not retract a claim it never made.
+  - **A photograph edited after being segmented reads back on the anatomy.** The
+    re-projection through `rgb_editor.js`'s crop, mirror and rotate now happens on the
+    annotation read path, from `annotations/adapters/image_edit_replay.py`. It is not
+    written back: a re-projection is derived, and the seven production studies whose
+    rotations were never applied still want a person to look at them rather than a
+    machine's guess filed as approved work.
+  - An outline drawn with no tooth selected says so and is not saved, rather than being
+    silently dropped: the FDI code decides which segment a polygon is exported under, so
+    there is no safe default to pick.
+  - The `Teeth` switch hides the outlines when it is off, matching the `Measure` switch.
+    Outlines left drawn under a switch reading "off" made the switch look broken, and the
+    visibility is re-applied on every redraw -- a freshly restored annotation is visible by
+    default, so scrolling used to bring them back.
+  - The FDI grid and its controls are visible again. They were inside a
+    `:not(.has-selected-image)` CSS gate belonging to the sidebar editor this replaces, and
+    nothing set that class any more, so `display: none` applied unconditionally: no tooth
+    could be selected and no undo, redo or `Mark done` could be reached.
 
 ### Changed
+- **`Calibrate` is part of annotation mode now, on every 2D surface.** It only does
+  anything once a `Length` line has been drawn, so on a study being read it was a button
+  whose only possible answer was "draw a line first". One owner (`applyAnnotationMode`), so
+  every toolbar built on `controlIds` inherits it.
+- **The image counter and the calibration readout follow the mouse wheel.** `StackScroll`
+  moves the stack without going through `scrollTo`, so everything hanging off the Prev/Next
+  buttons -- the counter, the calibration text, and which image the tooth editor draws --
+  stopped following the image the moment the user reached for the wheel. They now listen for
+  Cornerstone's own `STACK_NEW_IMAGE`, which covers both paths.
 - **CBCT annotation is a mode now, and it is off by default.** One switch reading
   `Annotations on` / `Annotations off` replaces the eye button: turning it on reveals the
   measurement tools *and* shows the measurements, turning it off hides both and puts the
@@ -172,6 +225,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `useLegacyVolumePreload` branch in `patient_detail.js`). Unreachable for maxillo and
   brain by code path, and confirmed unreachable for laparoscopy against production: no
   laparoscopy patient owns a `cbct_raw` file.
+- The Konva tooth-segmentation editor and the intraoral thumbnail grid it hung off
+  (`intraoral_segmentation.js`, `modality_viewers/intraoral.js`), their sidebar section
+  template, and the two `intraoral-segmentation/` endpoints -- `maxillo` no longer has a
+  view that writes tooth polygons. What survived that module is one payload-normalising
+  helper, moved to `maxillo/intraoral_teeth.py` because a views module with no views is a
+  misfiled one, and the image-edit replay, moved to
+  `annotations/adapters/image_edit_replay.py` where the read path and the export can both
+  reach it.
 
 ## [2.0.0] - 2026-08-26
 

@@ -151,16 +151,10 @@ urlpatterns = [
         views.patient_intraoral_data,
         name="patient_intraoral_photo_data",
     ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/",
-        views.patient_intraoral_segmentation_data,
-        name="patient_intraoral_segmentation_data",
-    ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/update/",
-        views.update_patient_intraoral_segmentation,
-        name="update_patient_intraoral_segmentation",
-    ),
+    # No `intraoral-segmentation/` routes: these were namespace parity with maxillo, and
+    # maxillo's went with the Konva editor in Phase 5. Keeping brain's would leave two
+    # routes answering for a surface brain does not have and whose maxillo counterpart no
+    # longer exists.
     path(
         "api/patient/<int:patient_id>/teleradiography/",
         views.patient_teleradiography_data,

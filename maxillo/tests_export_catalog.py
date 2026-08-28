@@ -1,8 +1,12 @@
 """Project-driven export: artifact catalog, filters, and the export builder."""
+import json
+
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
+from annotations.services.segmentation import save_tooth_segmentation
 from common import export_catalog, export_ui
 from common.export_processing import ExportProcessor
 from common.models import (
@@ -13,7 +17,14 @@ from common.models import (
     Project,
     ProjectAccess,
 )
-from maxillo.models import Classification, Export, Folder, Patient
+from maxillo.models import (
+    Classification,
+    Export,
+    Folder,
+    IntraoralToothSegmentation,
+    Patient,
+)
+from maxillo.views.export import _preview_totals
 
 
 def _method(slug, name):
@@ -482,3 +493,128 @@ class CbctBundleShapeTests(TestCase):
             export_catalog.artifact_by_key("maxillo", "panoramic.mip").zip_directory(),
             "panoramic/generated",
         )
+
+
+class ToothSegmentationExportTests(TestCase):
+    """The export document must not change shape when its source moves.
+
+    `_collect_tooth_segmentation` used to read `maxillo.IntraoralToothSegmentation`. Both
+    of that table's writers now go through `annotations.services.segmentation`, so the
+    export reads there instead -- otherwise it would keep serving the polygons that were
+    in the table before anybody edited the study, which is the worst kind of stale: right
+    once, wrong afterwards, and identical to look at.
+
+    So this pins the document against the legacy implementation, field for field. The one
+    permitted difference is `updated_at`, which is now the set's last save rather than the
+    image's: items are rewritten as fresh rows on every revision, so the new model has no
+    per-image edit timestamp to report and inventing one would be worse than moving the
+    granularity in the open.
+    """
+
+    LEGACY_KEYS = ["patient_id", "image_file_id", "image", "is_confirmed", "updated_at", "teeth"]
+    SQUARE = [[10, 10], [30, 10], [30, 30], [10, 30]]
+    TRIANGLE = [[40, 40], [60, 40], [60, 60]]
+
+    def setUp(self):
+        self.photo = _modality("intraoral-photo", "Intraoral Photographs")
+        self.project = Project.objects.create(
+            name="SegExport", slug="seg-export", domain="maxillo"
+        )
+        self.project.modalities.set([self.photo])
+        self.project.annotation_methods.set(
+            [_method("intraoral_segmentation", "Intraoral Segmentation")]
+        )
+        self.folder = Folder.objects.create(name="Root", project=self.project)
+        self.patient = Patient.objects.create(
+            patient_id=9701, name="Seg", project=self.project, folder=self.folder
+        )
+        self.image = FileRegistry.objects.create(
+            patient=self.patient,
+            domain="maxillo",
+            file_type="intraoral_raw",
+            file_path="maxillo/intraoral_raw/upper-left.png",
+            file_size=4,
+            file_hash="c" * 64,
+        )
+
+    def _documents(self):
+        export = Export(
+            user=None,
+            query_params={"domain": "maxillo", "artifacts": ["intraoral-photo.segmentation"]},
+        )
+        processor = ExportProcessor(export, domain="maxillo")
+        artifact = export_catalog.resolve_artifacts(
+            "maxillo", ["intraoral-photo.segmentation"]
+        )[0]
+        return [
+            (entry["filename"], json.loads(entry["content"]))
+            for entry, _size in processor._collect_tooth_segmentation(self.patient, artifact)
+        ]
+
+    def test_the_document_matches_what_the_legacy_row_produced(self):
+        teeth = {"11": [self.SQUARE], "36": [self.SQUARE, self.TRIANGLE]}
+        row = IntraoralToothSegmentation.objects.create(
+            patient=self.patient, image_file=self.image, teeth=teeth, is_confirmed=True
+        )
+        legacy = {
+            "patient_id": self.patient.patient_id,
+            "image_file_id": row.image_file_id,
+            "image": "upper-left.png",
+            "is_confirmed": row.is_confirmed,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            "teeth": row.teeth,
+        }
+
+        call_command("annotations_convert_legacy", "--surface", "intraoral", verbosity=0)
+
+        [(filename, document)] = self._documents()
+        self.assertEqual(filename, "upper-left.json")
+        self.assertEqual(
+            list(document), self.LEGACY_KEYS, "key order is part of the document"
+        )
+        for key in self.LEGACY_KEYS:
+            if key == "updated_at":
+                self.assertIsNotNone(document[key], "still a timestamp, just the set's")
+                continue
+            self.assertEqual(document[key], legacy[key], key)
+
+    def test_an_image_whose_polygons_were_all_deleted_yields_no_document(self):
+        # The legacy behaviour: the editor deleted the row rather than storing `{}`, so an
+        # emptied image had no document. A confirmed-but-empty image must not reappear as
+        # an empty one either.
+        save_tooth_segmentation(
+            self.patient, images=[{"file_obj": self.image, "teeth": {"11": [self.SQUARE]}}]
+        )
+        save_tooth_segmentation(
+            self.patient,
+            images=[{"file_obj": self.image, "teeth": {}, "confirmed": True}],
+            expected_revision=1,
+        )
+        self.assertEqual(self._documents(), [])
+
+    def test_the_preview_count_matches_the_documents_actually_written(self):
+        # A preview that promised N files and produced N-1 is how an export looks broken
+        # to the person who requested it.
+        second = FileRegistry.objects.create(
+            patient=self.patient,
+            domain="maxillo",
+            file_type="intraoral_raw",
+            file_path="maxillo/intraoral_raw/lower-right.png",
+            file_size=4,
+            file_hash="d" * 64,
+        )
+        save_tooth_segmentation(
+            self.patient,
+            images=[
+                {"file_obj": self.image, "teeth": {"11": [self.SQUARE]}},
+                {"file_obj": second, "teeth": {"36": [self.TRIANGLE]}},
+            ],
+        )
+        artifacts = export_catalog.resolve_artifacts(
+            "maxillo", ["intraoral-photo.segmentation"]
+        )
+        file_count, _size = _preview_totals(
+            "maxillo", Patient.objects.filter(pk=self.patient.pk), artifacts
+        )
+        self.assertEqual(file_count, len(self._documents()))
+        self.assertEqual(file_count, 2)

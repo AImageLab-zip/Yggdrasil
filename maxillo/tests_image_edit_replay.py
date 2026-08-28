@@ -1,5 +1,10 @@
 """The server half of the image-edit replay, against the shared fixture.
 
+The implementation moved to ``annotations.adapters.image_edit_replay`` in Phase 5 -- the
+module that used to hold it was a views module whose endpoints the Cornerstone editor
+replaced, and both the annotation read path and the export need it now. The cases are
+unchanged; only the import moved.
+
 `rgb_editor.js` can crop, mirror and rotate an intraoral photograph, and every tooth
 polygon already drawn on it is expressed in the *old* pixel frame. Two implementations
 re-project them -- this one on the read path, and
@@ -18,7 +23,7 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from maxillo.views.intraoral_segmentation import _transform_polygon, _transform_teeth
+from annotations.adapters.image_edit_replay import transform_polygon, transform_teeth
 
 FIXTURE = Path(__file__).resolve().parent.parent / "common" / "fixtures" / "image_edit_replay.json"
 
@@ -39,7 +44,7 @@ class SharedEditReplayFixtureTests(SimpleTestCase):
         for case in load_cases():
             with self.subTest(case=case["name"]):
                 self.assertEqual(
-                    _transform_polygon(case["polygon"], case["operations"]),
+                    transform_polygon(case["polygon"], case["operations"]),
                     [list(point) for point in case["expected"]],
                 )
 
@@ -59,7 +64,7 @@ class SharedEditReplayFixtureTests(SimpleTestCase):
         self.assertIn("rotate-arbitrary", covered)
 
     def test_a_rotation_actually_moves_the_polygon(self):
-        rotated = _transform_polygon(
+        rotated = transform_polygon(
             [[10, 20], [30, 20], [30, 40]],
             [{"type": "rotate-cw", "input_width": 100, "input_height": 80}],
         )
@@ -72,15 +77,15 @@ class SharedEditReplayFixtureTests(SimpleTestCase):
 class TransformTeethTests(SimpleTestCase):
     def test_a_tooth_whose_polygons_all_vanish_is_dropped(self):
         teeth = {"11": [[[10, 10], [20, 10], [20, 20], [10, 20]]]}
-        out = _transform_teeth(
+        out = transform_teeth(
             teeth, {"operations": [{"type": "crop", "x": 50, "y": 50, "width": 20, "height": 20}]}
         )
         self.assertEqual(out, {}, "a crop can remove a tooth from the picture entirely")
 
     def test_no_operations_returns_the_geometry_unchanged(self):
         teeth = {"11": [[[10, 10], [20, 10], [20, 20]]]}
-        self.assertEqual(_transform_teeth(teeth, {"operations": []}), teeth)
-        self.assertEqual(_transform_teeth(teeth, None), teeth)
+        self.assertEqual(transform_teeth(teeth, {"operations": []}), teeth)
+        self.assertEqual(transform_teeth(teeth, None), teeth)
 
     def test_replay_is_idempotent_from_the_pristine_geometry(self):
         """The property the whole preview path depends on.
@@ -91,5 +96,5 @@ class TransformTeethTests(SimpleTestCase):
         """
         teeth = {"11": [[[10, 20], [30, 20], [30, 40]]]}
         edit = {"operations": [{"type": "flip-h", "input_width": 100, "input_height": 80}]}
-        once = _transform_teeth(teeth, edit)
-        self.assertEqual(_transform_teeth(teeth, edit), once)
+        once = transform_teeth(teeth, edit)
+        self.assertEqual(transform_teeth(teeth, edit), once)

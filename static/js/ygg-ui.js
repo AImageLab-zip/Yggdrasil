@@ -6,9 +6,8 @@
  * attributes.
  *
  * It ALSO exposes a `window.bootstrap` compatibility shim. That is deliberate,
- * not laziness: three call sites construct Bootstrap objects directly, and one
- * of them (modality_viewers/intraoral.js) is viewer code we are contractually
- * not allowed to touch. The shim lets those files keep working verbatim:
+ * not laziness: call sites construct Bootstrap objects directly, and rewriting
+ * them buys nothing. The shim lets those files keep working verbatim:
  *
  *   - new bootstrap.Modal(el) / .show() / .hide() / Modal.getOrCreateInstance(el)
  *   - bootstrap.Collapse.getOrCreateInstance(el, { toggle: false }) / .show() / .hide()
@@ -291,8 +290,8 @@
         initTooltips: initTooltips,
     };
 
-    // Compatibility shim. Keeps modality_viewers/intraoral.js (viewer code we do
-    // not touch), vocal_caption.js and patient_list.js working unmodified.
+    // Compatibility shim. Keeps vocal_caption.js and patient_list.js working unmodified.
+    // `modality_viewers/intraoral.js` was the third caller until Phase 5 deleted it.
     window.bootstrap = window.bootstrap || {
         Modal: Modal,
         Collapse: Collapse,

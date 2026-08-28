@@ -8,24 +8,52 @@
  * the grid's switch came to invert itself after the first click.
  */
 
-/** Element ids the template must provide. A missing one disables its feature only. */
-export const PHOTO_CONTROL_IDS = Object.freeze({
-    viewport: 'photoViewport',
-    strip: 'photoStrip',
-    prev: 'photoPrev',
-    next: 'photoNext',
-    counter: 'photoCounter',
-    calibrate: 'photoCalibrate',
-    calibration: 'photoCalibration',
-    edit: 'photoEditImage',
-    save: 'photoSaveMeasurements',
-    clear: 'photoClearMeasurements',
-    annotationMode: 'photoAnnotationMode',
-    annotationTools: 'photoAnnotationTools',
-    status: 'photoStatus',
-});
+/**
+ * Element ids for one instance of the toolbar.
+ *
+ * A function of a prefix rather than a constant, because two photo stacks now share a
+ * patient-detail page: teleradiography and the intraoral photographs are the same surface,
+ * and ids are unique per *document*, not per surface. Without this the intraoral stack
+ * would resolve teleradiography's viewport and both would render into one element.
+ *
+ * @param {string} prefix
+ * @returns {object} `{[key]: id}`
+ */
+export function controlIds(prefix) {
+    return Object.freeze({
+        viewport: `${prefix}Viewport`,
+        strip: `${prefix}Strip`,
+        prev: `${prefix}Prev`,
+        next: `${prefix}Next`,
+        counter: `${prefix}Counter`,
+        calibrate: `${prefix}Calibrate`,
+        calibration: `${prefix}Calibration`,
+        // The group the two above sit in, so annotation mode can hide the whole thing --
+        // hiding the button but leaving its label and its group border behind reads as a
+        // broken toolbar rather than a hidden feature.
+        calibrationGroup: `${prefix}CalibrationGroup`,
+        edit: `${prefix}EditImage`,
+        save: `${prefix}SaveMeasurements`,
+        clear: `${prefix}ClearMeasurements`,
+        annotationMode: `${prefix}AnnotationMode`,
+        annotationTools: `${prefix}AnnotationTools`,
+        status: `${prefix}Status`,
+    });
+}
 
-/** Selector for the measurement-tool buttons, matching the grid's convention. */
+/** Teleradiography's toolbar, and the historical spelling every existing test uses. */
+export const PHOTO_CONTROL_IDS = controlIds('photo');
+
+/** The intraoral photographs' toolbar. */
+export const INTRAORAL_CONTROL_IDS = controlIds('intraoralPhoto');
+
+/**
+ * Selector for the measurement-tool buttons, matching the grid's convention.
+ *
+ * Scoped per surface by {@link controlPlan}, which searches inside the toolbar's own
+ * container: two toolbars on one page both carry `[data-ygg-tool]` buttons, and a document
+ * -wide query would wire each surface to the other's.
+ */
 export const TOOL_BUTTON_SELECTOR = '[data-ygg-tool]';
 
 export const SAVED_MESSAGE = 'Measurements saved.';
@@ -35,17 +63,22 @@ export const CLEAR_CONFIRM =
 export const CLEARED_MESSAGE = 'Measurements removed. Save to make it permanent.';
 
 /**
- * Resolve the toolbar once.
+ * Resolve one toolbar.
  *
  * @param {Document} doc
+ * @param {object} [ids] from {@link controlIds}; defaults to teleradiography's.
  * @returns {object} `{[key]: Element|null}` plus `toolButtons`.
  */
-export function controlPlan(doc) {
+export function controlPlan(doc, ids = PHOTO_CONTROL_IDS) {
     const plan = {};
-    for (const [key, id] of Object.entries(PHOTO_CONTROL_IDS)) {
+    for (const [key, id] of Object.entries(ids)) {
         plan[key] = doc?.getElementById?.(id) ?? null;
     }
-    plan.toolButtons = Array.from(doc?.querySelectorAll?.(TOOL_BUTTON_SELECTOR) ?? []);
+    // Scoped to this surface's tool container when it has one, so two toolbars on one page
+    // do not each claim the other's buttons. Falls back to the document, which is what a
+    // single-surface page and every existing test look like.
+    const scope = plan.annotationTools ?? doc;
+    plan.toolButtons = Array.from(scope?.querySelectorAll?.(TOOL_BUTTON_SELECTOR) ?? []);
     return plan;
 }
 
@@ -68,11 +101,18 @@ export function isAnnotationModeOn(plan) {
  */
 export function applyAnnotationMode({ plan, enabled }) {
     plan.annotationMode?.setAttribute?.('aria-checked', enabled ? 'true' : 'false');
-    if (plan.annotationTools) {
+    // Calibration rides with the measurement tools rather than sitting in the toolbar
+    // permanently. It only does anything once a Length line has been drawn, so on a
+    // read-only look at an image it was a button that could only ever answer "draw a line
+    // first". One owner for both groups, so every surface built on `controlIds` inherits it.
+    for (const group of [plan.annotationTools, plan.calibrationGroup]) {
+        if (!group) {
+            continue;
+        }
         if (enabled) {
-            plan.annotationTools.removeAttribute?.('hidden');
+            group.removeAttribute?.('hidden');
         } else {
-            plan.annotationTools.setAttribute?.('hidden', '');
+            group.setAttribute?.('hidden', '');
         }
     }
     // The word beside the switch, so the state is readable without inspecting the

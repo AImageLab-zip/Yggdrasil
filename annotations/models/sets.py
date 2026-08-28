@@ -184,6 +184,21 @@ class AnnotationTarget(models.Model):
             "a conditional constraint, because MySQL drops those silently (F12)."
         ),
     )
+    status = models.CharField(
+        max_length=20,
+        choices=AnnotationStatus.CHOICES,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Where the work on *this* target is in its lifecycle, or NULL when "
+            "the set-level status is the only answer. Confirmation is per target "
+            "because that is the granularity it is actually claimed at: a "
+            "clinician confirms the polygons on one photograph, not every "
+            "photograph the patient owns, and the set's own status cannot say "
+            "which of several images was meant."
+        ),
+    )
     order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 

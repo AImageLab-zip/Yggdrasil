@@ -60,6 +60,13 @@ function fakeDoc({ omit = [], tools = ['Length', 'Angle'] } = {}) {
         button.dataset.yggTool = name;
         return button;
     });
+    // The buttons live inside the annotation-tools container in the template, and
+    // `controlPlan` searches there rather than document-wide -- two photo stacks share a
+    // patient-detail page and a document query would wire each to the other's buttons.
+    const toolsContainer = elements.get(PHOTO_CONTROL_IDS.annotationTools);
+    if (toolsContainer) {
+        toolsContainer.querySelectorAll = () => toolButtons;
+    }
 
     return {
         getElementById: (id) => elements.get(id) ?? null,
@@ -126,6 +133,29 @@ test('turning the mode on reveals the tools and says so in words', () => {
     assert.equal(plan.annotationTools.attributes.has('hidden'), false);
     assert.equal(plan.annotationMode.getAttribute('aria-checked'), 'true');
     assert.equal(plan.annotationMode.stateLabel.textContent, 'on');
+});
+
+test('calibration rides with the measurement tools, not the permanent toolbar', () => {
+    // Calibrate only does anything once a Length line has been drawn, so on a read-only
+    // look at an image it was a button that could only ever answer "draw a line first".
+    const plan = controlPlan(fakeDoc());
+    bindControls({ plan });
+    assert.equal(plan.calibrationGroup.getAttribute('hidden'), '');
+
+    plan.annotationMode.click();
+    assert.equal(plan.calibrationGroup.attributes.has('hidden'), false);
+
+    plan.annotationMode.click();
+    assert.equal(plan.calibrationGroup.getAttribute('hidden'), '');
+});
+
+test('a toolbar with no calibration group still switches modes', () => {
+    // Not every surface has one, and a missing control must degrade rather than throw.
+    const plan = controlPlan(fakeDoc({ omit: [PHOTO_CONTROL_IDS.calibrationGroup] }));
+    bindControls({ plan });
+    assert.equal(plan.calibrationGroup, null);
+    plan.annotationMode.click();
+    assert.equal(isAnnotationModeOn(plan), true);
 });
 
 test('applyAnnotationMode is idempotent', () => {

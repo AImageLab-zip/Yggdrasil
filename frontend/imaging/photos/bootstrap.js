@@ -30,6 +30,11 @@ import {
 } from './calibration.js';
 import { askForNumber, openPanel } from './dialog.js';
 import { checkRoundTrip } from './coordinates.js';
+import {
+    SEGMENTATION_CONTROL_IDS,
+    createToothEditor,
+    segmentationControlPlan,
+} from './toothSegmentation.js';
 
 export const LOG_PREFIX = '[ygg-photo]';
 
@@ -52,8 +57,8 @@ export function report(message, detail) {
  * @param {Document} doc
  * @returns {object|null} `{patientId, projectNamespace, modalitySlug, endpoint}`
  */
-export function readPhotoData(doc) {
-    const element = doc?.getElementById?.(DATA_ELEMENT_ID);
+export function readPhotoData(doc, elementId = DATA_ELEMENT_ID) {
+    const element = doc?.getElementById?.(elementId);
     if (!element) {
         return null;
     }
@@ -64,7 +69,7 @@ export function readPhotoData(doc) {
         }
         return parsed;
     } catch (error) {
-        report(`#${DATA_ELEMENT_ID} is not valid JSON: ${error.message}`);
+        report(`#${elementId} is not valid JSON: ${error.message}`);
         return null;
     }
 }
@@ -143,15 +148,21 @@ export function readImageRecords(payload, { namespace, origin } = {}) {
  * @param {Document} [options.doc]
  * @returns {Promise<object|null>}
  */
-export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) {
-    const data = readPhotoData(doc);
+export async function bootstrapPhotoStack({
+    mount,
+    doc = globalThis.document,
+    dataElementId = DATA_ELEMENT_ID,
+    ids = PHOTO_CONTROL_IDS,
+    instanceId = 'stack',
+}) {
+    const data = readPhotoData(doc, dataElementId);
     if (!data) {
-        report(`no #${DATA_ELEMENT_ID} on this page; nothing to mount.`);
+        report(`no #${dataElementId} on this page; nothing to mount.`);
         return null;
     }
-    const plan = controlPlan(doc);
+    const plan = controlPlan(doc, ids);
     if (!plan.viewport) {
-        report(`no #${PHOTO_CONTROL_IDS.viewport} on this page; nothing to mount.`);
+        report(`no #${ids.viewport} on this page; nothing to mount.`);
         return null;
     }
 
@@ -181,7 +192,7 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
     }
 
     const registry = new Map(records.map((record) => [record.imageId, record]));
-    const mounted = await mount({ element: plan.viewport, registry });
+    const mounted = await mount({ element: plan.viewport, registry, instanceId });
     if (!mounted) {
         return null;
     }
@@ -458,16 +469,127 @@ export async function bootstrapPhotoStack({ mount, doc = globalThis.document }) 
         },
     });
 
+    // -- tooth segmentation, on the intraoral surface only ------------------
+    //
+    // Mounted on the same stack rather than as a second surface: intraoral photographs are
+    // a photo stack that also carries segmentation, and they need the same scroll, pan,
+    // zoom, calibration and measurement tools. `data.segmentation` is what the template
+    // says to switch it on, so teleradiography -- which has no teeth -- gets none of it.
+    const editor = data.segmentation
+        ? await mountSegmentation({
+              doc,
+              mounted,
+              stack,
+              records,
+              data,
+              prefix,
+              origin,
+              report,
+              notify: controls.report,
+          })
+        : null;
+
     function afterScroll() {
         const record = current();
         controls.setCounter(stack.currentIndex(), records.length);
         controls.setCalibration(formatCalibration(record.calibration));
+        // The editor draws one image's outlines at a time, so scrolling the stack has to
+        // tell it which image is now on screen. Without this, outlines from image 1 stay
+        // drawn over image 2 -- in the wrong place, and attributed to the wrong file on
+        // the next save.
+        void editor?.showImage(record.fileId);
     }
     afterScroll();
+    // Also on the wheel. `StackScroll` moves the stack without going through `scrollTo`, so
+    // the counter, the calibration readout and the editor's current image all used to stop
+    // following the image once the user reached for the wheel instead of the buttons.
+    stack.onImageChange?.(afterScroll);
 
     observeSize(plan.viewport, () => stack.resize());
     report(`mounted ${records.length} image(s).`);
-    return stack;
+    return editor ? { ...stack, editor } : stack;
+}
+
+/**
+ * Build the tooth editor and wire its controls.
+ *
+ * Separate from the main bootstrap because it is a whole feature rather than a branch, and
+ * because the intraoral surface is the only caller: keeping it here means teleradiography
+ * loads the code and never runs it, which is the cost of one bundle for both surfaces and
+ * is cheaper than a second bundle that duplicates the stack.
+ *
+ * @returns {Promise<object|null>} the editor, or null if its controls are absent.
+ */
+async function mountSegmentation({
+    doc,
+    mounted,
+    stack,
+    records,
+    data,
+    prefix,
+    origin,
+    report,
+    notify,
+}) {
+    const segPlan = segmentationControlPlan(doc);
+    if (!segPlan.teeth) {
+        report(`no #${SEGMENTATION_CONTROL_IDS.teeth} on this page; segmentation is off.`);
+        return null;
+    }
+    if (!mounted.segmentation) {
+        report('the entry supplied no segmentation bindings; segmentation is off.');
+        return null;
+    }
+
+    const url = (suffix) =>
+        new URL(`${prefix}/patients/${data.patientId}/tooth-segmentation${suffix}`, origin).href;
+
+    const editor = createToothEditor({
+        stack,
+        plan: segPlan,
+        toolName: mounted.segmentation.toolName,
+        endpoints: { state: url('/state/'), save: url('/') },
+        cornerstone: mounted.segmentation,
+        io: {
+            fetchImpl: (input, init) =>
+                fetch(input, { credentials: 'same-origin', ...(init ?? {}) }),
+            csrfToken: () => csrfToken(doc),
+        },
+        canModify: Boolean(data.canModify),
+        report: notify,
+    });
+
+    editor.setImages(records);
+    try {
+        await editor.load();
+    } catch (error) {
+        // A study whose polygons cannot be fetched is still worth showing, and the grid
+        // still works -- what must not happen is drawing on top of state we failed to read
+        // and then saving over it, so the editor stays in its empty state and says so.
+        report(`could not read the tooth segmentation: ${error.message}`);
+        notify?.('danger', 'The tooth segmentation could not be loaded.');
+        return editor;
+    }
+    await editor.showImage(records[0].fileId, { force: true });
+
+    // The mode switch, read back out of the DOM exactly as the measurement one is -- a
+    // captured boolean is how the grid's switch came to invert itself after one click.
+    segPlan.mode?.addEventListener?.('click', () => {
+        const enabled = segPlan.mode.getAttribute('aria-checked') !== 'true';
+        segPlan.mode.setAttribute('aria-checked', enabled ? 'true' : 'false');
+        const state = segPlan.mode.querySelector?.('[data-mode-state]');
+        if (state) {
+            state.textContent = enabled ? 'on' : 'off';
+        }
+        editor.setMode(enabled);
+    });
+    // Off to begin with, outlines hidden -- the same shape as the Measure switch, which
+    // hides its measurements when it is off. `setMode(false)` leaves the tool *passive*
+    // rather than disabled, so the outlines are ready to render the moment it goes on.
+    editor.setMode(false);
+
+    report(`tooth segmentation ready for ${records.length} image(s).`);
+    return editor;
 }
 
 /**

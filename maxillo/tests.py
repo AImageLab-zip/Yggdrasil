@@ -11,7 +11,7 @@ from django.utils import timezone
 from common.models import Invitation, Modality, Project, ProjectAccess
 from .models import Folder, FolderAccess, Patient
 from .views.auth import _repair_empty_invitation_codes
-from .views.intraoral_segmentation import _normalize_teeth_payload
+from .intraoral_teeth import _normalize_teeth_payload
 from .views.patient_data import _normalize_landmarks_payload, _normalize_loaded_landmarks
 
 

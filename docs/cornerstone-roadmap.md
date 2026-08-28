@@ -58,6 +58,9 @@ Consequences that constrain every phase:
 - The REST API is domain-oriented. There is no `POST /cornerstone/save`.
 - Dense segmentation is a file artifact in object storage (canonical `nifti_labelmap`,
   exchange `dicom_seg`) — never JSON voxels.
+- **Sparse annotations live in MySQL, and only there** (decision #20). No annotation is
+  canonically a JSON document in object storage. Export still produces JSON — it is
+  *generated from the record*, not read back from an artifact.
 
 ## Decisions already made with the maintainer
 
@@ -82,6 +85,7 @@ Consequences that constrain every phase:
 | 17 | **Affine rewrite refuses when annotations exist (409).** |
 | 18 | **The annotation lock becomes monotonic** — once annotated, always locked. |
 | 19 | **ACL fix shipped first**, standalone. ✅ done on `release/2.0` (`232b40e`). |
+| 20 | **No annotation JSON in object storage.** Sparse annotations — measurements, tooth polygons, IOS landmarks — are rows in MySQL, reached through `annotations/`. They stay exportable as JSON, but the export *renders* the document from the record; nothing reads a stored one back. Settles the Phase 6 landmark question and generalises what Phase 5 did for tooth polygons. |
 
 ## Critical findings
 
@@ -372,9 +376,9 @@ implemented, which is F7's original requirement and is unchanged.
 | 1 | Build toolchain + vendored bundle + dead-code deletion | ✅ done (`release/3.0`, `d8ce0df`, `9dd212f`, this commit) |
 | 2 | `annotations/` Django app | ✅ done (`release/3.0`, `47ede3b`…`032e639`) |
 | 3 | CBCT + brain volume grid | ✅ done (`release/3.0`, `8758efa`…`768be15`) — grid wired in both namespaces, **NiiVue and `viewer_grid.js` deleted**, measurements persist and come back on reload behind an annotation *mode*. Tier 1 + Tier 2 pass 34/34; **F7's `amip` sign-off recorded on real studies by the maintainer**, which clears the last item the gate was held on. 22 brain studies remain unread on the staging box — an environment limit, not a finding |
-| 4 | Photo stacks — teleradiography | ✅ done (`release/3.0`, `e713b28`, `7e2c4cc`) — `yggweb:` loader, calibration, stack viewport wired; `modality_viewers/teleradiography.js` deleted. Unrendered: see the gate note below |
-| 5 | Intraoral tooth segmentation | 🟡 **model shipped, editor not** (`d3815e3`) — the durable path, the FDI vocabulary wiring and the shared conversion are done and tested; the interactive editor is not, and `intraoral_segmentation.js` therefore **stays**. See the note under *Phases 4–10* |
-| 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started |
+| 4 | Photo stacks — teleradiography | ✅ done (`release/3.0`, `e713b28`, `7e2c4cc`, `74d49d4`) — `yggweb:` loader, calibration, stack viewport wired; `modality_viewers/teleradiography.js` deleted. **Rendered and signed off**; the four bugs the maintainer reported are fixed in `74d49d4`, and two more found during Phase 5's check (`Calibrate` always visible, the counter ignoring the wheel) are fixed here — both were in shared toolbar code, so teleradiography inherited them |
+| 5 | Intraoral tooth segmentation | ✅ **done, signed off on a real study** (`release/3.0`, `d3815e3`, this commit) — the editor is on `SplineROITool` with `tension: 0.35` reproduced exactly; `intraoral_segmentation.js` (1901) and `modality_viewers/intraoral.js` (134) are **deleted**, along with the two legacy endpoints and the last writer of `IntraoralToothSegmentation`. Per-image confirmation moved to `AnnotationTarget.status` (migration `0003`). 554 JS tests, 932 Django tests, 0 failures. Four defects the browser check found are fixed — see the gate note below |
+| 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started — **next**. Landmark storage settled by decision #20: into MySQL through `annotations/`, no JSON document in object storage, still exportable. The 3D IOS viewer is untouched by Phase 5, which was intraoral *photographs* only. See the note under *Phases 4–10* |
 | 7 | Panoramic live CPR | ⬜ not started |
 | 8 | Native DICOM ingestion and serving | ⬜ not started |
 | 9 | Interop: SEG / RTSTRUCT / SR / Parametric Map | ⬜ not started |
@@ -880,34 +884,112 @@ Tier 1 compares two different header parsers.
 
 ## Phases 4–10 (summary)
 
-> **Shipped, and where it stopped.** Phase 4 is done: the `yggweb:` loader, the metadata
-> provider, calibration, the stack viewport and the toolbar are wired to
-> teleradiography, and `modality_viewers/teleradiography.js` is deleted. Phase 5's
-> *model* is done — the shared conversion, the FDI schema wiring, the save and read
-> endpoints — and its **editor is not**, so `intraoral.js` and
-> `intraoral_segmentation.js` both stay for now.
+> **Phases 4 and 5 are both done.** Phase 4: the `yggweb:` loader, the metadata provider,
+> calibration, the stack viewport and the toolbar are wired to teleradiography, and
+> `modality_viewers/teleradiography.js` is deleted. Phase 5: the editor is built on
+> `SplineROITool`, and `intraoral_segmentation.js` (1901 lines) and
+> `modality_viewers/intraoral.js` (134) are deleted with it. **Phase 5's browser check has
+> been run and signed off** — see the gate at the end of this note for the four defects it
+> found.
 >
-> That split is deliberate and is the Phase 3 lesson applied rather than repeated. The
-> editor being replaced is 1901 lines of Konva: three layers, `tension: 0.35` smoothed
-> rings whose midpoint handles reimplement Konva's own tension maths so they sit on the
-> drawn curve, zoom and pan with fixed-screen-size overlay counter-scaling, per-image
-> edit sessions, and a 32-button tooth grid with mirrored SVGs. Rebuilding that on
-> Cornerstone contours is a real piece of work, and **building it without ever rendering
-> a pixel and deleting the working one in the same commit is precisely what Phase 3 is on
-> record for** — except worse, because Phase 3 at least had a validated data path behind
-> it and a blind editor would have neither.
+> The editor that was replaced was three Konva layers, `tension: 0.35` smoothed rings whose
+> midpoint handles reimplemented Konva's own tension maths so they sat on the drawn curve,
+> zoom and pan with fixed-screen-size overlay counter-scaling, per-image edit sessions, and
+> a 32-button tooth grid with mirrored SVGs. What replaced it, and why each piece is where
+> it is:
 >
-> So what shipped is everything that could be *verified* without a browser, and the
-> boundary is drawn at the honest place. What remains, in order:
+> - **`tension: 0.35` is reproduced exactly, in rendering only** — the decision this phase
+>   was told to make deliberately, made with numbers rather than taste. Konva's `tension` is
+>   a *chord-length-weighted* cardinal spline; Cornerstone's `CardinalSpline` is uniform, and
+>   a constant transform matrix cannot express a chord weight. Measured worst-case deviation
+>   from the curve 5,491 stored segmentations were approved against, on synthetic rings, in
+>   image pixels:
 >
-> 1. The interactive editor, built against a real browser and real studies: contour
->    drawing bound to an FDI code, vertex editing, the tooth grid, and the smoothing
->    decision below.
-> 2. Wire `intraoral.js`'s tab to it, and delete both old files in that commit.
-> 3. Decide `tension: 0.35` deliberately. The drawn curve is **not** the stored polygon
->    today; a Cornerstone `Contour` draws the stored points, so shapes will render tighter
->    unless the smoothing is reproduced. Either answer is defensible; discovering it on a
->    clinician's screen is not.
+>   | candidate | 12 even | 12 uneven | 8 very uneven | 30 dense |
+>   |---|---|---|---|---|
+>   | straight polygon (`LinearSpline`) | 3.97 | 5.28 | **7.70** | 1.48 |
+>   | `CardinalSpline`, scale 0.5 (upstream default) | 0.73 | 2.89 | 3.53 | 1.08 |
+>   | `KonvaTensionSpline` (shipped) | ~1e-12 | ~1e-12 | ~1e-12 | ~1e-12 |
+>
+>   So: a ~20-line subclass overriding `_getPoint`, registered under its own spline type —
+>   `_getSplineConfig` is a plain lookup, so a custom type key is a supported extension
+>   point. **Storage is untouched**: the control points *are* the stored polygon, so
+>   `annotations_crosscheck` keeps comparing like with like. `frontend/tests/tensionSpline.test.js`
+>   pins the parity *and* asserts the private hooks the override stands on still exist on
+>   the installed package, so a version bump that renames one fails the build instead of
+>   silently rendering a uniform spline a few pixels off on every study.
+> - **One writer for tooth polygons.** `IntraoralToothSegmentation` had two — the editor
+>   endpoint and the segmentation job at `maxillo/file_utils.py` — and an export reader.
+>   All three now go through `annotations.services.segmentation`; the legacy table is
+>   read-only history for the cross-check release (risk #19 drops it, unchanged). The
+>   *presence* predicate was also written twice, in `patient_list` and `export_catalog`, and
+>   is now one function in `annotations/queries.py`.
+> - **Per-image confirmation moved to `AnnotationTarget.status`** (migration `0003`,
+>   additive). `AnnotationSet.status` is keyed `(domain, patient, kind)`, so the legacy
+>   conversion was collapsing N per-image `is_confirmed` values onto one flag, last row
+>   winning. No backfill: the conversion commands have never run against production.
+> - **The image-edit replay is now one implementation per side.** Its geometry moved to
+>   `annotations/adapters/image_edit_replay.py` — the module that held it was a views module
+>   whose endpoints this phase deleted, and both the annotation read path and the export
+>   need it. It is applied on the **read** (`_with_edited_descendants`), not by rewriting
+>   stored geometry: a re-projection is derived, and the seven studies below still need a
+>   person to look at them. Filing a machine's guess as approved work would be worse than
+>   the current state.
+> - **A live bug found while porting.** `showImage` set the incoming file id before clearing
+>   the viewer, so scrolling the stack left the previous photograph's outlines drawn — in the
+>   wrong place, and attributed to the wrong file on the next save. Caught by
+>   `frontend/tests/toothSegmentation.test.js`, which is the argument for the injected-
+>   Cornerstone shape rather than a claim about it.
+> - **Konva stays.** `cbct_panorex_editor.js` (Phase 7) and the laparoscopy annotator
+>   (Phase 10) still draw with it. Removing the tag here would have been a silent regression
+>   on the panoramic editor, and `maxillo/tests_intraoral_surface.py` now asserts it is
+>   still loaded.
+>
+> **The gate is cleared.** The editor was signed off on a real intraoral study. The check
+> found four defects, all of them in the surface rather than the data path, and all fixed
+> here. They are worth recording because three of the four share one shape — *a value with
+> two owners, where only one of them was updated*:
+>
+> - **The FDI grid and its whole controls row were invisible.**
+>   `static/css/intraoral_segmentation.css` opened with a
+>   `:not(.has-selected-image)` gate: the Konva editor lived in the sidebar with no image of
+>   its own, so it hid the grid until one was picked and set that class from JS. The
+>   stylesheet was kept and the class was not, so the selector matched unconditionally and
+>   `display: none` applied to the 32 buttons *and* to Undo, Redo, Only selected, Mark done
+>   and Reset view. The grid was built correctly and appended into a container CSS had
+>   switched off. The gate is deleted rather than re-satisfied: `#segTools` is already hidden
+>   behind the Teeth switch, and by the time it is open an image is on screen by construction.
+> - **The Teeth switch did not hide the outlines.** Deliberate and wrong: the outlines were
+>   shown passively so a study being *read* displayed its segmentation. But `Measure` hides
+>   its measurements when off, and a switch reading "off" over visible outlines reads as a
+>   broken switch. Now symmetrical — and the visibility is re-applied on every redraw,
+>   because a freshly restored annotation is visible by default, so scrolling would otherwise
+>   bring them back.
+> - **`Calibrate` sat in the toolbar permanently.** It only does anything once a `Length`
+>   line exists, so outside annotation mode its only possible answer was "draw a line first".
+>   It now rides with the measurement tools, owned by `applyAnnotationMode`, so every toolbar
+>   built on `controlIds` inherits it — teleradiography and intraoral today, anything later
+>   for free.
+> - **Nothing followed the mouse wheel.** `StackScroll` is bound to the wheel and moves the
+>   stack without going through `scrollTo`, and `afterScroll()` was wired only to the
+>   Prev/Next buttons. Three things stopped following the image: the counter, the calibration
+>   readout, and — the serious one — **which image the tooth editor draws**, so a polygon
+>   drawn after a wheel scroll would have been attributed to the previous file. Now
+>   subscribed to Cornerstone's own `STACK_NEW_IMAGE`, which fires for both paths.
+>   **This one has no unit test**: `createPhotoStack` needs a real `RenderingEngine`, so
+>   nothing in `frontend/tests/` constructs it, and the listener is verifiable only in a
+>   browser. It was, on a multi-photograph study.
+>
+> The lesson for the phases still to come: **a template id or a CSS class joining two files
+> is an untested interface.** `maxillo/tests_intraoral_surface.py` now asserts the ids the JS
+> resolves, because a rename there leaves the JS holding `null` and the control stuck in
+> whatever state the template shipped — silently, and only on the surface being replaced.
+>
+> The shape-parity item the original gate listed was **withdrawn by the maintainer**:
+> intraoral segmentation is a new modality here, so the drawn curve does not have to match
+> what Konva drew for the same stored points. `tension: 0.35` stays regardless — it is what
+> makes a 12-vertex hand-drawn ring read as a tooth rather than a dodecagon — but it is no
+> longer a compatibility constraint.
 >
 > **Both production checks the plan asked for have now been run, and one of them did not
 > come back clean.**
@@ -961,11 +1043,15 @@ Tier 1 compares two different header parsers.
   - `rgb_editor.js` **survives this phase**: it is a *geometric* editor (crop, mirror,
     rotate), not a windowing one, and it creates the `*_processed` rows the export catalog
     reads. Only its mounting moves. Replacing it needs a phase of its own.
-- **5 — Intraoral tooth segmentation.** FDI-keyed polygons ↔ `Contour` representation. The
+- **5 — Intraoral tooth segmentation.** ✅ **built** — what follows is the plan as designed,
+  kept because the hazards it names are the reasons the shipped shape is what it is; the
+  narrative above records where it landed. Segmentation accelerators did **not** land here
+  and are still new work, not a port.
+
+  FDI-keyed polygons ↔ `Contour` representation. The
   `labelMapper` FDI↔segmentIndex table is load-bearing and must be exhaustively unit-tested.
   Preserve the operation-based undo/redo — implemented over the *Yggdrasil* representation, not
   Cornerstone state — and the edit-operation replay at `intraoral_segmentation.js:465-495`.
-  Segmentation accelerators land here.
   - **The target model already exists and must not be re-invented.**
     `annotations/adapters/legacy_maxillo.py:127` already converts `{FDI: [[[x, y], …], …]}`
     into `Geometry2DItem(POLYGON, IMAGE_PIXEL, closed=True, label_code=fdi,
@@ -995,15 +1081,46 @@ Tier 1 compares two different header parsers.
     items; and whether any intraoral `edit_meta` carries a rotate operation.
   - `tension: 0.35` means the drawn curve is not the stored polygon. A Cornerstone `Contour`
     draws the stored points, so shapes render tighter unless the smoothing is reproduced.
-    **Decide it deliberately.**
+    **Decide it deliberately.** ✅ **Decided: reproduced exactly, in rendering only.** The
+    numbers, and why upstream's own `CardinalSpline` is not close enough, are in the
+    narrative above; the implementation is `frontend/imaging/annotations/tensionSpline.js`.
   - **Magic Tool / SAM2 is not on this surface** — decision #9 is about laparoscopy video
     (Phase 10). The only AI touchpoint here is a passive `segmentation_job_running` flag from
     an offline `Job`. Accelerators would be new work, not a port.
   - There are **no JS tests on this surface at all** today, for either replay mechanism, and
     the server twin of the second is untested too. Write characterisation tests first.
+    ✅ Six suites now cover it: `tensionSpline`, `toothGrid`, `toothOutlines`,
+    `polygonActions`, `toothSegmentation` and the pre-existing `history`/`editReplay`, plus
+    `maxillo/tests_intraoral_surface.py` — the first test in the repo that renders the
+    patient-detail page, which is what the two-payload wiring needed.
 - **6 — IOS meshes.** `cornerstoneMeshLoader` + `MeshType.STL` in a `VolumeViewport3D`;
   `TrackballRotateTool` replaces `THREE.TrackballControls`. Deletes `ios.js` (1539) and
   `templates/base.html:36-39`. **Sitewide change** — grep for `THREE.` in the same PR.
+  - **Landmarks move into MySQL — final, decision #20.** No per-patient JSON document, and
+    none in object storage either: the points are annotations, so they live in
+    `annotations/` like every other surface, and **they stay exportable** — the export
+    produces the document rather than reading one. That is the same shape Phase 5 just gave tooth segmentation, and the same
+    three-part move: the editor writes through a service, the prediction job writes through
+    it too, and `_collect_*` in `common/export_processing.py` reads the record instead of
+    the artifact.
+  - What that costs, named now so it is not discovered mid-phase: `ios_landmarks` is a
+    `FileRegistry` file_type, so **four** readers of the document exist rather than one —
+    `common/export_catalog.py:261` (the export artifact), `:692` (the "Has IOS landmarks"
+    filter), `common/annotation_lock.py:130` (the legacy half of the lock), and
+    `maxillo/file_utils.py:1165-1190` (the prediction writer). The lock's legacy branch is
+    already scheduled to go with risk #19; the other three move.
+  - **This is also what closes the gap `annotations_materialize_landmarks` records.** That
+    command anchors landmarks to `role='landmark_document'` because the legacy file says
+    which *patient* the points belong to and never which mesh — and `resource_local`
+    coordinates are only meaningful against a mesh. Phase 6 names the mesh, which is the
+    point at which the coordinate system stops being a promise.
+  - Picking a point on a mesh has **no Cornerstone equivalent**: there is no 3D point tool,
+    and `ProbeTool` is planar. Surface picking is `vtkCellPicker` against
+    `viewport.getRenderer()`, and the markers are vtk sphere actors — Yggdrasil's own state,
+    which is what decision #4 requires anyway. Leave the actors untransformed: the legacy
+    document stores `worldToLocal` against a *centred* mesh, which is the STL's own frame,
+    so untransformed actors make picked world coordinates the same numbers. Assert that,
+    because it is the whole compatibility story for every stored landmark.
 - **7 — Panoramic live CPR.** Interactive layer → Cornerstone + vtk.js `ImageCPRMapper`.
   **Baking layer unchanged**: `seg2pano_core.js` and `worker/seg2pano_worker.js` survive
   verbatim, so the exported PNGs (`common/export_catalog.py:232-241`) keep their bytes.

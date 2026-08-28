@@ -520,9 +520,13 @@ def _preview_totals(domain, patients, artifacts):
             file_count += count
             total_size += count * 450
         elif artifact.collector == "tooth_segmentation" and domain == "maxillo":
-            from maxillo.models import IntraoralToothSegmentation
+            # One document per photograph that still has polygons on the latest revision,
+            # which is exactly what `_collect_tooth_segmentation` yields. Counted from
+            # `annotations/` because that is where the polygons now live;
+            # `IntraoralToothSegmentation` stops moving the moment anybody edits a study.
+            from annotations.queries import tooth_segmentation_image_count
 
-            count = IntraoralToothSegmentation.objects.filter(patient__in=patients).count()
+            count = tooth_segmentation_image_count(patients)
             file_count += count
             total_size += count * 2048
 

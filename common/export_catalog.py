@@ -691,7 +691,13 @@ def _filter_has_annotation(patients, domain, suffix):
     if suffix == "landmarks":
         return patients.filter(files__file_type="ios_landmarks")
     if suffix == "tooth_segmentation":
-        return patients.filter(intraoral_segmentations__isnull=False)
+        # From `annotations/`, not the legacy `intraoral_segmentations` reverse FK: the
+        # editor and the segmentation job both write through
+        # `annotations.services.segmentation` now, so that table stops moving the moment
+        # anybody edits a study and this filter would answer for the corpus as it was.
+        from annotations.queries import with_tooth_segmentation
+
+        return with_tooth_segmentation(patients)
     return patients
 
 

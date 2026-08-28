@@ -37,7 +37,6 @@ worker still parses headers through it (finding F2).
 {% endcomment %}
 {% cornerstone_entry 'volume-grid' %}
 {% endif %}
-<script src="{% static 'js/modality_viewers/intraoral.js' %}"></script>
 {% comment %}
     rgb_editor.js survives Phases 4+5 and is NOT scaffolding. It is a *geometric* editor
     -- crop, mirror, rotate -- and it writes the `*_processed` FileRegistry rows the
@@ -49,19 +48,29 @@ worker still parses headers through it (finding F2).
 <script src="{% static 'js/modality_viewers/rgb_editor.js' %}"></script>
 <script src="{% static 'js/modality_viewers/panoramic.js' %}"></script>
 {% if ns == 'maxillo' %}
-{# Teleradiography, on Cornerstone3D. Replaces modality_viewers/teleradiography.js. #}
+{% comment %}
+    Photo stacks on Cornerstone3D: teleradiography (Phase 4) and the intraoral
+    photographs with tooth segmentation (Phase 5). One entry, two surfaces -- it mounts
+    one stack per payload element on the page, each with its own ids and its own
+    rendering engine. Replaces modality_viewers/teleradiography.js,
+    modality_viewers/intraoral.js and intraoral_segmentation.js.
+{% endcomment %}
 {% cornerstone_entry 'photo-stack' %}
 {% endif %}
 
 {# Main patient detail controller #}
 <script src="{% static 'js/patient_detail.js' %}"></script>
 {% if ns == 'maxillo' %}
+{% comment %}
+    Konva stays. Phase 5 removed its *other* consumer -- intraoral_segmentation.js --
+    but cbct_panorex_editor.js (Phase 7) and the laparoscopy annotator (Phase 10) still
+    draw with it, so this tag goes when the later of those two ships and not before.
+{% endcomment %}
 <script src="https://cdn.jsdelivr.net/npm/konva@9.3.20/konva.min.js"
         integrity="sha384-chZfUp+dDy+Z9NNL/wlLCKHhRYh1tNUse5T0ikH8HziawiqQG88F8SBIIcrHY+/b"
         crossorigin="anonymous"></script>
 <script src="{% static 'js/seg2pano_core.js' %}"></script>
 <script src="{% static 'js/modality_viewers/cbct_panorex_editor.js' %}"></script>
-<script src="{% static 'js/intraoral_segmentation.js' %}"></script>
 {% endif %}
 
 {# Additional features #}

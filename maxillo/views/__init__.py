@@ -57,10 +57,6 @@ from .patient_data import (
 )
 
 # Intraoral segmentation APIs
-from .intraoral_segmentation import (
-    patient_intraoral_segmentation_data,
-    update_patient_intraoral_segmentation,
-)
 
 # Voice captions
 from .voice_captions import (
@@ -129,8 +125,6 @@ __all__ = [
     'patient_teleradiography_data',
     'calibrate_image_pixel_spacing',
     'save_rgb_image_edit',
-    'patient_intraoral_segmentation_data',
-    'update_patient_intraoral_segmentation',
     # Voice captions
     'delete_voice_caption',
     'upload_text_caption',

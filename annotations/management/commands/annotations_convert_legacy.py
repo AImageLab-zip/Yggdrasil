@@ -28,6 +28,7 @@ from annotations import services
 from annotations.adapters import legacy_common, legacy_laparoscopy, legacy_maxillo
 from annotations.constants import AnnotationOrigin, AnnotationStatus
 from annotations.models import AnnotationSet, LabelDefinition, LabelSchema
+from annotations.services.segmentation import IMAGE_ROLE
 from common.domains import DOMAINS, fk_fields_for
 from common.models import AnnotationMethod
 
@@ -168,12 +169,18 @@ class Command(BaseCommand):
         return marker in notes
 
     @transaction.atomic
-    def _write(self, *, patient, kind, marker, descriptors, resource=None, role="", origin=AnnotationOrigin.MIGRATION, label_schema=None, status=None):
+    def _write(self, *, patient, kind, marker, descriptors, resource=None, role="", origin=AnnotationOrigin.MIGRATION, label_schema=None, status=None, target_status=None):
         """One patient, one surface, one transaction.
 
         ``check_project=False``: this work predates the project registry, and a
         project that has since switched a method off must not lose annotations
         somebody actually made.
+
+        ``status`` is the *set's*; ``target_status`` is this target's. The distinction
+        is load-bearing for intraoral segmentation, where one legacy row is one
+        photograph: the table carries ``is_confirmed`` per image, and folding N of them
+        onto the set-level status let whichever row converted last decide the answer for
+        all of them. Migration ``0003`` added the per-target column for exactly this.
         """
         annotation_set = services.get_or_create_set(
             patient,
@@ -192,6 +199,8 @@ class Command(BaseCommand):
             target = services.attach_target(
                 annotation_set, resource, role=role, primary=not has_primary
             )
+            if target_status is not None:
+                services.set_target_status(target, target_status)
         revision = services.record_revision(
             annotation_set, author=None, origin=origin, note=marker, status=status
         )
@@ -314,10 +323,14 @@ class Command(BaseCommand):
                     marker=marker,
                     descriptors=descriptors,
                     resource=resource,
-                    role="image",
+                    role=IMAGE_ROLE,
                     label_schema=self._fdi_schema,
-                    status=(
-                        AnnotationStatus.CONFIRMED if row.is_confirmed else None
+                    # Per *target*: one legacy row is one photograph, and the set spans
+                    # every photograph this patient owns.
+                    target_status=(
+                        AnnotationStatus.CONFIRMED
+                        if row.is_confirmed
+                        else AnnotationStatus.DRAFT
                     ),
                 )
 

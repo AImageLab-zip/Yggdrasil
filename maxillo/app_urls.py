@@ -189,16 +189,10 @@ urlpatterns = [
         views.patient_intraoral_data,
         name="patient_intraoral_photo_data",
     ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/",
-        views.patient_intraoral_segmentation_data,
-        name="patient_intraoral_segmentation_data",
-    ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/update/",
-        views.update_patient_intraoral_segmentation,
-        name="update_patient_intraoral_segmentation",
-    ),
+    # The two `intraoral-segmentation/` routes are gone (roadmap Phase 5). The editor
+    # saves through `annotations/`, which is where tooth polygons now live, so the
+    # endpoints that read and wrote `maxillo.IntraoralToothSegmentation` have no caller.
+    # See the `tooth-segmentation/` routes below.
     path(
         "api/patient/<int:patient_id>/teleradiography/",
         views.patient_teleradiography_data,

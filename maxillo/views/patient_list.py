@@ -199,7 +199,13 @@ def patient_list(request):
         patients = patients.filter(files__file_type='ios_landmarks').distinct()
 
     if namespace == 'maxillo' and has_segmentation_filter == 'yes':
-        patients = patients.filter(intraoral_segmentations__isnull=False).distinct()
+        # From `annotations/`: both writers of `IntraoralToothSegmentation` now go through
+        # `annotations.services.segmentation`, so that table stops moving the moment
+        # anybody edits a study. Shared with the export builder's copy of this filter --
+        # see annotations/queries.py for why the two are one function now.
+        from annotations.queries import with_tooth_segmentation
+
+        patients = with_tooth_segmentation(patients)
     
     patients = patients.order_by('-uploaded_at')
     

@@ -30,12 +30,27 @@
  *   shows `W 256 / L 128` with no unit, because there is not one.
  */
 
-/** One rendering engine for the surface. */
-export const PHOTO_RENDERING_ENGINE_ID = 'ygg-photo-stack';
+/**
+ * Cornerstone ids for one instance of this surface.
+ *
+ * Per instance, because a patient-detail page mounts two: teleradiography and the intraoral
+ * photographs. `createToolGroup` destroys and recreates its group by id on mount, so two
+ * stacks sharing one id would mean the second mount silently stole the first's tools.
+ *
+ * @param {string} instanceId
+ */
+export function stackIds(instanceId) {
+    return Object.freeze({
+        renderingEngine: `ygg-photo-${instanceId}`,
+        viewport: `ygg-photo-${instanceId}-0`,
+        toolGroup: `ygg-photo-${instanceId}-tools`,
+    });
+}
 
-/** The viewport, and its tool group. */
-export const PHOTO_VIEWPORT_ID = 'ygg-photo-0';
-export const PHOTO_TOOL_GROUP_ID = 'ygg-photo-tools';
+/** The historical ids, kept as the default instance's. */
+export const PHOTO_RENDERING_ENGINE_ID = stackIds('stack').renderingEngine;
+export const PHOTO_VIEWPORT_ID = stackIds('stack').viewport;
+export const PHOTO_TOOL_GROUP_ID = stackIds('stack').toolGroup;
 
 /**
  * Tools bound on every stack, colour or not.
@@ -65,6 +80,21 @@ export const PHOTO_MEASUREMENT_TOOLS = Object.freeze([
 ]);
 
 /**
+ * The tooth-outline tool, bound on the same viewport rather than a second one.
+ *
+ * Intraoral photographs are a photo stack that also carries segmentation, not a different
+ * kind of surface: they need the same stack scroll, the same pan and zoom, and the same
+ * calibration and measurement tools. A second rendering engine for the contours would hold
+ * a second GPU context on the same page and would need its own copy of all of that.
+ *
+ * It is listed separately from the measurement tools because it is a *different mode*.
+ * `setAnnotationMode` and `setSegmentationMode` are two switches, and only one of them is
+ * on at a time -- a click that could either measure or draw a tooth would do the wrong one
+ * about half the time.
+ */
+export const SEGMENTATION_TOOLS = Object.freeze(['ToothOutline']);
+
+/**
  * Build the stack viewport and return a handle over it.
  *
  * @param {object} options
@@ -72,7 +102,12 @@ export const PHOTO_MEASUREMENT_TOOLS = Object.freeze([
  * @param {HTMLElement} options.element the viewport host.
  * @returns {object} the handle.
  */
-export function createPhotoStack({ cornerstone, element, toolConfiguration = new Map() }) {
+export function createPhotoStack({
+    cornerstone,
+    element,
+    toolConfiguration = new Map(),
+    instanceId = 'stack',
+}) {
     const {
         RenderingEngine,
         coreEnums,
@@ -83,16 +118,17 @@ export function createPhotoStack({ cornerstone, element, toolConfiguration = new
         annotationState,
         annotationVisibility,
     } = cornerstone;
+    const ids = stackIds(instanceId);
 
-    const renderingEngine = new RenderingEngine(PHOTO_RENDERING_ENGINE_ID);
+    const renderingEngine = new RenderingEngine(ids.renderingEngine);
     renderingEngine.setViewports([
         {
-            viewportId: PHOTO_VIEWPORT_ID,
+            viewportId: ids.viewport,
             type: coreEnums.ViewportType.STACK,
             element,
         },
     ]);
-    const viewport = renderingEngine.getViewport(PHOTO_VIEWPORT_ID);
+    const viewport = renderingEngine.getViewport(ids.viewport);
 
     const toolGroup = createToolGroup({
         addTool,
@@ -100,8 +136,9 @@ export function createPhotoStack({ cornerstone, element, toolConfiguration = new
         tools,
         toolsEnums,
         toolConfiguration,
+        toolGroupId: ids.toolGroup,
     });
-    toolGroup.addViewport(PHOTO_VIEWPORT_ID, PHOTO_RENDERING_ENGINE_ID);
+    toolGroup.addViewport(ids.viewport, ids.renderingEngine);
 
     let imageIds = [];
     let windowingBound = false;
@@ -158,6 +195,30 @@ export function createPhotoStack({ cornerstone, element, toolConfiguration = new
         },
 
         /**
+         * Run `handler` whenever the image on screen changes, however it changed.
+         *
+         * The Prev/Next buttons are not the only way to move: `StackScroll` is bound to the
+         * wheel, so a mouse wheel changes the image without going through `scrollTo` at all.
+         * Everything that has to follow the current image -- the counter, the calibration
+         * readout, which image the tooth editor is drawing -- was hanging off the buttons
+         * only, so a wheel scroll left all three describing the image before last.
+         *
+         * `STACK_NEW_IMAGE` is Cornerstone's own signal and fires for both paths, which is
+         * why the buttons now go through here as well rather than calling the handler twice.
+         *
+         * @param {() => void} handler
+         * @returns {() => void} unsubscribe.
+         */
+        onImageChange(handler) {
+            const listener = () => {
+                syncWindowingTool();
+                handler();
+            };
+            element.addEventListener(coreEnums.Events.STACK_NEW_IMAGE, listener);
+            return () => element.removeEventListener(coreEnums.Events.STACK_NEW_IMAGE, listener);
+        },
+
+        /**
          * Make one measurement tool primary, passiving the others.
          *
          * Passive rather than disabled for the rest, so an existing annotation stays
@@ -204,6 +265,88 @@ export function createPhotoStack({ cornerstone, element, toolConfiguration = new
                 syncWindowingTool();
             }
             viewport.render();
+        },
+
+        /**
+         * Turn tooth outlining on or off.
+         *
+         * On: the contour tool takes the primary button and every measurement tool is
+         * disabled, so a click draws a tooth and nothing else. Off: it is set *passive*
+         * rather than disabled, which is what keeps restored outlines drawn while the tab
+         * is merely being read -- a mode-less tool is skipped by
+         * `getToolsWithModesForElement`, which is exactly the defect the grid shipped with.
+         *
+         * @param {boolean} enabled
+         */
+        setSegmentationMode(enabled) {
+            const tool = tools.ToothOutline;
+            if (!tool) {
+                return;
+            }
+            if (enabled) {
+                for (const name of PHOTO_MEASUREMENT_TOOLS) {
+                    if (tools[name]) {
+                        toolGroup.setToolDisabled(tools[name].toolName);
+                    }
+                }
+                if (tools.WindowLevel) {
+                    toolGroup.setToolDisabled(tools.WindowLevel.toolName);
+                    windowingBound = false;
+                }
+                toolGroup.setToolActive(tool.toolName, {
+                    bindings: [{ mouseButton: toolsEnums.MouseBindings.Primary }],
+                });
+            } else {
+                toolGroup.setToolPassive(tool.toolName);
+                syncWindowingTool();
+            }
+            viewport.render();
+        },
+
+        /**
+         * Put one stored tooth outline back on the viewer.
+         *
+         * Hand-built rather than routed through `SplineROITool.hydrate`, for one concrete
+         * reason: `hydrate` hardcodes `data.label = ''`, and the label *is* the FDI code --
+         * the only field the tool's `getTextLines(data)` can read. Everything else it does
+         * is reproduced here, including leaving `data.spline.instance` unset: the tool
+         * builds it on first render (`SplineROITool.js:610-612`), so constructing a spline
+         * here would be a second, unused one.
+         *
+         * @param {object} outline `{imageId, label, worldPoints, splineType, toolName}`
+         * @returns {object|null} the annotation added.
+         */
+        addToothOutline({ imageId, label, worldPoints, splineType, toolName }) {
+            const add = annotationState?.addAnnotation;
+            if (typeof add !== 'function' || !worldPoints?.length) {
+                return null;
+            }
+            const camera = viewport.getCamera();
+            const annotation = {
+                annotationUID: cornerstone.uuid?.() ?? undefined,
+                data: {
+                    // The FDI code. See `toothOutlines.js` for why it lives here.
+                    label,
+                    handles: { points: worldPoints.map((point) => [...point]) },
+                    contour: { closed: true },
+                    spline: { type: splineType },
+                    cachedStats: {},
+                },
+                highlighted: false,
+                autoGenerated: false,
+                invalidated: true,
+                isLocked: false,
+                isVisible: true,
+                metadata: {
+                    toolName,
+                    referencedImageId: imageId,
+                    FrameOfReferenceUID: viewport.getFrameOfReferenceUID?.(),
+                    viewPlaneNormal: [...(camera.viewPlaneNormal ?? [0, 0, 1])],
+                    viewUp: [...(camera.viewUp ?? [0, -1, 0])],
+                },
+            };
+            add(annotation, element);
+            return annotation;
         },
 
         /** Everything Cornerstone is holding, for the caller to filter and group. */
@@ -278,13 +421,79 @@ export function createPhotoStack({ cornerstone, element, toolConfiguration = new
             viewport.render();
         },
 
+        /**
+         * The pixel dimensions of one loaded image, or null.
+         *
+         * Read off the loaded Cornerstone image rather than the metadata registry: the
+         * registry holds what the server said, and a vertex has to be clamped to the
+         * bytes actually on screen. The two disagree exactly when they matter -- after the
+         * RGB editor has cropped a photograph.
+         *
+         * @param {string} [imageId] defaults to the image on screen.
+         * @returns {{width: number, height: number}|null}
+         */
+        imageBounds(imageId) {
+            const image = viewport.csImage ?? viewport.getCornerstoneImage?.();
+            if (!image || (imageId && stack.currentImageId() !== imageId)) {
+                return null;
+            }
+            return image.width && image.height
+                ? { width: image.width, height: image.height }
+                : null;
+        },
+
+        /**
+         * Frame a rectangle given in image pixels.
+         *
+         * `parallelScale` is half the viewport's world height, so the rectangle is fitted
+         * against whichever of its dimensions is tighter against the element's aspect
+         * ratio -- fitting only the height would push a wide shape off both sides.
+         *
+         * @param {object} region `{imageId, minX, maxX, minY, maxY}`
+         * @param {number} [margin] extra world units around the region.
+         */
+        frameImageRegion({ imageId, minX, maxX, minY, maxY }, margin = 1.15) {
+            const convert = cornerstone.imageToWorld;
+            if (typeof convert !== 'function') {
+                return;
+            }
+            const target = imageId ?? stack.currentImageId();
+            if (!target) {
+                return;
+            }
+            const topLeft = convert([minX, minY], target);
+            const bottomRight = convert([maxX, maxY], target);
+            const focalPoint = topLeft.map((value, index) => (value + bottomRight[index]) / 2);
+            const worldHeight = Math.abs(bottomRight[1] - topLeft[1]);
+            const worldWidth = Math.abs(bottomRight[0] - topLeft[0]);
+            const { clientWidth, clientHeight } = element;
+            const aspect = clientWidth && clientHeight ? clientWidth / clientHeight : 1;
+            const scale = Math.max(worldHeight, worldWidth / aspect) / 2;
+            const camera = viewport.getCamera();
+            viewport.setCamera({
+                ...camera,
+                focalPoint,
+                position: camera.position.map(
+                    (value, index) => focalPoint[index] + (value - camera.focalPoint[index])
+                ),
+                parallelScale: Math.max(scale * margin, 1e-3),
+            });
+            viewport.render();
+        },
+
+        /** Back to the whole image, undoing a zoom or a frame. */
+        resetCamera() {
+            viewport.resetCamera();
+            viewport.render();
+        },
+
         resize() {
             renderingEngine.resize(true, false);
         },
 
         destroy() {
             try {
-                ToolGroupManager.destroyToolGroup(PHOTO_TOOL_GROUP_ID);
+                ToolGroupManager.destroyToolGroup(ids.toolGroup);
             } catch {
                 // Already gone; nothing to undo.
             }
@@ -295,8 +504,8 @@ export function createPhotoStack({ cornerstone, element, toolConfiguration = new
     return stack;
 }
 
-function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums, toolConfiguration }) {
-    for (const name of [...NAVIGATION_TOOLS, ...PHOTO_MEASUREMENT_TOOLS, 'WindowLevel']) {
+function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums, toolConfiguration, toolGroupId }) {
+    for (const name of [...NAVIGATION_TOOLS, ...PHOTO_MEASUREMENT_TOOLS, ...SEGMENTATION_TOOLS, 'WindowLevel']) {
         if (tools[name]) {
             addTool(tools[name]);
         }
@@ -305,13 +514,13 @@ function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums, toolCon
     // Destroy first: a re-mount on the same page (switching tabs, or the RGB editor
     // writing a new row) would otherwise find the group already registered and throw.
     try {
-        ToolGroupManager.destroyToolGroup(PHOTO_TOOL_GROUP_ID);
+        ToolGroupManager.destroyToolGroup(toolGroupId);
     } catch {
         // No previous group.
     }
-    const toolGroup = ToolGroupManager.createToolGroup(PHOTO_TOOL_GROUP_ID);
+    const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
 
-    for (const name of [...NAVIGATION_TOOLS, ...PHOTO_MEASUREMENT_TOOLS, 'WindowLevel']) {
+    for (const name of [...NAVIGATION_TOOLS, ...PHOTO_MEASUREMENT_TOOLS, ...SEGMENTATION_TOOLS, 'WindowLevel']) {
         if (tools[name]) {
             // Per-tool configuration goes in here, not on the tool class: `addTool` on the
             // *group* is what builds the instance the viewport uses, so a config set
@@ -335,9 +544,10 @@ function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums, toolCon
             bindings: [{ mouseButton: toolsEnums.MouseBindings.Secondary }],
         });
     }
-    // Measurement tools start Disabled, matching the grid: annotation is a mode, off by
-    // default, so a study being read shows fewer controls than one being measured.
-    for (const name of PHOTO_MEASUREMENT_TOOLS) {
+    // Measurement and segmentation tools start Disabled, matching the grid: both are
+    // modes, off by default, so a study being read shows fewer controls than one being
+    // measured or segmented.
+    for (const name of [...PHOTO_MEASUREMENT_TOOLS, ...SEGMENTATION_TOOLS]) {
         if (tools[name]) {
             toolGroup.setToolDisabled(tools[name].toolName);
         }

@@ -42,6 +42,7 @@ from annotations.services.sets import (
     current_revision_number,
     get_or_create_set,
     record_revision,
+    set_target_status,
 )
 
 __all__ = [
@@ -68,4 +69,5 @@ __all__ = [
     "register_file",
     "register_logical_volume",
     "save_measurements",
+    "set_target_status",
 ]

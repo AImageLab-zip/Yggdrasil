@@ -122,6 +122,117 @@ export function renameFile(history, fromFileId, toFileId) {
     return history;
 }
 
+/**
+ * The actions that turn one polygon into another.
+ *
+ * Exists because Cornerstone reports *that* an annotation changed, never *how*: an
+ * `ANNOTATION_MODIFIED` event carries the new state and nothing else. The action log needs
+ * the how, so the difference is derived here -- in the module that owns the action
+ * vocabulary, rather than in a viewer module that would end up inventing a fifth action
+ * type nothing can invert.
+ *
+ * Three cases are recognised because they are the three a contour tool actually produces:
+ * dragging a handle, adding a control point, and deleting one. Anything else -- and the
+ * only realistic source is a programmatic replacement -- becomes a delete followed by a
+ * create, which is expressible, inverts correctly, and costs the user two undo steps for
+ * an edit they cannot make by hand anyway. The alternative was a `polygon-replace` action
+ * whose inverse would have to carry a whole second copy of the geometry.
+ *
+ * @param {number[][]} previous
+ * @param {number[][]} next
+ * @param {object} at `{fileId, tooth, polygonIndex}`
+ * @returns {object[]} zero actions when the polygons are equal.
+ */
+export function actionsBetween(previous, next, at) {
+    const before = previous ?? [];
+    const after = next ?? [];
+    if (samePolygon(before, after)) {
+        return [];
+    }
+
+    if (before.length === after.length) {
+        const moved = [];
+        for (let index = 0; index < before.length; index += 1) {
+            if (!samePoint(before[index], after[index])) {
+                moved.push(index);
+            }
+        }
+        // One handle at a time is what dragging produces. Two or more differing points
+        // means something replaced the ring, and pretending otherwise would record an
+        // inverse that restores only one of them.
+        if (moved.length === 1) {
+            const [pointIndex] = moved;
+            return [
+                {
+                    type: 'vertex-move',
+                    ...at,
+                    pointIndex,
+                    from: clonePolygon([before[pointIndex]])[0],
+                    to: clonePolygon([after[pointIndex]])[0],
+                },
+            ];
+        }
+    }
+
+    if (after.length === before.length + 1) {
+        const pointIndex = firstDivergence(before, after);
+        if (pointIndex !== null && samePolygon(before, withoutIndex(after, pointIndex))) {
+            return [
+                {
+                    type: 'vertex-insert',
+                    ...at,
+                    pointIndex,
+                    point: clonePolygon([after[pointIndex]])[0],
+                },
+            ];
+        }
+    }
+
+    if (after.length === before.length - 1) {
+        const pointIndex = firstDivergence(after, before);
+        if (pointIndex !== null && samePolygon(after, withoutIndex(before, pointIndex))) {
+            return [
+                {
+                    type: 'vertex-delete',
+                    ...at,
+                    pointIndex,
+                    point: clonePolygon([before[pointIndex]])[0],
+                },
+            ];
+        }
+    }
+
+    return [
+        { type: 'polygon-delete', ...at, polygon: clonePolygon(before) },
+        { type: 'polygon-create', ...at, polygon: clonePolygon(after) },
+    ];
+}
+
+function samePoint(left, right) {
+    return Boolean(left) && Boolean(right) && left[0] === right[0] && left[1] === right[1];
+}
+
+function samePolygon(left, right) {
+    return (
+        left.length === right.length &&
+        left.every((point, index) => samePoint(point, right[index]))
+    );
+}
+
+/** The first index at which `longer` stops matching `shorter`, or its end. */
+function firstDivergence(shorter, longer) {
+    for (let index = 0; index < shorter.length; index += 1) {
+        if (!samePoint(shorter[index], longer[index])) {
+            return index;
+        }
+    }
+    return shorter.length;
+}
+
+function withoutIndex(polygon, index) {
+    return polygon.filter((_point, position) => position !== index);
+}
+
 /** Forget everything. For a caller that has genuinely started over. */
 export function clearHistory(history) {
     history.undo = [];

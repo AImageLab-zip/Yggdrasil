@@ -177,7 +177,6 @@ def patient_detail(request, patient_id):
         "management_form": management_form,
         "has_cbct": False,
         "has_uploaded_panoramic": False,
-        "has_intraoral_modality": False,
         "can_modify_segmentation": can_modify,
         "can_create_caption": can_modify,
         "patient_modalities": patient_modalities,
@@ -1116,13 +1115,7 @@ def patient_viewer_data(request, patient_id):
 patient_cbct_data = patient_viewer_data
 patient_panoramic_data = patient_viewer_data
 patient_intraoral_data = patient_viewer_data
-patient_intraoral_segmentation_data = patient_viewer_data
 patient_teleradiography_data = patient_viewer_data
-
-
-@login_required
-def update_patient_intraoral_segmentation(request, patient_id):
-    return JsonResponse({"error": "Not available for Brain."}, status=400)
 
 
 @login_required

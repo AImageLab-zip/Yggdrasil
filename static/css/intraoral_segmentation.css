@@ -3,26 +3,15 @@
     background: var(--ygg-surface);
 }
 
-.intraoral-segmentation-box:not(.has-selected-image) .intraoral-segmentation-teeth-grid,
-.intraoral-segmentation-box:not(.has-selected-image) .intraoral-segmentation-controls {
-    display: none;
-}
-
-.intraoral-segmentation-box.has-selected-image .seg-empty-hint {
-    display: none;
-}
-
-.intraoral-segmentation-box.job-running .seg-empty-hint {
-    display: flex;
-    align-items: center;
-}
-
-.seg-empty-hint {
-    color: var(--ygg-text-muted);
-    font-size: 0.82rem;
-    font-weight: 600;
-    padding: 0.15rem 0;
-}
+/*
+ * No `has-selected-image` gate, and no `seg-empty-hint`.
+ *
+ * The Konva editor lived in the sidebar with no image of its own, so it hid the grid until
+ * one was picked and showed a hint in its place. The workbench is inside the viewer now:
+ * the whole `#segTools` section is hidden until the Teeth switch is on, and by then an
+ * image is on screen by construction. The gate outlived the class that set it and left the
+ * grid and its controls permanently `display: none`.
+ */
 
 .intraoral-segmentation-teeth-grid {
     display: grid;
