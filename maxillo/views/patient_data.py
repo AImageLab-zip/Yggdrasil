@@ -851,34 +851,14 @@ def patient_viewer_data(request, patient_id):
     lower_scan_url = None
 
     # Select one complete pair according to the root IOS step's viewer policy.
+    selected_pair = None
     try:
-        from common.modality_config import (
-            modality_prefers_processed_for_viewer,
-            raw_file_hidden,
-        )
+        from maxillo.ios_meshes import current_ios_pair
 
-        processed_files = patient.get_ios_processed_files()
-        raw_files = patient.get_ios_raw_files()
-
-        processed_pair = None
-        if processed_files["upper"] and processed_files["lower"]:
-            processed_pair = (processed_files["upper"], processed_files["lower"])
-
-        raw_pair = None
-        if raw_files["upper"] and raw_files["lower"]:
-            candidate = (raw_files["upper"], raw_files["lower"])
-            if not any(raw_file_hidden(file_obj) for file_obj in candidate):
-                raw_pair = candidate
-
-        pairs = (
-            (processed_pair, raw_pair)
-            if modality_prefers_processed_for_viewer(modality_slug)
-            else (raw_pair, processed_pair)
-        )
-        selected_pair = next((pair for pair in pairs if pair is not None), None)
+        selected_pair = current_ios_pair(patient)
         if selected_pair:
-            upper_scan_url = _serve_file_url(request, selected_pair[0].id)
-            lower_scan_url = _serve_file_url(request, selected_pair[1].id)
+            upper_scan_url = _serve_file_url(request, selected_pair["upper"].id)
+            lower_scan_url = _serve_file_url(request, selected_pair["lower"].id)
     except Exception:
         pass
 
@@ -928,6 +908,13 @@ def patient_viewer_data(request, patient_id):
     data = {
         "upper_scan_url": upper_url,
         "lower_scan_url": lower_url,
+        # The ids as well as the URLs, because a landmark is stored in one mesh's own
+        # object space and the surface has to be able to say which mesh it drew on. The
+        # save endpoint re-derives the pair server-side rather than trusting these back --
+        # a client that could choose its own anchor could file landmarks against geometry
+        # nobody was looking at -- so they are here to be echoed, not to be believed.
+        "upper_scan_file_id": selected_pair["upper"].id,
+        "lower_scan_file_id": selected_pair["lower"].id,
         "patient_info": {
             "patient_id": patient.patient_id,
         },

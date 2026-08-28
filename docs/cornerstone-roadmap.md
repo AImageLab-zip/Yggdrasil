@@ -378,7 +378,7 @@ implemented, which is F7's original requirement and is unchanged.
 | 3 | CBCT + brain volume grid | ✅ done (`release/3.0`, `8758efa`…`768be15`) — grid wired in both namespaces, **NiiVue and `viewer_grid.js` deleted**, measurements persist and come back on reload behind an annotation *mode*. Tier 1 + Tier 2 pass 34/34; **F7's `amip` sign-off recorded on real studies by the maintainer**, which clears the last item the gate was held on. 22 brain studies remain unread on the staging box — an environment limit, not a finding |
 | 4 | Photo stacks — teleradiography | ✅ done (`release/3.0`, `e713b28`, `7e2c4cc`, `74d49d4`) — `yggweb:` loader, calibration, stack viewport wired; `modality_viewers/teleradiography.js` deleted. **Rendered and signed off**; the four bugs the maintainer reported are fixed in `74d49d4`, and two more found during Phase 5's check (`Calibrate` always visible, the counter ignoring the wheel) are fixed here — both were in shared toolbar code, so teleradiography inherited them |
 | 5 | Intraoral tooth segmentation | ✅ **done, signed off on a real study** (`release/3.0`, `d3815e3`, this commit) — the editor is on `SplineROITool` with `tension: 0.35` reproduced exactly; `intraoral_segmentation.js` (1901) and `modality_viewers/intraoral.js` (134) are **deleted**, along with the two legacy endpoints and the last writer of `IntraoralToothSegmentation`. Per-image confirmation moved to `AnnotationTarget.status` (migration `0003`). 554 JS tests, 932 Django tests, 0 failures. Four defects the browser check found are fixed — see the gate note below |
-| 6 | IOS meshes + landmark tool (Three.js removed) | ⬜ not started — **next**. Landmark storage settled by decision #20: into MySQL through `annotations/`, no JSON document in object storage, still exportable. The 3D IOS viewer is untouched by Phase 5, which was intraoral *photographs* only. See the note under *Phases 4–10* |
+| 6 | IOS meshes + landmark tool (Three.js removed) | 🟡 **half done** — PR 6.1 (this commit) moves landmark *storage* into `annotations/` per decision #20: `annotations.services.ios_landmarks`, two endpoints, the export rendered from the record, the presence filter consolidated, the prediction writer rerouted. **No migration was needed** — `ios_landmarks` was already an `AnnotationSet.kind` and `SpatialAnnotation3DItem` already existed. The legacy `PUT` still works and is still the only writer, so this PR changes no behaviour. 987 Django tests, 0 failures. PR 6.2 replaces the viewer: `modality_viewers/ios.js` (1539) and the three Three.js r128 CDN tags go, along with the legacy endpoint. See the note under *Phases 4–10* |
 | 7 | Panoramic live CPR | ⬜ not started |
 | 8 | Native DICOM ingestion and serving | ⬜ not started |
 | 9 | Interop: SEG / RTSTRUCT / SR / Parametric Map | ⬜ not started |
@@ -1114,6 +1114,32 @@ Tier 1 compares two different header parsers.
     which *patient* the points belong to and never which mesh — and `resource_local`
     coordinates are only meaningful against a mesh. Phase 6 names the mesh, which is the
     point at which the coordinate system stops being a promise.
+  - **Three corrections from building PR 6.1**, each of which changes what the rest of this
+    phase has to do:
+    - **No migration, and no landmark-type vocabulary.** `ios_landmarks` was already an
+      `AnnotationSet.kind`, `SpatialAnnotation3DItem` already carried
+      `Geometry3DType.POINT`/`PLANE` in `resource_local`, and the adapter already spent the
+      single `label` FK on the FDI code with the type in `attributes['landmark']`. A
+      landmark-type `LabelSchema` would have no FK slot to occupy and would invalidate the
+      cross-check's field-by-field comparison.
+    - **The "which mesh" gap was narrower than this note says — and wider in a way it does
+      not say.** The *jaw* was never unknown: it is in the document key and derivable from
+      the FDI quadrant, which the legacy server already enforced. What is genuinely
+      unrecorded is **raw vs processed**. Which STL the viewer serves is
+      `prefer_processed_for_viewer`, an admin-editable flag on the processing step; the two
+      are different geometry, so flipping it re-frames every landmark stored against the
+      other one. PR 6.1 records the mesh on every save, which closes it going forward.
+      Nothing repairs the pre-Phase-6 corpus, and a best-effort re-anchor would file a
+      guess as the anchor — so it is stated, not fixed.
+    - **Re-anchoring a converted study is not free.** `save_measurement_groups` carries
+      forward every target a save does not name, so a live save that wrote only *mesh*
+      targets would leave the converter's `landmark_document` target untouched and copy its
+      items forward too. Single-point types survive that; `cusps` and `planar` are lists the
+      reader appends to and would have doubled on the first edit of every converted study.
+      `_legacy_anchor_group` names the old target explicitly, handing it exactly the arches
+      the save did not mention — so a full save retires it and a partial save cannot delete
+      what the client never sent. Four tests in `annotations/tests_ios_landmarks.py` pin it;
+      three of them fail with the guard removed.
   - Picking a point on a mesh has **no Cornerstone equivalent**: there is no 3D point tool,
     and `ProbeTool` is planar. Surface picking is `vtkCellPicker` against
     `viewport.getRenderer()`, and the markers are vtk sphere actors — Yggdrasil's own state,
@@ -1121,6 +1147,30 @@ Tier 1 compares two different header parsers.
     document stores `worldToLocal` against a *centred* mesh, which is the STL's own frame,
     so untransformed actors make picked world coordinates the same numbers. Assert that,
     because it is the whole compatibility story for every stored landmark.
+    - **Verified while planning, and more precisely than the sentence above.** `ios.js` sets
+      `mesh.rotation.y = Math.PI` on each jaw *and* translates both by the negated centre
+      of their combined bounding box — so the meshes are not merely "centred". It does not
+      matter: `worldToLocal` inverts the **full** world matrix, so the stored numbers are
+      raw STL vertex coordinates, independent of both. `@cornerstonejs/core`'s
+      `cache/classes/Mesh.js` applies no transform to STL actors, so the identity holds.
+      Pin that upstream fact the way `tensionSpline.test.js` pins its private hooks: a 5.9
+      bump that starts centring meshes must fail the build, not silently move every
+      landmark on every historical study.
+    - **The canvas→display transform is the trap, and there is a reference implementation
+      in the package.** Cornerstone renders into a *shared offscreen* render window, so
+      canvas coordinates are not display coordinates and `renderer.getViewport()` is not
+      `[0,0,1,1]` on a patient-detail page that also mounts the volume grid and the photo
+      stack. `@cornerstonejs/tools/utilities/vtkjs/OrientationControllerWidget/index.js`
+      (`setupPicker`, `pickAtPosition`) already does it: devicePixelRatio, the normalized
+      viewport rect, and the Y-flip. Reuse that arithmetic rather than deriving it — got
+      wrong, it puts picks a few millimetres out, which reads as a coordinate bug and is a
+      viewport-rect bug.
+    - **Two hazards in the shipped tools.** `TrackballRotateTool.preMouseDownCallback` does
+      an unguarded `viewport.getDefaultActor().actor.getMapper()`, so a mousedown before the
+      mesh loads is a `TypeError` — activate the tool only after both geometries resolve.
+      And `Viewport.resetCamera` multiplies the bounds radius by **10** for
+      `ViewportType.VOLUME_3D`, so it must not be used for framing; set the camera from the
+      seven ported presets instead.
 - **7 — Panoramic live CPR.** Interactive layer → Cornerstone + vtk.js `ImageCPRMapper`.
   **Baking layer unchanged**: `seg2pano_core.js` and `worker/seg2pano_worker.js` survive
   verbatim, so the exported PNGs (`common/export_catalog.py:232-241`) keep their bytes.

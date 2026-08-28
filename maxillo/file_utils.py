@@ -825,6 +825,84 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
     return saved_entries, errors, job
 
 
+def _record_predicted_landmarks(patient, landmark_path, job):
+    """Write a landmark job's output through ``annotations/`` as well as to storage.
+
+    The record is what the viewer, the export and the "Has IOS landmarks" filter read
+    (decision #20), so a prediction that only produced an object in storage would be
+    invisible to all three the moment Phase 6 stops reading documents back.
+
+    Three rules, each a real one:
+
+    - **``origin=PREDICTION``**, which is what keeps model output from setting the
+      monotonic ``ever_annotated`` flag. It is the direct replacement for the
+      ``metadata["origin"] == "ai"`` string test above -- "has a person touched this" is a
+      property of the annotation record, not of a file type.
+    - **A patient with human landmarks is left alone.** A revision replaces the set, so
+      without this gate a nightly re-run would overwrite work somebody did by hand. The
+      file half above expresses the same rule by filing to
+      ``ios_landmarks_prediction``; this is that rule, on the record.
+    - **Nothing here can fail the job.** A malformed document, a project with the method
+      switched off, or a patient whose scan pair is gone are all reasons not to write
+      landmarks -- and none of them is a reason to fail a completion the runner will retry
+      forever against a gate that will not move. Phase 5 took the same line for
+      segmentation.
+
+    Reading the object here is a download on the runner-callback path, which
+    ``CONTRIBUTING`` would normally push into a management command. It is accepted because
+    a landmark document is kilobytes and this callback already fetched the same object to
+    hash it -- not as licence for the next reader.
+    """
+    from annotations.adapters.ios_landmarks import by_jaw, normalize_worker_document
+    from annotations.constants import AnnotationOrigin
+    from annotations.services.ios_landmarks import ios_landmarks_state, save_ios_landmarks
+    from maxillo.ios_meshes import current_ios_pair
+
+    try:
+        state = ios_landmarks_state(patient, domain_field="patient")
+        if state["everAnnotated"]:
+            logger.info(
+                "Patient %s has hand-placed IOS landmarks; leaving the record alone",
+                patient.patient_id,
+            )
+            return
+        pair = current_ios_pair(patient)
+        if not pair:
+            logger.warning(
+                "No complete IOS scan pair for patient %s; predicted landmarks have no "
+                "mesh to be coordinates against",
+                patient.patient_id,
+            )
+            return
+
+        handle, _ = open_binary(landmark_path)
+        try:
+            payload = json.loads(handle.read().decode("utf-8"))
+        finally:
+            with contextlib.suppress(Exception):
+                handle.close()
+        document = normalize_worker_document(payload, patient_id=patient.patient_id)
+        if not document:
+            return
+        jaws = by_jaw(document)
+        save_ios_landmarks(
+            patient,
+            meshes=[
+                {"file_obj": pair[jaw], "jaw": jaw, "landmarks": jaws[jaw]}
+                for jaw in ("upper", "lower")
+            ],
+            author=None,
+            # No concurrent editor to lose a race to; this is an import.
+            expected_revision=state["revision"] or None,
+            origin=AnnotationOrigin.PREDICTION,
+            note=f"job:{job.id}",
+        )
+    except Exception:
+        logger.exception(
+            "Could not record predicted IOS landmarks for patient %s", patient.patient_id
+        )
+
+
 def mark_job_completed(job_id, output_files, logs=None):
     """
     Mark a processing job as completed and register output files.
@@ -1209,7 +1287,8 @@ def mark_job_completed(job_id, output_files, logs=None):
                             "processed_at": timezone.now().isoformat(),
                         },
                     }
-                    if active and (active.metadata or {}).get("origin") != "ai":
+                    human_edited = (active and (active.metadata or {}).get("origin") != "ai")
+                    if human_edited:
                         FileRegistry.objects.update_or_create(
                             file_path=landmark_path,
                             defaults={**defaults, "file_type": "ios_landmarks_prediction"},
@@ -1221,6 +1300,7 @@ def mark_job_completed(job_id, output_files, logs=None):
                             file_path=landmark_path,
                             defaults={**defaults, "file_type": "ios_landmarks"},
                         )
+                    _record_predicted_landmarks(job_patient, landmark_path, job)
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")

@@ -27,8 +27,6 @@ from django.core.exceptions import ValidationError
 
 from annotations.adapters.image_edit_replay import transform_teeth
 from annotations.adapters.tooth_segmentation import (
-    FDI_SCHEMA_SLUG,
-    FDI_SCHEMA_VERSION,
     SEGMENTATION_KIND,
     teeth_from_items,
     tooth_polygons,
@@ -39,8 +37,10 @@ from annotations.constants import (
     CoordinateSystem,
     ResourceKind,
 )
-from annotations.models import LabelSchema
 from annotations.services.exceptions import AnnotationConflict
+# Re-exported: this was `fdi_schema`'s home until IOS landmarks became a second caller,
+# and the import path is part of this module's surface.
+from annotations.services.labels import fdi_schema
 from annotations.services.viewer import save_measurement_groups
 from common.models import AnnotationMethod
 
@@ -62,24 +62,6 @@ def segmentation_method():
     than a reason to refuse every save.
     """
     return AnnotationMethod.objects.filter(slug=SEGMENTATION_METHOD_SLUG).first()
-
-
-def fdi_schema():
-    """The seeded FDI vocabulary.
-
-    Refused loudly rather than created on demand: the integers are frozen by
-    ``UniqueConstraint(schema, value)`` and a schema conjured at runtime would get a
-    numbering nobody reviewed, under the same slug, meaning something else.
-    """
-    schema = LabelSchema.objects.filter(
-        slug=FDI_SCHEMA_SLUG, version=FDI_SCHEMA_VERSION
-    ).first()
-    if schema is None:
-        raise ValidationError(
-            f"the {FDI_SCHEMA_SLUG} v{FDI_SCHEMA_VERSION} label schema is missing; it is "
-            "seeded by annotations/migrations/0002 and must not be created at runtime"
-        )
-    return schema
 
 
 #: The target role this surface anchors under.

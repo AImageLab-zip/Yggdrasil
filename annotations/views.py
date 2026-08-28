@@ -38,6 +38,11 @@ from annotations.services import (
     save_measurements,
 )
 from annotations.constants import AnnotationStatus, PayloadFormat, ResourceKind
+from annotations.services.ios_landmarks import (
+    JAWS,
+    ios_landmarks_state,
+    save_ios_landmarks,
+)
 from annotations.services.segmentation import (
     save_tooth_segmentation,
     tooth_segmentation_state,
@@ -558,6 +563,161 @@ def tooth_segmentation_state_api(request, patient_id):
             "confirmations": {
                 str(key): value for key, value in state["confirmations"].items()
             },
+            "updatedAt": updated_at.isoformat() if updated_at else None,
+        }
+    )
+
+
+@login_required
+@require_POST
+def save_ios_landmarks_api(request, patient_id):
+    """Replace this patient's IOS landmarks with what is currently on screen.
+
+    Body::
+
+        {
+          "expectedRevision": 4,
+          "meshes": [
+            {"jaw": "upper", "landmarks": {"11": {"incisal": [x, y, z],
+                                                  "cusps": [[x, y, z], ...]}}}
+          ]
+        }
+
+    Replace-the-set per jaw. A jaw omitted from the body is carried forward by the server,
+    and an empty ``landmarks`` map is how a deletion is expressed -- so a client clearing a
+    tooth must send the jaw it cleared, not just the jaws it still has points on.
+
+    **The client does not name the mesh.** It names the arch, and the server resolves the
+    ``FileRegistry`` row the viewer would serve for that arch today. Landmarks are stored
+    in one mesh's own object space, so an anchor the client could choose is an anchor a
+    stale or malicious client could get wrong -- and the resulting points would be
+    coordinates against geometry nobody was looking at, with nothing in the record to say
+    so. There is no ``fileId`` in this body on purpose.
+    """
+    from maxillo.ios_meshes import current_ios_pair
+
+    Patient = _patient_model(request)
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+
+    can_write = bool(
+        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
+    ) or user_is_project_admin(request.user, request)
+    if not can_write:
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Malformed JSON body"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Body must be a JSON object"}, status=400)
+
+    expected_revision = body.get("expectedRevision")
+    if expected_revision is not None and (
+        not isinstance(expected_revision, int) or isinstance(expected_revision, bool)
+    ):
+        return JsonResponse(
+            {"error": "expectedRevision must be an integer or null"}, status=400
+        )
+
+    entries = body.get("meshes")
+    if not isinstance(entries, list) or not entries:
+        return JsonResponse({"error": "meshes must be a non-empty list"}, status=400)
+
+    pair = current_ios_pair(patient)
+    if not pair:
+        # No complete pair means there is no geometry these coordinates could be *about*.
+        # Refusing beats writing points whose frame nothing can reconstruct.
+        return JsonResponse(
+            {"error": "This patient has no complete pair of IOS scans to anchor landmarks to."},
+            status=409,
+        )
+
+    meshes = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return JsonResponse({"error": f"meshes[{index}] must be an object"}, status=400)
+        jaw = entry.get("jaw")
+        if jaw not in JAWS:
+            return JsonResponse(
+                {"error": f"meshes[{index}].jaw must be one of {list(JAWS)}"}, status=400
+            )
+        meshes.append(
+            {
+                "file_obj": pair[jaw],
+                "jaw": jaw,
+                "landmarks": entry.get("landmarks"),
+                "descriptor": entry.get("meshDescriptor") or {},
+            }
+        )
+
+    try:
+        revision = save_ios_landmarks(
+            patient,
+            meshes=meshes,
+            author=request.user,
+            expected_revision=expected_revision,
+        )
+    except AnnotationConflict as exc:
+        return JsonResponse({"error": str(exc), "conflict": True}, status=409)
+    except AnnotationNotAllowed as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except ValidationError as exc:
+        # An adapter or label refusal: an unknown FDI code, a tooth in the wrong jaw, a
+        # malformed point. Nothing was written -- the translation runs before the first row.
+        return JsonResponse({"error": _first_message(exc)}, status=400)
+
+    return JsonResponse(
+        {
+            "revision": revision.revision_number,
+            "setId": revision.annotation_set_id,
+            "teeth": sum(len(mesh["landmarks"] or {}) for mesh in meshes),
+            # Which row each arch was anchored to, echoed so the client can tell that the
+            # mesh it drew on is the mesh the server filed against. A mismatch here is the
+            # one failure this design cannot rule out: the pair can change between the
+            # viewer loading and the save landing.
+            "meshes": {mesh["jaw"]: mesh["file_obj"].id for mesh in meshes},
+        }
+    )
+
+
+@login_required
+def ios_landmarks_state_api(request, patient_id):
+    """The landmarks to draw, and the revision a save must quote.
+
+    Keyed by arch and then FDI code, rebuilt from the canonical items. There is no scratch
+    payload for this surface: a landmark *is* a point, so the items are the whole truth.
+
+    ``meshes`` reports the pair these coordinates are to be interpreted against, which is
+    what the viewer loads. A client that rendered points from this response against any
+    other geometry would be drawing them in the wrong place.
+    """
+    from maxillo.ios_meshes import current_ios_pair
+
+    Patient = _patient_model(request)
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        (patient.folder and user_can_read_folder(request.user, patient.folder, request))
+        or user_is_project_admin(request.user, request)
+    ):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+
+    domain_field = {
+        "maxillo": "patient",
+        "brain": "brain_patient",
+        "laparoscopy": "laparoscopy_patient",
+    }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
+
+    state = ios_landmarks_state(patient, domain_field=domain_field)
+    updated_at = state.get("updatedAt")
+    pair = current_ios_pair(patient)
+    return JsonResponse(
+        {
+            "revision": state["revision"],
+            "setId": state["setId"],
+            "everAnnotated": state["everAnnotated"],
+            "jaws": state["jaws"],
+            "meshes": {jaw: pair[jaw].id for jaw in JAWS} if pair else {},
             "updatedAt": updated_at.isoformat() if updated_at else None,
         }
     )

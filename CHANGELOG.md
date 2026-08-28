@@ -114,6 +114,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:not(.has-selected-image)` CSS gate belonging to the sidebar editor this replaces, and
     nothing set that class any more, so `display: none` applied unconditionally: no tooth
     could be selected and no undo, redo or `Mark done` could be reached.
+- **IOS dental landmarks are annotation records, not a JSON document in object storage**
+  (roadmap Phase 6, decision #20). Landmarks now write through
+  `annotations.services.ios_landmarks` as `SpatialAnnotation3DItem` rows, on the same
+  machinery measurements and tooth polygons already use. **No migration**: `ios_landmarks`
+  was already an `AnnotationSet.kind`, the 3D point/plane model already existed, and the
+  FDI code already resolves against the `fdi-permanent` vocabulary seeded by
+  `annotations/migrations/0002` -- the landmark *type* travels in `attributes`, because the
+  single label slot is spent on the tooth, which is what decides the code a point is
+  exported under.
+  - **The mesh is named, and the model insists on it.** Landmark coordinates are
+    `resource_local` -- one STL's own object space -- and `add_spatial_3d` refuses to write
+    that frame without a resolved target resource. So each arch gets its own target
+    (`mesh_upper` / `mesh_lower`) pointing at the scan row the viewer actually serves. This
+    is the gap `annotations_materialize_landmarks` records against
+    `role='landmark_document'`: the legacy artifact named the *patient* and never the mesh,
+    which left every stored coordinate interpreted against geometry nobody had written
+    down. A converted study still reads correctly -- the reader groups by the arch the FDI
+    code implies, not by the target's role -- and its first live save re-anchors it, so
+    there is no backfill command and no second read path. The save names the old anchor
+    explicitly rather than leaving it untouched, because a target a save does not name has
+    its items *carried forward*: a converted study would otherwise have ended up holding
+    both copies, and while single-point types survive that, `cusps` and `planar` are lists
+    the reader appends to and would have silently doubled on the first edit. A save naming
+    one arch still leaves the other where it was, so a partial save cannot delete landmarks
+    the client never sent.
+  - **Which mesh a landmark was picked against is unknowable for the pre-Phase-6 corpus,
+    and is left that way.** Whether the viewer serves the raw or the re-oriented STL is
+    `prefer_processed_for_viewer`, an admin-editable flag; the two are different geometry,
+    so flipping it re-frames every landmark stored against the other one. Recording the
+    mesh fixes this from here on. Nothing repairs the existing corpus, and a best-effort
+    re-anchor would file a guess as the anchor.
+  - **Saves are concurrency-checked.** The legacy `PUT` replaced the whole document and
+    handed back a `file_id` the client discarded, so two annotators on one patient
+    silently clobbered each other; `expectedRevision` now makes the loser a 409. The client
+    also no longer names the mesh -- it names the arch and the server resolves the row, so
+    a stale viewer cannot file points against geometry nobody was looking at.
+  - **The export renders the document from the record** rather than streaming a stored
+    one. `ios.landmarks` became a collector; the bytes keep the legacy framing (bare
+    document, `separators=(",", ":")`, the same `ios_landmarks_patient_<id>.json`
+    filename). One honest difference: keys come out sorted where the legacy file preserved
+    the browser's insertion order. `ios.landmarks_prediction` stays a file artifact,
+    because that one really is model output arriving over the frozen runner API.
+  - The "Has IOS landmarks" filter -- written twice, in `common/export_catalog.py` and
+    `maxillo/views/patient_list.py` -- is now one function in `annotations/queries.py`. It
+    also stopped answering the wrong question: `files__file_type='ios_landmarks'` is true
+    for a patient whose every landmark has been deleted, because the file row survives as
+    history.
+  - The landmark prediction job writes through the service too, with
+    `origin=PREDICTION`, so model output never sets the monotonic `ever_annotated` flag and
+    a nightly re-run cannot overwrite work somebody placed by hand.
 
 ### Changed
 - **`Calibrate` is part of annotation mode now, on every 2D surface.** It only does

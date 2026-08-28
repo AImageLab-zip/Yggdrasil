@@ -196,7 +196,13 @@ def patient_list(request):
         patients = patients.filter(classifications__isnull=False).distinct()
 
     if namespace == 'maxillo' and has_landmarks_filter == 'yes':
-        patients = patients.filter(files__file_type='ios_landmarks').distinct()
+        # From `annotations/`, for the same reason the segmentation filter below is:
+        # landmarks are written through `annotations.services.ios_landmarks` now, and the
+        # `ios_landmarks` file row survives as history after the last point on it is
+        # deleted. Shared with the export builder's copy -- see annotations/queries.py.
+        from annotations.queries import with_ios_landmarks
+
+        patients = with_ios_landmarks(patients).distinct()
 
     if namespace == 'maxillo' and has_segmentation_filter == 'yes':
         # From `annotations/`: both writers of `IntraoralToothSegmentation` now go through

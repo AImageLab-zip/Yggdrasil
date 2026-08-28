@@ -6,6 +6,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
+from annotations.services.ios_landmarks import save_ios_landmarks
 from annotations.services.segmentation import save_tooth_segmentation
 from common import export_catalog, export_ui
 from common.export_processing import ExportProcessor
@@ -618,3 +619,147 @@ class ToothSegmentationExportTests(TestCase):
         )
         self.assertEqual(file_count, len(self._documents()))
         self.assertEqual(file_count, 2)
+
+
+class IosLandmarkExportTests(TestCase):
+    """The landmark document must survive moving out of object storage.
+
+    `ios.landmarks` used to be a file-backed artifact: the export streamed the JSON the
+    legacy `PUT` had written into Garage. Decision #20 makes the annotation record
+    canonical, so the export now *renders* the document instead. Whoever downloads an
+    export must not be able to tell.
+
+    What is pinned here is the framing the legacy writer used --
+    `json.dumps(document, separators=(",", ":"), ensure_ascii=True)`, bare document, and
+    the `ios_landmarks_patient_<id>.json` filename -- plus the fact that the predicted
+    variant is still a *file* artifact, because that one genuinely is model output
+    arriving over the frozen runner API.
+    """
+
+    DOCUMENT = {
+        "9801_upper_FDI_11": {
+            "incisal": [1.5, -2.25, 3.125],
+            "cusps": [[1.1, -2.1, 3.1], [1.2, -2.2, 3.2]],
+        },
+        "9801_lower_FDI_31": {"gingival": [7.5, -8.25, 9.125]},
+    }
+
+    def setUp(self):
+        self.ios = _modality("ios", "IOS")
+        self.project = Project.objects.create(
+            name="LmExport", slug="lm-export", domain="maxillo"
+        )
+        self.project.modalities.set([self.ios])
+        self.project.annotation_methods.set([_method("ios_landmarks", "IOS Landmarks")])
+        self.folder = Folder.objects.create(name="Root", project=self.project)
+        self.patient = Patient.objects.create(
+            patient_id=9801, name="Lm", project=self.project, folder=self.folder
+        )
+        self.upper = self._mesh("ios_raw_upper", "upper.stl", "a")
+        self.lower = self._mesh("ios_raw_lower", "lower.stl", "b")
+
+    def _mesh(self, file_type, name, hash_char):
+        return FileRegistry.objects.create(
+            patient=self.patient,
+            domain="maxillo",
+            file_type=file_type,
+            file_path=f"maxillo/ios/{name}",
+            file_size=4,
+            file_hash=hash_char * 64,
+        )
+
+    def _save(self):
+        save_ios_landmarks(
+            self.patient,
+            meshes=[
+                {
+                    "file_obj": self.upper,
+                    "jaw": "upper",
+                    "landmarks": {"11": self.DOCUMENT["9801_upper_FDI_11"]},
+                },
+                {
+                    "file_obj": self.lower,
+                    "jaw": "lower",
+                    "landmarks": {"31": self.DOCUMENT["9801_lower_FDI_31"]},
+                },
+            ],
+        )
+
+    def _documents(self):
+        export = Export(
+            user=None, query_params={"domain": "maxillo", "artifacts": ["ios.landmarks"]}
+        )
+        processor = ExportProcessor(export, domain="maxillo")
+        artifact = export_catalog.resolve_artifacts("maxillo", ["ios.landmarks"])[0]
+        return [
+            (entry["filename"], entry["content"])
+            for entry, _size in processor._collect_ios_landmarks(self.patient, artifact)
+        ]
+
+    def test_the_rendered_document_is_what_the_legacy_file_held(self):
+        self._save()
+        [(filename, content)] = self._documents()
+        self.assertEqual(filename, "ios_landmarks_patient_9801.json")
+        self.assertEqual(json.loads(content), self.DOCUMENT)
+
+    def test_the_bytes_are_framed_the_way_the_legacy_writer_framed_them(self):
+        self._save()
+        [(_filename, content)] = self._documents()
+        # Keys sorted, which is the one documented difference from the legacy file: it
+        # preserved whatever insertion order the browser sent. Same framing otherwise.
+        expected = {key: self.DOCUMENT[key] for key in sorted(self.DOCUMENT)}
+        self.assertEqual(
+            content, json.dumps(expected, separators=(",", ":"), ensure_ascii=True)
+        )
+
+    def test_a_patient_with_no_landmarks_yields_nothing_rather_than_an_empty_file(self):
+        self.assertEqual(self._documents(), [])
+
+    def test_deleting_every_landmark_removes_the_document(self):
+        # The file row survives as history; the export must not.
+        self._save()
+        save_ios_landmarks(
+            self.patient,
+            meshes=[
+                {"file_obj": self.upper, "jaw": "upper", "landmarks": {}},
+                {"file_obj": self.lower, "jaw": "lower", "landmarks": {}},
+            ],
+            expected_revision=1,
+        )
+        self.assertEqual(self._documents(), [])
+
+    def test_the_landmarks_artifact_is_a_collector_and_the_prediction_stays_a_file(self):
+        artifacts = {a.key: a for a in export_catalog.artifacts_for_domain("maxillo")}
+        self.assertEqual(artifacts["ios.landmarks"].collector, "ios_landmarks")
+        self.assertFalse(artifacts["ios.landmarks"].is_file_backed)
+        self.assertTrue(artifacts["ios.landmarks_prediction"].is_file_backed)
+        self.assertEqual(
+            list(artifacts["ios.landmarks_prediction"].file_types), ["ios_landmarks_prediction"]
+        )
+
+    def test_the_has_landmarks_filter_reads_the_record_not_the_file_row(self):
+        # A file row with no landmarks left on it is history, and the filter means "does
+        # this patient still have landmarks".
+        FileRegistry.objects.create(
+            patient=self.patient,
+            domain="maxillo",
+            file_type="ios_landmarks",
+            file_path="maxillo/processed/ios/ios_landmarks_patient_9801.json",
+            file_size=4,
+            file_hash="d" * 64,
+        )
+        self.assertFalse(
+            export_catalog.apply_filters(
+                Patient.objects.filter(pk=self.patient.pk),
+                "maxillo",
+                {"annotation_landmarks": "yes"},
+            ).exists()
+        )
+        self._save()
+        self.assertTrue(
+            export_catalog.apply_filters(
+                Patient.objects.filter(pk=self.patient.pk),
+                "maxillo",
+                {"annotation_landmarks": "yes"},
+            ).exists()
+        )

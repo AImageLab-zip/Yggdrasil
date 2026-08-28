@@ -2,7 +2,8 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from common.models import FileRegistry, Project, ProjectAccess
+from annotations.services.ios_landmarks import save_ios_landmarks
+from common.models import AnnotationMethod, FileRegistry, Project, ProjectAccess
 from maxillo.models import Classification, Folder, Patient
 
 
@@ -44,13 +45,35 @@ class MaxilloPatientListFiltersTests(TestCase):
             transverse="normal",
             midline="centered",
         )
-        FileRegistry.objects.create(
-            patient=landmarked,
-            domain="maxillo",
-            file_type="ios_landmarks",
-            file_path="maxillo/tests/landmarks.json",
-            file_size=2,
-            file_hash="0" * 64,
+        # Landmarks live in `annotations/` now (decision #20), so presence is a question
+        # about the record rather than about an object in storage. The two differ for a
+        # patient whose every landmark was deleted: the file row survives as history and
+        # the filter should not find it.
+        self.project.annotation_methods.add(
+            AnnotationMethod.objects.get_or_create(
+                slug="ios_landmarks", defaults={"name": "IOS Landmarks"}
+            )[0]
+        )
+        meshes = {
+            jaw: FileRegistry.objects.create(
+                patient=landmarked,
+                domain="maxillo",
+                file_type=f"ios_raw_{jaw}",
+                file_path=f"maxillo/ios/{jaw}.stl",
+                file_size=2,
+                file_hash=str(index) * 64,
+            )
+            for index, jaw in enumerate(("upper", "lower"))
+        }
+        save_ios_landmarks(
+            landmarked,
+            meshes=[
+                {
+                    "file_obj": meshes["upper"],
+                    "jaw": "upper",
+                    "landmarks": {"11": {"incisal": [1.0, 2.0, 3.0]}},
+                }
+            ],
         )
 
         bite_response = self.client.get(reverse("maxillo:patient_list"), {"has_bite_classification": "yes"})

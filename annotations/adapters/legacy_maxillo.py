@@ -11,118 +11,39 @@ rather than being dropped, so ``annotations_crosscheck`` can compare the two
 representations field by field.
 """
 
-import re
-
 from django.core.exceptions import ValidationError
 
 from annotations.adapters import descriptors
+from annotations.adapters import ios_landmarks as _ios
 from annotations.adapters.tooth_segmentation import tooth_polygons
 from annotations.constants import (
     CoordinateSystem,
     Geometry2DType,
-    Geometry3DType,
     SliceAxis,
 )
 
-#: ``<patient_id>_<jaw>_FDI_<tooth>``, the key format
-#: ``maxillo.views.patient_data`` validates on every save.
-LANDMARK_KEY_RE = re.compile(r"^(\d+)_(upper|lower)_FDI_(\d{2})$")
-
-#: Landmark entries holding a single point.
-LANDMARK_POINT_TYPES = frozenset(
-    {"incisal", "outer", "bracket", "gingival", "mesial", "distal", "inner", "facial"}
-)
-#: Landmark entries holding a list of points.
-LANDMARK_MULTI_POINT_TYPES = frozenset({"cusps", "planar"})
-#: The four named vectors of a tooth's base plane.
-LANDMARK_PLANE_KEYS = ("origin", "xAxis", "yAxis", "zAxis")
+#: Re-exported from :mod:`annotations.adapters.ios_landmarks`, which owns the landmark
+#: conversion now that the live editor calls it too. Kept importable from here because
+#: ``annotations_materialize_landmarks`` and the existing tests reach for them by this path.
+LANDMARK_KEY_RE = _ios.LANDMARK_KEY_RE
+LANDMARK_POINT_TYPES = _ios.LANDMARK_POINT_TYPES
+LANDMARK_MULTI_POINT_TYPES = _ios.LANDMARK_MULTI_POINT_TYPES
+LANDMARK_PLANE_KEYS = _ios.LANDMARK_PLANE_KEYS
 
 
 def ios_landmarks(document, *, patient_id):
     """Convert the IOS landmark JSON document into 3D descriptors.
 
-    The frame is ``resource_local``, not a patient frame. These points come out
-    of ``worldToLocal`` against a specific mesh: they are coordinates in that
-    mesh's own object space, and the mesh has no registration to the patient.
-    Recording them as ``patient_lps_mm`` would be a false statement that a later
-    fusion or export would act on.
+    Delegates to :func:`annotations.adapters.ios_landmarks.ios_landmarks`, which is also
+    what the live editor calls. That is the point rather than tidiness: decision #6 keeps
+    the legacy artifact readable for one release as a cross-check, and
+    ``annotations_crosscheck`` compares the two representations. Two implementations of
+    this conversion would drift, and the drift would surface as the cross-check reporting
+    differences on every study anybody had edited -- burying the signal it exists to give.
 
-    Each tooth's ``basePlane`` becomes one ``plane`` item from its origin and
-    two axis endpoints, with the third axis kept in ``attributes`` -- the model
-    stores a plane as three points, and z is derivable but not identical to a
-    recomputed cross product once floats are involved, so it is preserved rather
-    than reconstructed.
+    The frame is ``resource_local``, not a patient frame; the reasoning is in that module.
     """
-    if not isinstance(document, dict):
-        raise ValidationError("the landmark document must be a JSON object")
-
-    out = []
-    for key in sorted(document):
-        match = LANDMARK_KEY_RE.match(str(key))
-        if not match:
-            raise ValidationError(f"landmark key {key!r} is not in the FDI format")
-        if match.group(1) != str(patient_id):
-            raise ValidationError(
-                f"landmark key {key!r} belongs to patient {match.group(1)}, not {patient_id}"
-            )
-        jaw, tooth = match.group(2), match.group(3)
-        entry = document[key]
-        if not isinstance(entry, dict):
-            raise ValidationError(f"landmark entry {key!r} must be an object")
-
-        shared = {"jaw": jaw, "fdi": tooth, "legacy_key": key}
-
-        for name in sorted(LANDMARK_POINT_TYPES & set(entry)):
-            out.append(
-                descriptors.spatial_3d(
-                    geometry_type=Geometry3DType.POINT,
-                    coordinate_system=CoordinateSystem.RESOURCE_LOCAL,
-                    points=[list(entry[name])],
-                    label_code=tooth,
-                    attributes={**shared, "landmark": name},
-                )
-            )
-
-        for name in sorted(LANDMARK_MULTI_POINT_TYPES & set(entry)):
-            points = entry[name]
-            if not isinstance(points, list):
-                raise ValidationError(f"{key}.{name} must be a list of points")
-            # One item per point rather than a polyline: cusps are unordered
-            # landmarks that happen to be stored in a list, and a polyline would
-            # assert an order and a connectivity the original never had.
-            for index, point in enumerate(points):
-                out.append(
-                    descriptors.spatial_3d(
-                        geometry_type=Geometry3DType.POINT,
-                        coordinate_system=CoordinateSystem.RESOURCE_LOCAL,
-                        points=[list(point)],
-                        label_code=tooth,
-                        order=index,
-                        attributes={**shared, "landmark": name, "index": index},
-                    )
-                )
-
-        plane = entry.get("basePlane")
-        if plane is not None:
-            if not isinstance(plane, dict) or set(plane) != set(LANDMARK_PLANE_KEYS):
-                raise ValidationError(
-                    f"{key}.basePlane must hold exactly {list(LANDMARK_PLANE_KEYS)}"
-                )
-            out.append(
-                descriptors.spatial_3d(
-                    geometry_type=Geometry3DType.PLANE,
-                    coordinate_system=CoordinateSystem.RESOURCE_LOCAL,
-                    points=[
-                        list(plane["origin"]),
-                        list(plane["xAxis"]),
-                        list(plane["yAxis"]),
-                    ],
-                    label_code=tooth,
-                    attributes={**shared, "landmark": "basePlane", "zAxis": list(plane["zAxis"])},
-                )
-            )
-
-    return out
+    return _ios.ios_landmarks(document, patient_id=patient_id)
 
 
 def intraoral_segmentation(teeth):

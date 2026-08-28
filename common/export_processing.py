@@ -323,6 +323,7 @@ class ExportProcessor:
             "captions": self._collect_captions,
             "occlusion": self._collect_occlusion,
             "tooth_segmentation": self._collect_tooth_segmentation,
+            "ios_landmarks": self._collect_ios_landmarks,
         }.get(artifact.collector)
         if producer is None:
             logger.warning("No collector registered for artifact %s", artifact.key)
@@ -370,6 +371,44 @@ class ExportProcessor:
                 "artifact": artifact,
                 "content": content,
                 "filename": artifact.filename or "classification.json",
+            },
+            len(content.encode("utf-8")),
+        )
+
+    def _collect_ios_landmarks(self, patient, artifact):
+        """The IOS landmark document, rendered from ``annotations/``.
+
+        Decision #20: sparse annotations are MySQL rows, and the export *produces* the
+        document rather than reading a stored one back. The `ios_landmarks` FileRegistry
+        rows survive as read-only history for the cross-check release, but they stop being
+        updated the moment anybody places a landmark, so an export reading them would
+        quietly serve the points that were there before.
+
+        **The bytes are framed exactly as the legacy `PUT` framed them** -- bare document,
+        `separators=(",", ":")`, `ensure_ascii=True`, and the same
+        `ios_landmarks_patient_<id>.json` filename -- so a consumer parsing these exports
+        cannot tell the storage moved. One honest difference: the keys and each tooth's
+        types now come out sorted, where the legacy file preserved whatever insertion order
+        the browser happened to send. The document is a JSON object, so that is not a change
+        to its meaning, but it is a change to its bytes and is not worth pretending away.
+        """
+        if self.domain != "maxillo":
+            return
+        from annotations.services.ios_landmarks import ios_landmarks_state
+
+        state = ios_landmarks_state(patient, domain_field="patient")
+        document = state["document"]
+        if not document:
+            return
+
+        content = json.dumps(document, separators=(",", ":"), ensure_ascii=True)
+        yield (
+            {
+                "type": "document",
+                "patient": patient,
+                "artifact": artifact,
+                "content": content,
+                "filename": f"ios_landmarks_patient_{patient.patient_id}.json",
             },
             len(content.encode("utf-8")),
         )

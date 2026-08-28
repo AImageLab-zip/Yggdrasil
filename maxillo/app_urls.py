@@ -302,4 +302,19 @@ urlpatterns = [
         annotations_views.tooth_segmentation_state_api,
         name="api_tooth_segmentation_state",
     ),
+    # IOS landmarks, through the same services again. These replace the whole-document
+    # `PUT` at `api/patient/<id>/ios/landmarks/` (decision #20), which stays until the
+    # viewer moves across in the next PR. Note the URL names the patient and the work, and
+    # carries no mesh id: the arch is in the body and the server resolves the geometry,
+    # because a landmark's coordinates are only meaningful against one specific mesh.
+    path(
+        "api/patients/<int:patient_id>/ios-landmarks/",
+        annotations_views.save_ios_landmarks_api,
+        name="api_save_ios_landmarks",
+    ),
+    path(
+        "api/patients/<int:patient_id>/ios-landmarks/state/",
+        annotations_views.ios_landmarks_state_api,
+        name="api_ios_landmarks_state",
+    ),
 ]

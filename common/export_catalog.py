@@ -256,9 +256,12 @@ _MAXILLO_ARTIFACTS = [
         # ios_processed with subtype='upper'/'lower'. Both are exported.
         file_types=["ios_processed_upper", "ios_processed_lower", "ios_processed"],
     ),
+    # Rendered from the annotation record, not read back from a stored document
+    # (decision #20). The `ios_landmarks` FileRegistry rows survive as read-only history
+    # for the cross-check release; the export stopped reading them.
     Artifact(
         "ios.landmarks", "ios", "Tooth landmarks", BUCKET_DERIVED,
-        file_types=["ios_landmarks"], zip_dir="ios/landmarks",
+        collector="ios_landmarks", zip_dir="ios/landmarks",
     ),
     Artifact(
         "ios.landmarks_prediction", "ios", "Predicted tooth landmarks", BUCKET_DERIVED,
@@ -689,7 +692,12 @@ def _filter_has_annotation(patients, domain, suffix):
     if suffix == "bite_classification":
         return patients.filter(files__file_type="bite_classification")
     if suffix == "landmarks":
-        return patients.filter(files__file_type="ios_landmarks")
+        # From `annotations/`, not `files__file_type`: the file row survives as history
+        # after every landmark on it has been deleted, so asking object storage answers
+        # "was this ever annotated" where the filter means "does it still have landmarks".
+        from annotations.queries import with_ios_landmarks
+
+        return with_ios_landmarks(patients)
     if suffix == "tooth_segmentation":
         # From `annotations/`, not the legacy `intraoral_segmentations` reverse FK: the
         # editor and the segmentation job both write through
