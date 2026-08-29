@@ -173,3 +173,35 @@ class DicomInstance(models.Model):
                     "be written."
                 )
         return super().save(*args, **kwargs)
+
+
+def series_for_resource(source_resource):
+    """The :class:`DicomSeries` an annotation resource is anchored to, or ``None``.
+
+    Two ways in, and asking only the first is what F21 was. ``common.dicom.ingest``
+    registers a ``SourceResource`` of kind ``dicom_series`` carrying the
+    ``SeriesInstanceUID``, but the *viewer* never reaches it: the volume grid saves
+    through ``annotations.views``, which registers a ``logical_volume`` against the
+    ``FileRegistry`` row because a grid knows a file id and nothing else. So a
+    measurement drawn on a real DICOM series is anchored to a resource whose
+    ``series_instance_uid`` is blank, and code that asks that column alone answers "not
+    DICOM" on every study a user has actually annotated.
+
+    The ``FileRegistry`` row is the bridge, and it is one row rather than two by
+    construction: ``register_dicom_series`` sets ``file`` deliberately, so that the
+    authorization funnel and the raw-data lock both reach a series the ordinary way.
+
+    Lives here rather than in ``common.interop`` because the seal needs the same answer
+    and ``annotations`` must not import an interchange package to get it.
+    """
+    if source_resource is None:
+        return None
+    uid = (getattr(source_resource, "series_instance_uid", "") or "").strip()
+    if uid:
+        series = DicomSeries.objects.filter(series_instance_uid=uid).first()
+        if series is not None:
+            return series
+    file_id = getattr(source_resource, "file_id", None)
+    if file_id:
+        return DicomSeries.objects.filter(file_id=file_id).first()
+    return None

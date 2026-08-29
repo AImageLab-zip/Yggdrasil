@@ -294,6 +294,35 @@ _MAXILLO_ARTIFACTS = [
         "teleradiography.processed", "teleradiography", "Processed image", BUCKET_PROCESSED,
         file_types=["teleradiography_processed"],
     ),
+    # --- Interchange (roadmap Phase 9) --------------------------------------
+    # Produced from the annotation record, and only where the annotations are anchored
+    # to a natively-stored DICOM series: SEG, SR and RTSTRUCT all reference source SOP
+    # instances, and a patient whose CBCT arrived as a .nii.gz has no DICOM identity to
+    # reference. Selecting these for such a patient yields nothing rather than a
+    # fabricated Secondary Capture series -- see common/interop/__init__.py.
+    Artifact(
+        "cbct.dicom_seg", "cbct", "Segmentation (DICOM SEG)", BUCKET_DERIVED,
+        collector="dicom_seg", zip_dir="interop",
+        description="Pipeline segmentation as DICOM SEG. Requires a natively-stored DICOM series.",
+    ),
+    Artifact(
+        "cbct.dicom_sr", "cbct", "Measurements (DICOM SR)", BUCKET_DERIVED,
+        collector="dicom_sr", zip_dir="interop",
+        description=(
+            "Measurements as a Comprehensive3DSR. Uncalibrated values stay uncalibrated: "
+            "they are reported in pixels with an explicit qualifier, never converted to mm. "
+            "Requires a natively-stored DICOM series."
+        ),
+    ),
+    Artifact(
+        "cbct.dicom_rtstruct", "cbct", "Contours (DICOM RTSTRUCT)", BUCKET_DERIVED,
+        collector="dicom_rtstruct", zip_dir="interop",
+        description=(
+            "Three-dimensional contours as an RT Structure Set. Boxes and spheres have no "
+            "RTSTRUCT primitive and are omitted rather than approximated. Requires a "
+            "natively-stored DICOM series."
+        ),
+    ),
     # --- Raw archive --------------------------------------------------------
     Artifact(
         "rawzip.raw", "rawzip", "Uploaded archive", BUCKET_RAW,

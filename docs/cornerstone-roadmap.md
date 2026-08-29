@@ -365,6 +365,39 @@ silently rendering plain MIP (port the splice test, do not delete it); and the b
 `0.018` constant means the result needs looking at on real studies whichever way it is
 implemented, which is F7's original requirement and is unchanged.
 
+**F21 — a lock that guarded the resource nothing writes.** Found in Phase 9, while
+building the same resolution the interop writers needed.
+
+Phase 8 added `DicomSeries.sealed_at` to close a gap the annotation lock cannot see: the
+lock refuses to add or remove a raw *`FileRegistry` row*, and a DICOM series is one row
+holding several hundred objects, so rewriting instance 137 in place re-bases every
+coordinate drawn on the volume without touching the row. `_seal_dicom_sources` set it at
+the same moment as `ever_annotated`, which is the right moment.
+
+It found the targets to seal by filtering `source_resource__kind=dicom_series` and
+reading `series_instance_uid` off the row. That is the resource `common/dicom/ingest.py`
+registers — and the only place that registers one. The volume grid saves through
+`annotations/views.py:_measurement_groups`, which always registers a `logical_volume`
+against the `FileRegistry` row, because a grid is handed a file id and nothing else. So
+on every study a human had actually annotated the filter matched zero targets, the seal
+never fired, and `DicomInstance.save()`'s refusal — the mechanism risk 11 is discharged
+by — was never armed.
+
+**Why the suite was green.** `common/tests_dicom_lifecycle.py` builds its annotation by
+calling `attach_target` with the ingest-side resource directly. That is a legal shape and
+it is the shape the seal was written for; it is simply not the shape any code path
+produces. The test proved the sealing *mechanism* worked and said nothing about whether
+anything reached it — which is the same class of gap as F13, where an export helper was
+correct and unreachable.
+
+The fix is in the catalog, not in either caller: `common.dicom.models.series_for_resource`
+asks the question both ways round — the UID when the resource carries one, otherwise the
+`FileRegistry` row, which is the same row for both because `register_dicom_series` sets
+`file` deliberately — and the seal asks it of *every* target. Whether there is DICOM
+under an annotation is a fact about the bytes, not about which registrar named them. It
+lives in `common/dicom/` rather than in `common/interop/` so that `annotations/` can ask
+it without importing an interchange package.
+
 ## Status
 
 | Phase | Scope | Status |
@@ -381,7 +414,7 @@ implemented, which is F7's original requirement and is unchanged.
 | 6 | IOS meshes + landmark tool (Three.js removed) | ✅ **done** (`release/3.0`) — PR 6.1 moved landmark storage into `annotations/` per decision #20; PR 6.2 (this commit) replaced the viewer. `modality_viewers/ios.js` (1539) and the three Three.js r128 CDN tags are **deleted**, so no page loads Three.js — the last of the four original frontend stacks. `VolumeViewport3D` + `cornerstoneMeshLoader`, `TrackballRotateTool`, `vtkCellPicker` for surface picking, vtk sphere actors for markers. Landmarks gained **redo**. The legacy endpoint and its normalisers are gone. **No migration in either PR.** 626 JS tests, 995 Django tests, 0 failures. **Still to do: the browser check** — the coordinate identity is proven as algebra and pinned against the shipped `Mesh.js`, but only a real study proves the wiring, and Phases 4 and 5 each shipped four defects the harness could not see |
 | 7 | Panoramic live CPR | 🟡 **built** (`release/3.0`) — PR 7.1 moved the arch into `annotations/` (no migration; an `auto` arch is prediction origin, so a warm-up run over a folder still cannot lock a cohort's raw data; a replaced CBCT is detected from the revision's `source_fingerprint` rather than by deleting anything). PR 7.2 replaced the viewer: `modality_viewers/cbct_panorex_editor.js` (924) and `imaging/grid/panoramicSource.js` (195) are **deleted**, the panoramic reads the CBCT from the shared Cornerstone cache, and the strip reformats live through `ImageCPRMapper` while the *saved* strip is still the CPU bake. 1025 Django tests, 659 JS tests, 0 failures. **Still to do: the browser check** — nothing here has rendered a pixel, and Phases 4, 5 and 6 each shipped four defects the harness could not see |
 | 8 | Native DICOM ingestion and serving | 🟡 **built** (`release/3.0`) — an uploaded DICOM stays DICOM: stored, de-identified by **whitelist**, cataloged (`DicomSeries`/`DicomInstance`, one additive migration), served to the viewer, and exported. The runner is handed the series prefix; per the maintainer's decision the cluster algorithms read DICOM, and no NIfTI is derived anywhere. **No `DicomUidMap`** — UIDs are HMAC-derived, so risk 16 stops existing rather than being mitigated. Viewer shares the whole NIfTI path (`dicomSeriesHeader` states a series in the terms `describeGeometry`/`openingVoi` already read). **F13 fixed** here rather than in Phase 9, because Phase 8 is what creates the prefix rows it silently drops. 1110 Django tests, 696 JS tests, 0 failures. **Still to do: the browser check** — nothing here has rendered a pixel |
-| 9 | Interop: SEG / RTSTRUCT / SR / Parametric Map | ⬜ not started |
+| 9 | Interop: SEG / RTSTRUCT / SR | ✅ **built** (`release/3.0`) — three export artifacts under `interop/`, written from the record by `common/interop/`. **Server-authoritative** and **DICOM-anchored**: all three reference source SOP instances, so a patient whose CBCT arrived as a `.nii.gz` contributes nothing rather than being given a fabricated Secondary Capture series. **Risk 13's premise was wrong** — highdicom has no RTSTRUCT writer at all, so the IOD is built against `pydicom` and every object is read back and its contours re-derived. An uncalibrated measurement stays in `{pixels}`; the "not calibrated" qualifier the plan asked for was **removed** on reading the standard, because (0040,A301) is CID 42 and says the value is unusable. **Parametric Map and browser-side import are deferred**, with reasons, to `cornerstone-future-work.md`. F21 fixed here. 1136 Django tests, 696 JS tests, 0 failures |
 | 10 | Laparoscopy video (Konva removed) | ⬜ not started |
 
 ## Phase 1 — Build toolchain and vendored bundle
@@ -1409,8 +1442,8 @@ streaming of a bundle containing a full DICOM series under gunicorn.
 | 9 | **De-identification is header-only** | ✅ discharged in Phase 8 — burned-in and Secondary Capture are *refused* at ingest, whole upload at a time; `deid_confidence` is `header_only` unless the header explicitly declares otherwise, and the field's help text says nothing may report more than it establishes. The keep-list approach is what makes `assert_no_phi` an assertion rather than a spot check |
 | 10 | **`discard_raw` bricks the DICOM viewer** (the raw row *is* the viewer source) | ✅ discharged in Phase 8 — guarded at ingest *and* in `ProcessingStep.clean()`, both tested |
 | 11 | **The lock is blind to per-instance mutation** | ✅ discharged in Phase 8 — `sealed_at` set at the same moment as `ever_annotated` (and, for the same reason, *not* by a prediction) + `DicomInstance.save()` refusal. `_lock_reasons` needed no change: it asks `ever_annotated` and knows nothing about file formats |
-| 12 | **Two SEG writers (dcmjs + highdicom) can disagree** | Cross-writer mask/geometry equivalence test + a committed browser-generated fixture |
-| 13 | **highdicom RTSTRUCT is less exercised than its SEG writer** | Verify before shipping; SEG/SR first |
+| 12 | **Two SEG writers (dcmjs + highdicom) can disagree** | ⬜ **not applicable as written** — the risk assumed a browser-side SEG writer, and Phase 9 ships export only, so there is one writer and nothing to cross-check. Recorded rather than ticked: it comes back the moment browser-side import lands (future-work) |
+| 13 | **highdicom RTSTRUCT is less exercised than its SEG writer** | ✅ discharged in Phase 9, and the premise was wrong: highdicom 0.28.1 has **no RTSTRUCT writer at all**. `common/interop/rtstruct.py` builds the IOD against `pydicom`, and `common/tests_interop.py` reads every written object back, re-derives its contours and compares them to the rows they came from — which is a stronger claim than trusting a writer |
 | 14 | **`validate_labelmap` is the only server-side voxel read** | Budget check *before* reading, from the already-validated header |
 | 15 | **F13 — prefix rows silently export nothing** | ✅ discharged in Phase 8 (not 9 — Phase 8 creates the rows) — `series` entry type + the panoramic-PNG regression test, both in `common/tests_dicom_lifecycle.py`. Also fixes folder uploads, which have always exported as nothing |
 | 16 | **`DicomUidMap` is a re-identification vector** | ✅ **removed rather than mitigated** in Phase 8 — the table does not exist. UIDs are derived as `HMAC(DICOM_UID_HMAC_KEY, original)` under the ISO `2.25` arc, so re-ingest is idempotent with no lookup table to leak. Rotating the key renames every series: a migration, not a maintenance task |

@@ -24,7 +24,6 @@ from annotations.constants import (
     AnnotationOrigin,
     AnnotationStatus,
     PayloadFormat,
-    ResourceKind,
 )
 from annotations.models import (
     AnnotationPayload,
@@ -210,20 +209,25 @@ def _seal_dicom_sources(annotation_set):
 
     Machine output does not seal, because it does not set ``ever_annotated``: a
     prediction over a series must not stop a correction being ingested later.
-    """
-    from common.dicom.models import DicomSeries
 
-    series_uids = list(
-        annotation_set.targets.filter(
-            source_resource__kind=ResourceKind.DICOM_SERIES
-        ).values_list("source_resource__series_instance_uid", flat=True)
-    )
-    if not series_uids:
-        return
-    for series in DicomSeries.objects.filter(
-        series_instance_uid__in=series_uids, sealed_at__isnull=True
-    ):
-        series.seal()
+    **F21: which targets count cannot be decided by resource kind.** This asked for
+    ``kind=dicom_series`` and read ``series_instance_uid`` off the target, which is the
+    resource ``common.dicom.ingest`` registers -- and the resource nothing else ever
+    writes. The volume grid saves through ``annotations.views``, which registers a
+    ``logical_volume`` against the ``FileRegistry`` row, so on every study a user has
+    actually annotated the filter matched nothing and the seal never fired. The suite
+    did not see it because its test attached the ingest-side resource by hand, which is
+    the one shape production never produces. ``series_for_resource`` asks the question
+    both ways round, and it is asked of *every* target, because "is there DICOM under
+    this annotation" is a fact about the bytes and not about which registrar named them.
+    """
+    from common.dicom.models import series_for_resource
+
+    targets = annotation_set.targets.select_related("source_resource")
+    for target in targets:
+        series = series_for_resource(target.source_resource)
+        if series is not None and series.sealed_at is None:
+            series.seal()
 
 
 @transaction.atomic

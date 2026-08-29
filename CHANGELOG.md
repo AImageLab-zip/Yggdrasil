@@ -8,6 +8,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Interchange export (roadmap Phase 9): the annotation record leaves as DICOM SEG,
+  SR and RTSTRUCT.** Server-authoritative, because `common/export_processing.py` has
+  no browser. Three new export artifacts under `interop/`, produced from the durable
+  record rather than from a stored document, in the shape decision #20 established.
+  Adds `highdicom`.
+  - **Only for annotations anchored to a natively-stored DICOM series, and that is a
+    design decision rather than a limitation to be worked around.** All three objects
+    reference source SOP instances — a SEG carries `ReferencedSeriesSequence` and
+    inherits the source's Frame of Reference, an RT Structure Set names one per ROI, an
+    SR's evidence is a list of composite objects. A patient whose CBCT arrived as a
+    `.nii.gz` has no DICOM identity to reference, and fabricating a Secondary Capture
+    series so the export had something to point at would file an invention as
+    provenance. Such a patient contributes no interop files, and the artifact
+    descriptions say so before anyone selects them.
+  - **An uncalibrated measurement stays uncalibrated, and the unit is what carries it.**
+    A length taken with no known pixel spacing is written in UCUM `{pixels}`, never
+    converted. The first draft also set a "not calibrated" code as the measurement's
+    qualifier; that maps onto **Numeric Value Qualifier (0040,A301)**, whose defined
+    terms are CID 42 — "value out of range", "measurement failure", "not a number". It
+    qualifies a value as *unusable*, so that encoding discarded the measurement in the
+    act of trying to caveat it, and a strict receiver rejects a code outside CID 42
+    outright. There is no standard concept for "uncalibrated" and a private one would be
+    a string only this repository can read, so the attribute stays absent and a test
+    asserts its absence with the reasoning attached.
+  - **Risk 13's premise was wrong.** The register says "highdicom's RTSTRUCT writer is
+    newer and less exercised than its SEG writer, which is why SEG and SR ship first".
+    highdicom 0.28.1 ships `seg`, `sr`, `pm`, `ann`, `ko`, `pr`, `sc` and `legacy` and
+    **no RTSTRUCT writer at all**. The IOD is small and fully specified, so it is built
+    attribute by attribute against `pydicom` and every object written in the tests is
+    read back, its contours re-derived and compared to the rows they came from. A
+    round trip is a stronger claim than "we used a library" would have been.
+  - **A box and a sphere are omitted from an RTSTRUCT, not approximated.** DICOM has no
+    such ROI primitive; tessellating a sphere into planar contours would file a
+    rendering choice as clinical data. A RAS-stored shape is dropped for the same
+    reason — LPS and RAS differ by two sign flips, so a silent conversion mirrors the
+    ROI across two planes and the result looks plausible.
+  - **A SEG whose grid disagrees with its series is refused rather than resampled.**
+    Since Phase 8 the runner reads the series directly, so its labelmap is already on
+    that grid; a mismatch means the two are not the same study and `highdicom` would
+    not notice, because it matches frames to source images positionally. Slice
+    direction is settled by comparing the stored `ImagePositionPatient` of the first and
+    last instances against the affine, so a flipped export is a failed assertion rather
+    than a segmentation of the other end of the jaw.
+  - Every UID is derived — `HMAC(DICOM_UID_HMAC_KEY, ...)` under the ISO `2.25` arc,
+    the same way Phase 8 derives its own — so re-exporting a study produces the same
+    objects rather than a second set a receiving system files alongside the first.
+
+### Fixed
+- **F21: the DICOM series seal never fired on real work.** Phase 8 added `sealed_at` so
+  that annotating a series freezes its instances — the annotation lock guards
+  `FileRegistry` *rows*, and a series is one row holding hundreds of objects. The seal
+  looked for targets with `kind=dicom_series`, which is the resource `common.dicom.ingest`
+  registers and the resource **nothing else ever writes**: the volume grid saves through
+  `annotations/views.py`, which registers a `logical_volume` against the `FileRegistry`
+  row, because a grid knows a file id and nothing else. So on every study anyone had
+  actually annotated the filter matched nothing and every instance stayed rewritable
+  underneath its own coordinates. The suite did not see it because its test attached the
+  ingest-side resource by hand — the one shape production never produces. Found while
+  Phase 9 needed the same resolution, and fixed where it belongs: `series_for_resource`
+  asks both ways round — the UID when the resource carries one, otherwise the
+  `FileRegistry` row, which is the same row for both because `register_dicom_series` sets
+  `file` deliberately — and it is asked of *every* target, because whether there is DICOM
+  under an annotation is a fact about the bytes and not about which registrar named them.
+
 - **Native DICOM ingestion and serving (roadmap Phase 8): an uploaded DICOM stays
   DICOM.** Until now a DICOM folder was converted to a single `.nii.gz` in the browser
   and the original was **discarded** — the server had no DICOM reader, and
