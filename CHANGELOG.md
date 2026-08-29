@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The laparoscopy annotator is on Cornerstone3D, and Konva is gone from the whole
+  repository (roadmap Phase 10).** `laparoscopy_annotator.js` and its six mixins —
+  **4,919 lines** — are deleted along with both Konva CDN tags, so no page in Yggdrasil
+  loads Konva. This was the last of the four original frontend stacks.
+  - **The record is a labelmap per annotated frame** (decision #14), one plane per
+    region, because regions overlap and a single-valued labelmap cannot say so. Keyed by
+    milliseconds rather than frame index — the frame rate is a property of the file, so a
+    record keyed by frame number stops meaning the same instant the moment a video is
+    re-encoded — and by label code rather than class axis, because the export's axis is
+    the project's region types in order and adding a category would otherwise re-label
+    every historical study.
+  - **The per-stroke API is gone with the strokes.** Once the eraser has mutated pixels
+    there is no "the stroke with id 41" to `PATCH` or `DELETE`, so the two region routes
+    became one whole-state `GET`/`PUT` with `expectedRevision` and a 409 — the shape
+    every migrated surface uses.
+  - **NPZ export is regenerated from labelmaps and keeps its bytes** (decision #15). The
+    migration command and the export rasterise through the same function, replaying
+    strokes in their recorded order because the eraser is destructive; the frozen tests
+    are unchanged and a new one exports the same study down both paths and compares every
+    frame. A patient the migration has not reached still exports from strokes, so it can
+    be run at leisure rather than in the deploy window.
+  - **The page refuses to mount the annotator for a video with no recorded probe.** A
+    browser cannot read a video's frame rate; guessing 30 for a 25 fps recording puts
+    every mask on the wrong frame and looks entirely correct. The rate is `ffprobe`'s,
+    cached on the file's registry row.
+
+### Known gaps
+- **The Magic Tool (SAM2) is not wired on the new video surface.** Its client was a mixin
+  on the deleted annotator's prototype and needed **58 members** from it — shape
+  registration, the mask overlay renderer, the pending-scope bookkeeping, the timeline's
+  drag state — so it could not survive that file's deletion, and shipping it as a mixin
+  nothing applies would have been dead code that reads as live. The WebSocket contract is
+  untouched (decision #9): the GPU worker, the protocol and the Django proxies are exactly
+  as they were, and the labelmap sink it will write into is built and tested. Only the
+  host is missing. **This is a capability regression and a release blocker**, recorded
+  here rather than deferred quietly.
+- **Finding F20 was wrong and is withdrawn.** The first draft of this phase concluded
+  Cornerstone could not render a labelmap on a `VideoViewport` and built a bespoke frame
+  decoder and a second image loader around it. `VideoViewport` defines both of the methods
+  the labelmap path calls and wraps each labelmap in a `CanvasActor` for exactly that
+  purpose; the error came from a truncated grep and from not re-reading the file. It was
+  caught by writing the test meant to pin the finding, which failed. The roadmap keeps the
+  entry, withdrawn, because the near miss is more useful than the fact.
+
+### Added
 - **Interchange export (roadmap Phase 9): the annotation record leaves as DICOM SEG,
   SR and RTSTRUCT.** Server-authoritative, because `common/export_processing.py` has
   no browser. Three new export artifacts under `interop/`, produced from the durable

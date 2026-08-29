@@ -1,6 +1,7 @@
 {% load static %}
+{% load cornerstone %}
 
-<!-- django-data consumed by laparoscopy_annotator.js WebSocket bootstrap -->
+<!-- django-data: the scan id the Magic Tool's WebSocket client reads (decision #9). -->
 <script id="django-data" type="application/json">{"scanId": {{ patient.patient_id }}}</script>
 
 {% include 'common/sections/patient_header_section.html' %}
@@ -367,13 +368,25 @@
     <i class="fas fa-check me-1"></i>Saved!
 </div>
 
-<!-- Konva.js (required by the annotation canvas layer).
-     Pinned exactly, and to the same version templates/common/patient_detail.html loads:
-     `konva@9` is a range, so unpkg served whatever the latest 9.x was that day and the
-     two pages could drift apart with no commit to bisect. See CONTRIBUTING.md. -->
-<script src="https://unpkg.com/konva@9.3.20/konva.min.js"
-        integrity="sha384-chZfUp+dDy+Z9NNL/wlLCKHhRYh1tNUse5T0ikH8HziawiqQG88F8SBIIcrHY+/b"
-        crossorigin="anonymous"></script>
+{% comment %}
+    **The Magic Tool is not wired on this surface yet, and that is a known gap.**
+
+    Decision #9 freezes the WebSocket contract, and the *server* half is untouched: the
+    Django proxies (laparoscopy/views.py worker_session_ready / worker_session_prompt),
+    the protocol and the GPU worker are exactly as they were, so re-wiring is a
+    client-side job with no contract to renegotiate. The sink it will write into is
+    already built and tested (frontend/imaging/video/magicSink.js).
+
+    What is missing is its *host*. laparoscopy_annotator_worker.js was a mixin on the old
+    annotator's prototype and needed 58 members from it -- shape registration, the mask
+    overlay renderer, the pending-scope bookkeeping, the timeline's drag state. Loading
+    it here would define a mixin nothing applies: dead code that reads as live. So it is
+    deleted with the rest, and the gap is recorded rather than disguised.
+
+    Until it is closed, this surface does manual annotation only. See
+    docs/cornerstone-roadmap.md, Phase 10.
+{% endcomment %}
+<script src="{% static 'js/laparoscopy/laparoscopy_tutorial.js' %}"></script>
 
 {{ worker_video_source_ref|json_script:"worker-video-source-ref" }}
 {{ worker_video_source_file_id|json_script:"worker-video-source-file-id" }}
@@ -394,270 +407,99 @@
 })();
 </script>
 
-<!-- Annotator mixins must load before the main annotator -->
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_utils.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_shapes.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_timeline.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_api.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_mask.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_worker.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator_magic.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_annotator.js' %}"></script>
-<script src="{% static 'js/laparoscopy/laparoscopy_tutorial.js' %}"></script>
+{% if has_video and video_url %}
+{% comment %}
+    The surface's payload. `fps` and `frameCount` come from the server's own ffprobe
+    (laparoscopy/video_probe.py) rather than from the browser, which cannot report a
+    video's frame rate at all -- guessing 30 would put every annotation on the wrong
+    frame of a 25 fps recording, and `width`/`height` decide which pixels a stored mask
+    describes.
+{% endcomment %}
+<script id="videoAnnotateData" type="application/json">{{ video_annotate_data|safe }}</script>
 
-<script>
+<div id="video-annotate-viewport" class="d-none" style="width:100%;height:65vh;background:#000;"></div>
+
+{% comment %}
+    The laparoscopy annotator on Cornerstone3D (Phase 10). Replaces the eight Konva
+    files -- laparoscopy_annotator{,_shapes,_mask,_magic,_timeline,_utils,_api}.js, 4919
+    lines -- and both Konva CDN tags, so no page loads Konva any more.
+
+    The record is a labelmap per annotated frame (decision #14), so the brush, the
+    eraser and the scissors mutate pixels and the revision chain is the audit trail.
+{% endcomment %}
+{% cornerstone_entry 'video-annotate' %}
+
+<script type="module">
+/**
+ * Page glue: the markup above is Yggdrasil's own UI and stays that way (decision #4).
+ * This wires it to the mounted surface and does nothing a test could check -- every
+ * decision worth asserting lives in imaging/video/, which is why this is short.
+ */
 (function () {
     'use strict';
 
-    {% if not has_video or not video_url %}return;{% endif %}
+    const toolbar = document.getElementById('annotation-toolbar');
+    const viewport = document.getElementById('video-annotate-viewport');
+    const toggleBtn = document.getElementById('annotation-toggle-btn');
+    const placeholder = document.getElementById('video-placeholder');
+    const frameNavBar = document.getElementById('frame-nav-bar');
+    const temporalBar = document.getElementById('temporal-classification-bar');
+    const tourBtn = document.getElementById('laparoscopy-tour-btn');
 
-    var playerWrap  = document.getElementById('video-player-wrap');
-    var placeholder = document.getElementById('video-placeholder');
-    var toggleBtn   = document.getElementById('annotation-toggle-btn');    var frameNavBar = document.getElementById('frame-nav-bar');
-    var temporalBar = document.getElementById('temporal-classification-bar');
-    var quadrantTypesPanel = document.getElementById('quadrant-types-panel');
-    var regionPanel = document.getElementById('region-types-panel');
-    var magicPanel = document.getElementById('magic-toolbox-panel');
-    var tourBtn = document.getElementById('laparoscopy-tour-btn');
-
-    placeholder.remove();
-
-    var zoomInner = document.createElement('div');
-    zoomInner.id = 'video-zoom-inner';
-    zoomInner.style.cssText = 'position:relative;transform-origin:0 0;';
-    playerWrap.appendChild(zoomInner);
-
-    var video = document.createElement('video');
-    video.controls = true;
-    video.style.cssText = 'width:100%;display:block;max-height:65vh;background:#000;position:relative;z-index:1;';
-    video.setAttribute('preload', 'metadata');
-    video.src = '{{ video_url }}';
-    window.__laparoscopyVideoEl = video;
-    zoomInner.appendChild(video);
-
-    var subsampledPreviewVideo = null;
-    {% if subsampled_video_url %}
-    subsampledPreviewVideo = document.createElement('video');
-    subsampledPreviewVideo.muted = true;
-    subsampledPreviewVideo.setAttribute('playsinline', 'playsinline');
-    subsampledPreviewVideo.setAttribute('preload', 'auto');
-    subsampledPreviewVideo.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:none;pointer-events:none;background:#000;object-fit:contain;z-index:2;';
-    subsampledPreviewVideo.src = '{{ subsampled_video_url }}';
-    zoomInner.appendChild(subsampledPreviewVideo);
-    {% endif %}
-
-    if (toggleBtn) toggleBtn.classList.remove('d-none');
-    frameNavBar.classList.remove('d-none');
-    temporalBar.classList.remove('d-none');
-    if (quadrantTypesPanel) quadrantTypesPanel.classList.remove('d-none');
-
-    // ── Snap-to-second + subsampled overlay ─────────────────────────────────
-    // Whenever the video is paused (by any means — pause button, timeline drag,
-    // step buttons), snap currentTime to the nearest whole second and show the
-    // corresponding 1-fps subsampled frame as an overlay.
-    // A debounce of 120 ms prevents premature snapping while the user is still
-    // dragging the timeline playhead (continuous seeked events reset the timer).
-    if (subsampledPreviewVideo) {
-        var _snapTimer    = null;
-        var _isSnapping   = false;   // true while we're mid-snap seek
-
-        function _showSubFrame(snapped) {
-            subsampledPreviewVideo.currentTime = snapped;
-            subsampledPreviewVideo.style.display = 'block';
-        }
-
-        function _doSnap() {
-            if (!video.paused || _isSnapping) return;
-            var snapped = Math.round(video.currentTime);
-            if (Math.abs(video.currentTime - snapped) < 0.02) {
-                _showSubFrame(snapped);
-            } else {
-                _isSnapping = true;
-                video.currentTime = snapped;
-                // next seeked will be caught below
+    function whenMounted(callback) {
+        // The entry mounts on DOMContentLoaded and resolves its own promise; the page
+        // does not race it, it waits for it. A `null` surface means the bootstrap
+        // declined, and it has already said why in the console.
+        const poll = window.setInterval(() => {
+            if (window.YggVideoAnnotate?.surface !== undefined) {
+                window.clearInterval(poll);
+                callback(window.YggVideoAnnotate.surface);
             }
+        }, 50);
+    }
+
+    whenMounted((surface) => {
+        if (!surface) {
+            return;
+        }
+        if (placeholder) placeholder.remove();
+        viewport.classList.remove('d-none');
+        if (toggleBtn) toggleBtn.classList.remove('d-none');
+        if (frameNavBar) frameNavBar.classList.remove('d-none');
+        if (temporalBar) temporalBar.classList.remove('d-none');
+        if (tourBtn) tourBtn.classList.remove('d-none');
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                const on = toolbar.classList.toggle('d-none');
+                toggleBtn.classList.toggle('active', !on);
+            });
         }
 
-        function _scheduleSnap() {
-            if (_snapTimer) clearTimeout(_snapTimer);
-            _snapTimer = setTimeout(function () { _snapTimer = null; _doSnap(); }, 120);
-        }
-
-        video.addEventListener('seeked', function () {
-            if (!video.paused) return;
-            if (_isSnapping) {
-                _isSnapping = false;
-                _showSubFrame(Math.round(video.currentTime));
+        toolbar?.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-tool]');
+            if (!button) {
                 return;
             }
-            _scheduleSnap();
+            if (!surface.editor.setActiveTool(button.dataset.tool)) {
+                // Refused rather than silently ignored: the usual reason is that no
+                // region is selected, and a button that looks pressed and does nothing
+                // is worse than one that says so.
+                window.console.info('[ygg-video] pick a region before drawing on one');
+                return;
+            }
+            toolbar.querySelectorAll('[data-tool]').forEach((other) => {
+                other.classList.toggle('active', other === button);
+            });
         });
 
-        video.addEventListener('pause', function () {
-            _scheduleSnap();
+        window.addEventListener('beforeunload', (event) => {
+            if (surface.store.annotatedTimes().length && surface.dirty) {
+                event.preventDefault();
+                event.returnValue = '';
+            }
         });
-
-        video.addEventListener('play', function () {
-            _isSnapping = false;
-            if (_snapTimer) { clearTimeout(_snapTimer); _snapTimer = null; }
-            subsampledPreviewVideo.style.display = 'none';
-        });
-    }
-    // ────────────────────────────────────────────────────────────────────────
-
-    function initAnnotator() {
-        var shapesPanelEl = document.getElementById('shapes-list-panel');
-        var regionPanelEl = document.getElementById('region-types-panel');
-        var annotator = new VideoAnnotator({
-            videoEl:        video,
-            wrapEl:         zoomInner,
-            outerEl:        playerWrap,
-            toolbarEl:      document.getElementById('annotation-toolbar'),
-            regionListEl:   document.getElementById('region-list'),
-            shapesListEl:   document.getElementById('shapes-list'),
-            toggleBtn:      toggleBtn,
-            timestampEl:    document.getElementById('frame-timestamp'),
-            brushSizeInput: document.getElementById('brush-size-input'),
-            brushSizeLabel: document.getElementById('brush-size-label'),
-            polygonHintEl:  document.getElementById('polygon-drawing-hint'),
-            timelineTrackWrapEl:     document.getElementById('timeline-track-wrap'),
-            timelineTrackEl:         document.getElementById('timeline-track'),
-            timelineSegmentsLayerEl: document.getElementById('timeline-segments-layer'),
-            timelinePinsLayerEl:     document.getElementById('timeline-pins-layer'),
-            timelinePlayheadEl:      document.getElementById('timeline-playhead'),
-            timelineClassListEl:     document.getElementById('timeline-class-list'),
-            timelineCurrentTimeEl:   document.getElementById('timeline-current-time'),
-            timelineDurationEl:      document.getElementById('timeline-duration'),
-            timelineActiveClassEl:   document.getElementById('timeline-active-class'),
-            timelineAddPinBtnEl:     document.getElementById('timeline-add-pin-btn'),
-            timelineClassAdminListEl: document.getElementById('timeline-class-admin-list'),
-            timelineAddClassBtnEl:   document.getElementById('timeline-add-class-btn'),
-            patientId:               {{ patient.patient_id }},
-            isAdmin:                 {{ user_profile.is_admin|yesno:"true,false" }},
-            csrfToken:               '{{ csrf_token }}',
-            subsampledVideoFps:      1,
-            workerWsHost:            window.workerWsHost || 'zip-dgx.ing.unimore.it',
-            workerVideoId:           null,
-            workerVideoSource:       window.workerVideoSourceRef,
-            subsampledVideoEl:       subsampledPreviewVideo,
-            magicPanelEl:            magicPanel,
-            magicPointToolBtnEl:     document.getElementById('magic-tool-point-btn'),
-            magicPointPositiveBtnEl: document.getElementById('magic-point-positive-btn'),
-            magicPointNegativeBtnEl: document.getElementById('magic-point-negative-btn'),
-            magicSendBtnEl:          document.getElementById('magic-send-prompts-btn'),
-            magicPromptsListEl:      document.getElementById('magic-prompts-list'),
-            magicPromptsCountEl:     document.getElementById('magic-prompts-count'),
-            magicWindowInputEl:      document.getElementById('magic-window-seconds-input'),
-        });
-
-        // ── Fast timeline drag ───────────────────────────────────────────────
-        // During drag we ONLY update UI + seek the tiny 1-fps subsampled video.
-        // The compressed main video is seeked once, to the snapped second, on
-        // mouse-release — avoiding dozens of expensive seeks per second.
-        var _lastDragTime = null;
-
-        function _fmtTL(t) {
-            var mm = Math.floor(t / 60), ss = Math.floor(t % 60), ms = Math.floor((t % 1) * 1000);
-            return String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0') + '.' + String(ms).padStart(3,'0');
-        }
-
-        annotator._dragTimelineToClientX = function (clientX) {
-            if (!this._timelineDrag) return;
-            var t = this._timelineTimeFromClientX(clientX);
-            _lastDragTime = t;
-            this._timelinePreviewTime = t;
-
-            // Move playhead visually
-            var pct = this._timelineTimeToPct(t);
-            if (this.timelinePlayheadEl) {
-                this.timelinePlayheadEl.style.left = 'calc(8px + (100% - 16px) * ' + pct.toFixed(6) + ')';
-            }
-            if (this.timelineCurrentTimeEl) {
-                this.timelineCurrentTimeEl.textContent = _fmtTL(t);
-            }
-            // Keep #frame-timestamp in sync with the timeline drag position
-            if (this.timestampEl) {
-                this.timestampEl.textContent = _fmtTL(t);
-            }
-            if (this.timelineActiveClassEl) {
-                var cls = this._timelineClassAt(t);
-                this.timelineActiveClassEl.textContent = 'Current: ' + (cls ? cls.name : '-');
-                this.timelineActiveClassEl.style.backgroundColor = this._timelineClassColor(cls);
-                this.timelineActiveClassEl.style.color = '#fff';
-            }
-
-            // Seek the tiny subsampled video only in annotation mode
-            if (subsampledPreviewVideo && this.annotationMode) {
-                subsampledPreviewVideo.currentTime = Math.round(t);
-                subsampledPreviewVideo.style.display = 'block';
-            }
-            if (typeof this._renderMagicOverlay === 'function') this._renderMagicOverlay();
-            if (typeof this._renderMagicPromptList === 'function') this._renderMagicPromptList();
-            if (typeof this._syncMaskToCurrentVideoTime === 'function') this._syncMaskToCurrentVideoTime();
-        };
-
-        // On mouse-release: commit one seek on the main video at the snapped second
-        window.addEventListener('mouseup', function () {
-            if (_lastDragTime === null) return;
-            var seekTo = Math.round(_lastDragTime);
-            _lastDragTime = null;
-            video.currentTime = seekTo;
-        });
-        // ────────────────────────────────────────────────────────────────────
-
-        // Step buttons are labelled ±1s / ±10s but the annotator uses
-        // FRAME_STEP_S (0.033 s) * count. Override to treat count as seconds.
-        annotator._stepForward = function (seconds) {
-            this.videoEl.pause();
-            var base = this._seekPending !== null ? this._seekPending : this.videoEl.currentTime;
-            var max  = isFinite(this.videoEl.duration) ? this.videoEl.duration : Infinity;
-            this._seekPending = Math.min(max, base + seconds);
-            // Show the lightweight 1-fps preview immediately — no need to wait
-            // for the main video to decode from a keyframe.
-            if (subsampledPreviewVideo) {
-                subsampledPreviewVideo.currentTime = Math.round(this._seekPending);
-                subsampledPreviewVideo.style.display = 'block';
-            }
-            this._flushSeek();
-        };
-        annotator._stepBack = function (seconds) {
-            this.videoEl.pause();
-            var base = this._seekPending !== null ? this._seekPending : this.videoEl.currentTime;
-            this._seekPending = Math.max(0, base - seconds);
-            // Show the lightweight 1-fps preview immediately — no need to wait
-            // for the main video to decode from a keyframe.
-            if (subsampledPreviewVideo) {
-                subsampledPreviewVideo.currentTime = Math.round(this._seekPending);
-                subsampledPreviewVideo.style.display = 'block';
-            }
-            this._flushSeek();
-        };
-
-        var origEnter = annotator._enterAnnotationMode.bind(annotator);
-        var origExit  = annotator._exitAnnotationMode.bind(annotator);
-
-        annotator._enterAnnotationMode = function () {
-            origEnter();
-            if (shapesPanelEl) shapesPanelEl.classList.remove('d-none');
-            if (regionPanelEl) regionPanelEl.classList.remove('d-none');
-            if (magicPanel) magicPanel.classList.remove('d-none');
-        };
-        annotator._exitAnnotationMode = function () {
-            origExit();
-            if (shapesPanelEl) shapesPanelEl.classList.add('d-none');
-            if (regionPanelEl) regionPanelEl.classList.add('d-none');
-            if (magicPanel) magicPanel.classList.add('d-none');
-            if (annotator.currentTool === 'point') annotator._setTool(annotator._lastNonPointTool || 'brush');
-            if (subsampledPreviewVideo) subsampledPreviewVideo.style.display = 'none';
-        };
-
-        if (tourBtn) tourBtn.classList.remove('d-none');
-    }
-
-    if (video.readyState >= 1) {
-        initAnnotator();
-    } else {
-        video.addEventListener('loadedmetadata', initAnnotator, { once: true });
-    }
+    });
 })();
 </script>
+{% endif %}

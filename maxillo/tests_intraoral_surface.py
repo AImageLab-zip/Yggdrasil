@@ -141,16 +141,18 @@ class IntraoralSurfaceRenderTests(TestCase):
         self.assertNotIn('id="intraoralSegmentationTeethGrid"', html)
         self.assertNotIn("data-segmentation-root", html)
 
-    def test_konva_is_still_loaded(self):
-        """It has one consumer left, and deleting the tag would break it.
+    def test_konva_is_gone(self):
+        """Phase 10 removed the last consumer, so the tag goes with it.
 
-        Phase 5 removed Konva's *other* consumer on this surface and kept the tag because
-        the panoramic editor still drew with it; Phase 7 has since removed that one too, so
-        what is left is the laparoscopy annotator (Phase 10). The tag goes when that ships
-        and not before -- and this assertion is why it did not go early either time.
+        This assertion used to say the opposite, and that is why the tag survived Phases
+        5 and 7: each removed a Konva consumer while the laparoscopy annotator was still
+        drawing with it, and a tidy-up either time would have been a silent regression on
+        a page nobody was looking at. Phase 10 deleted that annotator, so the guard
+        inverts rather than being deleted -- what needs preventing now is the tag
+        creeping back onto a page with nothing to use it.
         """
         _response, html = self._page()
-        self.assertIn("konva", html.lower())
+        self.assertNotIn("konva.min.js", html.lower())
         # The panoramic is on Cornerstone now; asserting its script here would pin a file
         # that no longer exists.
         self.assertNotIn("cbct_panorex_editor.js", html)

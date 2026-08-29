@@ -71,14 +71,6 @@ worker still parses headers through it (finding F2).
 <script src="{% static 'js/patient_detail.js' %}"></script>
 {% if ns == 'maxillo' %}
 {% comment %}
-    Konva stays. Phases 5 and 7 removed its other two consumers -- intraoral_segmentation.js
-    and cbct_panorex_editor.js -- but the laparoscopy annotator (Phase 10) still draws with
-    it, so this tag goes when that ships and not before.
-{% endcomment %}
-<script src="https://cdn.jsdelivr.net/npm/konva@9.3.20/konva.min.js"
-        integrity="sha384-chZfUp+dDy+Z9NNL/wlLCKHhRYh1tNUse5T0ikH8HziawiqQG88F8SBIIcrHY+/b"
-        crossorigin="anonymous"></script>
-{% comment %}
     The panoramic's reconstruction core, and the one script the Cornerstone bundle reads
     through a global rather than importing. Decision #8 requires the exported strips to
     keep their bytes, so this file is untouched by the migration and is *the* implementation

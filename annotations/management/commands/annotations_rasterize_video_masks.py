@@ -130,9 +130,13 @@ class Command(BaseCommand):
         from common.object_storage import download_to_tempfile
         from laparoscopy import video_probe
 
-        suffix = Path(video.file_path or "").suffix or ".mp4"
-        with download_to_tempfile(video.file_path, suffix=suffix) as local_path:
-            probe = video_probe.probe_video(local_path)
+        probe = video_probe.recorded_probe(video)
+        if probe is None:
+            suffix = Path(video.file_path or "").suffix or ".mp4"
+            with download_to_tempfile(video.file_path, suffix=suffix) as local_path:
+                # Recorded while we have it: the patient-detail page needs the same
+                # answer and cannot afford to download a surgical recording to get it.
+                probe = video_probe.probe_and_record(video, local_path)
         width, height = int(probe["width"]), int(probe["height"])
         if width <= 0 or height <= 0:
             raise CommandError(f"ffprobe reported a {width}x{height} frame")

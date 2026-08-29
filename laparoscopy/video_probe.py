@@ -94,3 +94,40 @@ def probe_video(local_video_path):
         "fps": float(fps),
         "frame_count": int(frame_count),
     }
+
+
+#: Where a probe result is cached on the ``FileRegistry`` row.
+METADATA_KEY = "probe"
+
+
+def recorded_probe(file_row):
+    """The cached probe for a video row, or ``None``.
+
+    Cached rather than re-run because ``ffprobe`` needs the whole file, and a
+    patient-detail page render cannot afford to download a surgical recording to answer
+    "how many frames per second". The values do not change: they are properties of bytes
+    that the annotation lock already refuses to let anyone replace once annotated.
+    """
+    probe = (getattr(file_row, "metadata", None) or {}).get(METADATA_KEY)
+    if not isinstance(probe, dict):
+        return None
+    if not all(probe.get(key) for key in ("width", "height", "fps", "frame_count")):
+        return None
+    return probe
+
+
+def probe_and_record(file_row, local_video_path):
+    """Probe a video already on disk and cache the answer on its registry row.
+
+    Called from the upload path, which has the file locally anyway, and from
+    ``annotations_rasterize_video_masks``, which has to download it regardless. Anything
+    else reads :func:`recorded_probe` and does without if nobody has recorded one --
+    guessing a frame rate would put every annotation on the wrong frame of a 25 fps
+    recording, and it would look right.
+    """
+    probe = probe_video(local_video_path)
+    metadata = dict(getattr(file_row, "metadata", None) or {})
+    metadata[METADATA_KEY] = probe
+    file_row.metadata = metadata
+    file_row.save(update_fields=["metadata"])
+    return probe

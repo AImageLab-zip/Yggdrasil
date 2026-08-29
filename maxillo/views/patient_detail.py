@@ -877,11 +877,15 @@ def patient_detail(request, patient_id):
         if worker_source_file and getattr(worker_source_file, 'file_path', None):
             context['worker_video_source_ref'] = worker_source_file.file_path
             context['worker_video_source_file_id'] = worker_source_file.id
+        context['video_annotate_data'] = _video_annotate_payload(
+            request, ns, patient, video_file
+        )
     except Exception:
         context['has_video'] = False
         context['video_url'] = None
         context['worker_video_source_ref'] = None
         context['worker_video_source_file_id'] = None
+        context['video_annotate_data'] = 'null' 
 
     # Record for the landing "Continue where you left off" strip (best-effort).
     from common.activity import record_recent
@@ -927,3 +931,54 @@ def update_patient_name(request, patient_id):
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+def _video_annotate_payload(request, namespace, patient, video_file):
+    """The JSON the Phase 10 annotator mounts from, or ``'null'``.
+
+    ``null`` is a real answer and the surface handles it: the bootstrap reports that it
+    declined and mounts nothing. The one case worth spelling out is a video with **no
+    recorded probe** -- ``fps`` is a property of the file that a browser cannot read, and
+    ``laparoscopy/video_probe.py`` caches it at upload or on the first rasterisation.
+    Without it the viewer would have to guess a frame rate, and guessing 30 for a 25 fps
+    recording puts every mask on the wrong frame while looking entirely correct. So the
+    payload is withheld and the page says why, rather than mounting an editor that would
+    quietly mis-file work.
+    """
+    import json
+
+    from django.urls import reverse as _reverse
+
+    from laparoscopy import video_probe
+
+    if video_file is None or namespace != 'laparoscopy':
+        return 'null'
+    probe = video_probe.recorded_probe(video_file)
+    if probe is None:
+        logger.info(
+            "Patient %s has a video with no recorded probe; the annotator is not "
+            "mounted. Run annotations_rasterize_video_masks, or re-upload.",
+            patient.patient_id,
+        )
+        return 'null'
+    return json.dumps(
+        {
+            'patientId': patient.patient_id,
+            'videoUrl': _reverse(
+                f'{namespace}:api_serve_file', kwargs={'file_id': video_file.id}
+            ),
+            # Unnamespaced: laparoscopy/urls.py is included without a namespace, and
+            # the `laparoscopy:` prefix belongs to the maxillo app urls it re-includes.
+            # Getting this wrong raised inside the view's broad `except`, which turned a
+            # bad URL name into "this patient has no video" -- a page that renders and
+            # is simply missing its viewer.
+            'endpoint': _reverse(
+                'patient_video_annotations',
+                kwargs={'patient_id': patient.patient_id},
+            ),
+            'width': int(probe['width']),
+            'height': int(probe['height']),
+            'fps': float(probe['fps']),
+            'frameCount': int(probe['frame_count']),
+        }
+    )

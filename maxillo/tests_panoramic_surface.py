@@ -151,12 +151,16 @@ class PanoramicSurfaceRenderTests(TestCase):
 
         self.assertIn("panoramic-cpr", html)
 
-    def test_konva_is_still_loaded(self):
-        """Phase 10's annotator still draws with it.
+    def test_konva_is_gone(self):
+        """Phase 10 removed the last consumer, so the tag goes with it.
 
-        Removing the tag here would be a silent regression on the laparoscopy surface --
-        the same trap Phase 5 recorded when it removed Konva's other consumer.
+        This assertion used to say the opposite. It was guarding against a *premature*
+        removal -- Phases 5 and 7 each took a Konva consumer away and the laparoscopy
+        annotator was still drawing with it, so a tidy-up here would have been a silent
+        regression on a page nobody was looking at. Phase 10 deleted that annotator, so
+        the guard inverts rather than being deleted: what needs preventing now is the
+        tag creeping back in on a page that has nothing to use it.
         """
         html = self._render()
 
-        self.assertIn("konva", html.lower())
+        self.assertNotIn("konva.min.js", html.lower())

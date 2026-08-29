@@ -398,6 +398,33 @@ under an annotation is a fact about the bytes, not about which registrar named t
 lives in `common/dicom/` rather than in `common/interop/` so that `annotations/` can ask
 it without importing an interchange package.
 
+**F20 — withdrawn. `VideoViewport` *can* carry a labelmap, and the first draft of Phase
+10 was built on the belief that it could not.**
+
+Recorded because the mistake is more instructive than the fact. The reasoning was:
+`VideoViewport extends Viewport`, not `StackViewport`; the labelmap display path
+(`resolveLabelmapRenderPlan.js` → `stackImagePlan.js` → `syncStackLabelmapActors.js`)
+resolves to `'image'` mode for any viewport with `getCurrentImageId`, which
+`VideoViewport` has; and that plan then calls `viewport.getImageDataMetadata(...)` and
+`viewport.addImages(...)`. Every one of those statements is true.
+
+The conclusion drawn from them — that the two calls would be a `TypeError` — was not.
+`VideoViewport` defines both (`VideoViewport.js:193` and `:705`), and `addImages` wraps
+each labelmap in a `CanvasActor` for exactly this purpose. The error came from a grep
+over two files whose output was truncated at twenty lines, all of which happened to come
+from the other file, and from not re-reading the one that mattered.
+
+What it nearly cost: a bespoke frame decoder, a second image loader and a per-frame
+`StackViewport` — several hundred lines working around a limitation that does not exist,
+and carried forever, because nobody re-reads a workaround that looks load-bearing. It was
+caught by writing the test that was supposed to *pin* the finding, which failed.
+
+`frontend/tests/videoLabelmapSupport.test.js` now pins the four facts the correct design
+rests on, so a bump that removes any of them fails the build instead of leaving the
+surface silently unable to hold a mask. The general lesson is the one F13 and F21 also
+teach in different clothes: a check that passes for the wrong reason is worse than no
+check, and the cheapest defence is to write the test *before* believing the finding.
+
 ## Status
 
 | Phase | Scope | Status |
@@ -415,7 +442,7 @@ it without importing an interchange package.
 | 7 | Panoramic live CPR | 🟡 **built** (`release/3.0`) — PR 7.1 moved the arch into `annotations/` (no migration; an `auto` arch is prediction origin, so a warm-up run over a folder still cannot lock a cohort's raw data; a replaced CBCT is detected from the revision's `source_fingerprint` rather than by deleting anything). PR 7.2 replaced the viewer: `modality_viewers/cbct_panorex_editor.js` (924) and `imaging/grid/panoramicSource.js` (195) are **deleted**, the panoramic reads the CBCT from the shared Cornerstone cache, and the strip reformats live through `ImageCPRMapper` while the *saved* strip is still the CPU bake. 1025 Django tests, 659 JS tests, 0 failures. **Still to do: the browser check** — nothing here has rendered a pixel, and Phases 4, 5 and 6 each shipped four defects the harness could not see |
 | 8 | Native DICOM ingestion and serving | 🟡 **built** (`release/3.0`) — an uploaded DICOM stays DICOM: stored, de-identified by **whitelist**, cataloged (`DicomSeries`/`DicomInstance`, one additive migration), served to the viewer, and exported. The runner is handed the series prefix; per the maintainer's decision the cluster algorithms read DICOM, and no NIfTI is derived anywhere. **No `DicomUidMap`** — UIDs are HMAC-derived, so risk 16 stops existing rather than being mitigated. Viewer shares the whole NIfTI path (`dicomSeriesHeader` states a series in the terms `describeGeometry`/`openingVoi` already read). **F13 fixed** here rather than in Phase 9, because Phase 8 is what creates the prefix rows it silently drops. 1110 Django tests, 696 JS tests, 0 failures. **Still to do: the browser check** — nothing here has rendered a pixel |
 | 9 | Interop: SEG / RTSTRUCT / SR | ✅ **built** (`release/3.0`) — three export artifacts under `interop/`, written from the record by `common/interop/`. **Server-authoritative** and **DICOM-anchored**: all three reference source SOP instances, so a patient whose CBCT arrived as a `.nii.gz` contributes nothing rather than being given a fabricated Secondary Capture series. **Risk 13's premise was wrong** — highdicom has no RTSTRUCT writer at all, so the IOD is built against `pydicom` and every object is read back and its contours re-derived. An uncalibrated measurement stays in `{pixels}`; the "not calibrated" qualifier the plan asked for was **removed** on reading the standard, because (0040,A301) is CID 42 and says the value is unusable. **Parametric Map and browser-side import are deferred**, with reasons, to `cornerstone-future-work.md`. F21 fixed here. 1136 Django tests, 696 JS tests, 0 failures |
-| 10 | Laparoscopy video (Konva removed) | ⬜ not started |
+| 10 | Laparoscopy video (Konva removed) | 🟡 **built, with one part not done** (`release/3.0`) — the record is a labelmap per annotated frame (decision #14); `laparoscopy_annotator.js` and its six mixins (**4,919 lines**) and **both Konva CDN tags** are deleted, so no page loads Konva. The per-stroke API became one whole-state GET/PUT route, because once the eraser mutates pixels there is no stroke to PATCH. NPZ export is regenerated from labelmaps and stays byte-compatible — proven end to end on a fixture, through the rasteriser both paths share. **The Magic Tool is not re-wired**: its client was a mixin needing 58 members from the deleted annotator, so it went with it. The WebSocket contract, the Django proxies and the sink (`magicSink.js`) are all in place and untouched; the host is not. That is a capability regression against decision #9 and a release blocker, recorded rather than deferred. **F20 was wrong and withdrawn** — see below. 1168 Django tests, 733 JS tests, 0 failures |
 
 ## Phase 1 — Build toolchain and vendored bundle
 
@@ -1448,6 +1475,6 @@ streaming of a bundle containing a full DICOM series under gunicorn.
 | 15 | **F13 — prefix rows silently export nothing** | ✅ discharged in Phase 8 (not 9 — Phase 8 creates the rows) — `series` entry type + the panoramic-PNG regression test, both in `common/tests_dicom_lifecycle.py`. Also fixes folder uploads, which have always exported as nothing |
 | 16 | **`DicomUidMap` is a re-identification vector** | ✅ **removed rather than mitigated** in Phase 8 — the table does not exist. UIDs are derived as `HMAC(DICOM_UID_HMAC_KEY, original)` under the ISO `2.25` arc, so re-ingest is idempotent with no lookup table to leak. Rotating the key renames every series: a migration, not a maintenance task |
 | 17 | **Decision #18 removes an escape hatch** (delete no longer unlocks) | Superuser override exists; stamp `metadata['lock_override']` on bypass so a later fingerprint mismatch is explainable |
-| 18 | **Decision #15 must preserve NPZ bytes** | Prove byte-equivalence on existing studies during migration; both frozen tests unchanged |
+| 18 | **Decision #15 must preserve NPZ bytes** | 🟡 **half discharged in Phase 10.** Both frozen tests are unchanged and pass, and a new end-to-end test exports one study twice -- once from strokes, once from the labelmap they were rasterised into -- and compares every frame's array. They agree *by construction*: `annotations_rasterize_video_masks` and the export both rasterise through `laparoscopy/mask_raster.py`, replaying in `created_at` order. **That is proof on a fixture.** The register asks for existing studies, and nothing here has seen a real operation |
 | 19 | **Dropping legacy tables is non-additive** | Its own release, gated on a clean prod `annotations_crosscheck`; rollback is the Phase-2 backup |
 | 20 | **Additive-only re-anchors on v2.0.0** | Once `v2.0.0` is tagged it replaces `v1.9.0` as the rollback reference and as the dump every later migration must apply onto |
