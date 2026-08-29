@@ -206,6 +206,23 @@
 
 .panorex-editor__empty[hidden] { display: none; }
 
+/*
+ * The live reformat pane.
+ *
+ * It fills the same box the baked strip does, because the two are alternatives rather than
+ * neighbours: the CPR follows the arch while it is being dragged, and the canvas holds the
+ * strip that will actually be stored. `hidden` on either is honoured explicitly -- a grid
+ * item with `display: grid` from the rule above would otherwise ignore it.
+ */
+.panorex-editor__cpr {
+    width: 100%;
+    height: 340px;
+    max-height: 340px;
+}
+
+.panorex-editor__cpr[hidden],
+.panorex-editor__preview canvas[hidden] { display: none; }
+
 .panorex-editor__progress {
     height: 4px;
     margin-top: 0.65rem;

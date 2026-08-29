@@ -227,6 +227,35 @@ class ProcessingStep(models.Model):
 	def __str__(self):
 		return f"{self.modality.slug}:{self.slug}"
 
+	def clean(self):
+		"""Refuse ``discard_raw`` for a modality whose raw input is DICOM.
+
+		For a NIfTI modality, hiding the raw file is a security screen with no cost:
+		the viewer shows the *processed* volume. For a DICOM one the raw series may be
+		the only volume there is -- ``maxillo.views.patient_detail._usable_raw_volumes``
+		falls back to it whenever processing produced no ``volume_nifti`` -- so setting
+		this flag would blank the viewer for every patient on the modality at once,
+		with the files still sitting in storage and nothing on screen explaining it.
+
+		Roadmap risk 10. Guarded here *and* at ingest, because an admin can set the
+		flag before any series exists and an upload can arrive after it was set.
+		"""
+		super().clean()
+		if not self.discard_raw or not self.modality_id:
+			return
+		from django.core.exceptions import ValidationError as _ValidationError
+
+		from common.dicom.models import DicomSeries
+
+		if DicomSeries.objects.filter(file__modality_id=self.modality_id).exists():
+			raise _ValidationError({
+				"discard_raw": (
+					"This modality has DICOM series stored natively, and for those the "
+					"raw row is the volume the viewer displays. Hiding it would leave "
+					"every one of these patients with an empty viewer."
+				)
+			})
+
 	def save(self, *args, **kwargs):
 		if not self.slug:
 			self.slug = slugify(self.name)
@@ -947,3 +976,15 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"[{self.level}] {self.message[:40]} → {self.user.username}"
+
+
+# The DICOM catalog (Phase 8) is defined in ``common/dicom/models.py`` -- its own
+# module, because it is a self-contained subsystem and this file is long enough. It
+# carries an explicit ``app_label``, so Django files it under ``common`` either way;
+# this import is what makes ``from common.models import DicomSeries`` read like every
+# other model here, and what guarantees the models are registered when this module is.
+from common.dicom.models import (  # noqa: E402,F401  (placement is deliberate)
+	DicomInstance,
+	DicomSeries,
+	SealedSeriesError,
+)

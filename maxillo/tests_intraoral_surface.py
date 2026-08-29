@@ -142,15 +142,18 @@ class IntraoralSurfaceRenderTests(TestCase):
         self.assertNotIn("data-segmentation-root", html)
 
     def test_konva_is_still_loaded(self):
-        """It has two consumers left, and deleting the tag would break both.
+        """It has one consumer left, and deleting the tag would break it.
 
-        `cbct_panorex_editor.js` is Phase 7 and the laparoscopy annotator is Phase 10.
-        Removing this tag with Phase 5 would have been a silent regression on the panoramic
-        editor, which no test on this surface would have caught.
+        Phase 5 removed Konva's *other* consumer on this surface and kept the tag because
+        the panoramic editor still drew with it; Phase 7 has since removed that one too, so
+        what is left is the laparoscopy annotator (Phase 10). The tag goes when that ships
+        and not before -- and this assertion is why it did not go early either time.
         """
         _response, html = self._page()
         self.assertIn("konva", html.lower())
-        self.assertIn("cbct_panorex_editor.js", html)
+        # The panoramic is on Cornerstone now; asserting its script here would pin a file
+        # that no longer exists.
+        self.assertNotIn("cbct_panorex_editor.js", html)
 
     def test_the_photo_stack_entry_is_loaded_once_for_both_surfaces(self):
         _response, html = self._page()

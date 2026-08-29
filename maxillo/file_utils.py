@@ -446,8 +446,9 @@ def _validate_and_extract_nifti_orientation(cbct_file):
     filename_lower = original_name.lower()
     if not filename_lower.endswith(".nii.gz"):
         raise ValidationError(
-            "CBCT upload requires a compressed NIfTI file (.nii.gz). "
-            "Please convert DICOM or MetaImage files to .nii.gz before uploading."
+            "CBCT upload requires a compressed NIfTI file (.nii.gz) or a DICOM "
+            "file or folder. MetaImage (.mha) is not accepted; convert it to "
+            ".nii.gz first."
         )
 
     import tempfile
@@ -504,10 +505,34 @@ def _validate_and_extract_nifti_orientation(cbct_file):
     return orientation
 
 
+def _is_dicom_upload(uploaded_file):
+    """Whether an uploaded file carries the DICOM ``DICM`` marker at byte 128.
+
+    Read from the bytes, not from the name. The extension is unreliable in both
+    directions -- DICOM instances on a burned disc routinely have no extension at all,
+    and ``.dcm`` on something that is not DICOM should fail as "not DICOM" rather than
+    part-way through an ingest.
+    """
+    try:
+        uploaded_file.seek(128)
+        marker = uploaded_file.read(4)
+    except Exception:
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            uploaded_file.seek(0)
+    return marker == b"DICM"
+
+
 def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     """
-    Save CBCT file (.nii.gz only) to object storage and create processing job.
-    Validates orientation metadata server-side.
+    Save a CBCT upload to object storage and create the processing job.
+
+    Accepts a compressed NIfTI (orientation metadata validated server-side) or a DICOM
+    instance, which is stored natively through ``common.dicom.ingest`` rather than
+    converted -- the whole point of Phase 8. The File control has advertised ``.dcm``
+    for as long as it has existed; until now that promise was kept only by a browser
+    conversion that threw the DICOM away.
 
     Args:
         patient_or_legacy: Patient or legacy object with .patient
@@ -518,6 +543,11 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     """
     patient = _get_patient(patient_or_legacy)
     original_name = getattr(cbct_file, "name", "cbct.nii.gz") or "cbct.nii.gz"
+
+    if _is_dicom_upload(cbct_file):
+        # One instance is a one-instance series; the folder path already handles
+        # every part of that, including the refusals.
+        return save_cbct_folder_to_dataset(patient, [cbct_file])
 
     orientation = _validate_and_extract_nifti_orientation(cbct_file)
 
@@ -575,21 +605,62 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
 
 
 def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
-    """A DICOM folder never reaches the server as a folder.
+    """Store an uploaded DICOM folder natively, as DICOM.
 
-    The upload page converts a selected DICOM directory to a single .nii.gz in
-    the browser (static/js/cbct_convert.js) and submits that instead, because the
-    server-side path has no DICOM reader. Reaching here means that conversion did
-    not run -- almost always JavaScript being unavailable -- so say that rather
-    than "deprecated", which told the user nothing actionable.
+    Until Phase 8 this function existed only to raise: the folder was converted to a
+    single ``.nii.gz`` in the browser and the DICOM was discarded, so reaching the
+    server with a folder meant the conversion had not run. The conversion is gone. The
+    series is now stored as it arrived, de-identified but not transformed, and the
+    processing job is pointed at it.
+
+    Two behaviours the deleted converter had, which are not preserved because neither
+    was correct: it threw *every* slice in the folder into one volume regardless of
+    ``SeriesInstanceUID`` (so a folder holding a scout alongside the volume produced a
+    single interleaved mess), and it refused compressed pixel data outright, which made
+    an ordinary JPEG-Lossless CBCT un-uploadable. Series are now separated, and
+    compressed pixels are stored untouched.
+
+    :returns: ``(prefix, job)`` for the largest series, matching the shape every caller
+        already unpacks. Every series gets its own row and its own job -- nothing is
+        silently dropped -- and the largest one is reported back because on a folder
+        holding a scout and a volume, the volume is what the uploader came to upload.
     """
-    from django.core.exceptions import ValidationError
+    from common.dicom.ingest import DicomIngestError, ingest_dicom_series
 
-    raise ValidationError(
-        "A DICOM folder is converted in your browser before upload, and that "
-        "conversion did not run. Enable JavaScript and try again, or convert the "
-        "folder to a single .nii.gz file and upload that."
-    )
+    patient = _get_patient(patient_or_legacy)
+    modality_fk = None
+    try:
+        from common.models import Modality as _Modality
+
+        modality_fk = _Modality.objects.filter(slug="cbct").first()
+    except Exception:
+        modality_fk = None
+
+    try:
+        created = ingest_dicom_series(
+            patient,
+            modality_slug="cbct",
+            file_type=get_file_type_for_modality("cbct", is_processed=False),
+            files=list(folder_files or []),
+            modality=modality_fk,
+        )
+    except DicomIngestError as exc:
+        from django.core.exceptions import ValidationError
+
+        # Every reason at once: an uploader fixing one refused slice only to hit the
+        # next has learned nothing from the first round trip.
+        raise ValidationError(list(exc.reasons)) from exc
+
+    jobs = {
+        series.pk: _create_job_if_runner_enabled(
+            "cbct",
+            **_entity_fk_kwargs(patient),
+            input_files={"input": series.file.file_path},
+        )
+        for series in created
+    }
+    primary = max(created, key=lambda series: series.instance_count)
+    return primary.file.file_path, jobs.get(primary.pk)
 
 
 def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):

@@ -21,13 +21,13 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
+from annotations.queries import without_panoramic_arch
 from common.models import Project
 from common.permissions import filter_folders_for_user, user_is_project_admin
 
-from ..models import PanoramicState
 from .domain import get_domain_models, get_namespace
 from .helpers import redirect_with_namespace
-from .patient_data import BROWSER_PANORAMIC_ALGORITHM
+from .panoramic_state import BROWSER_PANORAMIC_ALGORITHM
 
 logger = logging.getLogger(__name__)
 
@@ -57,21 +57,28 @@ def _folders_for(request, project):
 def pending_patients(Patient, folder_ids):
     """Patients that can get a default panoramic but do not have one yet.
 
-    A DB-level approximation on purpose: it selects patients whose CBCT
-    processing completed and that carry no current-algorithm ``PanoramicState``.
-    Whether the completion actually published a segmentation is settled in the
-    browser, which already gives up quietly when it did not.
+    A DB-level approximation on purpose: it selects patients whose CBCT processing
+    completed and that carry no arch. Whether the completion actually published a
+    segmentation is settled in the browser, which already gives up quietly when it did
+    not.
+
+    Only an arch from the *current* baker counts as done. One written by a superseded
+    algorithm is history, and regenerating it is the whole reason this page exists.
+
+    Both stores are consulted. ``annotations`` holds every arch written from here on;
+    ``PanoramicState`` still holds the ones whose conversion has not run, and a patient
+    listed from that half would be sent through a silent regeneration it does not need.
     """
-    already_generated = PanoramicState.objects.filter(
-        algorithm_version=BROWSER_PANORAMIC_ALGORITHM
-    ).values_list("patient_id", flat=True)
     return (
-        Patient.objects.filter(
-            folder_id__in=folder_ids,
-            files__file_type="cbct_processed",
-            files__processing_job__status="completed",
+        without_panoramic_arch(
+            Patient.objects.filter(
+                folder_id__in=folder_ids,
+                files__file_type="cbct_processed",
+                files__processing_job__status="completed",
+            ),
+            algorithm_version=BROWSER_PANORAMIC_ALGORITHM,
         )
-        .exclude(patient_id__in=already_generated)
+        .exclude(panoramic_state__algorithm_version=BROWSER_PANORAMIC_ALGORITHM)
         .distinct()
         .order_by("patient_id")
     )

@@ -132,6 +132,25 @@ test('the primary volume is the CBCT when there is one', () => {
         bundleKey: 'volume_nifti',
         filename: 'cbct.nii.gz',
         modality: 'cbct',
+        // Null for every NIfTI row. Its *presence* is what selects the DICOM volume
+        // path, so the two sides never have to guess from a filename.
+        dicom: null,
+    });
+});
+
+test('a stored DICOM series carries its UIDs through the payload', () => {
+    const data = {
+        modalityFiles: {
+            cbct: {
+                id: 42,
+                file_key: 'primary',
+                dicom: { studyUid: '2.25.111', seriesUid: '2.25.222' },
+            },
+        },
+    };
+    assert.deepEqual(primaryVolumeFrom(data).dicom, {
+        studyUid: '2.25.111',
+        seriesUid: '2.25.222',
     });
 });
 

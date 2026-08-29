@@ -35,6 +35,20 @@ Edit `.env` and set at minimum:
 - `REDIS_PASSWORD`
 - `RUNNER_API_TOKENS` — token(s) the external runners will use
 
+Set one more if you store DICOM (roadmap Phase 8):
+
+- `DICOM_UID_HMAC_KEY` — the key every stored DICOM UID is derived under. It has a
+  working default (`SECRET_KEY`), so nothing breaks if you skip it, but **set it
+  separately in production**: leaving it blank ties the two rotations together, and
+  rotating either one renames every stored series and orphans the catalog. Treat a
+  change to it as a migration, not a maintenance task. There is no mapping table to
+  recover from — that is deliberate, see `common/dicom/deidentify.py`.
+
+`DICOM_DEMO_ENABLED` (default `False`) decides whether the public demo guest may read
+stored DICOM. Leave it off until the nightly `dicom_deidentification` check has been
+green for a while: the demo logs anonymous visitors in as a real user, so turning it on
+makes stored series reachable without an account for any folder flagged `is_demo`.
+
 `docker-compose.yml` always reads from `.env` in the repo root (`env_file: .env`), so make sure that's the file you edited.
 
 ## 3. Create the shared Docker network

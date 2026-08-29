@@ -10,6 +10,7 @@ nibabel==5.2.0
 numpy==2.3.2
 paramiko==3.5.1
 pillow==11.3.0
+pydicom==3.0.2
 python-decouple==3.8
 requests==2.32.4
 sqlparse==0.5.3

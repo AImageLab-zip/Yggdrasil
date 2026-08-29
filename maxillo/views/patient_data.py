@@ -36,10 +36,16 @@ from common.imaging_calibration import (
     pixel_spacing_mm,
     spacing_from_known_length,
 )
+from annotations import services as annotation_services
+from annotations.services.exceptions import AnnotationConflict
 from common.models import FileRegistry, Modality
 from .domain import get_domain_models
+from .panoramic_state import (
+    BROWSER_PANORAMIC_ALGORITHM,
+    current_browser_panoramic,
+    has_browser_panoramic,
+)
 from .patient_detail import _resolved_cbct_viewer_source
-from ..models import PanoramicState
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +62,6 @@ PANORAMIC_VARIANTS = {
     "zminus40_raysum": ("panoramic_zminus40_raysum_png", "Z-40 X-ray"),
 }
 DEFAULT_PANORAMIC_VARIANT = "z0_mean"
-BROWSER_PANORAMIC_ALGORITHM = "panorex-js-v2-mip"
 BROWSER_PANORAMIC_MAX_REQUEST = 25 * 1024 * 1024
 BROWSER_PANORAMIC_MAX_PNG = 10 * 1024 * 1024
 BROWSER_PANORAMIC_MAX_STATE = 64 * 1024
@@ -134,22 +139,6 @@ def _legacy_panoramic_matches_source(file_obj, active_source):
     if not volume_path or volume_path not in inputs:
         return False
     return not segmentation_path or segmentation_path in inputs
-
-
-def _state_matches_source(state, source):
-    if not state or not source:
-        return False
-    descriptor = _source_descriptor(source)
-    return (
-        state.algorithm_version == BROWSER_PANORAMIC_ALGORITHM
-        and state.source_job_id == descriptor["job_id"]
-        and state.source_file_id == descriptor["file_id"]
-        and state.source_file_key == descriptor["file_key"]
-        and state.source_file_hash == descriptor["file_hash"]
-        and state.source_segmentation_file_id == descriptor["segmentation_file_id"]
-        and (state.source_segmentation_key or None) == descriptor["segmentation_file_key"]
-        and (state.source_segmentation_hash or None) == descriptor["segmentation_file_hash"]
-    )
 
 
 def _source_shape(source):
@@ -338,17 +327,17 @@ def _upload_panoramic_bytes(storage, content, key):
             pass
 
 
-def _panoramic_save_response(state, *, idempotent=False):
+def _panoramic_save_response(*, revision, generation_uuid, default_mode, idempotent=False):
     variants = [
         {"id": "mip", "label": "MIP"},
         {"id": "raysum", "label": "X-ray"},
     ]
     return JsonResponse({
         "success": True,
-        "revision": state.revision,
-        "generation_uuid": str(state.generation_uuid),
-        "default_mode": state.default_mode,
-        "selected_variant": state.default_mode,
+        "revision": revision,
+        "generation_uuid": str(generation_uuid),
+        "default_mode": default_mode,
+        "selected_variant": default_mode,
         "variants": variants,
         "idempotent": idempotent,
     })
@@ -371,7 +360,7 @@ def save_browser_panoramic(request, patient_id):
     # ignores this patient's own panoramic state, or the first edit would be the
     # last one allowed.
     lock_reasons = annotation_lock_reasons(patient, include_panoramic=False)
-    if lock_reasons and PanoramicState.objects.filter(patient=patient).exists():
+    if lock_reasons and has_browser_panoramic(patient):
         return JsonResponse(
             {"error": lock_message(lock_reasons, subject="panoramic arch"), "panoramic_locked": True},
             status=409,
@@ -422,22 +411,28 @@ def save_browser_panoramic(request, patient_id):
     request_hash = hashlib.sha256(
         json.dumps(fingerprint_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    current = PanoramicState.objects.filter(patient=patient).first()
-    if current and current.generation_uuid == normalized["generation_uuid"]:
-        if current.request_hash == request_hash:
-            return _panoramic_save_response(current, idempotent=True)
+    generation = str(normalized["generation_uuid"])
+
+    # A cheap rejection before any object-storage work. Re-checked under the row lock
+    # below, which is the check that counts.
+    current = current_browser_panoramic(patient, active_source)
+    if current["generationUuid"] == generation:
+        if current["requestHash"] == request_hash:
+            return _panoramic_save_response(
+                revision=current["revision"],
+                generation_uuid=generation,
+                default_mode=current["defaultMode"],
+                idempotent=True,
+            )
         return JsonResponse({"error": "generation_uuid was already used"}, status=409)
-    current_matches_source = _state_matches_source(current, active_source)
-    effective_revision = current.revision if current_matches_source else 0
-    if effective_revision != normalized["base_revision"]:
+    if current["effectiveRevision"] != normalized["base_revision"]:
         return JsonResponse({"error": "Stale panoramic revision"}, status=409)
 
-    generation = str(normalized["generation_uuid"])
     prefix = f"maxillo/processed/panoramic/patient_{patient.patient_id}/{generation}"
     keys = {"mip": f"{prefix}/mip.png", "raysum": f"{prefix}/raysum.png"}
     storage = None
     uploaded_keys = []
-    idempotent_state = None
+    idempotent = False
     try:
         storage = get_object_storage()
         with transaction.atomic():
@@ -445,21 +440,17 @@ def save_browser_panoramic(request, patient_id):
             locked_source = _resolved_cbct_viewer_source(locked_patient)
             if not locked_source or _source_descriptor(locked_source) != normalized["source"]:
                 raise RuntimeError("The active CBCT source has changed")
-            current = PanoramicState.objects.select_for_update().filter(patient=locked_patient).first()
-            if current and current.generation_uuid == normalized["generation_uuid"]:
-                if current.request_hash == request_hash:
-                    idempotent_state = current
-                else:
+            current = current_browser_panoramic(locked_patient, locked_source)
+            if current["generationUuid"] == generation:
+                if current["requestHash"] != request_hash:
                     raise RuntimeError("generation_uuid was already used")
+                idempotent = True
+                revision_number = current["revision"]
+                default_mode = current["defaultMode"]
             else:
-                idempotent_state = None
-            current_matches_source = _state_matches_source(current, locked_source)
-            effective_revision = current.revision if current_matches_source else 0
-            if idempotent_state is None and effective_revision != normalized["base_revision"]:
-                raise RuntimeError("Stale panoramic revision")
-            if idempotent_state is not None:
-                state = idempotent_state
-            else:
+                if current["effectiveRevision"] != normalized["base_revision"]:
+                    raise RuntimeError("Stale panoramic revision")
+
                 # The patient row lock serializes uploads for one case, preventing two
                 # concurrent requests from overwriting or deleting the same UUID keys.
                 uploaded_keys.append(keys["mip"])
@@ -467,11 +458,20 @@ def save_browser_panoramic(request, patient_id):
                 uploaded_keys.append(keys["raysum"])
                 _upload_panoramic_bytes(storage, raysum_bytes, keys["raysum"])
 
-                revision = effective_revision + 1
+                # The number `save_panoramic_arch` is about to allocate. It is passed
+                # `expected_revision=current["revision"]`, so the unique constraint on
+                # (set, revision_number) makes any other answer an IntegrityError rather
+                # than a row whose metadata disagrees with its revision.
+                revision_number = current["revision"] + 1
+                default_mode = normalized["default_mode"]
                 source_metadata = dict(normalized["source"])
                 common_metadata = {
                     "generated_from": "browser_cbct_to_panoramic",
                     "generation_uuid": generation,
+                    # Kept on the upload rather than on the annotation record: it
+                    # fingerprints *this request*, which is a fact about the transfer and
+                    # not about the arch. `current_browser_panoramic` reads it back.
+                    "request_hash": request_hash,
                     "source": source_metadata,
                     "annotation": {
                         "axial_slice": normalized["axial_slice"],
@@ -479,7 +479,7 @@ def save_browser_panoramic(request, patient_id):
                         "spline": normalized["spline"],
                         "geometry_source": normalized["geometry_source"],
                         "algorithm_version": normalized["algorithm_version"],
-                        "revision": revision,
+                        "revision": revision_number,
                     },
                     "image_width": mip_size[0],
                     "image_height": mip_size[1],
@@ -492,7 +492,7 @@ def save_browser_panoramic(request, patient_id):
                     "generated_by": request.user.username,
                 }
                 modality = Modality.objects.filter(slug="panoramic").first()
-                new_rows = []
+                strips = []
                 for variant, content, digest in (
                     ("mip", mip_bytes, mip_hash),
                     ("raysum", raysum_bytes, raysum_hash),
@@ -503,7 +503,7 @@ def save_browser_panoramic(request, patient_id):
                         "projection": "maximum" if variant == "mip" else "nonnegative_ray_sum",
                         "is_default": variant == normalized["default_mode"],
                     })
-                    new_rows.append(FileRegistry.objects.create(
+                    row = FileRegistry.objects.create(
                         file_type="panoramic_processed",
                         subtype=variant,
                         file_path=keys[variant],
@@ -514,42 +514,38 @@ def save_browser_panoramic(request, patient_id):
                         domain="maxillo",
                         patient=locked_patient,
                         processing_job=None,
-                    ))
-                old_rows = []
-                if current:
-                    old_rows = [row for row in (current.mip_file, current.raysum_file) if row]
-                    state = current
-                else:
-                    state = PanoramicState(patient=locked_patient)
-                state.source_job = locked_source["job"]
-                state.source_file = locked_source["file"]
-                state.source_file_key = locked_source["file_key"]
-                state.source_file_hash = locked_source["file_hash"]
-                state.source_segmentation_file = locked_source["segmentation_file"]
-                state.source_segmentation_key = locked_source["segmentation_key"]
-                state.source_segmentation_hash = locked_source["segmentation_hash"]
-                state.mip_file, state.raysum_file = new_rows
-                state.axial_slice = normalized["axial_slice"]
-                state.volume_shape = normalized["volume_shape"]
-                state.spline = normalized["spline"]
-                state.geometry_source = normalized["geometry_source"]
-                state.default_mode = normalized["default_mode"]
-                state.algorithm_version = normalized["algorithm_version"]
-                state.revision = revision
-                state.generation_uuid = normalized["generation_uuid"]
-                state.request_hash = request_hash
-                state.generated_by = request.user
-                state.save()
+                    )
+                    strips.append({
+                        "variant": variant,
+                        "file_obj": row,
+                        "content_hash": digest,
+                        "byte_size": len(content),
+                    })
 
-                old_owned = [
-                    row for row in old_rows
-                    if isinstance(row.metadata, dict)
-                    and row.metadata.get("generated_from") == "browser_cbct_to_panoramic"
-                ]
-                old_ids = [row.id for row in old_owned]
-                old_paths = [row.file_path for row in old_owned]
-                if old_ids:
-                    FileRegistry.objects.filter(id__in=old_ids).delete()
+                old_strips = _superseded_strip_rows(locked_patient, current)
+                try:
+                    annotation_services.save_panoramic_arch(
+                        locked_patient,
+                        volume_file=locked_source["file"],
+                        volume_file_key=locked_source["file_key"],
+                        volume_hash=locked_source["file_hash"],
+                        segmentation_file=locked_source["segmentation_file"],
+                        segmentation_file_key=locked_source["segmentation_key"],
+                        segmentation_hash=locked_source["segmentation_hash"],
+                        spline=normalized["spline"],
+                        axial_slice=normalized["axial_slice"],
+                        volume_shape=normalized["volume_shape"],
+                        geometry_source=normalized["geometry_source"],
+                        default_mode=normalized["default_mode"],
+                        algorithm_version=normalized["algorithm_version"],
+                        strips=strips,
+                        author=request.user,
+                        expected_revision=current["revision"],
+                    )
+                except AnnotationConflict as exc:
+                    raise RuntimeError(str(exc)) from exc
+
+                old_paths = _supersede_browser_strips(old_strips)
 
                 def cleanup_old_outputs():
                     for old_path in old_paths:
@@ -577,7 +573,60 @@ def save_browser_panoramic(request, patient_id):
         logger.exception("Unable to save browser panoramic for patient %s", patient.patient_id)
         return JsonResponse({"error": "Unable to save panoramic"}, status=500)
 
-    return _panoramic_save_response(state, idempotent=bool(idempotent_state))
+    return _panoramic_save_response(
+        revision=revision_number,
+        generation_uuid=generation,
+        default_mode=default_mode,
+        idempotent=idempotent,
+    )
+
+
+def _superseded_strip_rows(patient, current):
+    """Every browser-generated strip this save replaces, from both stores.
+
+    ``annotations`` holds the strips of every save from here on. ``PanoramicState`` still
+    holds the ones written before the move, and its FKs are ``SET_NULL``, so a study whose
+    conversion has not run has strips nothing else can reach. Left behind they are not
+    merely orphaned bytes: ``common/export_catalog.py`` collects ``panoramic_processed``
+    rows by subtype, so a stale ``raysum`` would be exported *beside* the current one.
+    """
+    from ..models import PanoramicState
+
+    rows = {row.id: row for row in current["strips"].values() if row}
+    legacy = PanoramicState.objects.filter(patient=patient).first()
+    if legacy is not None:
+        for row in (legacy.mip_file, legacy.raysum_file):
+            if row is not None:
+                rows.setdefault(row.id, row)
+    return list(rows.values())
+
+
+def _supersede_browser_strips(old_strips):
+    """Drop the strips a new revision replaces, and say which object keys to delete.
+
+    The PNGs are *derived* payloads -- regenerable from the arch, and explicitly not
+    canonical -- so a superseded pair is deleted rather than kept as history. That is also
+    what makes the delete possible at all: ``AnnotationPayload.file`` is ``PROTECT``, so
+    the payload rows have to go first or the ``FileRegistry`` delete raises.
+
+    Only rows this endpoint produced are touched. A panoramic that came from the CBCT
+    pipeline or was uploaded by hand shares the ``panoramic_processed`` file type and is
+    nobody's to clean up here.
+    """
+    from annotations.models import AnnotationPayload
+
+    owned = [
+        row for row in old_strips
+        if isinstance(row.metadata, dict)
+        and row.metadata.get("generated_from") == "browser_cbct_to_panoramic"
+    ]
+    if not owned:
+        return []
+    ids = [row.id for row in owned]
+    paths = [row.file_path for row in owned]
+    AnnotationPayload.objects.filter(file_id__in=ids).delete()
+    FileRegistry.objects.filter(id__in=ids).delete()
+    return paths
 
 
 def _serve_file_url(request, file_id):
@@ -916,13 +965,11 @@ def patient_panoramic_data(request, patient_id):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     active_source = _resolved_cbct_viewer_source(patient)
-    state = PanoramicState.objects.select_related("mip_file", "raysum_file").filter(
-        patient=patient
-    ).first()
-    if _state_matches_source(state, active_source):
+    current = current_browser_panoramic(patient, active_source)
+    if current["matchesSource"]:
         browser_variants = {
-            "mip": {"file": state.mip_file, "label": "MIP"},
-            "raysum": {"file": state.raysum_file, "label": "X-ray"},
+            "mip": {"file": current["strips"].get("mip"), "label": "MIP"},
+            "raysum": {"file": current["strips"].get("raysum"), "label": "X-ray"},
         }
         available_variants = {
             variant: data
@@ -938,8 +985,8 @@ def patient_panoramic_data(request, patient_id):
         selected_variant = requested_variant
         if not selected_variant and available_variants:
             selected_variant = (
-                state.default_mode
-                if state.default_mode in available_variants
+                current["defaultMode"]
+                if current["defaultMode"] in available_variants
                 else next(iter(available_variants))
             )
         if selected_variant:
@@ -956,8 +1003,8 @@ def patient_panoramic_data(request, patient_id):
                         {"id": variant, "label": data["label"]}
                         for variant, data in available_variants.items()
                     ],
-                    "revision": state.revision,
-                    "generation_uuid": str(state.generation_uuid),
+                    "revision": current["revision"],
+                    "generation_uuid": current["generationUuid"],
                 })
             return streaming_response(
                 path_or_key=selected_file.file_path,

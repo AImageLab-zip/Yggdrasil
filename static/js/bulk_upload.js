@@ -12,7 +12,10 @@
 (function () {
     'use strict';
 
-    var CONVERTIBLE = /\.(dcm|dicom|nii|mha)$/i;
+    // DICOM is deliberately absent: it is uploaded as-is and stored as DICOM
+    // (common/dicom/ingest.py). Only the two formats the server cannot store
+    // natively are converted here.
+    var CONVERTIBLE = /\.(nii|mha)$/i;
 
     function element(id) { return document.getElementById(id); }
 
@@ -99,7 +102,7 @@
             }
         }).then(function (converted) {
             // Keep the original stem: the server names each patient after its file.
-            var stem = file.name.replace(/\.(dcm|dicom|nii|mha)$/i, '');
+            var stem = file.name.replace(/\.(nii|mha)$/i, '');
             return new File([converted.file], stem + '.nii.gz', { type: converted.file.type });
         });
     }

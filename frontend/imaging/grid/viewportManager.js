@@ -48,7 +48,8 @@ import { DEFAULT_RENDER_MODE, applyRenderMode } from './renderModes.js';
 import { createOverlay, updateOverlay } from './viewportOverlay.js';
 import { formatWindow } from './voi.js';
 import { residualModalityLut } from '../metadata/modalityLutModule.js';
-import { awaitVolumeLoad, readScalarData } from './volumeLoading.js';
+import { prepareDicomSeries } from './dicomVolume.js';
+import { awaitVolumeLoad, fetchHeader, readScalarData } from './volumeLoading.js';
 import { describeGeometry } from '../geometry/orientation.js';
 // The same list and filter a save uses: what is hidden, cleared and stored is one set.
 import { MEASUREMENT_TOOLS, NAVIGATION_TOOL, measurementAnnotations } from './measurements.js';
@@ -687,18 +688,40 @@ async function loadVolumeIntoWindows({
     volumeCache,
     elements,
 }) {
-    const { volumeLoader, createNiftiImageIdsAndCacheMetadata, setVolumesForViewports } = cornerstone;
-    const { url, modality, fileId } = descriptor;
+    const {
+        volumeLoader,
+        createNiftiImageIdsAndCacheMetadata,
+        setVolumesForViewports,
+        dicomMetaDataManager,
+    } = cornerstone;
+    const { url, modality, fileId, dicom } = descriptor;
     const volumeId = volumeIdFor(url);
     const generations = new Map(
         windowIndices.map((index) => [index, beginLoad(state, index, { modality, fileId, volumeId })])
     );
 
     try {
-        const header = await fetchHeader(url);
+        // The only place a DICOM series differs from a NIfTI: where the header and the
+        // imageIds come from. `dicomSeriesHeader` states the series in the same terms
+        // `describeGeometry` and `openingVoi` already read, so everything below --
+        // the cache, the VOI, the orientation overlay, the tools -- is shared rather
+        // than duplicated. See imaging/grid/dicomVolume.js.
+        let header;
+        let imageIds;
+        if (dicom) {
+            const prepared = await prepareDicomSeries({
+                studyUid: dicom.studyUid,
+                seriesUid: dicom.seriesUid,
+                metaDataManager: dicomMetaDataManager,
+            });
+            header = prepared.header;
+            imageIds = prepared.imageIds;
+        } else {
+            header = await fetchHeader(url);
+            imageIds = await createNiftiImageIdsAndCacheMetadata({ url });
+        }
         const geometry = describeGeometry(header);
 
-        const imageIds = await createNiftiImageIdsAndCacheMetadata({ url });
         if (!imageIds?.length) {
             throw new Error('The loader produced no imageIds for this volume.');
         }
@@ -795,22 +818,6 @@ function orientationWarningFor(geometry) {
     );
 }
 
-async function fetchHeader(url) {
-    const reader = globalThis.nifti;
-    if (!reader) {
-        throw new Error('The vendored nifti-reader is not loaded; orientation cannot be checked.');
-    }
-    // Range-request the header. `serve_file` advertises byte ranges only for audio and
-    // video, so a server that ignores the header hands back the whole volume -- which
-    // is correct, just larger, and the browser cache absorbs it for the load below.
-    const response = await fetch(url, { credentials: 'same-origin', headers: { Range: 'bytes=0-1023' } });
-    if (!response.ok && response.status !== 206) {
-        throw new Error(`HTTP ${response.status} fetching the volume header.`);
-    }
-    const buffer = await response.arrayBuffer();
-    const decompressed = reader.isCompressed(buffer) ? reader.decompress(buffer) : buffer;
-    return reader.readHeader(decompressed);
-}
 
 
 /**

@@ -379,8 +379,8 @@ implemented, which is F7's original requirement and is unchanged.
 | 4 | Photo stacks — teleradiography | ✅ done (`release/3.0`, `e713b28`, `7e2c4cc`, `74d49d4`) — `yggweb:` loader, calibration, stack viewport wired; `modality_viewers/teleradiography.js` deleted. **Rendered and signed off**; the four bugs the maintainer reported are fixed in `74d49d4`, and two more found during Phase 5's check (`Calibrate` always visible, the counter ignoring the wheel) are fixed here — both were in shared toolbar code, so teleradiography inherited them |
 | 5 | Intraoral tooth segmentation | ✅ **done, signed off on a real study** (`release/3.0`, `d3815e3`, this commit) — the editor is on `SplineROITool` with `tension: 0.35` reproduced exactly; `intraoral_segmentation.js` (1901) and `modality_viewers/intraoral.js` (134) are **deleted**, along with the two legacy endpoints and the last writer of `IntraoralToothSegmentation`. Per-image confirmation moved to `AnnotationTarget.status` (migration `0003`). 554 JS tests, 932 Django tests, 0 failures. Four defects the browser check found are fixed — see the gate note below |
 | 6 | IOS meshes + landmark tool (Three.js removed) | ✅ **done** (`release/3.0`) — PR 6.1 moved landmark storage into `annotations/` per decision #20; PR 6.2 (this commit) replaced the viewer. `modality_viewers/ios.js` (1539) and the three Three.js r128 CDN tags are **deleted**, so no page loads Three.js — the last of the four original frontend stacks. `VolumeViewport3D` + `cornerstoneMeshLoader`, `TrackballRotateTool`, `vtkCellPicker` for surface picking, vtk sphere actors for markers. Landmarks gained **redo**. The legacy endpoint and its normalisers are gone. **No migration in either PR.** 626 JS tests, 995 Django tests, 0 failures. **Still to do: the browser check** — the coordinate identity is proven as algebra and pinned against the shipped `Mesh.js`, but only a real study proves the wiring, and Phases 4 and 5 each shipped four defects the harness could not see |
-| 7 | Panoramic live CPR | ⬜ not started |
-| 8 | Native DICOM ingestion and serving | ⬜ not started |
+| 7 | Panoramic live CPR | 🟡 **built** (`release/3.0`) — PR 7.1 moved the arch into `annotations/` (no migration; an `auto` arch is prediction origin, so a warm-up run over a folder still cannot lock a cohort's raw data; a replaced CBCT is detected from the revision's `source_fingerprint` rather than by deleting anything). PR 7.2 replaced the viewer: `modality_viewers/cbct_panorex_editor.js` (924) and `imaging/grid/panoramicSource.js` (195) are **deleted**, the panoramic reads the CBCT from the shared Cornerstone cache, and the strip reformats live through `ImageCPRMapper` while the *saved* strip is still the CPU bake. 1025 Django tests, 659 JS tests, 0 failures. **Still to do: the browser check** — nothing here has rendered a pixel, and Phases 4, 5 and 6 each shipped four defects the harness could not see |
+| 8 | Native DICOM ingestion and serving | 🟡 **built** (`release/3.0`) — an uploaded DICOM stays DICOM: stored, de-identified by **whitelist**, cataloged (`DicomSeries`/`DicomInstance`, one additive migration), served to the viewer, and exported. The runner is handed the series prefix; per the maintainer's decision the cluster algorithms read DICOM, and no NIfTI is derived anywhere. **No `DicomUidMap`** — UIDs are HMAC-derived, so risk 16 stops existing rather than being mitigated. Viewer shares the whole NIfTI path (`dicomSeriesHeader` states a series in the terms `describeGeometry`/`openingVoi` already read). **F13 fixed** here rather than in Phase 9, because Phase 8 is what creates the prefix rows it silently drops. 1110 Django tests, 696 JS tests, 0 failures. **Still to do: the browser check** — nothing here has rendered a pixel |
 | 9 | Interop: SEG / RTSTRUCT / SR / Parametric Map | ⬜ not started |
 | 10 | Laparoscopy video (Konva removed) | ⬜ not started |
 
@@ -430,8 +430,14 @@ implemented, which is F7's original requirement and is unchanged.
 >   instance and a main-thread setter would not reach it.
 > - **`splitting` cannot separate core+tools.** All five surfaces need them, so the shared
 >   chunk is ~4.1 MB and every page pays it. What splitting *does* buy is the intended
->   thing: the NIfTI loader, polySeg, itk-wasm and the CPR mapper stay out of it, so a
->   laparoscopy page does not download the volume/CPR/mesh stack.
+>   thing: the NIfTI loader, polySeg and itk-wasm stay out of it, so a laparoscopy page
+>   does not download the volume/mesh stack.
+>
+>   ~~and the CPR mapper~~ — **wrong, and it has been since this was written.** Checked
+>   while building Phase 7: `vtkImageCPRMapper` is in the shared chunk in the Phase-1
+>   bundle too, so the laparoscopy entry has always carried it. Not a regression and not
+>   worth chasing — it is inside the 4.1 MB every page already pays — but the claim above
+>   should not be repeated as though it were verified.
 > - **`application/wasm` resolves correctly** from Python 3.11's `mimetypes` in the app
 >   container, so whitenoise serves the wasm with the right type. One fewer unknown for
 >   the "needs a live environment" list.
@@ -1171,18 +1177,136 @@ Tier 1 compares two different header parsers.
       And `Viewport.resetCamera` multiplies the bounds radius by **10** for
       `ViewportType.VOLUME_3D`, so it must not be used for framing; set the camera from the
       seven ported presets instead.
-- **7 — Panoramic live CPR.** Interactive layer → Cornerstone + vtk.js `ImageCPRMapper`.
+- **7 — Panoramic live CPR.** 🟡 **PR 7.1 shipped**; what follows is the plan as designed,
+  with the corrections PR 7.1 established recorded inline.
+  - **The arch moves into `annotations/` first**, the shape Phases 5 and 6 both took. It was
+    not optional: `annotations_crosscheck` compares every `PanoramicState` row against a
+    converted counterpart, so a live save that kept writing the legacy table would have
+    reported a gap on every edit. No migration — `panoramic_arch`, `png_render` and
+    `AnnotationPayload.variant` were all seeded by `annotations/migrations/0001`, the last
+    of them with "the panoramic bakes both a MIP and a ray-sum strip" written on it.
+  - **Three corrections from building it**, each of which changes what 7.2 has to do:
+    - **The whole-set fingerprint is not a source check.** `record_revision` stamps
+      `fingerprint_targets(annotation_set)`, which covers every target the set has *ever*
+      had — and replacing a CBCT leaves the old one attached as the audit trail. Comparing
+      it for equality reported "the source changed" on the very save that had just matched
+      it. What answers the question is the arch item's **own** target plus a subset check
+      on the hashes; `arch_describes_source` is that, and the residual case it cannot see
+      is named in its docstring rather than left to be discovered.
+    - **Carry-forward is wrong for this surface**, and would have been a defect with a long
+      fuse. A patient has one arch and every save names it, so the writer owns the whole
+      set. Left on, replacing the CBCT would have anchored the new arch to a new volume
+      resource, left the old target untouched, and copied *its* arch onto the same
+      revision — and the reader takes the first polyline it finds.
+    - **The revision number cannot rewind.** "The source changed, start again" used to mean
+      `revision = 1` on a replaced row. Revisions are monotonic by construction, so it now
+      means the *client* is handed 0 while the server keeps counting: `effectiveRevision`
+      and `revision` are different numbers, and only the first is quoted back.
+  - **Six readers moved, not four.** The plan below names four. The page payload
+    (`patient_detail._panorex_source_data`) and the strip-serving endpoint
+    (`patient_data.patient_panoramic_data`) were the other two, and all three had their own
+    copy of the seven-field source comparison. They now share
+    `maxillo/views/panoramic_state.py`.
+  - **Release ordering, which is not optional.** `annotations_convert_legacy --only panoramic`
+    must run **before** the release that ships the new writer. `_already_converted` keys on a
+    revision note, so a study edited live before the conversion would afterwards have its
+    frozen pre-deploy arch appended as a *newer* revision.
+  - **PR 7.2 shipped too.** Corrections from building the viewer:
+    - **No bridge was needed at all.** The plan assumed a narrowed hand-off between the
+      grid and the panoramic. There is none: every entry imports the same shared chunk, so
+      `@cornerstonejs/core`'s cache is one instance per page, and both surfaces derive the
+      same volume id from the same `#viewerGridData` payload through the same three
+      functions. The two agree by construction rather than by contract, and
+      `panoramicSource.js` is deleted outright.
+    - **`fetchHeader` moved to `imaging/grid/volumeLoading.js`.** It was file-local to the
+      grid's viewport manager, and the panoramic needs the same header to reorient the
+      array the baker consumes. Two implementations of "parse this volume's header" is two
+      chances to disagree about an affine.
+    - **The RAS array is materialised once, on the first bake.** The shim rebuilt it on
+      every call and the old editor *polled*, so a CBCT was reoriented several times a
+      second while the page was open.
+    - **The mapper's orientation triad, read off the shipped shader** rather than guessed:
+      `samplingDirection = orientation · tangentDirection` is across the strip (the volume's
+      +Z) and `projectionDirection = orientation · bitangentDirection` is the slab. Both are
+      derived from the worker's own `slab` — its first and last samples *are* the ends of
+      the arch normal — so the mapper integrates over the interval the baker integrates
+      over, rather than over one that agrees today.
+    - **`flipZ` reaches the display exactly once**, as the CPR camera's view-up. The baker
+      writes its first row from the last slice on those volumes, so the live strip and the
+      saved one would otherwise be mirror images of each other.
+  - **The gate is the browser check, and it is not cleared.** Nothing in Phase 7 has
+    rendered a pixel. Phases 4, 5 and 6 each shipped four defects a green suite could not
+    see, and this phase has two known candidates already, both recorded in the code:
+    - **The strip's up-axis.** `ImageCPRMapper.computeBounds` puts the reformat in a flat
+      rectangle of its own -- x is the cross-section, y is arc length -- so which way the
+      cross-section runs on screen is a display choice, and the baked strip's own row order
+      is the thing it has to match. `viewUpSign` is the one line to invert if the live
+      preview comes back mirrored against the saved one.
+    - **The live ray-sum is an average, not a clipped sum.** vtk has no mode for the
+      baker's projection. Baking on drag release keeps that off the moment of decision,
+      but the two panes will not look identical while an arch is moving, and whether that
+      reads as informative or as a bug is a question for a person.
+
+    Also worth driving deliberately: the warm-up page over a folder (the announcement
+    contract is unit-tested but the frame is not), and a locked patient's refusal.
+  - Interactive layer → Cornerstone + vtk.js `ImageCPRMapper`.
   **Baking layer unchanged**: `seg2pano_core.js` and `worker/seg2pano_worker.js` survive
   verbatim, so the exported PNGs (`common/export_catalog.py:232-241`) keep their bytes.
   **Port `cbct_panorex_editor.test.js`, do not delete it** — it locks the never-on-load and
   unattended-`autoMode` behaviours that `panoramic_warmup.js` depends on.
-- **8 — Native DICOM.** Catalog in `common/` (not `annotations/`, which would be a cycle).
-  **One `FileRegistry` row per series, `file_path` = a prefix** — already the house pattern at
-  `maxillo/file_utils.py:369-435`. `DicomSeries.sealed_at` because the annotation lock guards
-  rows, not instances. `pydicom` with `stop_before_pixels=True`. De-identification at ingest,
-  verified by a sentinel test, a runtime `assert_no_phi` that aborts the transaction, and a
-  nightly `SystemCheck`. Serving is a **minimal DICOMweb WADO-RS subset** (`wadors:`), because
-  the v5 adapter API assumes per-frame imageIds. Demo gate per F10.
+- **8 — Native DICOM.** ✅ **Built.** Catalog in `common/` (not `annotations/`, which would be a
+  cycle). **One `FileRegistry` row per series, `file_path` = a prefix** — already the house
+  pattern at `maxillo/file_utils.py:369-435`. `DicomSeries.sealed_at` because the annotation
+  lock guards rows, not instances. `pydicom` with `stop_before_pixels=True` for the header
+  pass. De-identification at ingest, verified by a sentinel test, a runtime `assert_no_phi`
+  that aborts the transaction, and a nightly `SystemCheck`. Serving is a **minimal DICOMweb
+  read subset** (`wadors:`). Demo gate per F10.
+
+  Six things the plan did not say, each settled by reading the shipped package or the
+  maintainer's decision rather than by assumption:
+
+  1. **No conversion, anywhere, and the runner reads DICOM.** The maintainer's call: an
+     uploaded DICOM stays DICOM, no NIfTI is derived even internally, and `input_files` names
+     the series prefix. The frozen wire contract in `maxillo/tests_runner_api.py` does not
+     change — `input_files` was always an opaque string map — but the cluster algorithms are
+     updated outside this repository, and **nothing here can verify that**.
+  2. **`DicomUidMap` was deleted from the design, not built.** This document's own risk 16
+     called it "a re-identification vector … safely droppable". Anything safely droppable is
+     not load-bearing, so UIDs are derived instead: `HMAC(key, original)` under the ISO `2.25`
+     arc. Idempotent re-ingest falls out for free, duplicate uploads become detectable, and
+     the vector stops existing.
+  3. **Whitelist, not blacklist.** A blacklist cannot be shown to be complete. The stored
+     dataset is rebuilt from ~35 named attributes; everything else, private blocks included,
+     is dropped, which is what lets `assert_no_phi` be an assertion. It runs against the exact
+     bytes handed to storage — asserting the in-memory dataset would check the intention, not
+     the artifact.
+  4. **The viewer needed almost no new geometry.** `dicomSeriesHeader` states a series in the
+     terms `describeGeometry` and `openingVoi` already read, so the branch in
+     `loadVolumeIntoWindows` is *where the header and imageIds come from* and nothing else.
+     Two values there are load-bearing: `qform_code: 1` (DICOM always declares its
+     orientation, so **F2 correctly never fires** — and a series that does *not* carry
+     `ImageOrientationPatient` is refused rather than assigned a fabricated one), and
+     identity `scl_slope`/`scl_inter`, because `createImage.js` defaults `preScale.enabled` to
+     `true`, so DICOM voxels arrive already in modality units. **There is no F1 ambiguity for
+     DICOM** — unlike NIfTI, the rescale is applied unconditionally.
+  5. **`register()` is not enough; `init()` is.** `imageLoader/decodeImageFrame.js` routes
+     *every* transfer syntax through the `dicomImageLoader` web worker, uncompressed included,
+     and only `init()` registers it. The lighter call would have downloaded every series
+     correctly and then never decoded one — in the browser only. `init()` also opens with
+     `cache.purgeCache()`, so it must run after core init and before anything is cached.
+  6. **`npm run verify` caught a real broken path again**, as it did on its first ever run
+     (F15). The decoders reference their wasm as
+     `new URL('@cornerstonejs/codec-charls/decodewasm', import.meta.url)` — a *bare package
+     specifier* inside `new URL`, which esbuild copies through untouched and which can never
+     resolve. Fixed through the loader's own `wasmBasePath` hook (which also gets the wasm
+     served as `application/wasm`, so `instantiateStreaming` succeeds instead of falling back
+     with a console warning on every compressed study), and the checker now asserts the
+     replacement exists rather than ignoring the reference.
+
+  **The gate is the browser check, and it is not cleared.** Nothing in Phase 8 has rendered a
+  pixel. Worth driving deliberately: a DICOM folder upload end to end; the series rendering in
+  the grid with measurements on it; a compressed (JPEG Lossless) study, which exercises the
+  codec wasm path that unit tests cannot reach; and an export containing the series.
 - **9 — Interop.** Browser for import (it has the registered volume); **server authoritative**
   for export (`common/export_processing.py` has no browser). Adds `highdicom`. **Fix F13** and
   add a regression test asserting a default export still contains
@@ -1281,15 +1405,15 @@ streaming of a bundle containing a full DICOM series under gunicorn.
 | 5 | **Bundle-freshness gate needs byte-reproducible esbuild** | ✅ discharged in Phase 1 — verified: consecutive builds are byte-identical (exact pin, committed lockfile, no sourcemaps) |
 | 6 | **`npm ci` needs registry egress** on the self-hosted runner | Documented in `CONTRIBUTING.md` beside the existing `gh` requirement; **still to be provisioned on the runner** |
 | 7 | **No feature flags** makes the harness gate load-bearing | If the corpus is too large, sweep every folder with confirmed annotations plus a random sample |
-| 8 | **F10 — demo guests reach every new endpoint** | `is_demo_guest → 404` behind `DICOM_DEMO_ENABLED`; nightly verification green before flipping |
-| 9 | **De-identification is header-only** | Refuse burned-in / Secondary-Capture; record `deid_confidence`; never claim more in the UI |
-| 10 | **`discard_raw` bricks the DICOM viewer** (the raw row *is* the viewer source) | Guarded at ingest *and* in `ProcessingStep.clean()` |
-| 11 | **The lock is blind to per-instance mutation** | `sealed_at` + `DicomInstance.save()` refusal + `_lock_reasons` learning about `annotations` |
+| 8 | **F10 — demo guests reach every new endpoint** | ✅ discharged in Phase 8 — `is_demo_guest → 404` behind `DICOM_DEMO_ENABLED`, which ships `False`; asserted in `common/tests_dicom_serving.py`, including that enabling it does **not** widen `is_demo` folder scoping |
+| 9 | **De-identification is header-only** | ✅ discharged in Phase 8 — burned-in and Secondary Capture are *refused* at ingest, whole upload at a time; `deid_confidence` is `header_only` unless the header explicitly declares otherwise, and the field's help text says nothing may report more than it establishes. The keep-list approach is what makes `assert_no_phi` an assertion rather than a spot check |
+| 10 | **`discard_raw` bricks the DICOM viewer** (the raw row *is* the viewer source) | ✅ discharged in Phase 8 — guarded at ingest *and* in `ProcessingStep.clean()`, both tested |
+| 11 | **The lock is blind to per-instance mutation** | ✅ discharged in Phase 8 — `sealed_at` set at the same moment as `ever_annotated` (and, for the same reason, *not* by a prediction) + `DicomInstance.save()` refusal. `_lock_reasons` needed no change: it asks `ever_annotated` and knows nothing about file formats |
 | 12 | **Two SEG writers (dcmjs + highdicom) can disagree** | Cross-writer mask/geometry equivalence test + a committed browser-generated fixture |
 | 13 | **highdicom RTSTRUCT is less exercised than its SEG writer** | Verify before shipping; SEG/SR first |
 | 14 | **`validate_labelmap` is the only server-side voxel read** | Budget check *before* reading, from the already-validated header |
-| 15 | **F13 — prefix rows silently export nothing** | `series` entry type + the panoramic-PNG regression test |
-| 16 | **`DicomUidMap` is a re-identification vector** | Never in admin, never exported, HMAC key in env, documented as safely droppable |
+| 15 | **F13 — prefix rows silently export nothing** | ✅ discharged in Phase 8 (not 9 — Phase 8 creates the rows) — `series` entry type + the panoramic-PNG regression test, both in `common/tests_dicom_lifecycle.py`. Also fixes folder uploads, which have always exported as nothing |
+| 16 | **`DicomUidMap` is a re-identification vector** | ✅ **removed rather than mitigated** in Phase 8 — the table does not exist. UIDs are derived as `HMAC(DICOM_UID_HMAC_KEY, original)` under the ISO `2.25` arc, so re-ingest is idempotent with no lookup table to leak. Rotating the key renames every series: a migration, not a maintenance task |
 | 17 | **Decision #18 removes an escape hatch** (delete no longer unlocks) | Superuser override exists; stamp `metadata['lock_override']` on bypass so a later fingerprint mismatch is explainable |
 | 18 | **Decision #15 must preserve NPZ bytes** | Prove byte-equivalence on existing studies during migration; both frozen tests unchanged |
 | 19 | **Dropping legacy tables is non-additive** | Its own release, gated on a clean prod `annotations_crosscheck`; rollback is the Phase-2 backup |

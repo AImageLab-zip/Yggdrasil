@@ -293,6 +293,38 @@ class ExportProcessor:
         logger.info("Total entries collected: %d, total size: %d bytes", len(entries), total_size)
         return entries, total_size
 
+    @staticmethod
+    def _prefix_members(row):
+        """Members of a prefix row, or ``None`` if this row is a single object.
+
+        Some ``FileRegistry`` rows have a ``file_path`` that is an object-storage
+        *prefix* rather than an object: folder uploads
+        (``maxillo.file_utils.save_generic_modality_folder``) and, since Phase 8, DICOM
+        series. Both record their members as a **list** under ``metadata['files']``,
+        which is what distinguishes them from a processed CBCT bundle -- that stores a
+        *dict* keyed by output name.
+
+        This is finding F13. ``artifact_exists(prefix)`` heads a key that does not
+        exist, raises, and the artifact is skipped **with a warning and no error**, so
+        a folder upload has always exported as nothing at all. Phase 8 makes that
+        matter: a DICOM series is the raw scan.
+        """
+        metadata = row.metadata if isinstance(row.metadata, dict) else {}
+        files = metadata.get("files")
+        if not isinstance(files, list):
+            return None
+        members = [
+            {
+                "name": str(member.get("name") or "").strip()
+                or os.path.basename(str(member.get("path") or "").rstrip("/")),
+                "path": member.get("path"),
+                "size": int(member.get("size") or 0),
+            }
+            for member in files
+            if isinstance(member, dict) and member.get("path")
+        ]
+        return members or None
+
     def _file_entry(self, patient, artifact, row):
         """Build one ZIP entry for a FileRegistry row, or (None, 0) if unusable."""
         output = artifact.resolve_output(row)
@@ -305,6 +337,22 @@ class ExportProcessor:
                 row.id, row.file_type, artifact.key,
             )
             return None, 0
+
+        # Checked before `artifact_exists`, because that call is what F13 breaks on:
+        # a prefix is not an object and heading it raises.
+        members = None
+        if not artifact.nested_key and path == row.file_path:
+            members = self._prefix_members(row)
+        if members is not None:
+            return {
+                "type": "series",
+                "patient": patient,
+                "artifact": artifact,
+                "file_registry": row,
+                "path": path,
+                "members": members,
+            }, sum(member["size"] for member in members)
+
         if not artifact_exists(path):
             logger.warning("File not found for artifact %s: %s", artifact.key, path)
             return None, 0
@@ -473,11 +521,36 @@ class ExportProcessor:
         return name.replace(" ", "_")
 
     @staticmethod
+    def _write_series(zipf, used_paths, directory, folder, entry):
+        """Write every member of a prefix row, and report how many landed.
+
+        One directory per series inside the artifact's own directory, so a patient
+        with two series does not interleave several hundred instances under one name.
+        """
+        written = 0
+        for member in entry["members"]:
+            source_path = member["path"]
+            if not artifact_exists(source_path):
+                logger.warning("Skipping missing series member: %s", source_path)
+                continue
+            dest_path = ExportProcessor._unique_path(
+                used_paths, f"{directory}/{folder}", member["name"]
+            )
+            with zipf.open(dest_path, mode="w", force_zip64=True) as handle:
+                for chunk in iter_artifact_bytes(source_path):
+                    handle.write(chunk)
+            written += 1
+        return written
+
+    @staticmethod
     def _entry_filename(entry):
         """Name this entry takes inside the ZIP."""
         artifact = entry["artifact"]
         if entry["type"] == "document":
             return entry["filename"]
+        if entry["type"] == "series":
+            # The directory the members go in, not a file name.
+            return os.path.basename((entry["path"] or "").rstrip("/")) or "series"
         # A bundled output (CBCT volume / segmentation / stats) is stored under an
         # opaque object key, so the artifact supplies the readable name.
         if artifact.nested_key and artifact.filename:
@@ -512,6 +585,14 @@ class ExportProcessor:
                 try:
                     if entry["type"] == "document":
                         zipf.writestr(dest_path, entry["content"])
+                    elif entry["type"] == "series":
+                        # A prefix row: one ZIP member per stored object, under a
+                        # directory named for the artifact. Writing the prefix itself
+                        # is what F13 was trying and failing to do.
+                        written += self._write_series(
+                            zipf, used_paths, directory, filename, entry
+                        )
+                        continue
                     else:
                         source_path = entry["path"]
                         if not artifact_exists(source_path):

@@ -15,12 +15,8 @@ from django.core.exceptions import ValidationError
 
 from annotations.adapters import descriptors
 from annotations.adapters import ios_landmarks as _ios
+from annotations.adapters import panoramic as _panoramic
 from annotations.adapters.tooth_segmentation import tooth_polygons
-from annotations.constants import (
-    CoordinateSystem,
-    Geometry2DType,
-    SliceAxis,
-)
 
 #: Re-exported from :mod:`annotations.adapters.ios_landmarks`, which owns the landmark
 #: conversion now that the live editor calls it too. Kept importable from here because
@@ -63,44 +59,24 @@ def intraoral_segmentation(teeth):
 def panoramic_arch(spline, *, axial_slice, volume_shape, geometry_source, default_mode, algorithm_version=""):
     """Convert a ``PanoramicState`` arch into one 2D polyline descriptor.
 
-    The frame is ``slice_pixel``, with a slice selector carrying the axial
-    index. That pairing is enforced by the validators, and it is the point: a
-    spline is a list of ``[x, y]`` pairs inside *one* axial slice of the volume,
-    and without the index it is a curve nobody can place.
+    Delegates to :func:`annotations.adapters.panoramic.panoramic_arch`, which is also what
+    the live editor calls. That is the point rather than tidiness: decision #6 keeps the
+    legacy table readable for one release as a cross-check, and ``annotations_crosscheck``
+    compares the two representations. Two implementations of this conversion would drift,
+    and the drift would surface as the cross-check reporting differences on every study
+    anybody had edited -- burying the signal it exists to give.
 
-    An ``auto`` arch is still converted. It is not human annotation work -- the
-    caller records it with a prediction origin, so it never sets
-    ``ever_annotated`` and never locks a case -- but it is the geometry the
-    baked strips were produced from, and dropping it would leave the exported
-    PNGs unexplained.
+    The frame is ``slice_pixel`` with a slice selector carrying the axial index; the
+    reasoning is in that module.
     """
-    if isinstance(spline, dict):
-        control_points = spline.get("control_points") or spline.get("controlPoints")
-    else:
-        control_points = spline
-    if not isinstance(control_points, list) or len(control_points) < 2:
-        raise ValidationError("a panoramic arch needs at least two control points")
-
-    selector = descriptors.slice_selector(
-        axis=SliceAxis.AXIAL,
-        index=axial_slice,
-        coordinate_system=CoordinateSystem.SLICE_PIXEL,
+    return _panoramic.panoramic_arch(
+        spline,
+        axial_slice=axial_slice,
+        volume_shape=volume_shape,
+        geometry_source=geometry_source,
+        default_mode=default_mode,
+        algorithm_version=algorithm_version,
     )
-    return [
-        descriptors.geometry_2d(
-            geometry_type=Geometry2DType.POLYLINE,
-            coordinate_system=CoordinateSystem.SLICE_PIXEL,
-            points=[list(point) for point in control_points],
-            closed=False,
-            selector=selector,
-            attributes={
-                "volume_shape": list(volume_shape or []),
-                "geometry_source": geometry_source,
-                "default_mode": default_mode,
-                "algorithm_version": algorithm_version,
-            },
-        )
-    ]
 
 
 #: The occlusion facets, in the order the sidebar shows them.

@@ -264,107 +264,27 @@ test('MetaImage orientation is derived from its TransformMatrix', () => {
     assert.equal(result.orientation, 'LPS');
 });
 
-// --- DICOM -------------------------------------------------------------------
+// --- DICOM is not converted here -----------------------------------------------
 
-/** Minimal explicit-VR little-endian DICOM slice with uncompressed PixelData. */
-function makeDicomSlice({ rows = 2, cols = 2, bitsAllocated = 16, pixelRepresentation = 0,
-                          position = [0, 0, 0], pixels }) {
-    const parts = [];
-    const push = (group, element, vr, payload) => {
-        const head = new Uint8Array(8);
-        const view = new DataView(head.buffer);
-        view.setUint16(0, group, true);
-        view.setUint16(2, element, true);
-        head[4] = vr.charCodeAt(0);
-        head[5] = vr.charCodeAt(1);
-        view.setUint16(6, payload.length, true);
-        parts.push(head, payload);
-    };
-    const ds = (text) => new TextEncoder().encode(text.length % 2 ? text + ' ' : text);
-    const us = (value) => {
-        const bytes = new Uint8Array(2);
-        new DataView(bytes.buffer).setUint16(0, value, true);
-        return bytes;
-    };
+/**
+ * Phase 8 stores an uploaded series as DICOM (`common/dicom/ingest.py`). The browser
+ * conversion that used to destroy it is deleted, and these two tests are what stop it
+ * coming back: a re-added branch would be silent data loss, visible only as "the DICOM
+ * we were told is stored is not there".
+ */
+test('the worker has no DICOM conversion branch', () => {
+    const { context, posted } = loadWorker();
+    context.self.onmessage({ data: { type: 'CONVERT_DICOM_SERIES', buffers: [] } });
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].ok, false);
+    assert.match(posted[0].error, /Unknown conversion request type/);
+});
 
-    push(0x0020, 0x0032, 'DS', ds(position.join('\\')));
-    push(0x0020, 0x0037, 'DS', ds('1\\0\\0\\0\\1\\0'));
-    push(0x0028, 0x0010, 'US', us(rows));
-    push(0x0028, 0x0011, 'US', us(cols));
-    push(0x0028, 0x0030, 'DS', ds('0.3\\0.3'));
-    push(0x0028, 0x0100, 'US', us(bitsAllocated));
-    push(0x0028, 0x0103, 'US', us(pixelRepresentation));
-    // OW uses the long form (2 reserved bytes + 4-byte length), which is what
-    // pushes PixelData onto an odd byte offset in real files.
-    const pixelBytes = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
-    const pixelHead = new Uint8Array(12);
-    const pixelView = new DataView(pixelHead.buffer);
-    pixelView.setUint16(0, 0x7FE0, true);
-    pixelView.setUint16(2, 0x0010, true);
-    pixelHead[4] = 'O'.charCodeAt(0);
-    pixelHead[5] = 'W'.charCodeAt(0);
-    pixelView.setUint32(8, pixelBytes.length, true);
-    parts.push(pixelHead, pixelBytes);
-
-    const bodyLength = parts.reduce((total, part) => total + part.length, 0);
-    const bytes = new Uint8Array(132 + bodyLength);
-    bytes.set(new TextEncoder().encode('DICM'), 128);
-    let offset = 132;
-    for (const part of parts) {
-        bytes.set(part, offset);
-        offset += part.length;
+test('the worker source carries no DICOM parser', () => {
+    const source = fs.readFileSync(
+        path.join(__dirname, '../worker/cbct_convert_worker.js'), 'utf8'
+    );
+    for (const symbol of ['parseDicomHeader', 'convertDicomSeries', 'dicomSliceArrayType']) {
+        assert.equal(source.includes(symbol), false, `${symbol} is back in the worker`);
     }
-    return bytes.buffer;
-}
-
-function convertDicom(context, buffers) {
-    const posted = [];
-    context.self.postMessage = (message) => posted.push(message);
-    context.self.onmessage({ data: { type: 'CONVERT_DICOM_SERIES', buffers } });
-    return posted[0];
-}
-
-test('a two-slice 16-bit DICOM series converts', () => {
-    const { context } = loadWorker();
-    const result = convertDicom(context, [
-        makeDicomSlice({ position: [0, 0, 0], pixels: new Int16Array([1, 2, 3, 4]) }),
-        makeDicomSlice({ position: [0, 0, 0.3], pixels: new Int16Array([5, 6, 7, 8]) })
-    ]);
-
-    assert.equal(result.ok, true, result.error);
-    const decompressed = context.nifti.decompress(result.buffer);
-    const header = context.nifti.readHeader(decompressed);
-    assert.deepEqual(Array.from(header.dims.slice(1, 4)), [2, 2, 2]);
-    const voxels = new Int16Array(context.nifti.readImage(header, decompressed));
-    assert.deepEqual(Array.from(voxels), [1, 2, 3, 4, 5, 6, 7, 8]);
-});
-
-test('an 8-bit DICOM series converts instead of being read as 16-bit', () => {
-    const { context } = loadWorker();
-    const result = convertDicom(context, [
-        makeDicomSlice({ bitsAllocated: 8, position: [0, 0, 0], pixels: new Uint8Array([1, 2, 3, 4]) }),
-        makeDicomSlice({ bitsAllocated: 8, position: [0, 0, 0.3], pixels: new Uint8Array([5, 6, 7, 8]) })
-    ]);
-
-    assert.equal(result.ok, true, result.error);
-    const decompressed = context.nifti.decompress(result.buffer);
-    const header = context.nifti.readHeader(decompressed);
-    assert.equal(header.datatypeCode, context.nifti.NIFTI1.TYPE_UINT8);
-    const voxels = new Uint8Array(context.nifti.readImage(header, decompressed));
-    assert.deepEqual(Array.from(voxels), [1, 2, 3, 4, 5, 6, 7, 8]);
-});
-
-test('unsigned 16-bit DICOM voxels do not wrap negative', () => {
-    const { context } = loadWorker();
-    const result = convertDicom(context, [
-        makeDicomSlice({ position: [0, 0, 0], pixels: new Uint16Array([40000, 2, 3, 4]) }),
-        makeDicomSlice({ position: [0, 0, 0.3], pixels: new Uint16Array([5, 6, 7, 8]) })
-    ]);
-
-    assert.equal(result.ok, true, result.error);
-    const decompressed = context.nifti.decompress(result.buffer);
-    const header = context.nifti.readHeader(decompressed);
-    assert.equal(header.datatypeCode, context.nifti.NIFTI1.TYPE_UINT16);
-    const voxels = new Uint16Array(context.nifti.readImage(header, decompressed));
-    assert.equal(voxels[0], 40000);
 });

@@ -353,6 +353,7 @@ class PanoramicWarmupTests(TestCase):
         self.assertEqual(response.json()["patients"], [])
 
     def test_a_stale_algorithm_panoramic_is_regenerated(self):
+        """An arch from a superseded baker is history, not a reason to skip the patient."""
         patient = self._processed_patient("stale")
         self.PanoramicState.objects.create(
             patient=patient,

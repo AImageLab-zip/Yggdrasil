@@ -20,7 +20,12 @@ have no concurrent editor to lose to.
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 
-from annotations.constants import AnnotationOrigin, AnnotationStatus, PayloadFormat
+from annotations.constants import (
+    AnnotationOrigin,
+    AnnotationStatus,
+    PayloadFormat,
+    ResourceKind,
+)
 from annotations.models import (
     AnnotationPayload,
     AnnotationRevision,
@@ -184,12 +189,41 @@ def record_revision(
     if origin in AnnotationOrigin.HUMAN and not annotation_set.ever_annotated:
         annotation_set.ever_annotated = True
         updates.append("ever_annotated")
+        _seal_dicom_sources(annotation_set)
     if status is not None and status != annotation_set.status:
         annotation_set.status = status
         updates.append("status")
     annotation_set.save(update_fields=updates)
 
     return revision
+
+
+def _seal_dicom_sources(annotation_set):
+    """Freeze any DICOM series this set is anchored to, the first time a human writes.
+
+    ``ever_annotated`` freezes the patient's raw *rows*, which is the whole lock for a
+    NIfTI scan: one row, one file. A DICOM series is one row holding several hundred
+    objects, and rewriting instance 137 in place would re-base every coordinate drawn
+    on the volume without touching the row at all. ``sealed_at`` is what closes that,
+    and this is the moment it has to close -- the same moment, and for the same reason,
+    that the raw data itself stops being replaceable.
+
+    Machine output does not seal, because it does not set ``ever_annotated``: a
+    prediction over a series must not stop a correction being ingested later.
+    """
+    from common.dicom.models import DicomSeries
+
+    series_uids = list(
+        annotation_set.targets.filter(
+            source_resource__kind=ResourceKind.DICOM_SERIES
+        ).values_list("source_resource__series_instance_uid", flat=True)
+    )
+    if not series_uids:
+        return
+    for series in DicomSeries.objects.filter(
+        series_instance_uid__in=series_uids, sealed_at__isnull=True
+    ):
+        series.seal()
 
 
 @transaction.atomic

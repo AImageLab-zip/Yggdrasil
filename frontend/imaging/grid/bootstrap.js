@@ -20,10 +20,10 @@
  * back rather than logging it; this is what puts it on screen.
  */
 
-import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, volumeIdFor } from './layout.js';
+import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS } from './layout.js';
 import { windowAt } from './windowState.js';
 import { volumeUrl } from '../ids/imageIds.js';
-import { announceVolumeReady, installPanoramicBridge, nativeRawVolumeDescriptor } from './panoramicSource.js';
+import { dicomSeriesUrl } from './dicomVolume.js';
 import {
     CLEARED_MESSAGE,
     SAVED_MESSAGE,
@@ -107,6 +107,10 @@ export function primaryVolumeFrom(data) {
         bundleKey: entry.file_key || 'primary',
         filename: entry.filename || `${slug}.nii.gz`,
         modality: slug,
+        // Present only for a stored DICOM series (Phase 8). Its presence is what
+        // selects the DICOM volume path; `maxillo.views.patient_detail` omits it for
+        // every NIfTI row, so neither side has to guess from a filename.
+        dicom: entry.dicom ?? null,
     };
 }
 
@@ -310,23 +314,22 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         return grid;
     }
 
-    const url = volumeUrl({
-        fileId: volume.fileId,
-        bundleKey: volume.bundleKey,
-        filename: volume.filename,
-        namespace,
-        origin,
-    });
-
-    // The panoramic reads through this, so it is installed before the load rather than
-    // after: `cbct_panorex_editor.js` polls for the descriptor and also listens for the
-    // ready event, and a bridge that appeared only afterwards would lose the race for
-    // the polling half.
-    installPanoramicBridge({
-        data,
-        getDescriptor: () => descriptorFor({ grid, url, volume }),
-        target: view,
-    });
+    // One URL either way, because it is also the volume cache key (`volumeIdFor`):
+    // one per volume, stable across reloads, unique. For a series that is its
+    // metadata endpoint; for a file, its serve path.
+    const url = volume.dicom
+        ? dicomSeriesUrl({
+              studyUid: volume.dicom.studyUid,
+              seriesUid: volume.dicom.seriesUid,
+              origin,
+          })
+        : volumeUrl({
+              fileId: volume.fileId,
+              bundleKey: volume.bundleKey,
+              filename: volume.filename,
+              namespace,
+              origin,
+          });
 
     const targets = layout.filter((entry) => !entry.lazy).map((entry) => entry.window);
     let loaded = false;
@@ -353,6 +356,7 @@ async function mountAndLoad({ mount, doc, data, elements }) {
             url,
             modality: volume.modality,
             fileId: volume.fileId,
+            dicom: volume.dicom,
         });
         loaded = !result?.superseded;
         if (result?.orientationWarning) {
@@ -417,46 +421,8 @@ async function mountAndLoad({ mount, doc, data, elements }) {
 
     if (loaded) {
         report(`loaded ${volume.modality} #${volume.fileId} into ${targets.length} window(s).`);
-        announceVolumeReady(
-            { windowIndex: targets[0], modality: volume.modality, fileId: volume.fileId },
-            view
-        );
     }
     return { ...grid, controls };
-}
-
-/**
- * Build the panoramic's descriptor from whatever the grid currently holds.
- *
- * Evaluated lazily, on each call, because the panorex editor asks before the volume has
- * necessarily arrived and expects null until it has.
- */
-function descriptorFor({ grid, url, volume }) {
-    const volumeId = volumeIdFor(url);
-    const holder = grid.state.windows.find((entry) => entry.volumeId === volumeId && !entry.loading);
-    if (!holder) {
-        return null;
-    }
-
-    const cached = grid.volumeCache?.get?.(volumeId);
-    // The scalar data was read once at load time and kept. Re-reading here would
-    // materialise another full copy of the volume every time the panorex editor polls.
-    if (!cached?.header || !cached?.scalarData) {
-        // Still loading. Null is what the old implementation returned, and what the
-        // panorex editor already handles by waiting.
-        return null;
-    }
-
-    return nativeRawVolumeDescriptor({
-        scalarData: cached.scalarData,
-        header: cached.header,
-        fileName: volume.filename,
-        source: {
-            fileId: String(volume.fileId),
-            fileKey: volume.bundleKey,
-            revision: null,
-        },
-    });
 }
 
 export { windowAt };

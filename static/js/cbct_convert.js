@@ -1,6 +1,11 @@
 /**
  * CBCTConvert - Front-end manager for in-browser CBCT conversion.
- * Orchestrates worker execution for DICOM series, MetaImage, and NIfTI repair.
+ * Orchestrates worker execution for MetaImage and NIfTI repair.
+ *
+ * **DICOM is not converted.** It is uploaded as-is and stored as DICOM by
+ * `common/dicom/ingest.py` (Phase 8). Everything that used to turn a selected DICOM
+ * folder into a .nii.gz -- and throw the series away -- is deleted; a `.dcm` or an
+ * extensionless file now falls through to the server untouched, which is the point.
  */
 
 (function (root, factory) {
@@ -10,26 +15,6 @@
     root.CBCTConvert = api;
 }(typeof window !== 'undefined' ? window : globalThis, function () {
     'use strict';
-
-    function isDicomFile(file) {
-        var name = (file.name || '').toLowerCase();
-        return name.endsWith('.dcm') || name.endsWith('.dicom') || !name.includes('.');
-    }
-
-    /**
-     * Whether a buffer carries the DICOM 'DICM' marker at byte 128.
-     *
-     * `isDicomFile` has to classify by name (files are not read yet), and it
-     * treats every extensionless file as DICOM so that DICOM directories work.
-     * Once the bytes are in hand this confirms it, so a folder of unrelated
-     * extensionless files reports "not DICOM" instead of the misleading
-     * "No valid DICOM slices could be parsed".
-     */
-    function isDicomBuffer(arrayBuffer) {
-        if (!arrayBuffer || arrayBuffer.byteLength < 132) return false;
-        var marker = new Uint8Array(arrayBuffer, 128, 4);
-        return marker[0] === 0x44 && marker[1] === 0x49 && marker[2] === 0x43 && marker[3] === 0x4d;
-    }
 
     function isMetaImageFile(file) {
         var name = (file.name || '').toLowerCase();
@@ -51,7 +36,9 @@
     }
 
     /**
-     * Convert selected files into a compressed NIfTI (.nii.gz) File object.
+     * Convert a MetaImage or a raw NIfTI into a compressed NIfTI (.nii.gz) File object.
+     *
+     * DICOM is not accepted: it is stored natively and never converted.
      *
      * @param {FileList|File[]} files
      * @param {Object} [options]
@@ -71,7 +58,6 @@
             return Promise.reject(new Error('No files selected for conversion.'));
         }
 
-        var dicomFiles = fileList.filter(isDicomFile);
         var metaImageFiles = fileList.filter(isMetaImageFile);
         var niftiFiles = fileList.filter(isNiftiFile);
 
@@ -127,28 +113,7 @@
                 reject(new Error('Worker execution error: ' + (event.message || 'Unknown error')));
             };
 
-            if (dicomFiles.length > 0) {
-                onProgress(10, 'Reading DICOM files (' + dicomFiles.length + ')...');
-                Promise.all(dicomFiles.map(readFileAsArrayBuffer))
-                    .then(function (buffers) {
-                        var dicomBuffers = buffers.filter(isDicomBuffer);
-                        if (!dicomBuffers.length) {
-                            throw new Error(
-                                'None of the ' + buffers.length + ' selected file(s) are DICOM ' +
-                                '(no DICM marker). Select a DICOM folder, or a .nii.gz / .nii / .mha volume.'
-                            );
-                        }
-                        onProgress(40, 'Converting DICOM series to NIfTI...');
-                        worker.postMessage(
-                            { type: 'CONVERT_DICOM_SERIES', buffers: dicomBuffers },
-                            dicomBuffers.slice()
-                        );
-                    })
-                    .catch(function (err) {
-                        cleanup();
-                        reject(err);
-                    });
-            } else if (metaImageFiles.length > 0) {
+            if (metaImageFiles.length > 0) {
                 onProgress(10, 'Reading MetaImage file...');
                 readFileAsArrayBuffer(metaImageFiles[0])
                     .then(function (buffer) {
@@ -172,15 +137,13 @@
                     });
             } else {
                 cleanup();
-                reject(new Error('Selected file(s) are not supported. Please select DICOM, NIfTI, or MetaImage (.mha).'));
+                reject(new Error('Selected file(s) are not supported here. This converter handles NIfTI (.nii) and MetaImage (.mha); DICOM is uploaded as-is.'));
             }
         });
     }
 
     return {
         convertFiles: convertFiles,
-        isDicomFile: isDicomFile,
-        isDicomBuffer: isDicomBuffer,
         isMetaImageFile: isMetaImageFile,
         isNiftiFile: isNiftiFile
     };

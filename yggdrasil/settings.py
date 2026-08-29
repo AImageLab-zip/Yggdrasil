@@ -265,6 +265,22 @@ LOGOUT_REDIRECT_URL = "/"
 # yggdrasil.middleware.DemoGuestReadOnlyMiddleware).
 DEMO_GUEST_USERNAME = config("DEMO_GUEST_USERNAME", default="guest")
 
+# --- Native DICOM (Phase 8) --------------------------------------------------
+# Key that pseudonymous DICOM UIDs are derived under. Every stored SeriesInstanceUID,
+# StudyInstanceUID, SOPInstanceUID and FrameOfReferenceUID is HMAC(this, original), so
+# there is no mapping table to leak -- see common/dicom/deidentify.py.
+#
+# Rotating it renames every stored series and orphans the catalog, so it is a
+# migration rather than a maintenance task. Left blank it falls back to SECRET_KEY,
+# which works but ties the two rotations together; set it separately in production.
+DICOM_UID_HMAC_KEY = config("DICOM_UID_HMAC_KEY", default="")
+
+# Whether the shared public-demo guest may read stored DICOM. Off, and it should stay
+# off until the nightly de-identification check has been green for a while: F10 means
+# `demo_index` logs anonymous visitors in as a real user, so a @login_required DICOM
+# endpoint is anonymously reachable for is_demo folders the moment this is True.
+DICOM_DEMO_ENABLED = config("DICOM_DEMO_ENABLED", default=False, cast=bool)
+
 # Email settings
 EMAIL_BACKEND = config("EMAIL_BACKEND")
 EMAIL_HOST = config("EMAIL_HOST")
@@ -360,6 +376,15 @@ CELERY_BEAT_SCHEDULE = {
     "backup-database-daily": {
         "task": "common.tasks.backup_database",
         "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": MAINTENANCE_QUEUE},
+    },
+    # Phase 8. De-identification is enforced at ingest; this is the standing check
+    # that it stayed true -- against a widened keep-list, a hand-repaired instance, or
+    # a restore predating the whitelist. Off-hour and after the backup, because it
+    # reads a few hundred objects out of storage.
+    "verify-dicom-deidentification-daily": {
+        "task": "common.tasks.verify_dicom_deidentification",
+        "schedule": crontab(hour=4, minute=20),
         "options": {"queue": MAINTENANCE_QUEUE},
     },
 }

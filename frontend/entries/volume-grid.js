@@ -73,6 +73,19 @@ import {
     Enums as niftiEnums,
 } from '@cornerstonejs/nifti-volume-loader';
 
+// Phase 8: a stored DICOM series renders through the same volume path as a NIfTI.
+//
+// `init` rather than the lighter `wadors/register`, deliberately: `register` installs
+// the image loader and its metadata provider but **not** the decode web worker, and
+// `imageLoader/decodeImageFrame.js` routes *every* transfer syntax through that worker
+// -- uncompressed Explicit VR Little Endian included. With only `register`, a series
+// downloads correctly and then never decodes, in the browser only.
+//
+// `metaDataManager` is how the application hands per-frame metadata to that decoder,
+// because -- unlike the NIfTI loader -- the wadors loader never fetches it itself.
+import { init as initDicomImageLoader } from '@cornerstonejs/dicom-image-loader';
+import { metaDataManager as dicomMetaDataManager } from '@cornerstonejs/dicom-image-loader/wadors';
+
 // Labelmap <-> contour <-> surface conversion (decision #11). Used in memory only:
 // per docs/cornerstone-future-work.md #7, labelmap is the one canonical form at rest.
 import { init as polySegInit } from '@cornerstonejs/polymorphic-segmentation';
@@ -141,6 +154,8 @@ export {
     ToolGroupManager,
     cornerstoneNiftiImageLoader,
     createNiftiImageIdsAndCacheMetadata,
+    dicomMetaDataManager,
+    initDicomImageLoader,
     polySegInit,
     interpolateLabelmap,
     initImaging,
@@ -220,6 +235,23 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
     // unregistered volume-id scheme falls through to -- hence VOLUME_ID_SCHEME.
     imageLoader.registerImageLoader(IMAGE_LOADER_SCHEME, cornerstoneNiftiImageLoader);
 
+    // The `wadors` image loader, for stored DICOM series (Phase 8): an *image* loader
+    // serving per-frame ids, with the volume itself still built by the default
+    // streaming loader, exactly as above.
+    //
+    // Placement matters twice. After `initImaging()`, because it asks core for the web
+    // worker manager. And before anything is cached, because `init` opens with
+    // `cache.purgeCache()` -- calling it later would silently evict a loaded volume.
+    initDicomImageLoader({
+        // Where the codec wasm actually lives. Without this the decoders fall back to
+        // `new URL('@cornerstonejs/codec-charls/decodewasm', import.meta.url)` -- a
+        // bare package specifier inside `new URL`, which esbuild copies through
+        // untouched and which resolves at runtime to a path that does not exist.
+        // Resolved from this module's own URL, the same way every worker and the
+        // orientation marker are, so it follows the build directory.
+        wasmBasePath: new URL('../codec-wasm/', import.meta.url).href,
+    });
+
     return createVolumeGrid({
         // The ROI tools print the area only. Mean/Max/Min/Std Dev on a CBCT are not
         // Hounsfield -- CBCT greyscale is vendor-dependent and uncalibrated -- and this
@@ -247,6 +279,9 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
             orientationMarkerUrl: new URL('../orientation/Human.vtp', import.meta.url).href,
             volumeLoader,
             createNiftiImageIdsAndCacheMetadata,
+            // Registering a series' metadata is a step the DICOM path has to take
+            // explicitly; see imaging/grid/dicomVolume.js.
+            dicomMetaDataManager,
             setVolumesForViewports,
             cache,
         },

@@ -198,6 +198,26 @@
         xhr.send(new FormData(form));
     }
 
+
+    /**
+     * Whether this input's selection has to go through the in-browser converter.
+     *
+     * Only the two formats the server cannot store natively, plus the .nii.gz
+     * orientation repair the server-side validator demands. **DICOM is never
+     * converted**: since Phase 8 it is uploaded as-is and stored as DICOM
+     * (common/dicom/ingest.py), so a folder selection and anything the converter does
+     * not recognise are submitted untouched and the server decides what they are --
+     * by the DICM marker in the bytes, not by a filename.
+     */
+    var BROWSER_CONVERTIBLE = /\.(nii|nii\.gz|mha)$/i;
+
+    function needsBrowserConversion(input) {
+        if (!input || input.dataset.converted === 'true') return false;
+        if (input.name === 'cbct_folder_files') return false;
+        var files = Array.from(input.files || []);
+        return files.length === 1 && BROWSER_CONVERTIBLE.test(files[0].name);
+    }
+
     function initForm() {
         const form = document.getElementById('patientUploadForm');
         if (!form) return;
@@ -221,7 +241,7 @@
             const activeCbctInput = cbctInput && !cbctInput.disabled && cbctInput.files && cbctInput.files.length ? cbctInput :
                 (folderInput && !folderInput.disabled && folderInput.files && folderInput.files.length ? folderInput : null);
 
-            if (activeCbctInput && activeCbctInput.dataset.converted !== 'true' && window.CBCTConvert) {
+            if (activeCbctInput && needsBrowserConversion(activeCbctInput) && window.CBCTConvert) {
                 event.preventDefault();
                 setSubmitting(form, true);
 

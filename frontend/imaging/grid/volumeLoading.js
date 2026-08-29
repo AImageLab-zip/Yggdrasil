@@ -201,3 +201,32 @@ function expectedVoxelCount(volume) {
     }
     return Number(dimensions[0]) * Number(dimensions[1]) * Number(dimensions[2]);
 }
+
+
+/**
+ * Read a NIfTI header without downloading the volume.
+ *
+ * Lives here rather than with the grid because the grid is no longer its only caller: the
+ * panoramic needs the same header to reorient the array the baker consumes, and two
+ * implementations of "parse this volume's header" is two chances to disagree about an
+ * affine.
+ *
+ * @param {string} url the loader URL.
+ * @returns {Promise<object>} the parsed header.
+ */
+export async function fetchHeader(url) {
+    const reader = globalThis.nifti;
+    if (!reader) {
+        throw new Error('The vendored nifti-reader is not loaded; orientation cannot be checked.');
+    }
+    // Range-request the header. `serve_file` advertises byte ranges only for audio and
+    // video, so a server that ignores the header hands back the whole volume -- which
+    // is correct, just larger, and the browser cache absorbs it for the load below.
+    const response = await fetch(url, { credentials: 'same-origin', headers: { Range: 'bytes=0-1023' } });
+    if (!response.ok && response.status !== 206) {
+        throw new Error(`HTTP ${response.status} fetching the volume header.`);
+    }
+    const buffer = await response.arrayBuffer();
+    const decompressed = reader.isCompressed(buffer) ? reader.decompress(buffer) : buffer;
+    return reader.readHeader(decompressed);
+}

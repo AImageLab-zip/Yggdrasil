@@ -38,7 +38,13 @@
                 </div>
             </div>
             <div class="panorex-editor__preview">
-                <canvas id="panorexResultCanvas" aria-label="Generated panoramic preview"></canvas>
+                {# Two panes, one visible at a time. The live reformat follows the arch as #}
+                {# it is dragged; the canvas holds the strip that will actually be stored, #}
+                {# baked by the same code that produced every existing export. They are    #}
+                {# not the same image, so the reader is never shown one while being asked  #}
+                {# to approve the other -- see frontend/imaging/panoramic/cprViewport.js.  #}
+                <div class="panorex-editor__cpr" id="panorexCprStage" aria-label="Live panoramic reformat" hidden></div>
+                <canvas id="panorexResultCanvas" aria-label="Generated panoramic preview" hidden></canvas>
                 <div class="panorex-editor__empty" id="panorexEmptyResult">Select Reset auto or adjust the axial arch to generate a panoramic.</div>
             </div>
             <div class="panorex-editor__progress" id="panorexProgress" hidden>

@@ -2,7 +2,7 @@
  * Batch default-panoramic generation (administrators).
  *
  * Drives the normal patient view in a hidden frame, one patient at a time:
- * cbct_panorex_editor.js runs its unattended pass there and posts the outcome
+ * the panoramic-cpr bundle runs its unattended pass there and posts the outcome
  * back, so there is no second copy of the reconstruction to keep in sync.
  *
  * Strictly sequential - each patient loads a whole CBCT volume into memory.

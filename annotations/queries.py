@@ -14,6 +14,7 @@ with each other only if this module is wrong for both.
 from django.db.models import Exists, OuterRef, Subquery
 
 from annotations.adapters.ios_landmarks import LANDMARKS_KIND
+from annotations.adapters.panoramic import PANORAMIC_KIND
 from annotations.adapters.tooth_segmentation import SEGMENTATION_KIND
 
 
@@ -141,4 +142,53 @@ def ios_landmarks_tooth_count(patients):
         .values("target_id", "label_id")
         .distinct()
         .count()
+    )
+
+
+def _latest_revisions_with_arch(algorithm_version=None):
+    """Revisions that are the newest on their set *and* still hold an arch polyline.
+
+    ``algorithm_version`` narrows to arches produced by one baker. It is not decoration:
+    an arch is the geometry a *particular* reconstruction was baked from, and one written
+    by a superseded algorithm has to be regenerated rather than served. The version is
+    read from the item's attributes, where the adapter records it for both the converted
+    and the live representation.
+    """
+    holds = (
+        {"geometry2ditems__attributes__algorithm_version": algorithm_version}
+        if algorithm_version is not None
+        else {"geometry2ditems__isnull": False}
+    )
+    return _latest_revisions(PANORAMIC_KIND, **holds)
+
+
+def with_panoramic_arch(patients, *, algorithm_version=None):
+    """Narrow a maxillo ``Patient`` queryset to those that already have an arch.
+
+    Replaces ``PanoramicState.objects.filter(algorithm_version=...)`` in
+    ``maxillo.views.panoramic_warmup``, which asked whether a legacy row existed. The
+    question the warm-up actually has is "does this patient still need an arch generated",
+    and the answer now lives with the arch.
+
+    :param patients: a ``maxillo.Patient`` queryset.
+    :param algorithm_version: when given, only an arch from that baker counts.
+    :returns: the same queryset, narrowed.
+    """
+    return patients.filter(
+        Exists(
+            _latest_revisions_with_arch(algorithm_version).filter(
+                annotation_set__patient=OuterRef("pk")
+            )
+        )
+    )
+
+
+def without_panoramic_arch(patients, *, algorithm_version=None):
+    """The complement of :func:`with_panoramic_arch` -- what the warm-up has to do."""
+    return patients.exclude(
+        Exists(
+            _latest_revisions_with_arch(algorithm_version).filter(
+                annotation_set__patient=OuterRef("pk")
+            )
+        )
     )

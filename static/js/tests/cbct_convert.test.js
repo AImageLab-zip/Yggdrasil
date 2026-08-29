@@ -12,7 +12,10 @@ function loadConvertContext() {
         window,
         console,
         TextEncoder,
-        TextDecoder
+        TextDecoder,
+        // `convertFiles` spawns its worker before dispatching, so a format it will
+        // refuse still needs one to exist. Never asked to do anything here.
+        Worker: function () { this.terminate = () => {}; }
     };
     vm.createContext(context);
     vm.runInNewContext(
@@ -30,12 +33,21 @@ function loadConvertContext() {
     return { CBCTConvert: window.CBCTConvert, VolumeMetadata: window.VolumeMetadata, nifti: window.nifti };
 }
 
-test('isDicomFile detects DICOM files and extensionless files', () => {
+test('DICOM is not something this converter claims to handle', () => {
+    // Phase 8 stores a series as DICOM. The predicates that used to classify one for
+    // conversion are gone, and their absence is the contract: anything still asking
+    // this module about DICOM is asking the wrong module.
     const { CBCTConvert } = loadConvertContext();
-    assert.equal(CBCTConvert.isDicomFile({ name: 'slice1.dcm' }), true);
-    assert.equal(CBCTConvert.isDicomFile({ name: 'slice1.DICOM' }), true);
-    assert.equal(CBCTConvert.isDicomFile({ name: '00000001' }), true);
-    assert.equal(CBCTConvert.isDicomFile({ name: 'volume.nii.gz' }), false);
+    assert.equal(CBCTConvert.isDicomFile, undefined);
+    assert.equal(CBCTConvert.isDicomBuffer, undefined);
+});
+
+test('a .dcm handed to convertFiles is refused rather than converted', () => {
+    const { CBCTConvert } = loadConvertContext();
+    return assert.rejects(
+        CBCTConvert.convertFiles([{ name: 'slice1.dcm' }]),
+        /not supported here/
+    );
 });
 
 test('isMetaImageFile detects .mha files', () => {

@@ -373,6 +373,13 @@ def update_nifti_metadata(request, patient_id):
                 try:
                     with transaction.atomic():
                         _update_file_identities(prepared)
+                        # The legacy half only. The arch in `annotations` needs no
+                        # cleanup: every revision is stamped with its targets'
+                        # content hashes, and `_update_file_identities` has just
+                        # changed this volume's -- so the stored arch already reads
+                        # as describing bytes that no longer exist, and the next
+                        # save starts from revision 0. Deleting it would throw away
+                        # the record of what the exported strips were baked from.
                         PanoramicState.objects.filter(patient=patient).delete()
                         Job.objects.create(
                             domain="maxillo",

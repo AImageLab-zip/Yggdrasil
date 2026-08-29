@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@cornerstonejs/core": "5.8.2",
+    "@cornerstonejs/dicom-image-loader": "5.8.2",
     "@cornerstonejs/labelmap-interpolation": "5.8.2",
     "@cornerstonejs/metadata": "5.8.2",
     "@cornerstonejs/nifti-volume-loader": "5.8.2",

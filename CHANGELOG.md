@@ -8,6 +8,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Native DICOM ingestion and serving (roadmap Phase 8): an uploaded DICOM stays
+  DICOM.** Until now a DICOM folder was converted to a single `.nii.gz` in the browser
+  and the original was **discarded** — the server had no DICOM reader, and
+  `save_cbct_folder_to_dataset` existed only to say so. The series is now stored as it
+  arrived, de-identified but not transformed, cataloged, served back to the viewer, and
+  exported. Adds `pydicom` and `@cornerstonejs/dicom-image-loader`.
+  - **De-identification is a whitelist, not a blacklist**, and that is the whole design.
+    The stored dataset is *rebuilt* from an explicit keep-list of the ~35 attributes the
+    geometry, the modality LUT and the decoder actually need; every other element, and
+    every private block, is dropped. A blacklist cannot be shown to be complete —
+    DICOM has thousands of standard attributes and vendors add their own freely — so an
+    unknown element is dropped by default and `assert_no_phi()` is a real assertion
+    rather than a spot check. It runs against the **exact byte buffer handed to object
+    storage**, and a leak aborts the transaction. Burned-in annotation and Secondary
+    Capture are *refused*, not stored-and-flagged, because header-only de-identification
+    cannot make them safe; `deid_confidence` records that the pixels were never read,
+    and nothing may report more than it says.
+  - **No `DicomUidMap` table.** The roadmap planned one and its own risk register called
+    it "a re-identification vector … safely droppable". A table that is safely droppable
+    is not load-bearing, so UIDs are instead *derived* — `HMAC(DICOM_UID_HMAC_KEY,
+    original)` under the ISO `2.25` arc. Re-ingesting a study is idempotent for free, a
+    duplicate upload is detectable rather than silently forking the study, and the
+    vector stops existing instead of being mitigated.
+  - **One `FileRegistry` row per series with a prefix `file_path`** — the shape
+    `save_generic_modality_folder` has always written — so every consumer of a prefix
+    row handles a series unchanged. `DicomSeries` / `DicomInstance` catalog it (one
+    additive migration).
+  - **`sealed_at` closes a gap the annotation lock cannot see.** The lock guards
+    `FileRegistry` *rows*: one row, one file. A series is one row holding hundreds of
+    objects, so rewriting instance 137 in place would re-base every coordinate drawn on
+    the volume without touching the row. A series is sealed at the same moment
+    `ever_annotated` is set — and, for the same reason, a *prediction* does not seal it.
+  - **The viewer renders DICOM through the same path as NIfTI.** `dicomSeriesHeader`
+    states a series in the terms the grid's geometry and windowing layer already reads,
+    so the volume cache, the VOI, the orientation overlay and every measurement tool are
+    shared rather than duplicated; the branch is two lines in `loadVolumeIntoWindows`.
+    Reading the shipped loader rather than assuming settled three things that fail
+    silently: the transfer syntax comes from the **response Content-Type** (so the frame
+    endpoint states it explicitly — without it a JPEG Lossless CBCT renders as noise
+    with no error); `preScale` is on by default, so DICOM voxels arrive already in
+    modality units and the residual LUT is correctly identity, with none of NIfTI's F1
+    ambiguity; and decoding runs in a web worker that `register()` does **not** install,
+    so the lighter call would have downloaded every series correctly and then never
+    decoded it.
+  - **`npm run verify` earned its keep again.** The decoders reference their wasm as
+    `new URL('@cornerstonejs/codec-charls/decodewasm', import.meta.url)` — a *bare
+    package specifier* inside `new URL`, which esbuild copies through untouched and which
+    can never resolve at runtime. Caught by the asset checker, fixed through the loader's
+    own `wasmBasePath` hook, and the checker now verifies the replacement exists rather
+    than ignoring the reference.
+  - **Fixes F13, a pre-existing export bug.** `ExportProcessor._file_entry` called
+    `artifact_exists(prefix)`, which heads a key that does not exist, raises, and skips
+    the artifact **with a warning and no error** — so folder uploads have always
+    exported as nothing at all. A `series` entry type expands a prefix row into its
+    members. A regression test asserts the panoramic MIP and ray-sum still reach the ZIP
+    (decision #8).
+  - **`discard_raw` is refused for a modality holding DICOM** (risk 10), at ingest and
+    in `ProcessingStep.clean()`: for a DICOM CBCT the raw series may be the only volume
+    there is, so the flag would blank the viewer for a whole cohort while the bytes sat
+    in storage. A nightly `SystemCheck` re-reads a sample of stored instances and
+    re-asserts the whitelist, recording the pseudonymous UID of any offender and never
+    the offending value.
+  - The DICOM half of `cbct_convert.js` and its worker is deleted (255 lines); the
+    MetaImage and NIfTI-repair halves **stay**, because `.mha` and the `.nii.gz`
+    orientation repair still need them. Two behaviours of the deleted converter are not
+    preserved because neither was correct: it threw every slice in a folder into one
+    volume regardless of `SeriesInstanceUID`, and it refused compressed pixel data
+    outright — which made an ordinary JPEG-Lossless CBCT un-uploadable.
 - **`annotations`, a new Django app: Yggdrasil's durable annotation model.** Thirteen
   models behind a strict layering — `validators/` is pure (values in, `ValidationError`
   out, no database), `adapters/` is pure translation, and `services/` is the only writer.
@@ -47,6 +115,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   route, in all four namespaces. Cornerstone's NIfTI loader decides whether to gunzip by
   testing the URL *pathname* for a `.gz` suffix, which a query parameter cannot carry.
   Same view, same ACL; the filename segment never takes part in resolving the file.
+
+- **The panoramic reconstructs live, on Cornerstone3D and vtk.js.** The arch is edited on
+  a real axial viewport -- pan, zoom and draggable control points come with the tool
+  instead of being rewritten -- and the strip reformats continuously through
+  `ImageCPRMapper` as the arch moves, where it used to appear only after a full CPU pass.
+  `static/js/modality_viewers/cbct_panorex_editor.js` (924 lines of Konva) is deleted, and
+  with it the last consumer of the `window.ViewerGrid` bridge Phase 3 built to keep it
+  alive; the panoramic reads the CBCT out of the Cornerstone cache the grid already filled,
+  so there is no second fetch, no second decode and no interface between the two surfaces
+  to fall out of step.
+  - **The strips that are saved are the same bytes they always were.**
+    `static/js/seg2pano_core.js` and `static/js/worker/seg2pano_worker.js` are untouched,
+    and the reader approves the *baked* strip rather than the live one: the reformat
+    follows the arch while it is being dragged, and the CPU bake replaces it the moment
+    the arch settles. The two are not the same image -- the ray-sum is a clipped
+    non-negative sum where vtk's nearest equivalent is an average -- so the difference is
+    kept off the moment of decision instead of hidden.
+  - **The drawn arch is the arch the projection follows.** Cornerstone's Catmull-Rom is
+    uniform; the one the baker fits is centripetal, and an arch's control points are
+    unevenly spaced by construction, so the two disagree along the whole curve. A small
+    spline subclass reproduces the baker's, and its test compares against
+    `seg2pano_core.js` itself and pins the upstream methods it stands on, so a Cornerstone
+    bump that renames one fails the build rather than quietly redrawing every arch.
+  - The mandible mask is drawn as an actor in the volume's own frame rather than as a
+    canvas positioned over the viewport, so nothing has to keep two files' idea of where
+    the slice is in agreement.
+
+- **The panoramic arch writes through `annotations/`.** Its own set kind, a slice
+  selector carrying the axial index -- a spline is a list of `[x, y]` pairs inside *one*
+  slice, and without the index it is a curve nobody can place -- and the same conversion
+  `annotations_convert_legacy` uses, as one function, so the converted and the live rows
+  cannot drift apart and `annotations_crosscheck` keeps comparing like with like. The two
+  baked strips ride along as `png_render` payloads on the revision, which is what connects
+  the exported PNGs to the geometry they were produced from; neither is canonical, because
+  an image is not the truth about a curve. `maxillo.PanoramicState` is no longer written.
+  - **An automatic arch is machine output, and never freezes a case.** The warm-up page
+    generates one for every patient in a folder without anybody looking. Filed as human
+    work it would have locked the raw data of a whole cohort -- monotonically, so nothing
+    would have thawed it. An `auto` arch is recorded with a prediction origin and an
+    edited one is not, which is the distinction the converter already made from the same
+    field.
+  - **A replaced CBCT is noticed rather than cleaned up after.** Every revision is stamped
+    with its targets' content hashes, so rewriting a volume's affine makes the stored arch
+    stop describing it, all by itself; the editor is handed revision 0 and starts again.
+    The arch is kept, because it is the record of what the exported strips were baked
+    from. The arch also names the *segmentation* it was fitted to, so a re-run mask is
+    visible the same way.
+  - **One reader for "which panoramic is current".** Three view modules each compared the
+    same seven source fields by hand -- the page payload, the strip-serving endpoint and
+    the save. They now share `maxillo.views.panoramic_state`, and the comparison is one
+    line of it.
 
 - **Teleradiography renders through Cornerstone3D**, replacing an `<img>` that could not
   measure anything. Lengths are honest about their unit: `px` until somebody calibrates

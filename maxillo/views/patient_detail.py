@@ -23,6 +23,7 @@ from common.permissions import (
 )
 
 from .domain import get_domain_forms, get_domain_models, get_namespace
+from .panoramic_state import current_browser_panoramic
 from .helpers import redirect_with_namespace, render_with_fallback
 from ..file_utils import get_file_type_for_modality
 
@@ -77,6 +78,56 @@ def _bundle_output_hash(file_obj, file_key):
     return file_obj.file_hash
 
 
+def _dicom_series_identity(file_obj):
+    """``{'studyUid', 'seriesUid'}`` when this row is a stored DICOM series.
+
+    ``None`` otherwise, which is every NIfTI row -- so its presence in the viewer
+    payload is what selects the DICOM volume path in the browser.
+    """
+    series = getattr(file_obj, "dicom_series", None)
+    if series is None:
+        return None
+    return {
+        "studyUid": series.study_instance_uid,
+        "seriesUid": series.series_instance_uid,
+    }
+
+
+def _usable_raw_volumes(raw_files):
+    """Raw rows the viewer can actually display, keyed by the path a job names.
+
+    Two kinds now. A NIfTI raw is one object, and its existence is a ``head()``.
+    A DICOM series (Phase 8) is a *prefix* holding hundreds of objects, and
+    ``head()`` on a prefix raises -- which is finding F13, and is why existence is
+    established from the catalog instead. A series with instances recorded is a series
+    that was written; nothing else would have created those rows.
+
+    This is the line that decides whether a DICOM CBCT is visible at all. If the
+    processing step stops emitting ``volume_nifti``, the raw series *is* the display
+    volume, and it reaches the viewer through here or not at all.
+    """
+    from common.dicom.models import DicomSeries
+
+    usable = {
+        file_obj.file_path: file_obj
+        for file_obj in raw_files
+        if file_obj.file_path
+        and file_obj.file_path.endswith(('.nii', '.nii.gz'))
+        and artifact_exists(file_obj.file_path)
+    }
+
+    series_by_file = {
+        series.file_id: series
+        for series in DicomSeries.objects.filter(
+            file__in=[row.pk for row in raw_files], instance_count__gt=0
+        )
+    }
+    for file_obj in raw_files:
+        if file_obj.pk in series_by_file and file_obj.file_path:
+            usable.setdefault(file_obj.file_path, file_obj)
+    return usable
+
+
 def _resolved_cbct_viewer_source(patient):
     """Resolve the exact volume/segmentation pair used by the CBCT viewer."""
     processed = list(
@@ -90,13 +141,7 @@ def _resolved_cbct_viewer_source(patient):
     raw_files = list(
         patient.files.filter(file_type='cbct_raw').order_by('-created_at', '-id')
     )
-    raw_by_path = {
-        file_obj.file_path: file_obj
-        for file_obj in raw_files
-        if file_obj.file_path
-        and file_obj.file_path.endswith(('.nii', '.nii.gz'))
-        and artifact_exists(file_obj.file_path)
-    }
+    raw_by_path = _usable_raw_volumes(raw_files)
 
     jobs = []
     for file_obj in processed:
@@ -185,35 +230,29 @@ def _cbct_viewer_files(patient):
 
 
 def _panorex_source_data(patient, source):
+    """The payload the panoramic editor reads: the active CBCT pair, plus any stored arch.
+
+    The seven-field source comparison this function used to carry is now
+    :func:`~maxillo.views.panoramic_state.current_browser_panoramic`, which three call
+    sites share. An arch that does not describe the active pair is reported as absent
+    rather than as stale -- the editor's contract is "revision 0 means start again".
+    """
     if not source:
         return None
-    try:
-        state = patient.panoramic_state
-    except Exception:
-        state = None
-    if state and (
-        state.source_job_id != (source['job'].id if source['job'] else None)
-        or state.source_file_id != source['file'].id
-        or state.source_file_key != source['file_key']
-        or state.source_file_hash != source['file_hash']
-        or state.source_segmentation_file_id != (
-            source['segmentation_file'].id if source['segmentation_file'] else None
-        )
-        or state.source_segmentation_key != source['segmentation_key']
-        or state.source_segmentation_hash != source['segmentation_hash']
-    ):
-        state = None
+
+    current = current_browser_panoramic(patient, source)
+    arch = current["arch"] if current["matchesSource"] else None
     state_data = None
-    if state:
+    if arch:
         state_data = {
-            'revision': state.revision,
-            'generationUuid': str(state.generation_uuid),
-            'axialSlice': state.axial_slice,
-            'volumeShape': state.volume_shape,
-            'spline': state.spline,
-            'geometrySource': state.geometry_source,
-            'defaultMode': state.default_mode,
-            'algorithmVersion': state.algorithm_version,
+            'revision': current["revision"],
+            'generationUuid': current["generationUuid"],
+            'axialSlice': arch["axial_slice"],
+            'volumeShape': arch["volume_shape"],
+            'spline': arch["spline"],
+            'geometrySource': arch["geometry_source"],
+            'defaultMode': arch["default_mode"],
+            'algorithmVersion': arch["algorithm_version"],
         }
     segmentation_file = source['segmentation_file']
     return {
@@ -227,7 +266,7 @@ def _panorex_source_data(patient, source):
         'segmentationFileId': segmentation_file.id if segmentation_file else None,
         'segmentationFileKey': source['segmentation_key'] or None,
         'segmentationFileHash': source['segmentation_hash'] or None,
-        'revision': state.revision if state else 0,
+        'revision': current["effectiveRevision"],
         'state': state_data,
     }
 
@@ -627,11 +666,19 @@ def patient_detail(request, patient_id):
                         file_key = 'primary'
 
                     if file_obj:
-                        modality_files[slug] = {
+                        entry = {
                             'id': file_obj.id,
                             'file_type': file_obj.file_type,
                             'file_key': file_key,
                         }
+                        # A stored DICOM series is addressed by its UIDs, not by a
+                        # serve path: the viewer fetches the series metadata and then
+                        # one frame per instance. Absent for every NIfTI row, which is
+                        # how the grid tells the two apart.
+                        series = _dicom_series_identity(file_obj)
+                        if series:
+                            entry['dicom'] = series
+                        modality_files[slug] = entry
     except Exception as e:
         logger.warning(f"Error building modality_files: {e}")
 

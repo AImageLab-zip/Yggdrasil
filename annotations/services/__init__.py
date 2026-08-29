@@ -24,9 +24,17 @@ from annotations.services.items import (
     add_spatial_3d,
     add_temporal,
 )
+from annotations.services.panoramic import (
+    arch_describes_source,
+    arch_origin,
+    expected_fingerprint,
+    panoramic_arch_state,
+    save_panoramic_arch,
+)
 from annotations.services.resources import (
     fingerprint_targets,
     register_derived,
+    register_dicom_series,
     register_file,
     register_logical_volume,
 )
@@ -59,15 +67,21 @@ __all__ = [
     "add_spatial_3d",
     "add_temporal",
     "apply_descriptors",
+    "arch_describes_source",
+    "arch_origin",
     "attach_target",
     "confirm",
     "current_revision_number",
+    "expected_fingerprint",
     "fingerprint_targets",
     "get_or_create_set",
+    "panoramic_arch_state",
     "record_revision",
     "register_derived",
+    "register_dicom_series",
     "register_file",
     "register_logical_volume",
     "save_measurements",
+    "save_panoramic_arch",
     "set_target_status",
 ]

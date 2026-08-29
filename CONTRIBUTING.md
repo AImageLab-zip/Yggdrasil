@@ -28,6 +28,14 @@ docker compose -f docker-compose.dev.yml run --rm web python manage.py test
 Or without the dev stack, the raw-docker recipe in
 `docs/modernization-roadmap.md` (MySQL 8 + Redis 7 containers on a scratch network).
 
+**After a change to `requirements.txt`, rebuild the image before running tests** — the
+dependencies are baked in at build time, and a stale image fails with an import error
+that looks like a broken branch rather than a stale container:
+
+```bash
+docker compose -f docker-compose.dev.yml build web
+```
+
 ## CI
 
 `.github/workflows/ci.yml` runs on self-hosted runners for pushes to
@@ -108,20 +116,34 @@ Templates load a surface with:
 
 Details and rationale: [docs/cornerstone-roadmap.md](docs/cornerstone-roadmap.md).
 
-## `panoramicSource.js` and `reorient.js` are scaffolding
+## `reorient.js` is load-bearing, and the panoramic is why
 
-`cbct_panorex_editor.js` is Phase 7's to rewrite. Until then it reads its **data** out
-of `window.ViewerGrid` — three methods and the `viewergridvolumeready` event — and it
-expects **RAS-ordered voxels**, because NiiVue reoriented every volume on load.
+The panoramic baker consumes **RAS-ordered voxels**, because NiiVue reoriented every
+volume on load and every existing exported strip was produced from that array.
+`frontend/imaging/geometry/reorient.js` does the reorientation, and
+`frontend/imaging/panoramic/volumeSupply.js` is its one caller.
 
-`frontend/imaging/grid/panoramicSource.js` reproduces that interface and
-`frontend/imaging/geometry/reorient.js` does the reorientation, so that Phase 3 could
-delete NiiVue without transposing every exported panoramic. Both go with Phase 7.
+Do not "simplify" the reorientation away. The panoramic was tuned against NiiVue's
+output, `export_catalog.py` ships the baked PNGs, and a different-but-defensible
+convention is still a change to an exported clinical artifact that nothing in the build
+would notice — every test would stay green while every panoramic came out transposed.
 
-Do not build on them, and do not "simplify" the reorientation away: the panoramic was
-tuned against NiiVue's output, `export_catalog.py` ships the baked PNGs, and a
-different-but-defensible convention is still a change to an exported clinical artifact
-that nothing in the build would notice.
+`panoramicSource.js`, the shim that kept the old Konva editor reading through
+`window.ViewerGrid` after NiiVue went, is **gone** with Phase 7. The panoramic now reads
+the CBCT out of the Cornerstone cache the volume grid already filled: every bundle entry
+imports the same shared chunk, so the cache is one instance per page.
+
+## `seg2pano_core.js` is not migrated code, and must not become it
+
+`static/js/seg2pano_core.js` and `static/js/worker/seg2pano_worker.js` are the panoramic's
+reconstruction: the arch fit, the slab and the projection. Decision #8 requires the strips
+they bake to keep their exact bytes, so Phase 7 rewrote the *viewer* around them and left
+them untouched.
+
+The bundle reaches the core through the `Seg2PanoCore` **global**, deliberately. Importing
+or vendoring a copy would create a second implementation of the arch mathematics, and the
+two would diverge silently — the drawn curve would stop being the curve the projection
+follows, and nothing would say so.
 
 ## The Phase 3 validation harness is gone
 
