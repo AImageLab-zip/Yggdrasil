@@ -168,11 +168,7 @@ class Command(BaseCommand):
         )
 
     def _check_laparoscopy(self):
-        from laparoscopy.models import (
-            Classification,
-            QuadrantClassificationMarker,
-            RegionAnnotation,
-        )
+        from laparoscopy.models import Classification, QuadrantClassificationMarker
 
         self._compare(
             "laparoscopy notes",
@@ -184,14 +180,26 @@ class Command(BaseCommand):
                 ).values_list("pk", flat=True)
             ),
         )
-        self._compare(
-            "video regions",
-            "video_regions",
-            (
-                f"legacy:laparoscopy.region:{pk}"
-                for pk in RegionAnnotation.objects.values_list("pk", flat=True)
-            ),
-        )
+        # **Video regions are deliberately not compared any more (Phase 10).**
+        #
+        # This check asked: does every legacy `RegionAnnotation` row have a converted
+        # counterpart carrying the same points? That was the right question while both
+        # sides were strokes. Decision #14 made the labelmap canonical, so the live
+        # record for this surface is now a rasterised mask and the strokes that produced
+        # it are not kept -- brush and eraser mutate pixels, and the revision chain is
+        # the audit trail rather than a stroke log.
+        #
+        # Comparing a raster against a stroke would report a difference on every study,
+        # and that difference *is* the design. Keeping the check with a loosened
+        # comparison would be worse: it would still be green, and it would no longer be
+        # evidence of anything.
+        #
+        # What replaces it as evidence is that `annotations_rasterize_video_masks` and
+        # the export both rasterise through `laparoscopy.mask_raster`, so the migrated
+        # mask and the mask the previous release exported are the same array by
+        # construction. The legacy rows stay in place for decision #6's one release; the
+        # notes and quadrant checks below are unaffected, because those are sparse rows
+        # whose representation did not change.
         self._compare(
             "quadrant markers",
             "video_quadrants",

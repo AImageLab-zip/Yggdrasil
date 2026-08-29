@@ -27,7 +27,7 @@ from django.db import transaction
 from annotations import services
 from annotations.adapters import legacy_common, legacy_laparoscopy, legacy_maxillo
 from annotations.constants import AnnotationOrigin, AnnotationStatus
-from annotations.models import AnnotationSet, LabelDefinition, LabelSchema
+from annotations.models import AnnotationSet, LabelSchema
 from annotations.services.segmentation import IMAGE_ROLE
 from common.domains import DOMAINS, fk_fields_for
 from common.models import AnnotationMethod
@@ -394,40 +394,17 @@ class Command(BaseCommand):
     # --------------------------------------------------------- laparoscopy
 
     def _region_schema(self, project):
-        """One label schema per project, mirroring its ``RegionType`` rows.
+        """The per-project region vocabulary.
 
-        Region types are per-project user-defined vocabularies, so they cannot
-        be seeded in a migration the way FDI can. The schema is created on
-        demand and keyed by project id, and each type's name becomes the label
-        ``code`` -- the name is what the legacy rows reference and what an
-        export has to keep meaning.
+        Delegated to ``annotations.services.video`` in Phase 10: the live save needs the
+        same schema, and two implementations of "which labels does this project have"
+        would make a converted study and an edited one resolve their region names
+        against different rows -- which the cross-check would then report as a gap on
+        every field.
         """
-        from laparoscopy.models import RegionType
+        from annotations.services.video import region_label_schema
 
-        slug = f"laparoscopy-regions-project-{project.pk}"
-        schema, _ = LabelSchema.objects.get_or_create(
-            slug=slug,
-            version=1,
-            defaults={
-                "name": f"Laparoscopy regions ({project.name})",
-                "domain": "laparoscopy",
-                "description": "Generated from laparoscopy.RegionType for this project.",
-            },
-        )
-        for index, region_type in enumerate(
-            RegionType.objects.filter(project=project).order_by("order", "name"), start=1
-        ):
-            LabelDefinition.objects.get_or_create(
-                schema=schema,
-                code=region_type.name,
-                defaults={
-                    "value": index,
-                    "display_name": region_type.name,
-                    "color": region_type.color,
-                    "order": region_type.order,
-                },
-            )
-        return schema
+        return region_label_schema(project)
 
     def _convert_video_regions(self):
         from laparoscopy.models import RegionAnnotation

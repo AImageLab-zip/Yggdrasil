@@ -743,6 +743,11 @@ class FileRegistry(DomainFKAccessorMixin, models.Model):
 		# Generic video modality (used by laparoscopy and any future video domain)
 		('video_raw', 'Video Raw'),
 		('video_processed', 'Video Processed'),
+		# Dense annotation artifacts. Sparse annotations are MySQL rows (decision #20);
+		# a labelmap is not sparse, and the governing rule already says dense segmentation
+		# is a file artifact in object storage. Addressed by an AnnotationPayload, never
+		# read back as the annotation record itself.
+		('annotation_mask', 'Annotation Mask'),
 	]
 
 	file_type = models.CharField(max_length=255, choices=FILE_TYPE_CHOICES)

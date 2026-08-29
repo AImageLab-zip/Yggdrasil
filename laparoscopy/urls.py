@@ -33,9 +33,11 @@ urlpatterns = [
     path('api/quadrant-types/', laparo_views.quadrant_types, name='quadrant_types'),
     path('api/quadrant-types/<int:pk>/', laparo_views.quadrant_type_detail, name='quadrant_type_detail'),
 
-    # Region annotation API
-    path('api/patient/<int:patient_id>/annotations/', laparo_views.patient_region_annotations, name='patient_region_annotations'),
-    path('api/annotations/<int:annotation_id>/', laparo_views.region_annotation_detail, name='region_annotation_detail'),
+    # Region annotation API. One whole-state route, GET and PUT: the per-stroke
+    # create/patch/delete endpoints went with the strokes themselves in Phase 10 --
+    # decision #14 makes the labelmap canonical, and there is no "the stroke with id 41"
+    # to address once the eraser has mutated the pixels it drew.
+    path('api/patient/<int:patient_id>/video-annotations/', laparo_views.patient_video_annotations, name='patient_video_annotations'),
     path('api/region-types/', laparo_views.region_types, name='region_types'),
     path('api/region-types/<int:pk>/', laparo_views.region_type_detail, name='region_type_detail'),
 

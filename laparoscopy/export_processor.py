@@ -1,4 +1,14 @@
-"""Laparoscopy-specific export processor for subsampled video and NPZ masks."""
+"""Laparoscopy-specific export processor for subsampled video and NPZ masks.
+
+Phase 10 changed where the masks come from, and deliberately did not change what they
+look like. A patient whose annotations have been migrated into ``annotations/`` exports
+the **stored labelmap**; a patient whose work is still in ``laparoscopy.RegionAnnotation``
+exports strokes rasterised on the fly, exactly as before. Both go through
+``laparoscopy.mask_raster``, so the two paths cannot drift, and a deployment that has not
+yet run ``annotations_rasterize_video_masks`` still exports correctly rather than
+exporting nothing -- which is what makes the migration safe to run at leisure instead of
+in the deploy window.
+"""
 
 import io
 import json
@@ -12,15 +22,24 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
 from django.utils import timezone
 
 from common.models import FileRegistry, Project
 from common.object_storage import download_to_tempfile, get_object_storage
+from . import mask_raster, video_probe
 from .models import Export, Folder, Patient, RegionAnnotation, RegionType
 
 
 logger = logging.getLogger(__name__)
+
+
+def _as_stroke(annotation):
+    """A ``RegionAnnotation`` row as the three fields the rasteriser reads."""
+    return mask_raster.Stroke(
+        points=annotation.points,
+        tool=annotation.tool,
+        stroke_width=annotation.stroke_width,
+    )
 
 
 @dataclass(frozen=True)
@@ -126,145 +145,28 @@ class LaparoscopyExportProcessor:
         Export.objects.filter(pk=self.export.pk).update(**update_kw)
 
     def _probe_video(self, local_video_path):
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-count_packets",
-            "-show_entries",
-            "stream=width,height,avg_frame_rate,nb_frames,nb_read_packets,duration",
-            "-of",
-            "json",
-            local_video_path,
-        ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                "ffprobe is required in the web container to export laparoscopy videos."
-            ) from exc
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"ffprobe failed for {local_video_path}: {(result.stderr or result.stdout).strip()}"
-            )
+        """Delegated to ``laparoscopy.video_probe`` in Phase 10 -- see that module."""
+        return video_probe.probe_video(local_video_path)
 
-        payload = json.loads(result.stdout or "{}")
-        streams = payload.get("streams") or []
-        if not streams:
-            raise RuntimeError(f"No video stream found in {local_video_path}")
-        stream = streams[0]
-
-        width = int(stream.get("width") or 0)
-        height = int(stream.get("height") or 0)
-        if width <= 0 or height <= 0:
-            raise RuntimeError(f"Invalid video dimensions in {local_video_path}")
-
-        fps_raw = str(stream.get("avg_frame_rate") or "")
-        fps = 0.0
-        if "/" in fps_raw:
-            num_raw, den_raw = fps_raw.split("/", 1)
-            try:
-                num = float(num_raw)
-                den = float(den_raw)
-                if den:
-                    fps = num / den
-            except (TypeError, ValueError, ZeroDivisionError):
-                fps = 0.0
-        elif fps_raw:
-            try:
-                fps = float(fps_raw)
-            except (TypeError, ValueError):
-                fps = 0.0
-        if not math.isfinite(fps) or fps <= 0:
-            fps = 1.0
-
-        frame_count = 0
-        for key in ("nb_frames", "nb_read_packets"):
-            raw_value = stream.get(key)
-            try:
-                parsed = int(raw_value)
-            except (TypeError, ValueError):
-                parsed = 0
-            if parsed > 0:
-                frame_count = parsed
-                break
-        if frame_count <= 0:
-            try:
-                duration = float(stream.get("duration") or 0)
-            except (TypeError, ValueError):
-                duration = 0.0
-            if duration > 0:
-                frame_count = max(1, int(math.ceil(duration * fps - 1e-9)))
-        if frame_count <= 0:
-            raise RuntimeError(f"Could not determine frame count for {local_video_path}")
-
-        return {
-            "width": width,
-            "height": height,
-            "fps": float(fps),
-            "frame_count": int(frame_count),
-        }
+    # Rasterisation moved to laparoscopy/mask_raster.py in Phase 10: the migration
+    # command that converts the legacy stroke corpus into stored labelmaps has to
+    # produce the same pixels this export produces, and the only way to guarantee that
+    # is for both to call the same function. These thin delegations stay so the
+    # processor still reads as one object.
 
     @staticmethod
     def _frame_index_for_time(frame_time, fps, frame_count):
-        try:
-            frame_time = float(frame_time)
-        except (TypeError, ValueError):
-            frame_time = 0.0
-        if not math.isfinite(frame_time) or frame_time < 0:
-            frame_time = 0.0
-        frame_index = int(round(frame_time * fps))
-        return min(max(frame_index, 0), max(frame_count - 1, 0))
+        return mask_raster.frame_index_for_time(frame_time, fps, frame_count)
 
     @staticmethod
     def _clamp_coord(value, upper_bound):
-        try:
-            value = float(value)
-        except (TypeError, ValueError):
-            value = 0.0
-        if not math.isfinite(value):
-            value = 0.0
-        if upper_bound <= 0:
-            return 0
-        return min(max(int(round(value)), 0), upper_bound - 1)
+        return mask_raster.clamp_coord(value, upper_bound)
 
     def _annotation_pairs(self, annotation, width, height):
-        points = annotation.points if isinstance(annotation.points, list) else []
-        if len(points) < 4 or len(points) % 2 != 0:
-            return []
-        pairs = []
-        for idx in range(0, len(points), 2):
-            x = self._clamp_coord(points[idx], width)
-            y = self._clamp_coord(points[idx + 1], height)
-            pairs.append((x, y))
-        return pairs
-
-    def _draw_polyline(self, draw, pairs, fill_value, stroke_width):
-        if len(pairs) < 2:
-            return
-        draw.line(pairs, fill=fill_value, width=stroke_width)
-        radius = max(1, stroke_width // 2)
-        for x, y in pairs:
-            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill_value)
+        return mask_raster.stroke_pairs(_as_stroke(annotation), width, height)
 
     def _apply_annotation_to_layer(self, image, annotation, width, height):
-        pairs = self._annotation_pairs(annotation, width, height)
-        if not pairs:
-            return
-
-        draw = ImageDraw.Draw(image)
-        tool = str(annotation.tool or "").strip().lower()
-        stroke_width = max(1, int(round(float(annotation.stroke_width or 1.0))))
-
-        if tool == "polygon":
-            if len(pairs) >= 3:
-                draw.polygon(pairs, fill=255, outline=255)
-            return
-
-        fill_value = 0 if tool == "eraser" else 255
-        self._draw_polyline(draw, pairs, fill_value, stroke_width)
+        mask_raster.apply_stroke_to_layer(image, _as_stroke(annotation), width, height)
 
     def _build_frame_annotation_map(self, patient, class_axis_by_region_type_id, fps, frame_count):
         annotations = (
@@ -280,27 +182,94 @@ class LaparoscopyExportProcessor:
             class_index = class_axis_by_region_type_id.get(annotation.region_type_id)
             if class_index is None:
                 continue
-            frame_index = self._frame_index_for_time(annotation.frame_time, fps, frame_count)
+            frame_index = mask_raster.frame_index_for_time(
+                annotation.frame_time, fps, frame_count
+            )
             frame_map.setdefault(frame_index, []).append((class_index, annotation))
         return frame_map
 
     def _render_frame_masks(self, width, height, class_count, frame_annotations):
-        if class_count <= 0:
-            return np.zeros((0, height, width), dtype=np.uint8)
+        return mask_raster.render_layers(
+            width,
+            height,
+            class_count,
+            [(index, _as_stroke(annotation)) for index, annotation in frame_annotations],
+        )
 
-        layer_images = [Image.new("L", (width, height), 0) for _ in range(class_count)]
-        for class_index, annotation in frame_annotations:
-            if class_index < 0 or class_index >= class_count:
-                continue
-            self._apply_annotation_to_layer(
-                layer_images[class_index], annotation, width=width, height=height
+    # --- the stored labelmap -------------------------------------------------------
+
+    def _stored_masks(self, patient, class_axis, fps, frame_count, width, height):
+        """``{frame_index: (class_count, h, w)}`` from ``annotations/``, or ``None``.
+
+        ``None`` means this patient has not been migrated yet, and the caller falls back
+        to rasterising the legacy strokes. That fallback is not a transitional
+        convenience to be tidied away later: it is what lets
+        ``annotations_rasterize_video_masks`` run at leisure instead of inside the deploy
+        window, and what keeps an export correct for a study nobody has touched since.
+
+        A stored mask whose frame size disagrees with the video is refused rather than
+        resized. The masks were drawn against pixels; scaling them would move every
+        boundary by an amount nobody chose, and the honest reading of the disagreement
+        is that the video was re-encoded after the annotations were made.
+        """
+        from annotations.constants import PayloadFormat
+        from annotations.models import AnnotationSet
+        from annotations.services.video import REGIONS_KIND, read_mask_archive
+        from common.file_access import open_binary
+
+        annotation_set = AnnotationSet.objects.filter(
+            domain="laparoscopy", laparoscopy_patient=patient, kind=REGIONS_KIND
+        ).first()
+        if annotation_set is None:
+            return None
+        revision = annotation_set.revisions.order_by("-revision_number").first()
+        if revision is None:
+            return None
+        payload = revision.payloads.filter(
+            format=PayloadFormat.NPZ_MASK, canonical_slot=1
+        ).select_related("file").first()
+        if payload is None or not payload.file_id:
+            return None
+
+        handle, _info = open_binary(payload.file.file_path)
+        try:
+            stored_width, stored_height, frames = read_mask_archive(handle.read())
+        finally:
+            close = getattr(handle, "close", None)
+            if close is not None:
+                close()
+        if (stored_width, stored_height) != (width, height):
+            raise RuntimeError(
+                f"patient {patient.patient_id}: stored masks are "
+                f"{stored_width}x{stored_height} but the video is {width}x{height}; "
+                "the video was re-encoded after it was annotated"
             )
 
-        layers = []
-        for image in layer_images:
-            layer = (np.asarray(image, dtype=np.uint8) > 0).astype(np.uint8)
-            layers.append(layer)
-        return np.stack(layers, axis=0)
+        axis_by_code = {entry["name"]: entry["axis"] for entry in class_axis}
+        by_frame = {}
+        for time_ms, regions in frames.items():
+            frame_index = mask_raster.frame_index_for_ms(time_ms, fps, frame_count)
+            layers = by_frame.setdefault(
+                frame_index, np.zeros((len(class_axis), height, width), dtype=np.uint8)
+            )
+            for code, mask in regions.items():
+                axis = axis_by_code.get(code)
+                if axis is None:
+                    # A region type deleted since the work was done. Dropping it is the
+                    # only option -- the NPZ's class axis is the project's current
+                    # vocabulary and there is no column to put it in -- but it is worth
+                    # saying out loud rather than losing quietly.
+                    logger.warning(
+                        "patient %s: stored mask names region %r, which the project no "
+                        "longer defines; omitted from the export",
+                        patient.patient_id, code,
+                    )
+                    continue
+                # Two annotated instants can round to one frame index at a low
+                # sampling rate; OR rather than assign, so the later one does not
+                # erase the earlier.
+                layers[axis] |= (np.asarray(mask, dtype=np.uint8) > 0).astype(np.uint8)
+        return by_frame
 
     def process_export(self):
         try:
@@ -387,14 +356,34 @@ class LaparoscopyExportProcessor:
                             video_zip_path = f"{patient_folder}/video/subsampled{video_ext}"
                             zipf.write(local_video_path, video_zip_path)
 
+                            stored_masks = self._stored_masks(
+                                patient,
+                                class_axis,
+                                fps=video_meta["fps"],
+                                frame_count=video_meta["frame_count"],
+                                width=video_meta["width"],
+                                height=video_meta["height"],
+                            )
+                            empty_masks = np.zeros(
+                                (len(class_axis), video_meta["height"], video_meta["width"]),
+                                dtype=np.uint8,
+                            )
+
                             frame_progress_interval = max(1, video_meta["frame_count"] // 10)
                             for frame_index in range(video_meta["frame_count"]):
-                                masks = self._render_frame_masks(
-                                    width=video_meta["width"],
-                                    height=video_meta["height"],
-                                    class_count=len(class_axis),
-                                    frame_annotations=frame_annotations.get(frame_index, []),
-                                )
+                                if stored_masks is not None:
+                                    # Decision #15: regenerated from labelmaps, not
+                                    # replayed through PIL. The bytes are the same
+                                    # because the labelmap was rasterised by the same
+                                    # function this branch replaces.
+                                    masks = stored_masks.get(frame_index, empty_masks)
+                                else:
+                                    masks = self._render_frame_masks(
+                                        width=video_meta["width"],
+                                        height=video_meta["height"],
+                                        class_count=len(class_axis),
+                                        frame_annotations=frame_annotations.get(frame_index, []),
+                                    )
                                 buffer = io.BytesIO()
                                 np.savez_compressed(buffer, masks=masks)
                                 zipf.writestr(
