@@ -125,9 +125,16 @@ a per-slice planar contour format; round-tripping labelmap → contours → labe
 both directions, and making it canonical would mean either accepting that loss or maintaining
 two canonical forms.
 
-There is also a dependency caveat recorded in the migration risk register: `highdicom`'s
-RTSTRUCT *writer* is newer and less exercised than its SEG writer, which is why SEG and SR
-ship first.
+There was also a dependency caveat recorded in the migration risk register: that
+`highdicom`'s RTSTRUCT *writer* is newer and less exercised than its SEG writer. **That was
+wrong, and Phase 9 found out by looking.** `highdicom` 0.28.1 has `seg`, `sr`, `pm`, `ann`,
+`ko`, `pr`, `sc` and `legacy` and **no RTSTRUCT writer at all**. The exchange writer this
+repository ships is built directly on `pydicom` in `common/interop/rtstruct.py`, and its
+tests read every object back and re-derive the contours.
+
+That changes the shape of this entry rather than its conclusion. Making RTSTRUCT canonical
+would still mean owning a per-slice planar contour format end to end — but the *reader*
+would now have to be written here too, not merely adopted.
 
 **What would have to be true.** A radiotherapy workflow with RTSTRUCT as the source of truth
 — i.e. structure sets arriving from a treatment planning system that must be edited and
@@ -188,6 +195,13 @@ path for **MetaImage (`.mha`)** and for **NIfTI orientation repair**, both of wh
 `convertDicomSeries` / `parseDicomHeader` / `dicomSliceArrayType` and the DICOM cases in
 `static/js/tests/cbct_convert_worker.test.js`. Keep `isDicomBuffer` — it becomes the
 client-side pre-filter that avoids uploading 400 MB of non-DICOM. Keep everything else.
+
+**Status: done, and earlier than planned.** Phase 8 deleted the DICOM branch in the same
+commit that made it redundant rather than waiting a release, because leaving two DICOM
+readers in the tree — one of which threw every slice of a folder into a single volume
+regardless of `SeriesInstanceUID`, and refused compressed pixel data outright — would have
+meant an ordinary JPEG-Lossless CBCT taking the broken path for a release. `isDicomBuffer`
+stayed, and so did the MetaImage and NIfTI-repair halves.
 
 ---
 
@@ -254,3 +268,85 @@ same silent-mirroring hazard documented in `static/js/volume_metadata.js`, which
 module is retained and re-wired rather than deleted. Arguably an upstream *policy* question
 rather than a bug — but the loader should at minimum surface that the orientation was
 inferred, so a consumer can refuse to show measurements derived from it.
+
+
+---
+
+## 11. Browser-side interchange import (SEG / RTSTRUCT / SR)
+
+**What.** Reading a DICOM SEG, RT Structure Set or SR produced elsewhere and turning it
+into Yggdrasil annotations. Decision #2 asked for import *and* export; Phase 9 shipped
+export only.
+
+**Why deferred.** Not difficulty — scope, and the absence of a second half. Export has a
+clear consumer: somebody wants this study's annotations in a form their own system reads.
+Import has none yet, and importing without one means choosing, with no user to ask, how
+several genuinely ambiguous cases resolve: a SEG whose frames do not line up with any
+series held here; an SR whose measurements reference instances that were never ingested;
+an RTSTRUCT whose contours fall outside every stored frame of reference. Each of those is
+a policy question, and a policy invented to make a feature demo-able is the kind that
+survives into production unexamined.
+
+The roadmap put import in the browser deliberately — that is where the registered volume
+is, so a labelmap can be checked against the grid it claims to describe before anything is
+written. That reasoning still holds and is the right starting point.
+
+**What would have to be true.** A stated source: a scanner, a planning system or a
+collaborator actually sending these objects, so the ambiguous cases have someone to
+resolve them. At that point risk 12 (two SEG writers disagreeing) comes back with it —
+Phase 9 recorded it as not-applicable precisely because there is only one writer today,
+and a browser-side importer paired with a browser-side writer is what would create the
+second.
+
+**Cost if adopted.** Moderate and mostly validation, not parsing: `dcmjs` reads all three,
+and the adapter layer that turns them into descriptors is the same shape as the five that
+exist. The work is in refusing well.
+
+---
+
+## 12. DICOM Parametric Map
+
+**What.** `highdicom.pm`, for storing a derived per-voxel *measurement* map — an ADC map,
+a perfusion map, a computed HU map — as DICOM rather than as a NIfTI.
+
+**Why deferred.** Nothing in the platform produces one. A Parametric Map is not a
+segmentation with real numbers in it: it is a map whose values carry a real-world quantity
+and a unit, and DICOM requires that unit to be a coded concept. The CBCT pipeline emits a
+label array, which is a SEG; the ROI statistics are numbers about regions, which are an
+SR. Writing a Parametric Map today would mean inventing a quantity for values that do not
+have one.
+
+**What would have to be true.** A pipeline that emits a calibrated per-voxel quantity —
+the obvious candidate is a bone-density map, which would have a real unit and a real
+consumer. `highdicom.pm` is a small module and the export plumbing already exists, so this
+is a "when the data arrives" item rather than a research one.
+
+---
+
+## 13. Re-wiring the Magic Tool onto the Cornerstone video surface
+
+**What.** Restoring SAM2-assisted segmentation on the laparoscopy surface Phase 10 built.
+
+**This is not deferred work — it is unfinished work**, listed here only so it is not lost.
+It is a **release blocker** for 3.0. The distinction matters: everything else in this file
+was considered and deliberately left out of scope, and this was not.
+
+**Where it stands.** The WebSocket contract is untouched (decision #9) — the GPU worker,
+the protocol and the Django proxies in `laparoscopy/views.py` are exactly as they were, so
+there is no contract to renegotiate. The sink is built and unit-tested
+(`frontend/imaging/video/magicSink.js`): a returned mask is written into the labelmap
+directly, with none of the contour tracing and small-component filtering the old annotator
+needed to make a mask look like a polygon.
+
+What is missing is the host. `laparoscopy_annotator_worker.js` was a mixin on the deleted
+annotator's prototype and read **58 members** off it — shape registration, the mask overlay
+renderer, the pending-scope bookkeeping, the timeline's drag state. Roughly half of those
+have no counterpart on the new surface because they existed to manage Konva nodes; the
+other half — prompt collection, the frame key, scope signatures, the mask decision box —
+are real and need somewhere to live.
+
+**Shape if picked up.** A `frontend/imaging/video/magic/` module owning the session, the
+prompts and the pending scopes, talking to the surface through the same narrow interface
+the page glue uses. The prompt points already have a home in the record: Phase 10 stores
+them as sparse `Geometry2DItem` points in normalised coordinates, which is what
+`annotations_convert_legacy` has always written.

@@ -1376,6 +1376,49 @@ Tier 1 compares two different header parsers.
   (decision #14); NPZ export stays byte-compatible but is regenerated from labelmaps
   (decision #15) — **prove byte-equivalence on existing studies during migration.**
 
+## What stands between this and a release
+
+Everything in Phases 1–10 is built and the suite is green. That is not the same as
+shippable, and this section exists so nobody has to reconstruct the difference from ten
+phase notes.
+
+**Five surfaces have never rendered a pixel.** Phases 6, 7, 8, 9 and 10 were each
+verified against their own tests and against the shipped packages, and none has been put
+in front of a real study. The calibration for how much that is worth is in this document
+already: Phase 4 shipped four defects a green suite could not see, and Phase 5 shipped
+four more. There is no reason to think the rate has changed, and the later phases touch
+more.
+
+What to drive, per surface, and what to look for:
+
+| Phase | Surface | Worth driving deliberately |
+|---|---|---|
+| 6 | IOS meshes + landmarks | A converted study's landmarks landing on the mesh they were picked against — the coordinate identity is algebra plus a pin against the shipped `Mesh.js`, and only a real study proves the wiring. Picking on a page that *also* mounts the grid and the photo stack, which is where the viewport-rect arithmetic bites |
+| 7 | Panoramic live CPR | Whether the live strip comes back mirrored against the baked one (`viewUpSign` is the one line to invert); whether the average-vs-clipped-sum difference during a drag reads as informative or as a bug; the warm-up over a folder; a locked patient's refusal |
+| 8 | Native DICOM | A folder upload end to end; the series in the grid with measurements on it; a **JPEG Lossless** study, which is the codec wasm path no unit test can reach; an export containing the series |
+| 9 | Interop | The three objects opened by something that is not this repository. `pydicom` reading back what `highdicom` wrote proves self-consistency and nothing about a PACS |
+| 10 | Video | A brush stroke surviving a frame change and a reload; two overlapping regions staying independent; an export whose NPZ matches what the previous release produced for the same study |
+
+**One capability is missing.** The Magic Tool is not wired on the new video surface — see
+Phase 10. Decision #9 forbids regressing it, so this is a blocker rather than a deferral.
+
+**Two migrations must run in the right order, before the release that ships their
+writer**, or a study edited live before conversion has its frozen pre-deploy state
+appended as a *newer* revision:
+
+- `annotations_convert_legacy --only panoramic` before Phase 7's writer.
+- `annotations_convert_legacy --only laparoscopy`, then
+  `annotations_rasterize_video_masks`, before Phase 10's. The rasterisation may run at
+  leisure — the export falls back to strokes for any patient it has not reached — but the
+  conversion may not.
+
+**Two things are open by design, not by omission.** Risk 18's production half (NPZ
+byte-equivalence is proven on a fixture, not on real studies) and risk 19 (dropping the
+legacy tables is its own release, gated on a clean production `annotations_crosscheck`).
+
+**And `v2.0.0` is still not tagged** (status row 0.2). Until it is, the additive-only rule
+has no anchor.
+
 ## Verification
 
 **CI:** `ruff check .` → `makemigrations --check --dry-run` **empty** → `migrate` → full
