@@ -1,6 +1,8 @@
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import (
+    PasswordResetForm, SetPasswordForm, UserCreationForm
+)
 from django.contrib.auth.models import User
 from datetime import timedelta
 from django.utils import timezone
@@ -291,4 +293,22 @@ class InvitedUserCreationForm(UserCreationForm):
                 raise forms.ValidationError("This invitation was created for a different email address.")
             return code
         except Invitation.DoesNotExist:
-            raise forms.ValidationError("Invalid invitation code.") 
+            raise forms.ValidationError("Invalid invitation code.")
+
+
+class StyledPasswordResetForm(PasswordResetForm):
+    """Password reset request form with Bootstrap styling."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault('class', 'form-control')
+
+
+class StyledSetPasswordForm(SetPasswordForm):
+    """New password form with Bootstrap styling."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault('class', 'form-control')
