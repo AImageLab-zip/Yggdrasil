@@ -207,10 +207,19 @@ CSRF_TRUSTED_ORIGINS = config(
 
 # SECURITY: Enhanced CSRF and Session Security
 CSRF_USE_SESSIONS = True  # Store CSRF token in session for better security
+# NOTE: with CSRF_USE_SESSIONS enabled no CSRF cookie is ever set, so the two
+# CSRF_COOKIE_* settings below are inert. They are kept only in case
+# CSRF_USE_SESSIONS is ever turned off; changing them has no effect today.
 CSRF_COOKIE_HTTPONLY = True  # Prevent XSS attacks on CSRF cookie
 CSRF_COOKIE_SAMESITE = "Strict"  # Prevent CSRF attacks
 SESSION_COOKIE_HTTPONLY = True  # Prevent XSS attacks on session cookie
-SESSION_COOKIE_SAMESITE = "Strict"  # Prevent session fixation attacks
+# Lax (Django's default) still withholds the cookie on cross-site POST/iframe/XHR,
+# which is the CSRF-relevant case, while allowing top-level GET navigations.
+# Do NOT set this to "Strict": the browser then drops the session cookie for the
+# whole redirect chain of any externally-initiated navigation, so users following
+# a link from email or chat arrive logged out, and password reset links break
+# outright (PasswordResetConfirmView round-trips its token through the session).
+SESSION_COOKIE_SAMESITE = "Lax"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
