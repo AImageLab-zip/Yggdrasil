@@ -16,9 +16,10 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, reverse_lazy
 from django.contrib.auth import views as auth_views
 from maxillo import views as scans_views
+from maxillo.forms import StyledPasswordResetForm, StyledSetPasswordForm
 from common import views as common_views
 
 urlpatterns = [
@@ -55,6 +56,41 @@ urlpatterns = [
         "logout/",
         auth_views.LogoutView.as_view(template_name="registration/logged_out.html"),
         name="logout",
+    ),
+    # Password reset (Django's built-in flow, token-based)
+    path(
+        "password-reset/",
+        auth_views.PasswordResetView.as_view(
+            template_name="registration/password_reset_form.html",
+            email_template_name="registration/emails/password_reset_body.txt",
+            subject_template_name="registration/emails/password_reset_subject.txt",
+            form_class=StyledPasswordResetForm,
+            success_url=reverse_lazy("password_reset_done"),
+        ),
+        name="password_reset",
+    ),
+    path(
+        "password-reset/sent/",
+        auth_views.PasswordResetDoneView.as_view(
+            template_name="registration/password_reset_done.html"
+        ),
+        name="password_reset_done",
+    ),
+    path(
+        "password-reset/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name="registration/password_reset_confirm.html",
+            form_class=StyledSetPasswordForm,
+            success_url=reverse_lazy("password_reset_complete"),
+        ),
+        name="password_reset_confirm",
+    ),
+    path(
+        "password-reset/done/",
+        auth_views.PasswordResetCompleteView.as_view(
+            template_name="registration/password_reset_complete.html"
+        ),
+        name="password_reset_complete",
     ),
     path("register/", scans_views.register, name="register"),
     path("invitations/", scans_views.invitation_list, name="invitation_list"),
