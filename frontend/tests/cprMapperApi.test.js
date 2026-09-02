@@ -5,12 +5,14 @@ import vtkImageCPRMapper from '@kitware/vtk.js/Rendering/Core/ImageCPRMapper.js'
 import { ProjectionMode } from '@kitware/vtk.js/Rendering/Core/ImageCPRMapper/Constants.js';
 import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData.js';
 import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray.js';
+import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData.js';
 
 import {
     ORIENTATION_ARRAY_NAME,
     ORIENTATION_COMPONENTS,
 } from '../imaging/panoramic/cprGeometry.js';
-import { PROJECTION_MODES } from '../imaging/panoramic/cprViewport.js';
+import { PROJECTION_MODES, createCprViewport } from '../imaging/panoramic/cprViewport.js';
+import { readScalarData } from '../imaging/grid/volumeLoading.js';
 
 /**
  * The panoramic's reformat is a *pinned* dependency on vtk.js, in the same way the
@@ -101,4 +103,89 @@ test('a centreline with no orientation is refused, not silently straightened', (
     // Upstream resets to an empty oriented centreline rather than throwing, so this is
     // recorded as the behaviour to expect: the surface must supply the array, and does.
     assert.equal(mapper.getOrientedCenterline().getOrientations().length, 0);
+});
+
+test('the mapper reads voxels out of point-data scalars, which a Cornerstone volume has none of', () => {
+    // The pin behind `cprViewport.setVolume`. `vtkImageCPRMapper.buildBufferObjects` does
+    // `const scalars = image?.getPointData()?.getScalars(); if (!scalars) return;` and
+    // leaves `volumeTexture` at its `null` default, which `updateBufferObjects`
+    // dereferences one line later (`Rendering/OpenGL/ImageCPRMapper.js:99,106,119-125`).
+    // A 5.8.2 `ImageVolume.imageData` carries a `voxelManager` and `hasScalarVolume:
+    // false` instead of scalars, so handing it over threw -- and because
+    // `ContextPoolRenderingEngine._renderFlaggedViewports` has no `try` and clears
+    // `_animationFrameSet` only after its loop, that throw froze every viewport on the
+    // shared engine, axial included.
+    const bare = vtkImageData.newInstance();
+    bare.setDimensions(2, 2, 2);
+    bare.set({ voxelManager: { getScalarData: () => Int16Array.from([0]) } }, true);
+    assert.equal(bare.getPointData().getScalars(), null, 'a voxelManager is not scalars');
+
+    const mapper = vtkImageCPRMapper.newInstance();
+    mapper.setImageData(bare);
+    assert.equal(mapper.getInputData(0)?.getPointData()?.getScalars(), null);
+});
+
+test('setVolume gives the mapper an imageData that carries the voxels', () => {
+    const values = Int16Array.from({ length: 2 * 3 * 4 }, (_unused, index) => index);
+    const volume = {
+        dimensions: [2, 3, 4],
+        spacing: [0.5, 0.5, 1],
+        direction: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        origin: [-10, -20, -30],
+        voxelManager: { getCompleteScalarDataArray: () => values },
+        // Present, and deliberately unusable: the point of the fix is that this object is
+        // *not* what the mapper is handed.
+        imageData: vtkImageData.newInstance(),
+    };
+
+    let handed = null;
+    const cpr = createCprViewport({
+        element: {},
+        cornerstone: {
+            renderingEngine: {
+                enableElement() {},
+                getViewport: () => ({ addActor() {}, render() {}, removeActors() {} }),
+            },
+            coreEnums: { ViewportType: { VOLUME_3D: 'volume3d' } },
+        },
+        vtk: {
+            vtkImageCPRMapper: {
+                newInstance: () => ({
+                    setOrientationArrayName() {},
+                    setUseUniformOrientation() {},
+                    setImageData: (imageData) => {
+                        handed = imageData;
+                    },
+                }),
+            },
+            vtkImageSlice: { newInstance: () => ({ setMapper() {} }) },
+            vtkPolyData,
+            vtkDataArray,
+            vtkImageData,
+        },
+    });
+
+    cpr.setVolume(volume);
+
+    assert.ok(handed, 'the mapper was given an imageData');
+    assert.notEqual(handed, volume.imageData, "the volume's own imageData is left alone");
+    const scalars = handed.getPointData().getScalars();
+    assert.ok(scalars, 'point-data scalars are set, which is the whole fix');
+    assert.equal(scalars.getNumberOfComponents(), 1);
+    // Shared, not copied: a CBCT is not a thing to hold twice.
+    assert.equal(scalars.getData(), values);
+    assert.deepEqual(Array.from(handed.getDimensions()), volume.dimensions);
+    assert.deepEqual(Array.from(handed.getSpacing()), volume.spacing);
+    assert.deepEqual(Array.from(handed.getOrigin()), volume.origin);
+});
+
+test('setVolume refuses a volume that has not finished loading', () => {
+    // `readScalarData`'s contract, reused rather than re-derived: an unread voxel manager
+    // hands back an empty array instead of throwing, and reformatting padding would look
+    // like anatomy.
+    assert.throws(
+        () => readScalarData({ voxelManager: { getCompleteScalarDataArray: () => Int16Array.of() } }),
+        /cached no voxels/
+    );
+    assert.throws(() => readScalarData({}), /no voxel manager/);
 });

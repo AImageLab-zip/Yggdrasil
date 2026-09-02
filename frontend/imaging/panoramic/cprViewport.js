@@ -28,6 +28,7 @@
  *   than creating a second pool.
  */
 
+import { readScalarData } from '../grid/volumeLoading.js';
 import {
     ORIENTATION_ARRAY_NAME,
     ORIENTATION_COMPONENTS,
@@ -59,12 +60,12 @@ export const PROJECTION_MODES = Object.freeze({
  * @param {HTMLElement} options.element the container to render into.
  * @param {object} options.cornerstone injected: `{renderingEngine, coreEnums}`.
  * @param {object} options.vtk injected: `{vtkImageCPRMapper, vtkImageSlice, vtkPolyData,
- *   vtkDataArray}`.
+ *   vtkDataArray, vtkImageData}`.
  * @returns {object} the strip's handle.
  */
 export function createCprViewport({ element, cornerstone, vtk }) {
     const { renderingEngine, coreEnums } = cornerstone;
-    const { vtkImageCPRMapper, vtkImageSlice, vtkPolyData, vtkDataArray } = vtk;
+    const { vtkImageCPRMapper, vtkImageSlice, vtkPolyData, vtkDataArray, vtkImageData } = vtk;
 
     renderingEngine.enableElement({
         viewportId: VIEWPORT_ID,
@@ -85,12 +86,46 @@ export function createCprViewport({ element, cornerstone, vtk }) {
     /**
      * Point the strip at the volume the grid loaded.
      *
-     * The Cornerstone volume's own `imageData`, so the reformat samples the same voxels
-     * the grid shows -- no second copy, no second upload to the GPU, and no chance of the
-     * two disagreeing about the affine.
+     * **The volume's own `imageData` cannot be handed to this mapper, and doing it froze
+     * the whole page.** A Cornerstone 5.8.2 `ImageVolume` never calls
+     * `pointData.setScalars()`: it attaches a `voxelManager` and states
+     * `hasScalarVolume: false` (`cache/classes/ImageVolume.js:37-65`), and gets voxels to
+     * the GPU through its own patched classes (`vtkStreamingOpenGLTexture` reads
+     * `image.voxelManager.getScalarData()`). `vtkImageCPRMapper` is the one mapper in this
+     * stack with no patched counterpart, so it reads
+     * `image.getPointData().getScalars()`, finds null, and `buildBufferObjects` returns
+     * early leaving `model.volumeTexture` at its `null` default -- which
+     * `updateBufferObjects` then dereferences (`Rendering/OpenGL/ImageCPRMapper.js:99`,
+     * `:106`, `:119-125`).
+     *
+     * That throw is not contained. `ContextPoolRenderingEngine._renderFlaggedViewports`
+     * maps over the flagged viewports with no `try` and clears `_animationFrameSet` only
+     * *after* the loop, so one throwing viewport leaves the flag set forever and **no
+     * viewport on the shared engine ever repaints again**. The reported symptom was the
+     * axial background refusing to follow the Z control while the mask overlay -- painted
+     * directly by `archViewport.setMask`, not by the render loop -- moved with it.
+     *
+     * So: a `vtkImageData` that carries the voxels in its point data, with the volume's own
+     * dimensions, spacing, direction and origin, so the centreline `cprGeometry` builds
+     * keeps meaning exactly what it meant. The typed array is shared, not copied, and the
+     * volume's own `imageData` is left alone -- the grid holds the same object and
+     * Cornerstone's `hasScalarVolume: false` is a statement about it.
      */
     function setVolume(volume) {
-        mapper.setImageData(volume.imageData);
+        const values = readScalarData(volume);
+        const imageData = vtkImageData.newInstance();
+        imageData.setDimensions(...volume.dimensions);
+        imageData.setSpacing(...volume.spacing);
+        imageData.setDirection(volume.direction);
+        imageData.setOrigin(volume.origin);
+        imageData.getPointData().setScalars(
+            vtkDataArray.newInstance({
+                name: 'Pixels',
+                numberOfComponents: 1,
+                values,
+            })
+        );
+        mapper.setImageData(imageData);
     }
 
     /**
@@ -196,11 +231,31 @@ export function createCprViewport({ element, cornerstone, vtk }) {
         void built;
     }
 
+    /**
+     * Re-apply the framing after the engine has re-measured this element.
+     *
+     * The strip's stage is `hidden` until the live pane is the one showing, so this
+     * viewport is normally enabled against an element with no size at all -- see
+     * `archViewport.reframe` for what that costs. `renderingEngine.resize` restores the
+     * camera it found, but the camera it found may be the one `enableElement` fitted to a
+     * 300x150 canvas, and {@link frame} is the only thing that knows what this viewport is
+     * actually looking at. Never `resetCamera`: it multiplies the bounds radius by 10 for
+     * `VOLUME_3D` and would put the strip on screen as a hairline.
+     */
+    function reframe() {
+        if (!framed) {
+            return;
+        }
+        viewport.setCamera(framed);
+        viewport.render();
+    }
+
     return {
         viewport,
         setVolume,
         setArch,
         setMode,
+        reframe,
         /** For tests and for a resize: the camera this surface chose, never upstream's. */
         camera: () => framed,
         render: () => viewport.render(),

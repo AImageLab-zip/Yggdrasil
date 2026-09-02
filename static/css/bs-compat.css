@@ -56,6 +56,39 @@
 .btn-outline-warning:hover,
 .btn-outline-light:hover { background: var(--ygg-surface-2); color: var(--ygg-text); }
 
+/* Selected state for an outline button. Bootstrap filled `.active` and nothing here
+   replaced it, so every toolbar that toggles the class -- the laparoscopy annotator's
+   tool palette, its annotation-mode switch -- rendered its selection identically to the
+   rest and the reader could not tell which tool was armed. Same treatment as
+   `.page-item.active .page-link` below. `:hover` is repeated so hovering the selected
+   button does not wash it back out to the unselected fill. */
+.btn-outline-primary.active,
+.btn-outline-primary.active:hover,
+.btn-outline-secondary.active,
+.btn-outline-secondary.active:hover,
+.btn-outline-info.active,
+.btn-outline-info.active:hover,
+.btn-outline-warning.active,
+.btn-outline-warning.active:hover,
+.btn-outline-light.active,
+.btn-outline-light.active:hover {
+    background: var(--ygg-primary);
+    color: var(--ygg-on-primary);
+    border-color: var(--ygg-primary);
+}
+.btn-outline-success.active,
+.btn-outline-success.active:hover {
+    background: var(--ygg-accent2);
+    color: var(--ygg-on-primary);
+    border-color: var(--ygg-accent2);
+}
+.btn-outline-danger.active,
+.btn-outline-danger.active:hover {
+    background: var(--ygg-danger);
+    color: var(--ygg-on-primary);
+    border-color: var(--ygg-danger);
+}
+
 /* Visually-hidden radio/checkbox driving an adjacent <label> styled as a
    button (Bootstrap's "btn-check" pattern) — used by the modality tab strip
    and the voice-caption language toggle. */

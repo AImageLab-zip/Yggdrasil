@@ -35,10 +35,12 @@ import {
     saveBody,
     saveState,
 } from './savePayload.js';
+import { GRID_READY_EVENT } from '../grid/bootstrap.js';
 import {
     canEdit,
     controlPlan,
     isLocked,
+    setEditReady,
     setEditorVisible,
     setError,
     setMode,
@@ -80,6 +82,46 @@ export function readGridData(doc) {
     }
 }
 
+/** The element carrying the page's own facts: who is looking, and at which patient. */
+export const PAGE_ELEMENT_ID = 'django-data';
+
+/**
+ * The page's `canEdit` and `scanId`, **from the document rather than from globals**.
+ *
+ * `window.canEdit` and `window.scanId` are assigned in exactly one place -- inside
+ * `static/js/patient_detail.js`'s `DOMContentLoaded` handler -- and this module runs
+ * before that. `{% cornerstone_entry %}` emits a module script, which is deferred: it
+ * executes once parsing finishes, with `readyState === 'interactive'`, so the entry's
+ * `readyState === 'loading' ? wait : start()` starts immediately and the classic script's
+ * handler has not run yet. `view.canEdit` was therefore `undefined` on every visit by
+ * every user, the gate below refused, and no patient page ever generated its default
+ * panoramic. `grid/bootstrap.js` documents the same race for `window.CBCTViewer`; this is
+ * the same resolution -- read what the page was served with.
+ *
+ * The globals are still consulted as a fallback, so a page that carries them and not the
+ * payload keeps working.
+ *
+ * @param {Document} doc
+ * @param {object} [view] the window, for the fallback.
+ * @returns {{canEdit: boolean, patientId: number|null}}
+ */
+export function readPageData(doc, view = doc?.defaultView ?? globalThis) {
+    let payload = null;
+    const element = doc?.getElementById?.(PAGE_ELEMENT_ID);
+    if (element) {
+        try {
+            payload = JSON.parse(element.textContent || 'null');
+        } catch {
+            payload = null;
+        }
+    }
+    const scanId = payload?.scanId ?? view?.scanId ?? null;
+    return {
+        canEdit: Boolean(payload?.canEdit ?? view?.canEdit),
+        patientId: Number.isFinite(Number(scanId)) && scanId !== null ? Number(scanId) : null,
+    };
+}
+
 /**
  * Announce an unattended outcome, both ways.
  *
@@ -105,6 +147,28 @@ export function announce(view, outcome, patientId, detail) {
 }
 
 /**
+ * Call back once the volume grid has this patient's CBCT on screen.
+ *
+ * Both orders happen: the grid's bundle may finish first, in which case the event has
+ * already been dispatched and `CBCTViewer.ready` is the only record of it, or this one may
+ * be listening before the grid ever starts. Reading the flag *and* subscribing covers both
+ * without either bundle having to know which one it is.
+ *
+ * @param {object} view the window.
+ * @param {() => void} callback
+ * @returns {() => void} unsubscribe.
+ */
+export function whenGridReady(view, callback) {
+    if (view?.CBCTViewer?.ready) {
+        callback();
+        return () => {};
+    }
+    const handler = () => callback();
+    view?.addEventListener?.(GRID_READY_EVENT, handler, { once: true });
+    return () => view?.removeEventListener?.(GRID_READY_EVENT, handler);
+}
+
+/**
  * Start the surface.
  *
  * @param {object} options
@@ -120,10 +184,11 @@ export async function bootstrapPanoramic({
     const view = doc?.defaultView ?? globalThis;
     const plan = controlPlan(doc);
     const data = readGridData(doc);
-    const patientId = view.scanId ?? null;
+    const page = readPageData(doc, view);
+    const patientId = page.patientId;
     const say = (outcome, detail) => announce(view, outcome, patientId, detail);
 
-    if (!plan.root || !canEdit(plan) || !view.canEdit || !view.Worker) {
+    if (!plan.root || !canEdit(plan) || !page.canEdit || !view.Worker) {
         report('the panoramic editor is unavailable on this page; not mounting.');
         say(OUTCOMES.SKIPPED, 'the panoramic editor is unavailable on this page');
         return null;
@@ -138,8 +203,11 @@ export async function bootstrapPanoramic({
     // Hidden first, before anything slow: the editor is never opened on load, and a
     // surface that revealed itself while deciding would flash on every patient page.
     setEditorVisible(plan, false);
+    // And no way in until there is a CBCT to open it on -- see `controls.setEditReady`.
+    setEditReady(plan, false);
+    whenGridReady(view, () => setEditReady(plan, true));
 
-    const surface = createSurface({ plan, data, source, doc, view, fetchImpl, mount, say });
+    const surface = createSurface({ plan, data, source, doc, view, patientId, fetchImpl, mount, say });
 
     if (hasSavedPanoramic(source)) {
         report('this patient already has a current panoramic; nothing to generate.');
@@ -181,7 +249,7 @@ export function editorApi(plan, surface) {
  * more than one of the handlers below and by nothing outside them -- and because the thing
  * being modelled genuinely is one editing session.
  */
-function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say }) {
+function createSurface({ plan, data, source, doc, view, patientId, fetchImpl, mount, say }) {
     let mounted = null;
     let autoMode = false;
     let started = false;
@@ -255,6 +323,32 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
         }
     }
 
+    /**
+     * Put the arch that has been fitted on screen.
+     *
+     * Separate from {@link onGeometry} because a reader can arrive at a geometry that was
+     * fitted while nobody was watching. The unattended pass draws nothing -- there is no
+     * editor on screen to draw into -- so a patient whose default panoramic was generated
+     * on this visit had a fitted arch, a mask and a centreline in hand and an **empty**
+     * axial the moment the Edit button revealed the editor, because `activate` returned on
+     * `if (geometry)` without ever asking for any of it. One function, called from both.
+     */
+    function present(pane) {
+        if (!mounted || !geometry) {
+            return;
+        }
+        // The plane by a world point, not by a slice index: the arch's `z` counts
+        // slices of the RAS-reoriented array and Cornerstone's counts steps along its
+        // camera normal, and the two run opposite ways. `worldFor` is the transform
+        // the control points and the mask already go through, so naming the plane with
+        // it is what makes all three agree. See `archViewport.showPlane`.
+        mounted.arch.showPlane(mounted.worldFor([0, 0]));
+        mounted.arch.setArch(geometry.controlPoints, mounted.worldFor);
+        mounted.arch.setMask(geometry.mask, descriptor, slice);
+        mounted.cpr.setArch({ geometry, sliceIndex: slice, descriptor, mode });
+        showPane(plan, pane);
+    }
+
     /** The worker has fitted an arch. Draw it, show it live, then bake it. */
     function onGeometry(next) {
         geometry = next;
@@ -263,11 +357,7 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
         setSaveEnabled(plan, false);
         setSlice(plan, slice);
         if (!autoMode) {
-            mounted.arch.showSlice(slice);
-            mounted.arch.setArch(next.controlPoints, mounted.worldFor);
-            mounted.arch.setMask(next.mask, descriptor, slice);
-            mounted.cpr.setArch({ geometry: next, sliceIndex: slice, descriptor, mode });
-            showPane(plan, 'live');
+            present('live');
             setEditorVisible(plan, true);
         }
         bake();
@@ -285,7 +375,19 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
         setEditorVisible(plan, true);
     }
 
+    /**
+     * Ask the worker to re-fit at the current slice.
+     *
+     * Guarded because the toolbar is bound before the editor is mounted: the entry calls
+     * `bindControls` unconditionally (`panoramic-cpr.js`), while the saved-panoramic path
+     * above returns before `mount()`, so `mounted` and `descriptor` are still null until
+     * the reader clicks Edit. A no-op is the honest answer -- there is nothing to re-fit
+     * yet -- and it is what `dragArch` already does.
+     */
     function requestArch(controlPoints) {
+        if (!mounted) {
+            return;
+        }
         geometry = null;
         baked = null;
         setSaveEnabled(plan, false);
@@ -369,7 +471,7 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
             });
             setProgress(plan, 0.65, 'Saving the projection');
             const response = await fetchImpl(
-                `/maxillo/api/patient/${view.scanId}/panoramic/generated/`,
+                `/maxillo/api/patient/${patientId}/panoramic/generated/`,
                 { method: 'POST', headers: { 'X-CSRFToken': csrf }, body: saveBody(state, blobs) }
             );
             const payload = await response.json().catch(() => null);
@@ -420,7 +522,11 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
             restoreOnReady = Boolean(source.state);
             setEditorVisible(plan, true);
             if (geometry) {
-                showPane(plan, baked ? 'baked' : 'live');
+                // Drawn now, not when it was fitted: see `present`.
+                present('live');
+                if (baked) {
+                    showBaked();
+                }
                 setStatus(plan, 'Ready. Adjust the axial arch to replace the saved panoramic.');
                 return;
             }
@@ -431,6 +537,9 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
 
         /** Bound by the entry to the toolbar. Exposed for the same reason: testability. */
         setSlice(next) {
+            if (!descriptor) {
+                return;
+            }
             const clamped = Math.max(0, Math.min(descriptor.dimensions.depth - 1, Math.trunc(next)));
             if (clamped === slice) {
                 return;
@@ -440,6 +549,9 @@ function createSurface({ plan, data, source, doc, view, fetchImpl, mount, say })
             requestArch(null);
         },
         resetAuto() {
+            if (!mounted) {
+                return;
+            }
             slice = autoSlice;
             setSlice(plan, slice);
             requestArch(null);

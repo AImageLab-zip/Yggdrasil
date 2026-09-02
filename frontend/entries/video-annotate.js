@@ -22,8 +22,15 @@
 import {
     RenderingEngine,
     Enums as coreEnums,
+    // Not an enum on `Enums`: it is exported from the package root in its own right, and
+    // it is what selects the CanvasActor path for a labelmap on a video viewport. See
+    // `video/editor.js:declareCpuImageRendering`.
+    ActorRenderMode,
     imageLoader,
     cache,
+    // The library's global event target, which is where `ANNOTATION_COMPLETED` is
+    // announced -- it is a core export, not a tools one.
+    eventTarget,
     metaData,
     utilities as coreUtilities,
 } from '@cornerstonejs/core';
@@ -32,6 +39,7 @@ import {
     addTool,
     ToolGroupManager,
     Enums as toolsEnums,
+    annotation,
     segmentation,
     PanTool,
     ZoomTool,
@@ -41,10 +49,14 @@ import {
     EraserTool,
     RectangleScissorsTool,
     CircleScissorsTool,
-    PlanarFreehandContourSegmentationTool,
-    LivewireContourSegmentationTool,
+    // The plain freehand ROI, **not** `PlanarFreehandContourSegmentationTool`: the latter
+    // refuses to create an annotation unless a Contour segmentation is active, and this
+    // surface stores labelmaps only. The outline is rasterised into the mask and dropped
+    // -- see `imaging/video/polygonFill.js`.
+    PlanarFreehandROITool,
     LengthTool,
     ArrowAnnotateTool,
+    utilities as toolsUtilities,
 } from '@cornerstonejs/tools';
 
 import { initImaging } from '../imaging/runtime/init.js';
@@ -55,9 +67,18 @@ import {
     readVideoData,
 } from '../imaging/video/bootstrap.js';
 import { createVideoMetadataProvider } from '../imaging/video/metadata.js';
+import { bindVideoControls } from '../imaging/video/pageControls.js';
 
 export const SURFACE = 'video-annotate';
 
+/**
+ * The tool classes registered with the library on this surface.
+ *
+ * Exactly the classes whose `toolName` appears in `VIDEO_TOOL_NAMES`, and no more.
+ * `LivewireContourSegmentationTool` was registered here and added to no tool group and
+ * named by no toolbar button -- a registration nothing could reach, which reads as a
+ * live feature. `frontend/tests/videoToolNames.test.js` pins the two lists to each other.
+ */
 export const VIDEO_TOOLS = [
     PanTool,
     ZoomTool,
@@ -65,8 +86,7 @@ export const VIDEO_TOOLS = [
     EraserTool,
     RectangleScissorsTool,
     CircleScissorsTool,
-    PlanarFreehandContourSegmentationTool,
-    LivewireContourSegmentationTool,
+    PlanarFreehandROITool,
     LengthTool,
     ArrowAnnotateTool,
 ];
@@ -110,6 +130,7 @@ export async function start() {
                 {
                     RenderingEngine,
                     coreEnums,
+                    ActorRenderMode,
                     toolsEnums,
                     segmentation,
                     SegmentationRepresentations: toolsEnums.SegmentationRepresentations,
@@ -121,7 +142,16 @@ export async function start() {
                     // package root, and esbuild is right to refuse the named import.
                     createAndCacheDerivedLabelmapImages:
                         imageLoader.createAndCacheDerivedLabelmapImages,
+                    // The brush's size is tool-group state, not viewport state, and the
+                    // helper that writes it also invalidates the cursor -- setting the
+                    // configuration by hand leaves the old circle on screen.
+                    setBrushSizeForToolGroup: toolsUtilities.segmentation.setBrushSizeForToolGroup,
                     cache,
+                    // `ANNOTATION_COMPLETED` is announced on the library's global event
+                    // target, not on the element, and the finished outline has to be
+                    // removed from the annotation store once it has been rasterised.
+                    eventTarget,
+                    annotationState: annotation.state,
                 },
                 options
             ),
@@ -129,14 +159,21 @@ export async function start() {
 }
 
 if (typeof window !== 'undefined') {
-    // `surface` is published rather than returned so the page's glue can wait for it
-    // without importing this module. It is `null` when the bootstrap declined, which is
-    // a state the page has to distinguish from "not mounted yet".
+    // `surface` is published rather than returned so anything on the page can wait for
+    // it without importing this module. It is `null` when the bootstrap declined, which
+    // is a state the page has to distinguish from "not mounted yet".
     window.YggVideoAnnotate = { start, SURFACE, surface: undefined };
     const run = () =>
         start()
             .then((surface) => {
                 window.YggVideoAnnotate.surface = surface;
+                // Wired here rather than from a `<script type="module">` in the
+                // template. The page used to poll `window.YggVideoAnnotate.surface`
+                // every 50 ms for it; the entry has the surface the moment it exists
+                // and the binder is a module a test can drive.
+                if (surface) {
+                    bindVideoControls({ surface, doc: document });
+                }
             })
             .catch((error) => {
                 // Never throw into the page. A blank viewer that reports nothing is

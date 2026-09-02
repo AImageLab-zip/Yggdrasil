@@ -200,6 +200,41 @@ export function syncTargets(state, sourceIndex) {
 }
 
 /**
+ * The windows that may share one window/level setting, or none of them.
+ *
+ * **Brightness is a property of a volume, not of a grid.** On the fixed CBCT layout every
+ * window is a different plane of one study, so a window/level drag in any of them belongs
+ * to all of them -- that is what the VOI synchroniser is for. On the free layout each
+ * window holds a *different series*: FLAIR against T1 against T1c against T2. Cornerstone's
+ * `voiSyncCallback` copies the source's **absolute** `voiRange` onto every target, so
+ * synchronising there pushes one sequence's window onto three others whose values are on
+ * entirely different scales -- and it fires on the opening `setProperties` too, so all four
+ * windows were wearing the first-loaded volume's window before anyone touched anything.
+ * That was reported as "they seem not to use all 4 the same lighting" and "the brightness
+ * of the brains change" on a drag; each sequence's own `openingVoi` is what makes the four
+ * look like each other, and the synchroniser was overwriting three of them.
+ *
+ * The rule is therefore the honest one rather than the layout's name: windows share a
+ * window/level exactly when they are showing the same volume. A grid holding two different
+ * volumes synchronises nothing -- a conservative answer, and the only one that cannot
+ * misreport an intensity.
+ *
+ * @param {object} state
+ * @returns {number[]} window indices, ascending; empty when they do not agree.
+ */
+export function voiSyncGroup(state) {
+    const loaded = state.windows.filter((window) => window.volumeId !== null);
+    if (loaded.length < 2) {
+        return [];
+    }
+    const [first] = loaded;
+    if (loaded.some((window) => window.volumeId !== first.volumeId)) {
+        return [];
+    }
+    return loaded.map((window) => window.index);
+}
+
+/**
  * Windows currently showing a given orientation and taking part in synchronisation.
  *
  * The replacement for `synchronizationGroups`, which was a mutable index maintained

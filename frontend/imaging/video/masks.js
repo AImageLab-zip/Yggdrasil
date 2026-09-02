@@ -127,12 +127,41 @@ export function isEmpty(mask) {
  * what makes "did the mask survive a frame change" a unit test rather than a browser
  * session.
  */
+/** Do two planes of the same length hold the same thing? */
+function sameMask(a, b) {
+    for (let index = 0; index < a.length; index += 1) {
+        if (a[index] !== b[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 export function createMaskStore({ width, height }) {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
         throw new Error(`A frame has positive integer dimensions, got ${width}x${height}.`);
     }
     /** @type {Map<number, Map<string, Uint8Array>>} */
     const frames = new Map();
+    /**
+     * Which tool last wrote each mask, keyed the same way.
+     *
+     * Beside the planes rather than inside them: a plane is a typed array the editor hands
+     * straight to Cornerstone, and attribution is metadata about who wrote it. Kept in
+     * step with `frames` by every mutator here -- a tool for a mask that no longer exists
+     * would show up in the annotation list as a row with nothing behind it.
+     *
+     * @type {Map<number, Map<string, string>>}
+     */
+    const tools = new Map();
+
+    function forgetTool(timeMs, regionCode) {
+        const known = tools.get(timeMs);
+        known?.delete(regionCode);
+        if (known && known.size === 0) {
+            tools.delete(timeMs);
+        }
+    }
 
     return {
         width,
@@ -165,31 +194,117 @@ export function createMaskStore({ width, height }) {
             return [...(frames.get(timeMs)?.keys() ?? [])].sort();
         },
 
-        /** Replace one region's mask on one frame, dropping it when it is empty. */
-        set(timeMs, regionCode, mask) {
+        /**
+         * Which tool last wrote one mask, or `null` when the record does not say.
+         *
+         * `null` is the honest answer for every mask stored before attribution existed:
+         * the tool was never recorded anywhere, so the annotation list shows the row
+         * without a tool rather than guessing one.
+         */
+        toolAt(timeMs, regionCode) {
+            return tools.get(timeMs)?.get(regionCode) ?? null;
+        },
+
+        /**
+         * Replace one region's mask on one frame, dropping it when it is empty.
+         *
+         * **The attribution is only rewritten when the mask actually changed**, and this
+         * is the place that can tell: the caller reads Cornerstone's buffer back on every
+         * frame change for every region, so it has no idea which of them the reader
+         * touched. Recording the armed tool unconditionally would relabel every mask on
+         * the frame with whatever tool happened to be selected while the reader scrubbed
+         * past it. The comparison replaces the copy that was being made anyway when
+         * nothing moved.
+         *
+         * @param {number} timeMs
+         * @param {string} regionCode
+         * @param {ArrayLike<number>} mask
+         * @param {string} [tool] the toolbar key now armed, recorded only if this write
+         *   changes the mask.
+         * @returns {boolean} whether the mask changed.
+         */
+        set(timeMs, regionCode, mask, tool) {
             if (mask.length !== width * height) {
                 throw new Error(
                     `A ${width}x${height} frame needs ${width * height} values, got ` +
                         `${mask.length}.`
                 );
             }
+            const previous = frames.get(timeMs)?.get(regionCode) ?? null;
             if (isEmpty(mask)) {
+                if (!previous) {
+                    return false;
+                }
                 const regions = frames.get(timeMs);
-                regions?.delete(regionCode);
-                if (regions && regions.size === 0) {
+                regions.delete(regionCode);
+                if (regions.size === 0) {
                     frames.delete(timeMs);
                 }
-                return;
+                forgetTool(timeMs, regionCode);
+                return true;
+            }
+            if (previous && sameMask(previous, mask)) {
+                return false;
             }
             if (!frames.has(timeMs)) {
                 frames.set(timeMs, new Map());
             }
             frames.get(timeMs).set(regionCode, Uint8Array.from(mask));
+            if (tool) {
+                if (!tools.has(timeMs)) {
+                    tools.set(timeMs, new Map());
+                }
+                tools.get(timeMs).set(regionCode, tool);
+            }
+            return true;
+        },
+
+        /**
+         * Move every mask from one region code to another, for a rename.
+         *
+         * The archive is keyed by code, so a rename that left the masks behind would
+         * store them under a name the project no longer has.
+         */
+        rename(fromCode, toCode) {
+            if (!fromCode || !toCode || fromCode === toCode) {
+                return false;
+            }
+            for (const [timeMs, regions] of frames) {
+                const mask = regions.get(fromCode);
+                if (!mask) {
+                    continue;
+                }
+                regions.delete(fromCode);
+                regions.set(toCode, mask);
+                const tool = tools.get(timeMs)?.get(fromCode);
+                forgetTool(timeMs, fromCode);
+                if (tool) {
+                    if (!tools.has(timeMs)) {
+                        tools.set(timeMs, new Map());
+                    }
+                    tools.get(timeMs).set(toCode, tool);
+                }
+            }
+            return true;
+        },
+
+        /** Drop every mask for one region, for a region type that was deleted. */
+        forget(regionCode) {
+            for (const [timeMs, regions] of [...frames]) {
+                if (!regions.delete(regionCode)) {
+                    continue;
+                }
+                forgetTool(timeMs, regionCode);
+                if (regions.size === 0) {
+                    frames.delete(timeMs);
+                }
+            }
         },
 
         /** Fill the store from a state response. */
         load(stateFrames) {
             frames.clear();
+            tools.clear();
             for (const frame of stateFrames ?? []) {
                 for (const [code, entry] of Object.entries(frame.regions ?? {})) {
                     const mask = decodeRuns(entry.rle ?? [], width, height);
@@ -198,6 +313,12 @@ export function createMaskStore({ width, height }) {
                             frames.set(frame.timeMs, new Map());
                         }
                         frames.get(frame.timeMs).set(code, mask);
+                        if (entry.tool) {
+                            if (!tools.has(frame.timeMs)) {
+                                tools.set(frame.timeMs, new Map());
+                            }
+                            tools.get(frame.timeMs).set(code, entry.tool);
+                        }
                     }
                 }
             }
@@ -226,9 +347,19 @@ export function buildSaveRequest({ store, prompts = [], expectedRevision }) {
         frames: store.annotatedTimes().map((timeMs) => ({
             timeMs,
             regions: Object.fromEntries(
-                store
-                    .regionsAt(timeMs)
-                    .map((code) => [code, { rle: encodeRuns(store.peek(timeMs, code)) }])
+                store.regionsAt(timeMs).map((code) => {
+                    const tool = store.toolAt(timeMs, code);
+                    return [
+                        code,
+                        {
+                            rle: encodeRuns(store.peek(timeMs, code)),
+                            // Omitted rather than sent as null when unknown: the server
+                            // records attribution it was told, and an explicit null would
+                            // overwrite what an earlier revision knew.
+                            ...(tool ? { tool } : {}),
+                        },
+                    ];
+                })
             ),
         })),
         prompts,

@@ -334,6 +334,43 @@ class Classification(ClassificationBase):
         return f"Classification {self.id} - {self.get_classifier_display()}"
 
 
+#: Distinct default colours for newly created region and quadrant types.
+#:
+#: Every type used to be born in the model field's default, so a project's second region
+#: was the same blue as its first and the masks on screen were told apart only by which
+#: one happened to be drawn last. The list is ordered for contrast between *adjacent*
+#: entries, because that is the order they are handed out in. A per-user override
+#: (``RegionTypeUserColor``) still wins, and once the list is exhausted the model default
+#: takes over -- a repeat is better than a colour picked by arithmetic nobody can predict.
+TYPE_PALETTE = (
+    "#3498db",  # blue
+    "#e74c3c",  # red
+    "#2ecc71",  # green
+    "#f39c12",  # amber
+    "#9b59b6",  # purple
+    "#1abc9c",  # teal
+    "#e67e22",  # orange
+    "#34495e",  # slate
+    "#d81b60",  # magenta
+    "#7f8c8d",  # grey
+)
+
+
+def next_palette_color(model_cls, project, fallback):
+    """The first palette colour this project has not used for ``model_cls`` yet.
+
+    Read off the rows rather than counted off ``order``: a project that deleted its
+    second region type should get that colour back, and counting would skip it forever.
+    """
+    taken = set(
+        model_cls.objects.filter(project=project).values_list("color", flat=True)
+    )
+    for color in TYPE_PALETTE:
+        if color not in taken:
+            return color
+    return fallback
+
+
 class RegionType(models.Model):
     project = models.ForeignKey(
         'common.Project', on_delete=models.CASCADE, related_name="laparoscopy_region_types"

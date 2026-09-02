@@ -4,7 +4,6 @@ import uuid
 from django.db import models
 from django.db.models import Q
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 import os
 from django.utils import timezone
 from django.utils.text import slugify
@@ -21,69 +20,6 @@ from common.base_models import (
 )
 import logging
 logger = logging.getLogger(__name__)
-
-
-def validate_cbct_folder(files):
-    """
-    Validator for CBCT folder uploads.
-    Validates that the folder contains valid DICOM files.
-    
-    Args:
-        files: List of uploaded files from folder
-    """
-    if not files:
-        raise ValidationError('No files found in uploaded folder')
-    
-    # Check if any files have DICOM extensions or are DICOMDIR
-    valid_files = []
-    has_dicomdir = False
-    dicom_files = []
-    extensionless_files = []
-    
-    for file in files:
-        filename = file.name.lower()
-        
-        # Check for DICOMDIR (handle both root and nested paths)
-        if filename.endswith('dicomdir') or filename == 'dicomdir' or '/dicomdir' in filename:
-            has_dicomdir = True
-            valid_files.append(file)
-        # Check for DICOM files (handle both root and nested paths)
-        elif filename.endswith(('.dcm', '.dicom')) or '.dcm' in filename or '.dicom' in filename:
-            dicom_files.append(file.name)
-            valid_files.append(file)
-        # Check for files without extensions (common for DICOM files)
-        elif '.' not in os.path.basename(filename):
-            extensionless_files.append(file.name)
-            valid_files.append(file)
-    
-
-    
-    if not valid_files:
-        # Provide more detailed error message
-        file_extensions = set()
-        for file in files[:10]:  # Check first 10 files for debugging
-            if hasattr(file, 'name'):
-                ext = os.path.splitext(file.name.lower())[1]
-                file_extensions.add(ext)
-        
-        error_msg = f'Folder must contain DICOM files (.dcm, .dicom, or no extension) and/or a DICOMDIR file. '
-        if file_extensions:
-            error_msg += f'Found file types: {", ".join(sorted(file_extensions))}'
-        else:
-            error_msg += 'No valid files found.'
-        
-        raise ValidationError(error_msg)
-    
-    # Validate individual DICOM files (basic check)
-    for file in valid_files[:5]:  # Check first 5 files to avoid overwhelming validation
-        try:
-            # Basic file size check (DICOM files should not be empty)
-            if file.size == 0:
-                raise ValidationError(f'Invalid DICOM file: {file.name} (empty file)')
-        except AttributeError:
-            pass  # Skip if size attribute not available
-    
-    return valid_files
 
 
 # MaxilloUserProfile has been removed - user permissions are now handled via common.ProjectAccess
@@ -408,34 +344,6 @@ class Patient(models.Model):
         """Get jobs waiting for dependencies"""
         return self.processing_jobs.filter(status='dependency')
     
-    def create_bite_classification_job(self, ios_job):
-        """Create a bite classification job that depends on the IOS processing job"""
-        from common.job_routing import is_runner_enabled_for_modality
-        from .models import Job
-
-        if not is_runner_enabled_for_modality('bite_classification'):
-            logger.info(
-                "Not creating bite classification job for patient %s because the runner is disabled",
-                self.patient_id,
-            )
-            return None
-        
-        existing_job = self.jobs.filter(modality_slug='bite_classification').first()
-        if existing_job:
-            return existing_job
-        
-        bite_job = Job.objects.create(
-            modality_slug='bite_classification',
-            status='dependency',
-            patient=self,
-            input_files={},
-        )
-        
-        bite_job.add_dependency(ios_job)
-        
-        return bite_job
-
-
 class IntraoralToothSegmentation(models.Model):
     """Vector tooth polygons per intraoral image."""
 
@@ -573,6 +481,11 @@ class Classification(ClassificationBase):
     SAGITTAL_CHOICES = [
         ('Unknown', 'Unknown'),
         ('I', 'Class I'),
+        # Plain Class II: what an automated classifier can state when it does not
+        # model the edge/full distinction a human annotator makes (Bits2Bites
+        # predicts a single "seconda classe"). Human annotation keeps using
+        # II_edge/II_full.
+        ('II', 'Class II'),
         ('II_edge', 'Class II Edge'),
         ('II_full', 'Class II Full'),
         ('III', 'Class III'),
@@ -612,6 +525,18 @@ class Classification(ClassificationBase):
         indexes = [
             models.Index(fields=['patient', 'classifier']),
             models.Index(fields=['classifier']),
+        ]
+        constraints = [
+            # One classification per patient per classifier: the manual one a human
+            # entered, and the pipeline one the model produced. Every write site treats
+            # it that way (two use get_or_create, the accept-AI path uses
+            # update_or_create), and duplicates only ever arrived from concurrent
+            # writes -- where the older row silently shadowed the newer in
+            # ``-timestamp`` order, so the UI showed a stale classification.
+            models.UniqueConstraint(
+                fields=('patient', 'classifier'),
+                name='uniq_maxillo_class_patient_classifier',
+            ),
         ]
 
     def __str__(self):

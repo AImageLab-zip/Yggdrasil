@@ -8,6 +8,7 @@ No job data flows through the worker. The worker only:
 The sbatch job itself pulls inputs and pushes outputs (see Yggdrasil/slurm/scripts).
 """
 import logging
+import os
 import shlex
 
 from django.conf import settings
@@ -80,9 +81,49 @@ def _collect_output_files(output_prefix):
     return output_files
 
 
+#: Per modality, the outputs the app looks up by a *logical* name, which the algorithm
+#: can only write as a file. See :func:`_normalize_output_files`.
+#:
+#: ``video``      the annotation gate asks for ``video_processed``/``subtype='subsampled'``
+#:                and the export reads the same row.
+#: ``intraoral-photo``  ``mark_job_completed`` reads ``output_files["segmentation_json"]``,
+#:                and the view labels beside it.
+_LOGICAL_OUTPUTS = {
+    "video": ("compressed", "subsampled"),
+    "intraoral-photo": ("segmentation_json", "views_json"),
+}
+
+
 def _normalize_output_files(modality, output_files):
-    """Apply modality-specific logical names to generic collected artifacts."""
+    """Apply modality-specific logical names to generic collected artifacts.
+
+    Outputs are *discovered*, not declared: the sbatch script pushes a directory and
+    :func:`_collect_output_files` lists it, so a key here is a path relative to the
+    output prefix -- ``subsampled.mp4``, not ``subsampled``. What reads those outputs
+    asks for a logical name: ``mark_job_completed`` indexes
+    ``output_files["segmentation_json"]``, and the generic registration branch stores
+    the key verbatim as ``FileRegistry.subtype``, which the annotation gate and the
+    export then filter on. Reconciling the two is this function's job, and doing it here
+    rather than at each lookup keeps "what the algorithm produced" in one place.
+    """
     output_files = dict(output_files or {})
+
+    logical = _LOGICAL_OUTPUTS.get(modality)
+    if logical:
+        # Renamed, not aliased: the generic registration branch stores every key it is
+        # given, and two keys pointing at one path would write the row twice and keep
+        # whichever came last -- a coin toss between `subsampled` and `subsampled.mp4`.
+        for name in logical:
+            if name in output_files:
+                continue
+            matches = [
+                key for key in output_files
+                if os.path.splitext(os.path.basename(str(key)))[0].lower() == name
+            ]
+            if len(matches) == 1:
+                output_files[name] = output_files.pop(matches[0])
+        return output_files
+
     if modality != "cbct" or "segmentation_nifti" in output_files:
         return output_files
 
@@ -154,25 +195,41 @@ def run_job(job_id: int) -> str:
     stdout_template = f"{log_dir}/job_{job_id}-%j.out"
     stderr_template = f"{log_dir}/job_{job_id}-%j.err"
 
+    # Set only when a previous attempt already submitted this job and died waiting.
+    # Reattaching is what makes the task safe to redeliver: resubmitting instead would
+    # run the algorithm twice against one output prefix.
+    attached_slurm_id = str(job.get("slurm_job_id") or "").strip()
+
     try:
         with SlurmSSH.from_settings() as ssh:
-            ssh.mkdirs(log_dir)
-            ssh.mkdirs(f"{stage}/in")
-            ssh.mkdirs(f"{stage}/out")
-            ssh.sftp_write(creds_path, render_creds_env(input_keys, output_prefix))
-            slurm_id = ssh.sbatch(
-                script_path=script_path,
-                export={
-                    "YGG_JOB_ID": job_id,
-                    "YGG_STAGE": stage,
-                    "YGG_CREDS": creds_path,
-                    "YGG_ALGO_DIR": algo_dir,
-                },
-                output_path=stdout_template,
-                error_path=stderr_template,
-                work_dir=stage_base,
-            )
-            logger.info("Job %s submitted as SLURM %s; waiting", job_id, slurm_id)
+            if attached_slurm_id:
+                slurm_id = attached_slurm_id
+                logger.info(
+                    "Job %s reattaching to SLURM %s (previous attempt did not finish)",
+                    job_id,
+                    slurm_id,
+                )
+            else:
+                ssh.mkdirs(log_dir)
+                ssh.mkdirs(f"{stage}/in")
+                ssh.mkdirs(f"{stage}/out")
+                ssh.sftp_write(creds_path, render_creds_env(input_keys, output_prefix))
+                slurm_id = ssh.sbatch(
+                    script_path=script_path,
+                    export={
+                        "YGG_JOB_ID": job_id,
+                        "YGG_STAGE": stage,
+                        "YGG_CREDS": creds_path,
+                        "YGG_ALGO_DIR": algo_dir,
+                    },
+                    output_path=stdout_template,
+                    error_path=stderr_template,
+                    work_dir=stage_base,
+                )
+                # Before the first poll: everything after this point can lose the
+                # worker, and the stamp is the only way back to this allocation.
+                api.attach(job_id, slurm_id)
+                logger.info("Job %s submitted as SLURM %s; waiting", job_id, slurm_id)
             state = ssh.poll(slurm_id)
             ssh.remove_file(creds_path)
             accounting = ssh.accounting(slurm_id)

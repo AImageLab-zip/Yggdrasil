@@ -154,8 +154,7 @@ window.PanoramicViewer = {
         const content = document.getElementById(config.contentId);
         const error = document.getElementById(config.errorId);
         const img = document.getElementById(config.imageId);
-        const editButton = document.getElementById('editSavedPanoramic');
-        
+
         if (!img) {
             console.debug('Panoramic image element not found for target:', config.imageId);
             return;
@@ -169,7 +168,6 @@ window.PanoramicViewer = {
         if (loading) loading.style.display = 'block';
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'none';
-        if (config === this.targets.inline && editButton) editButton.hidden = true;
         
         fetch(this.getMetaUrl(), config.abortController ? { signal: config.abortController.signal } : undefined)
             .then(response => {
@@ -181,14 +179,9 @@ window.PanoramicViewer = {
                 this.variants = Array.isArray(data.variants) ? data.variants : [];
                 this.selectedVariant = data.selected_variant || null;
                 this.updateVariantControls();
-                if (config === this.targets.inline && editButton) {
-                    // Independent of whether a panoramic exists yet: the editor is
-                    // only ever opened from this button, so hiding it for a patient
-                    // with no panoramic would leave no way in at all.
-                    editButton.hidden = !(
-                        window.canEdit && document.getElementById('cbctPanorexEditor')
-                    );
-                }
+                // The Edit-arch button is NOT touched here. It is offered by the editor's
+                // own bundle, which is the only thing that knows whether the CBCT has
+                // finished loading -- see `frontend/imaging/panoramic/controls.js`.
                 const container = img.parentElement;
                 if (container) {
                     container.querySelectorAll('.rgb-edit-toolbar, .rgb-crop-layer').forEach((el) => el.remove());
@@ -220,20 +213,28 @@ window.PanoramicViewer = {
                 const cacheToken = data.generation_uuid || (
                     data.revision !== undefined ? data.revision : this.refreshRevision
                 );
-                img.src = cacheToken === null || cacheToken === undefined
+                const nextSrc = cacheToken === null || cacheToken === undefined
                     ? data.url
                     : data.url + (data.url.includes('?') ? '&' : '?') + 'generation=' + encodeURIComponent(cacheToken);
+                // **Assigning the src it already has fires neither event.** Every switch to
+                // the CBCT tab calls loadInlineForCBCT(), and the second call asks for the
+                // same URL with the same generation token: the browser does not reload, no
+                // `load` and no `error` arrive, and the spinner this function just turned on
+                // stays on over a hidden image for the rest of the visit. Settle it here
+                // instead, from what the element already knows.
+                if (img.src && img.src === new URL(nextSrc, document.baseURI).href) {
+                    if (img.complete) {
+                        (img.naturalWidth ? img.onload : img.onerror)();
+                    }
+                    return;
+                }
+                img.src = nextSrc;
             })
             .catch((fetchError) => {
                 if (fetchError && fetchError.name === 'AbortError') return;
                 if (requestToken !== config.requestToken) return;
                 if (loading) loading.style.display = 'none';
                 if (error) error.style.display = 'block';
-                if (config === this.targets.inline && editButton) {
-                    editButton.hidden = !(
-                        window.canEdit && document.getElementById('cbctPanorexEditor')
-                    );
-                }
             });
     },
 
@@ -243,6 +244,29 @@ window.PanoramicViewer = {
 
     loadInlineForCBCT: function() {
         this.loadInto(this.targets.inline);
+    },
+
+    /** Settle the inline pane on "nothing here yet" without asking the server. */
+    showInlineEmptyForCBCT: function() {
+        this.showEmpty(this.targets.inline);
+    },
+
+    /**
+     * The pane's own empty state: no spinner, no content, the placeholder shown.
+     *
+     * This is the same end state `loadInto`'s catch reaches, reached without the
+     * request -- see the caller in `static/js/patient_detail.js`. A request in flight
+     * is abandoned first, so a slow answer cannot re-show the pane behind this.
+     */
+    showEmpty: function(config) {
+        config.requestToken = (config.requestToken || 0) + 1;
+        if (config.abortController) config.abortController.abort();
+        const loading = document.getElementById(config.loadingId);
+        const content = document.getElementById(config.contentId);
+        const error = document.getElementById(config.errorId);
+        if (loading) loading.style.display = 'none';
+        if (content) content.style.display = 'none';
+        if (error) error.style.display = 'block';
     },
 
     refreshAfterSave: function(data) {

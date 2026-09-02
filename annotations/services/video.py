@@ -71,6 +71,21 @@ VIDEO_ROLE = ""
 #: ``MAX_ANNOTATIONS_PER_REVISION`` exists.
 MAX_ANNOTATED_FRAMES = 5000
 
+#: The toolbar keys a client may claim wrote a mask, mirroring ``TOOL_PLAN`` in
+#: ``frontend/imaging/video/editor.js``.
+#:
+#: The record is one labelmap per (region, frame) and carries no stroke history, so the
+#: attribution is the *last* tool to have written that mask -- which is all the annotation
+#: list claims. Validated against a closed set rather than stored verbatim: it is shown to
+#: readers, and an unknown string would be rendered as a tool that does not exist.
+#:
+#: A mask stored before this field existed carries no tool, and none can be invented for
+#: it: the information was never recorded anywhere. Those rows read as region and instant
+#: alone, which is the truth about them.
+MASK_TOOLS = frozenset(
+    {"brush", "eraser", "polygon", "rect-scissors", "circle-scissors"}
+)
+
 
 class VideoMaskError(ValidationError):
     """A mask payload that cannot be decoded into the frame it claims to describe."""
@@ -79,7 +94,7 @@ class VideoMaskError(ValidationError):
 # ------------------------------------------------------------------- the vocabulary
 
 
-def region_label_schema(project):
+def region_label_schema(project, extra_codes=()):
     """The label schema mirroring one project's ``RegionType`` rows.
 
     Region types are a per-project, user-defined vocabulary, so unlike FDI they cannot be
@@ -88,6 +103,18 @@ def region_label_schema(project):
     because the live save needs the *same* schema: a converted study and an edited one
     that resolved their region names against two different schemas would compare as a
     gap on every field.
+
+    ``extra_codes`` names region vocabulary the project's *stored* annotations use but its
+    current ``RegionType`` rows no longer offer. That is not hypothetical and it is not
+    corruption: region types predate the project registry, so a patient can sit in one
+    project while the annotations on it reference a ``RegionType`` that now belongs to
+    another. The legacy conversion hit exactly this -- a stroke labelled ``Tool`` on a
+    patient whose project had no such type -- and ``_resolve_label`` refused it, correctly,
+    because writing the item unlabelled would file it under the wrong segment on export.
+    Refusing is right for a *live* save; for history it would mean the record cannot be
+    represented at all. So the schema is widened to hold what the record actually says.
+    The live UI still offers only the project's own types, because that list comes from
+    ``RegionType``, not from here.
     """
     from annotations.models import LabelDefinition, LabelSchema
     from laparoscopy.models import RegionType
@@ -113,6 +140,26 @@ def region_label_schema(project):
                 "color": region_type.color,
                 "order": region_type.order,
             },
+        )
+
+    for code in dict.fromkeys(code for code in extra_codes if code):
+        if LabelDefinition.objects.filter(schema=schema, code=code).exists():
+            continue
+        # Past the end rather than into the enumeration above: `(schema, value)` is
+        # unique, and a value inside the project's own range would collide the moment
+        # that project gains another region type.
+        highest = (
+            LabelDefinition.objects.filter(schema=schema)
+            .order_by("-value")
+            .values_list("value", flat=True)
+            .first()
+        ) or 0
+        LabelDefinition.objects.create(
+            schema=schema,
+            code=code,
+            value=highest + 1,
+            display_name=code,
+            order=highest + 1,
         )
     return schema
 
@@ -181,13 +228,19 @@ def _mask_key(time_ms, region_code):
     return f"m_{int(time_ms)}_{region_code}"
 
 
-def build_mask_archive(*, width, height, frames):
+def build_mask_archive(*, width, height, frames, tools=None):
     """The canonical ``.npz`` bytes for one revision.
 
     ``frames`` is ``{time_ms: {region_code: (height, width) array}}``. Only non-empty
     masks are written: an all-zero plane is the absence of an annotation, and storing
     one per region per frame would multiply the artifact by the size of the project's
     vocabulary for no information.
+
+    ``tools`` is the optional ``{time_ms: {region_code: tool}}`` attribution, written
+    under one more self-describing key beside ``region_codes`` and holding entries only
+    for masks that were actually stored -- so it can never name a mask the archive does
+    not contain. An archive with no ``mask_tools`` key is a valid archive that records no
+    attribution, which is every archive written before the key existed.
 
     The class vocabulary travels inside the archive rather than beside it, so the file
     is self-describing -- a mask array whose region codes have to be looked up in a
@@ -198,6 +251,7 @@ def build_mask_archive(*, width, height, frames):
         "times_ms": np.asarray(sorted(frames), dtype=np.int64),
     }
     codes = set()
+    stored_tools = {}
     for time_ms, regions in frames.items():
         for region_code, mask in regions.items():
             array = (np.asarray(mask, dtype=np.uint8) > 0).astype(np.uint8)
@@ -205,7 +259,12 @@ def build_mask_archive(*, width, height, frames):
                 continue
             codes.add(region_code)
             payload[_mask_key(time_ms, region_code)] = array
+            tool = (tools or {}).get(time_ms, {}).get(region_code)
+            if tool:
+                stored_tools[_mask_key(time_ms, region_code)] = tool
     payload["region_codes"] = np.asarray(json.dumps(sorted(codes)))
+    if stored_tools:
+        payload["mask_tools"] = np.asarray(json.dumps(stored_tools, sort_keys=True))
 
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **payload)
@@ -213,20 +272,37 @@ def build_mask_archive(*, width, height, frames):
 
 
 def read_mask_archive(payload_bytes):
-    """``(width, height, {time_ms: {region_code: array}})`` out of the stored bytes."""
+    """``(width, height, frames, tools)`` out of the stored bytes.
+
+    ``frames`` is ``{time_ms: {region_code: array}}`` and ``tools`` is the same shape
+    holding the toolbar key that last wrote each mask. ``tools`` is empty for an archive
+    written before attribution existed, and holds an entry only where the archive
+    recorded one -- absence means "the record does not say", never "no tool".
+    """
     with np.load(io.BytesIO(payload_bytes), allow_pickle=False) as archive:
         height, width = (int(v) for v in archive["shape"])
         times = [int(v) for v in archive["times_ms"]]
         codes = json.loads(str(archive["region_codes"]))
+        stored_tools = (
+            json.loads(str(archive["mask_tools"]))
+            if "mask_tools" in archive.files
+            else {}
+        )
         frames = {}
+        tools = {}
         for time_ms in times:
             regions = {}
+            per_frame = {}
             for code in codes:
                 key = _mask_key(time_ms, code)
                 if key in archive.files:
                     regions[code] = np.asarray(archive[key], dtype=np.uint8)
+                    if key in stored_tools:
+                        per_frame[code] = stored_tools[key]
             frames[time_ms] = regions
-    return width, height, frames
+            if per_frame:
+                tools[time_ms] = per_frame
+    return width, height, frames, tools
 
 
 def _store_archive(patient, *, content, revision):
@@ -331,10 +407,12 @@ def save_video_regions(
 ):
     """Write one revision: the labelmap archive, plus the prompts that produced it.
 
-    :param frames: ``[{"timeMs": int, "regions": {code: {"rle": [...]}}}]`` -- the whole
-        state of the work, not a delta. The client owns the entire set, which is why
-        ``carry_forward`` is off: there is one video and every save names it, so a
+    :param frames: ``[{"timeMs": int, "regions": {code: {"rle": [...], "tool": str}}}]``
+        -- the whole state of the work, not a delta. The client owns the entire set, which
+        is why ``carry_forward`` is off: there is one video and every save names it, so a
         carried-forward item would be a region the user had just erased coming back.
+        ``tool`` is optional and names the toolbar key that last wrote that mask; an
+        unknown one is refused rather than stored, because it is shown to readers.
     :param expected_revision: the revision the client read. A stale one is a 409 through
         ``record_revision``'s unique constraint, with no read-then-write window.
     :returns: the new ``AnnotationRevision``.
@@ -349,6 +427,7 @@ def save_video_regions(
         )
 
     decoded = {}
+    decoded_tools = {}
     for index, frame in enumerate(frames):
         if not isinstance(frame, dict):
             raise ValidationError(f"frames[{index}] must be an object")
@@ -365,6 +444,19 @@ def save_video_regions(
             code: decode_rle((entry or {}).get("rle"), width, height)
             for code, entry in regions.items()
         }
+        per_frame = {}
+        for code, entry in regions.items():
+            tool = (entry or {}).get("tool")
+            if tool is None:
+                continue
+            if tool not in MASK_TOOLS:
+                raise ValidationError(
+                    f"frames[{index}].regions[{code}].tool is {tool!r}, which is not one "
+                    f"of {sorted(MASK_TOOLS)}"
+                )
+            per_frame[code] = tool
+        if per_frame:
+            decoded_tools[time_ms] = per_frame
 
     revision = save_measurement_groups(
         patient,
@@ -393,7 +485,9 @@ def save_video_regions(
         note=f"video regions: {len(decoded)} annotated frames",
     )
 
-    content = build_mask_archive(width=width, height=height, frames=decoded)
+    content = build_mask_archive(
+        width=width, height=height, frames=decoded, tools=decoded_tools
+    )
     row, digest = _store_archive(patient, content=content, revision=revision)
     add_payload(
         revision,
@@ -509,7 +603,7 @@ def video_regions_state(patient):
     if payload is not None and payload.file_id:
         handle, _info = open_binary(payload.file.file_path)
         try:
-            width, height, decoded = read_mask_archive(handle.read())
+            width, height, decoded, decoded_tools = read_mask_archive(handle.read())
         finally:
             close = getattr(handle, "close", None)
             if close is not None:
@@ -518,7 +612,16 @@ def video_regions_state(patient):
             {
                 "timeMs": time_ms,
                 "regions": {
-                    code: {"rle": encode_rle(mask)}
+                    code: {
+                        "rle": encode_rle(mask),
+                        # Omitted, not null, when the archive does not say: the client
+                        # renders a row without a tool rather than one claiming "none".
+                        **(
+                            {"tool": decoded_tools[time_ms][code]}
+                            if code in decoded_tools.get(time_ms, {})
+                            else {}
+                        ),
+                    }
                     for code, mask in sorted(regions.items())
                 },
             }

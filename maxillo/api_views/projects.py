@@ -76,18 +76,6 @@ def project_upload_api(request, project_slug):
         PatientUploadForm = _upload_form_class(project_slug)
         patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user, current_project=project)
         
-        # Validate CBCT folder uploads before creating the patient so invalid
-        # folder selections do not leave behind empty patient rows.
-        cbct_upload_type = request.POST.get('cbct_upload_type', 'file')
-        cbct_folder_files = request.FILES.getlist('cbct_folder_files')
-        if cbct_upload_type == 'folder' and cbct_folder_files:
-            try:
-                from ..models import validate_cbct_folder
-
-                validate_cbct_folder(cbct_folder_files)
-            except Exception as e:
-                return JsonResponse({'error': f'Invalid CBCT folder upload: {e}'}, status=400)
-        
         if not patient_upload_form.is_valid():
             return JsonResponse({
                 'error': 'Form validation failed',
@@ -170,7 +158,6 @@ def project_upload_api(request, project_slug):
         try:
             from django.core.exceptions import ValidationError
             cbct_file = request.FILES.get('cbct')
-            cbct_folder_files = request.FILES.getlist('cbct_folder_files')
             if cbct_file:
                 from ..file_utils import save_cbct_to_dataset
 
@@ -182,17 +169,6 @@ def project_upload_api(request, project_slug):
                         'status': processing_job.status
                     })
                     upload_results['messages'].append("CBCT scan queued for processing")
-            elif cbct_folder_files:
-                from ..file_utils import save_cbct_folder_to_dataset
-
-                folder_path, processing_job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
-                if processing_job:
-                    upload_results['jobs'].append({
-                        'id': processing_job.id,
-                        'type': 'cbct',
-                        'status': processing_job.status
-                    })
-                    upload_results['messages'].append("CBCT folder queued for processing")
         except ValidationError as e:
             err_msg = e.message if hasattr(e, 'message') else '; '.join(e.messages) if hasattr(e, 'messages') else str(e)
             return JsonResponse({'error': err_msg}, status=400)

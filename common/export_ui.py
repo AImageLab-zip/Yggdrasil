@@ -89,11 +89,7 @@ def artifact_groups(domain, project, patients, patient_fk="patient"):
     """
     modalities = project_modalities(project)
     by_slug = {modality.slug: modality for modality in modalities}
-    # rawzip is excluded from the modality *list* (it is an ingestion detail, not
-    # a clinical modality) but its artifacts are still exportable when enabled.
     enabled_slugs = list(by_slug)
-    if project is not None and project.modalities.filter(slug="rawzip").exists():
-        enabled_slugs.append("rawzip")
     artifacts = export_catalog.artifacts_for_project(domain, enabled_slugs)
 
     file_rows = None
@@ -108,18 +104,19 @@ def artifact_groups(domain, project, patients, patient_fk="patient"):
         modality = by_slug.get(slug)
         group = groups.setdefault(slug, {
             "slug": slug,
-            "name": modality.name if modality else ("Raw archive" if slug == "rawzip" else "Patient level"),
-            "icon": (modality.icon if modality and modality.icon else
-                     "fas fa-file-zipper" if slug == "rawzip" else "fas fa-user"),
+            "name": modality.name if modality else "Patient level",
+            "icon": modality.icon if modality and modality.icon else "fas fa-user",
             "buckets": {},
         })
+        # No count for an artifact with a collector, even one that also has files:
+        # its document is produced from the database, so a zero file count would
+        # grey out a checkbox that has something to export.
         count = None
-        if artifact.is_file_backed and file_rows is not None:
+        if artifact.is_file_backed and not artifact.collector and file_rows is not None:
             count = file_rows.filter(artifact.registry_q()).count()
         group["buckets"].setdefault(artifact.bucket, []).append({
             "key": artifact.key,
             "label": artifact.label,
-            "description": artifact.description,
             "count": count,
             "available": count is None or count > 0,
         })

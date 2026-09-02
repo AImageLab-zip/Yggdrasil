@@ -45,38 +45,34 @@ def _brain_patient(**kwargs):
 
 
 class ModalityConfigAccessorTests(TestCase):
-    # Neutralize any local .env env-routing so fallbacks are deterministic.
-    @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
-    def test_requires_processing_legacy_fallback_when_no_step(self):
-        self.assertFalse(mc.modality_requires_processing("panoramic"))
-        self.assertFalse(mc.modality_requires_processing("teleradiography"))
-        self.assertFalse(mc.modality_requires_processing("rawzip"))
-        self.assertTrue(mc.modality_requires_processing("ios"))
+    def test_a_modality_with_no_step_declares_no_processing(self):
+        # The reported defect. An admin-added modality (here an intraoral photo
+        # type) has no ProcessingStep, so nothing declares an algo for it -- and
+        # `runner.run.run_job` fails outright a job whose step has no algo_name.
+        # Creating one is not a harmless extra: it is a red "processing failed"
+        # pill on every patient that ever uploaded the modality.
+        _modality("iop")
+        self.assertFalse(mc.modality_requires_processing("iop"))
+        self.assertFalse(mc.modality_is_enabled("iop"))
+        self.assertFalse(mc.modality_is_blocking("iop"))
 
-    def test_requires_processing_step_overrides_legacy(self):
+    def test_requires_processing_follows_the_step(self):
         m = _modality("panoramic")
         _step(m, is_enabled=True)
         self.assertTrue(mc.modality_requires_processing("panoramic"))
+        self.assertTrue(mc.modality_is_enabled("panoramic"))
 
         m2 = _modality("ios")
         _step(m2, is_enabled=False)
         self.assertFalse(mc.modality_requires_processing("ios"))
+        self.assertFalse(mc.modality_is_enabled("ios"))
 
-    @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_is_enabled_env_fallback_when_no_step(self):
-        # env map present but slug absent => disabled (legacy behavior)
+    @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "gpu-q"})
+    def test_env_queue_map_does_not_enable_a_step_less_modality(self):
+        # RUNNER_QUEUE_BY_MODALITY routes jobs to a queue; it does not declare
+        # that work exists. Only a step does.
+        _modality("demo")
         self.assertFalse(mc.modality_is_enabled("demo"))
-
-    @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_is_enabled_step_overrides_env(self):
-        m = _modality("demo")
-        _step(m, is_enabled=True)
-        # env would disable (slug absent), but the enabled step wins
-        self.assertTrue(mc.modality_is_enabled("demo"))
-
-        m2 = _modality("demo2")
-        _step(m2, is_enabled=False)
-        self.assertFalse(mc.modality_is_enabled("demo2"))
 
     def test_queue_override_for(self):
         self.assertIsNone(mc.queue_override_for("demo"))
@@ -87,10 +83,44 @@ class ModalityConfigAccessorTests(TestCase):
         step.save()
         self.assertEqual(mc.queue_override_for("demo"), "special-q")
 
-    @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
     def test_is_blocking_defaults_to_requires_processing_when_no_step(self):
-        self.assertTrue(mc.modality_is_blocking("ios"))
+        self.assertFalse(mc.modality_is_blocking("ios"))
         self.assertFalse(mc.modality_is_blocking("panoramic"))
+
+    def test_status_of_a_step_less_modality_is_read_from_its_files(self):
+        # A patient uploaded while the step-less modality still spawned a job
+        # carries a permanently failed row -- no rerun can complete it, because
+        # there is nothing to run. The pill reports the files instead.
+        from types import SimpleNamespace
+        _modality("iop")
+        failed = [SimpleNamespace(status="failed")]
+        self.assertEqual(mc.modality_status("iop", failed, True), "processed")
+        self.assertEqual(mc.modality_status("iop", failed, False), "absent")
+
+    def test_status_of_a_processing_modality_still_reports_its_jobs(self):
+        from types import SimpleNamespace
+        _step(_modality("ios"))
+        self.assertEqual(
+            mc.modality_status("ios", [SimpleNamespace(status="failed")], True),
+            "failed",
+        )
+        self.assertEqual(
+            mc.modality_status(
+                "ios",
+                [SimpleNamespace(status="completed"), SimpleNamespace(status="processing")],
+                True,
+            ),
+            "processing",
+        )
+        self.assertEqual(
+            mc.modality_status("ios", [SimpleNamespace(status="retrying")], True),
+            "pending",
+        )
+        self.assertEqual(
+            mc.modality_status("ios", [SimpleNamespace(status="completed")], True),
+            "processed",
+        )
+        self.assertEqual(mc.modality_status("ios", [], False), "absent")
 
     def test_is_blocking_step_value(self):
         m = _modality("ios")

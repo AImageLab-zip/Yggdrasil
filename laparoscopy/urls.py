@@ -2,20 +2,14 @@ from django.urls import path, include
 from django.shortcuts import redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from common.models import Project, ProjectAccess
+from common.models import Project
+from common.permissions import entry_project_for
 from laparoscopy import views as laparo_views
 
 
 @login_required
 def set_laparoscopy(request):
-    accessible = ProjectAccess.objects.filter(user=request.user).values_list('project_id', flat=True)
-    proj = (
-        Project.objects.filter(domain='laparoscopy', is_active=True)
-        .filter(id__in=accessible)
-        .order_by('name')
-        .first()
-        or Project.objects.filter(domain='laparoscopy', is_active=True).order_by('name').first()
-    )
+    proj = entry_project_for(request.user, 'laparoscopy')
     if proj is None:
         proj = Project.objects.filter(slug='laparoscopy').first()
     if proj is None:

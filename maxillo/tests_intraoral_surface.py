@@ -185,3 +185,58 @@ class IntraoralSurfaceRenderTests(TestCase):
         self.project.annotation_methods.set([])
         _response, html = self._page()
         self.assertIn('id="segTeethGrid"', html)
+
+
+@override_settings(SECURE_SSL_REDIRECT=False)
+class EmptyImageListingTests(TestCase):
+    """A patient with none of a modality gets an empty collection, not a 404.
+
+    Every CBCT page load fetched the intraoral and teleradiography listings, and most
+    CBCT patients have neither -- so every one of those page loads logged two failed
+    requests in the browser console, and the photo stack showed "These images could not
+    be listed" over a study where nothing had gone wrong. It also buried real failures:
+    a 404 from a broken route looked exactly like a patient with no photographs.
+    """
+
+    def setUp(self):
+        self.project, _ = Project.objects.update_or_create(
+            slug="maxillo", defaults={"name": "maxillo", "domain": "maxillo"}
+        )
+        self.user = User.objects.create_user(username="empty-listing", password="x")  # noqa: S106
+        ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
+        self.client.force_login(self.user)
+        self.folder = Folder.objects.create(name="Empty", project=self.project)
+        self.patient = Patient.objects.create(
+            patient_id=9811, name="CBCT only", folder=self.folder, project=self.project
+        )
+
+    def test_intraoral_listing_is_empty_rather_than_missing(self):
+        response = self.client.get(
+            reverse("maxillo:patient_intraoral_data", args=[self.patient.patient_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {"images": [], "count": 0})
+
+    def test_teleradiography_metadata_is_empty_rather_than_missing(self):
+        response = self.client.get(
+            reverse("maxillo:patient_teleradiography_data", args=[self.patient.patient_id]),
+            {"meta": "1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {"images": [], "count": 0})
+
+    def test_asking_for_the_bytes_of_an_absent_image_is_still_a_404(self):
+        # Without `meta`, the caller named one image and asked for its content. There is
+        # no such thing, and saying "here is an empty list" in reply to a request for
+        # image bytes would be a different lie.
+        response = self.client.get(
+            reverse("maxillo:patient_teleradiography_data", args=[self.patient.patient_id])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_unknown_patient_is_still_a_404(self):
+        # The rule is "an empty set is not a missing resource", not "nothing is missing".
+        response = self.client.get(
+            reverse("maxillo:patient_intraoral_data", args=[999999])
+        )
+        self.assertEqual(response.status_code, 404)

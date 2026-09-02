@@ -93,6 +93,33 @@ class SshHelperTests(SimpleTestCase):
         self.assertEqual(details["node_list"], "germano")
         self.assertEqual(details["submit_line"], "sbatch --parsable /x")
 
+    def test_poll_tolerates_the_submit_to_accounting_lag(self):
+        ssh = SlurmSSH(host="d", poll_interval=5, max_wall_seconds=100,
+                       unknown_grace_seconds=30)
+        states = iter([None, None, "RUNNING", "COMPLETED"])
+        ssh._state = lambda sid: next(states)
+        with mock.patch("common.runner.ssh.time.sleep"):
+            self.assertEqual(ssh.poll("900"), "COMPLETED")
+
+    def test_poll_gives_up_on_an_id_accounting_never_knows(self):
+        # A reattach to a purged allocation must not burn the 24h wall clock.
+        ssh = SlurmSSH(host="d", poll_interval=5, max_wall_seconds=86400,
+                       unknown_grace_seconds=10)
+        ssh._state = lambda sid: None
+        with mock.patch("common.runner.ssh.time.sleep"):
+            with self.assertRaises(SlurmSSHError) as ctx:
+                ssh.poll("900")
+        self.assertIn("not visible in accounting", str(ctx.exception))
+
+    def test_poll_unknown_grace_resets_once_the_job_appears(self):
+        ssh = SlurmSSH(host="d", poll_interval=5, max_wall_seconds=1000,
+                       unknown_grace_seconds=10)
+        # Blips of invisibility between real states must not trip the bound.
+        states = iter([None, "RUNNING", None, "RUNNING", None, "COMPLETED"])
+        ssh._state = lambda sid: next(states)
+        with mock.patch("common.runner.ssh.time.sleep"):
+            self.assertEqual(ssh.poll("900"), "COMPLETED")
+
     def test_poll_times_out(self):
         ssh = SlurmSSH(host="d", poll_interval=1, max_wall_seconds=1)
         ssh._state = lambda sid: "RUNNING"
@@ -182,6 +209,63 @@ class RunHelperTests(SimpleTestCase):
         self.assertEqual(
             run_mod._normalize_output_files("cbct", output_files), output_files
         )
+
+
+    def test_video_derivatives_lose_their_container_extension(self):
+        """`subsampled.mp4` on the bucket is `subtype='subsampled'` in the registry.
+
+        Outputs are discovered by listing the prefix, so the key is a filename. The
+        annotation gate and the export both look the sampled track up by its logical
+        name, and a subtype of `subsampled.mp4` matches neither -- the annotator would
+        stay closed on a study that had finished processing.
+        """
+        out = run_mod._normalize_output_files(
+            "video",
+            {
+                "compressed.mp4": "lap/processed/video/job_9/compressed.mp4",
+                "subsampled.mp4": "lap/processed/video/job_9/subsampled.mp4",
+            },
+        )
+
+        self.assertEqual(
+            out,
+            {
+                "compressed": "lap/processed/video/job_9/compressed.mp4",
+                "subsampled": "lap/processed/video/job_9/subsampled.mp4",
+            },
+        )
+
+    def test_a_video_derivative_already_named_logically_is_left_alone(self):
+        output_files = {"subsampled": "lap/processed/video/job_9/subsampled.mp4"}
+
+        self.assertEqual(run_mod._normalize_output_files("video", output_files), output_files)
+
+    def test_an_unexpected_video_output_keeps_its_name(self):
+        """Renaming is for the two derivatives the algorithm declares. Anything else is
+        registered as it arrived rather than guessed at."""
+        output_files = {"preview.png": "lap/processed/video/job_9/preview.png"}
+
+        self.assertEqual(run_mod._normalize_output_files("video", output_files), output_files)
+
+
+    def test_intraoral_outputs_lose_their_extension_too(self):
+        """`mark_job_completed` indexes `output_files["segmentation_json"]`."""
+        out = run_mod._normalize_output_files(
+            "intraoral-photo",
+            {
+                "segmentation_json.json": "mx/processed/iop/job_3/segmentation_json.json",
+                "views_json.json": "mx/processed/iop/job_3/views_json.json",
+            },
+        )
+
+        self.assertEqual(
+            sorted(out), ["segmentation_json", "views_json"]
+        )
+
+    def test_a_modality_with_no_logical_outputs_is_untouched(self):
+        output_files = {"scan_upper.stl": "mx/processed/ios/job_1/scan_upper.stl"}
+
+        self.assertEqual(run_mod._normalize_output_files("ios", output_files), output_files)
 
 
 class RunJobTests(SimpleTestCase):
@@ -299,6 +383,90 @@ class RunJobTests(SimpleTestCase):
         with mock.patch.object(run_mod, "JobApiClient", return_value=api):
             result = run_mod.run_job(5)
         self.assertEqual(result, "skipped")
+
+
+class RunJobResumeTests(SimpleTestCase):
+    """Recovery after a worker dies mid-allocation.
+
+    The failure this closes: the runner container was recreated while blocked in
+    ``poll``; the SLURM job went on to finish and push its outputs, and the job sat in
+    ``processing`` forever because nothing recorded which allocation to look at.
+    """
+
+    def _ssh(self, poll_state="COMPLETED"):
+        ssh = mock.MagicMock()
+        ssh.__enter__.return_value = ssh
+        ssh.__exit__.return_value = False
+        ssh.sbatch.return_value = "900"
+        ssh.poll.return_value = poll_state
+        return ssh
+
+    def _run(self, api, ssh, job_id=5):
+        with override_settings(SLURM_STAGE_DIR="/stage", ALGO_BASE_DIR="/algo"), \
+             mock.patch.object(run_mod, "JobApiClient", return_value=api), \
+             mock.patch.object(run_mod.SlurmSSH, "from_settings", return_value=ssh), \
+             mock.patch.object(run_mod, "_collect_output_files", return_value={"a": "k"}):
+            return run_mod.run_job(job_id)
+
+    def _claim(self, **extra):
+        payload = {
+            "algo_name": "sn", "project_slug": "maxillo",
+            "modality_slug": "ios", "input_files": {},
+        }
+        payload.update(extra)
+        return payload
+
+    def test_allocation_is_stamped_before_the_wait_begins(self):
+        # The window this closes is exactly "submitted but not yet recorded", so the
+        # stamp has to land before the call that can block for 24h.
+        api = mock.MagicMock()
+        api.claim.return_value = self._claim()
+        ssh = self._ssh()
+        attached_before_poll = []
+        ssh.poll.side_effect = lambda sid: (
+            attached_before_poll.append(api.attach.called) or "COMPLETED"
+        )
+
+        self.assertEqual(self._run(api, ssh), "completed")
+
+        api.attach.assert_called_once_with(5, "900")
+        self.assertEqual(attached_before_poll, [True])
+
+    def test_redelivered_task_reattaches_instead_of_resubmitting(self):
+        api = mock.MagicMock()
+        api.claim.return_value = self._claim(slurm_job_id="900")
+        ssh = self._ssh()
+
+        self.assertEqual(self._run(api, ssh), "completed")
+
+        ssh.sbatch.assert_not_called()
+        ssh.sftp_write.assert_not_called()
+        ssh.poll.assert_called_once_with("900")
+        api.complete.assert_called_once()
+        api.attach.assert_not_called()
+
+    def test_reattached_run_that_already_failed_is_reported(self):
+        api = mock.MagicMock()
+        api.claim.return_value = self._claim(slurm_job_id="900")
+        ssh = self._ssh(poll_state="FAILED")
+        ssh.accounting.return_value = {"state": "FAILED", "exit_code": "1:0"}
+        ssh.read_text_if_exists.side_effect = ["out", "err"]
+
+        self.assertEqual(self._run(api, ssh), "failed:FAILED")
+
+        ssh.sbatch.assert_not_called()
+        api.complete.assert_not_called()
+        self.assertIn("SLURM job 900", api.fail.call_args.args[1])
+
+    def test_blank_stamp_submits_normally(self):
+        api = mock.MagicMock()
+        api.claim.return_value = self._claim(slurm_job_id="  ")
+        ssh = self._ssh()
+
+        self.assertEqual(self._run(api, ssh), "completed")
+
+        ssh.sbatch.assert_called_once()
+        api.attach.assert_called_once_with(5, "900")
 
 
 class SerializerTests(SimpleTestCase):

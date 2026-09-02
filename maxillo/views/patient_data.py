@@ -1153,7 +1153,7 @@ def patient_intraoral_data(request, patient_id):
                 "metadata__image_index", "created_at", "id"
             )
             if not legacy_files.exists():
-                return JsonResponse({"error": "No intraoral photographs found"}, status=404)
+                return _empty_image_listing()
             images_data = []
             for fallback_index, file_obj in enumerate(legacy_files, start=1):
                 if not artifact_exists(file_obj.file_path):
@@ -1184,10 +1184,7 @@ def patient_intraoral_data(request, patient_id):
                     }
                 )
             if not images_data:
-                return JsonResponse(
-                    {"error": "No intraoral image files found in storage"},
-                    status=404,
-                )
+                return _empty_image_listing()
             return JsonResponse({"images": images_data, "count": len(images_data)})
 
         images_data = []
@@ -1233,16 +1230,36 @@ def patient_intraoral_data(request, patient_id):
                 )
 
         if not images_data:
-            return JsonResponse(
-                {"error": "No intraoral image files found in storage"},
-                status=404,
-            )
+            return _empty_image_listing()
 
         return JsonResponse({"images": images_data, "count": len(images_data)})
 
     except Exception as e:
         logger.error(f"Error serving intraoral data: {e}", exc_info=True)
         return JsonResponse({"error": "Internal server error"}, status=500)
+
+
+def _empty_image_listing():
+    """A study that has none of this modality, said as an empty collection.
+
+    **An empty collection is not a missing resource.** These endpoints answer "which
+    images of this kind does this patient have?", and "none" is a complete, correct
+    answer to that question -- the patient exists, the caller may read them, and there
+    are zero. Returning 404 made the browser log a failed request on every CBCT page
+    load for a patient who simply has no intraoral photographs, and made the viewer say
+    "These images could not be listed" over a study where nothing had gone wrong. It
+    also left a real failure indistinguishable from an ordinary one in the console.
+
+    404 is still what a *specific* absent thing gets: an unknown patient, a panoramic
+    variant that was asked for by name, the bytes of an image that is not there. The
+    difference is whether the caller named a resource or asked for a set.
+
+    The shape is the one `readImageRecords` (frontend/imaging/photos/bootstrap.js)
+    already normalises both endpoints into, so a client that handles "no images yet"
+    needs no new branch -- and the photo stack's own "There are no images on this study
+    yet." message is reached instead of its error path.
+    """
+    return JsonResponse({"images": [], "count": 0})
 
 
 def _calibration_fields(file_obj):
@@ -1390,6 +1407,11 @@ def patient_teleradiography_data(request, patient_id):
             teleradiography_file = None
 
         if not teleradiography_file:
+            # Metadata is a *listing* request and an absent image is an empty one --
+            # see `_empty_image_listing`. Without `meta`, the caller asked for the
+            # bytes of a specific image, and there being none is a real 404.
+            if request.GET.get("meta") == "1":
+                return _empty_image_listing()
             return JsonResponse(
                 {"error": "Teleradiography image not found"}, status=404
             )

@@ -95,9 +95,6 @@
                                             <span class="badge {% if artifact.available %}bg-secondary{% else %}bg-dark{% endif %} ms-1">{{ artifact.count }}</span>
                                             {% endif %}
                                         </label>
-                                        {% if artifact.description %}
-                                        <small class="text-muted d-block ms-4">{{ artifact.description }}</small>
-                                        {% endif %}
                                     </div>
                                     {% endfor %}
                                 </div>

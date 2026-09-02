@@ -103,7 +103,22 @@ function captureInfo(run) {
 const DATA = {
     projectNamespace: 'maxillo',
     fixedMode: true,
+    // As `maxillo/views/patient_detail.py` actually sends it. The flag was missing
+    // from this fixture while nothing read it; it decides whether the grid loads a
+    // volume on arrival or waits for a dropped chip, so a fixture without it now
+    // describes the brain page rather than this one.
+    enableDragDrop: false,
     modalityFiles: { cbct: { id: 42, file_key: 'volume_nifti' } },
+};
+
+/** The brain payload: several co-registered series, and the user places them. */
+const BRAIN_DATA = {
+    projectNamespace: 'brain',
+    enableDragDrop: true,
+    modalityFiles: {
+        'braintumor-mri-flair': { id: 11 },
+        'braintumor-mri-t1c': { id: 12 },
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -281,6 +296,30 @@ test('a patient with no volume says so, and still mounts the grid', async () => 
         return bootstrapVolumeGrid({ mount: async () => fakeMountedGrid(), doc });
     });
     assert.match(output, /no volume to show/);
+});
+
+test('a drag-and-drop grid loads nothing on arrival', async () => {
+    // The brain page opens with four empty windows and the chips bound. Before this it
+    // loaded `Object.keys(modalityFiles)[0]` -- an arbitrary series, since brain sends
+    // no defaultModality -- into all four, and offered no way to change any of them.
+    const loads = [];
+    const output = await captureInfo(() => {
+        const { doc } = fakeDoc({ data: BRAIN_DATA });
+        return bootstrapVolumeGrid({
+            mount: async () => {
+                const grid = fakeMountedGrid();
+                const original = grid.loadVolumeIntoWindows;
+                grid.loadVolumeIntoWindows = (windows, descriptor) => {
+                    loads.push([windows, descriptor.modality]);
+                    return original(windows, descriptor);
+                };
+                return grid;
+            },
+            doc,
+        });
+    });
+    assert.deepEqual(loads, [], 'nothing is fetched until a chip is dropped');
+    assert.match(output, /windows start empty/);
 });
 
 // ---------------------------------------------------------------------------

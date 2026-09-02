@@ -53,6 +53,17 @@ class JobApiClient:
             return body.get("job", {})
         raise ClaimError(f"job {job_id} not claimable (HTTP {status}): {body.get('reason')}")
 
+    def attach(self, job_id, slurm_job_id):
+        """Record the allocation we just submitted, so a later attempt can reattach.
+
+        Best-effort by design: losing the stamp costs resumability, not the run, and
+        raising here would fail a job whose sbatch is already queued.
+        """
+        status, body = self._post(job_id, "attach", {"slurm_job_id": str(slurm_job_id)})
+        if status != 200:
+            logger.error("attach job %s -> HTTP %s: %s", job_id, status, body)
+        return body
+
     def complete(self, job_id, output_files, logs=""):
         status, body = self._post(
             job_id, "complete", {"output_files": output_files, "logs": logs}

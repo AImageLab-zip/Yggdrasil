@@ -106,6 +106,35 @@ class MaxilloProjectAclTests(TestCase):
         self.assertFalse(user_can_view_caption_content(annotator, caption, self.project))
         self.assertFalse(user_can_view_caption_content(outsider, caption, self.project))
 
+    def test_caption_visibility_does_not_depend_on_the_patient_having_a_folder(self):
+        """An unfiled patient's captions stay visible to the project's viewers.
+
+        The patient detail view used to derive the role from ``patient.folder``,
+        so a patient with no folder -- ``Patient.folder`` is SET_NULL, and a
+        deleted folder unfiles every patient in it -- had no role at all and its
+        captions were ghosted for the project's own viewers.
+        """
+        viewer = User.objects.create_user(username="unfiled_viewer", password="x")
+        ProjectAccess.objects.create(user=viewer, project=self.project, role="viewer")
+        owner = User.objects.create_user(username="unfiled_owner", password="x")
+
+        self.patient.folder = None
+        self.patient.save(update_fields=["folder"])
+        caption = VoiceCaption.objects.create(
+            patient=self.patient, user=owner, modality="audio", duration=1.0
+        )
+
+        self.assertTrue(user_can_view_caption_content(viewer, caption))
+
+        # And through the view, which is where the folder-derived role lived.
+        self.client.force_login(viewer)
+        response = self.client.get(
+            reverse("maxillo:patient_detail", args=[self.patient.patient_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        rendered = response.context["voice_captions"]
+        self.assertTrue(all(c.can_view_content for c in rendered))
+
     def test_viewer_role_cannot_create_text_caption(self):
         self.client.force_login(self.viewer)
 

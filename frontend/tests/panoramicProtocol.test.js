@@ -14,6 +14,8 @@ import {
     saveState,
 } from '../imaging/panoramic/savePayload.js';
 import { COLUMNS_PER_CHUNK, projectStrips } from '../imaging/panoramic/bake.js';
+import { readFileSync } from 'node:fs';
+
 import { openArchWorker } from '../imaging/panoramic/archWorker.js';
 
 const SOURCE = {
@@ -332,4 +334,71 @@ test('the ready promise reports the automatic slice the worker chose', async () 
     reply({ type: 'initialized', id: 1, dimensions: RAW.dimensions, autoZ: 96, flipZ: true });
 
     assert.deepEqual(await client.ready, { dimensions: RAW.dimensions, autoZ: 96, flipZ: true });
+});
+
+test('a callback that throws becomes an error on the panel, not an uncaught exception', () => {
+    // What actually happened: `onGeometry` called `arch.showSlice`, which called
+    // `setViewReference` with a bare `{sliceIndex}`, which threw `Incompatible view refs`.
+    // The throw was raised inside a `message` event, so nothing caught it and the rest of
+    // `onGeometry` -- the arch, the CPR, the live pane, the bake -- never ran. The editor
+    // sat empty and said nothing.
+    const { FakeWorker, reply } = fakeWorker();
+    const errors = [];
+    const client = openArchWorker({
+        segmentation: new ArrayBuffer(8), raw: RAW, WorkerImpl: FakeWorker,
+        onError: (error, fatal) => errors.push([error.message, fatal]),
+        onGeometry: () => {
+            throw new Error('Incompatible view refs: undefined!==1.2.840.10008.1.4');
+        },
+    });
+
+    reply({ type: 'initialized', id: 1, dimensions: RAW.dimensions, autoZ: 5, flipZ: false });
+    const id = client.request(5);
+    // The assertion is that this does not throw out of the handler.
+    reply({ type: 'geometry', id, z: 5, slab: [] });
+
+    assert.deepEqual(errors, [['Incompatible view refs: undefined!==1.2.840.10008.1.4', false]]);
+});
+
+test('the arch plane is a world point, and setViewReference still gates on how it is named', () => {
+    // Pinned against the vendored library, the way the crosshair and attenuated-MIP tests
+    // are. Two facts about `setViewReference` decide how `archViewport.showPlane` has to
+    // call it, and a bump that changed either would otherwise turn the panoramic editor
+    // back into an empty pane with a stack trace behind it.
+    const viewport = readFileSync(
+        'node_modules/@cornerstonejs/core/dist/esm/RenderingEngine/BaseVolumeViewport.js',
+        'utf8'
+    );
+    assert.match(
+        viewport,
+        /throw new Error\(`Incompatible view refs: \$\{refFrameOfReference\}!==\$\{this\.getFrameOfReferenceUID\(\)\}`\)/,
+        'a reference that names neither a matching volume nor the frame of reference throws'
+    );
+    assert.match(
+        viewport,
+        /if \(cameraFocalPoint\) \{[\s\S]*?this\.setCamera\(\{ focalPoint: newFocal, position: newPosition \}\);/,
+        'and the focal-point branch is what moves the camera to a world point'
+    );
+
+    // The other half, and the reason a slice index cannot be used here: Cornerstone's
+    // index is steps along the camera normal from the low end of the volume, and the AXIAL
+    // normal points at -z, so it runs opposite to a canonical RAS k. The arch's z is a
+    // canonical RAS k -- `volumeSupply.rasDescriptor` reorients before the worker sees it.
+    const constants = readFileSync(
+        'node_modules/@cornerstonejs/core/dist/esm/constants/mprCameraValues.js',
+        'utf8'
+    );
+    assert.match(constants, /axial: \{\s*viewPlaneNormal: \[0, 0, -1\]/);
+
+    const arch = readFileSync('frontend/imaging/panoramic/archViewport.js', 'utf8');
+    assert.match(
+        arch,
+        /cameraFocalPoint: worldPoint/,
+        'showPlane must name the plane in world mm'
+    );
+    assert.doesNotMatch(
+        arch,
+        /getViewReference\(\{ sliceIndex/,
+        'a viewport slice index is a foreign index here and must not be built from one'
+    );
 });

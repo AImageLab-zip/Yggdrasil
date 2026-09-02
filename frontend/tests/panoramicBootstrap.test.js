@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
+import { GRID_READY_EVENT } from '../imaging/grid/bootstrap.js';
 import { ANNOUNCE_TYPE, OUTCOMES } from '../imaging/panoramic/savePayload.js';
 import { CONTROL_IDS } from '../imaging/panoramic/controls.js';
 import { bootstrapPanoramic } from '../imaging/panoramic/bootstrap.js';
@@ -44,8 +46,12 @@ function makeElement(id) {
  * @param {object} [options.source] the `panorexSource` payload.
  * @param {boolean} [options.canEdit]
  * @param {boolean} [options.locked]
+ * @param {boolean} [options.globalsSet] whether `window.canEdit`/`window.scanId` have
+ *   been assigned yet. **False is the real page**: they are written inside
+ *   `patient_detail.js`'s `DOMContentLoaded` handler and the entry is a deferred module,
+ *   which runs first.
  */
-function buildHarness({ source, canEdit = true, locked = false, mountImpl } = {}) {
+function buildHarness({ source, canEdit = true, locked = false, globalsSet = false, mountImpl } = {}) {
     const elements = new Map();
     for (const id of Object.values(CONTROL_IDS)) {
         elements.set(id, makeElement(id));
@@ -78,12 +84,14 @@ function buildHarness({ source, canEdit = true, locked = false, mountImpl } = {}
     const events = [];
     const saves = [];
     const view = {
-        scanId: 4242,
-        canEdit: true,
+        ...(globalsSet ? { scanId: 4242, canEdit: true } : {}),
         Worker: class {},
         location: { origin: 'https://ygg.test' },
         CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
         dispatchEvent(event) { events.push(event.detail); return true; },
+        listeners: new Map(),
+        addEventListener(name, handler) { view.listeners.set(name, handler); },
+        removeEventListener(name) { view.listeners.delete(name); },
         parent: null,
         PanoramicViewer: { refreshAfterSave() {} },
     };
@@ -97,6 +105,11 @@ function buildHarness({ source, canEdit = true, locked = false, mountImpl } = {}
     };
     // The payload element, read as JSON by the bootstrap.
     elements.set('viewerGridData', { textContent: JSON.stringify(data) });
+    // And the page's own facts, which the bootstrap reads for the same reason: the
+    // globals above do not exist yet when a deferred module runs.
+    elements.set('django-data', {
+        textContent: JSON.stringify({ canEdit, scanId: 4242 }),
+    });
 
     const mounts = [];
     const mount = mountImpl ?? defaultMount(mounts, saves);
@@ -113,6 +126,7 @@ function buildHarness({ source, canEdit = true, locked = false, mountImpl } = {}
 function defaultMount(mounts, saves) {
     return async ({ plan, onReady, onGeometry, onError }) => {
         const requests = [];
+        const drawn = { planes: [], arches: [], masks: [], strips: [] };
         const mounted = {
             descriptor: {
                 dimensions: { width: 2, height: 2, depth: 2 },
@@ -120,8 +134,12 @@ function defaultMount(mounts, saves) {
                 flipZ: false, slope: 1, intercept: 0,
             },
             worker: { request: (z, controlPoints) => requests.push({ z, controlPoints }) },
-            arch: { showSlice() {}, setArch() {}, setMask() {} },
-            cpr: { setArch() {}, setMode() {} },
+            arch: {
+                showPlane: (point) => drawn.planes.push(point),
+                setArch: (points) => drawn.arches.push(points),
+                setMask: (mask) => drawn.masks.push(mask),
+            },
+            cpr: { setArch: (options) => drawn.strips.push(options), setMode() {} },
             worldFor: (point) => [point[0], point[1], 0],
             projectStrips: async () => ({ mip: new Float32Array(4), raysum: new Float32Array(4), width: 2, height: 2 }),
             encode: () => ({ mip: { width: 2, height: 2 }, raysum: { width: 2, height: 2 } }),
@@ -137,6 +155,7 @@ function defaultMount(mounts, saves) {
             adopt() {},
             // Test handles.
             requests,
+            drawn,
             plan,
             ready: onReady,
             geometry: onGeometry,
@@ -196,6 +215,34 @@ test('the editor is not shown on load when a panoramic already exists', async ()
     // volume read, on every page view of every patient that already has a panoramic.
     assert.equal(harness.mounts.length, 0);
     assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.EXISTING]);
+});
+
+test('the toolbar is inert until the editor is mounted', async () => {
+    // `bindControls` wires the Z slider, prev/next and Reset auto unconditionally, but the
+    // saved-panoramic path returns before `mount()` -- so `descriptor` and `mounted` are
+    // still null. Touching a control used to be `Cannot read properties of null (reading
+    // 'dimensions')` / `(reading 'worker')`, on a page that had done nothing wrong.
+    const harness = buildHarness({
+        source: {
+            volumeFileId: 12, volumeFileKey: 'volume_nifti', segmentationFileId: 13,
+            segmentationFileKey: 'segmentation_nifti', revision: 3,
+            state: { algorithmVersion: 'panorex-js-v2-mip' },
+        },
+    });
+
+    const surface = await bootstrapPanoramic({
+        doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves),
+    });
+    assert.equal(harness.mounts.length, 0, 'nothing was mounted, which is the precondition');
+
+    surface.setSlice(40);
+    surface.setSlice(surface.state().slice - 1);
+    surface.resetAuto();
+    surface.editArch([[1, 1], [2, 2]]);
+
+    // A no-op, not a throw: there is no volume to re-fit against until Edit is clicked.
+    assert.equal(surface.state().slice, 0);
+    assert.equal(surface.state().hasGeometry, false);
 });
 
 test('a patient with no panoramic gets a MIP default from the automatic arch', async () => {
@@ -284,6 +331,41 @@ test('every declining path announces, on both channels', async () => {
         assert.deepEqual(harness.events.map((entry) => entry.type), [ANNOUNCE_TYPE]);
         assert.equal(harness.mounts.length, 0);
     }
+});
+
+test('the page decides who is looking, not a global that has not been set yet', async () => {
+    // The bug this pins. `window.canEdit` is assigned inside `patient_detail.js`'s
+    // `DOMContentLoaded` handler; `{% cornerstone_entry %}` emits a *module* script,
+    // which is deferred and therefore runs before that handler. `view.canEdit` was
+    // `undefined` on every visit by every user, this gate refused, and no patient page
+    // ever generated its default panoramic. The harness leaves the globals unset for
+    // exactly that reason -- so the surface has to read the page.
+    const harness = buildHarness();
+    assert.equal(harness.view.canEdit, undefined, 'the harness must reproduce the race');
+
+    await bootstrapPanoramic({
+        doc: harness.doc,
+        mount: harness.mount,
+        fetchImpl: okFetch(harness.saves),
+    });
+
+    assert.equal(harness.mounts.length, 1, 'the unattended pass must run');
+});
+
+test('a page that states no rights is still refused, whatever the globals say', async () => {
+    const harness = buildHarness({ canEdit: false, globalsSet: true });
+    await bootstrapPanoramic({
+        doc: harness.doc,
+        mount: harness.mount,
+        fetchImpl: okFetch(harness.saves),
+    });
+    assert.equal(harness.mounts.length, 0);
+    assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.SKIPPED]);
+    // And it names the patient it is skipping. `window.scanId` is set by the same
+    // handler as `window.canEdit`, so the same race made every announcement carry
+    // `patientId: null` -- which left the warm-up run unable to tell one skip from
+    // another across a whole folder.
+    assert.deepEqual(harness.posted.map((entry) => entry.patientId), [4242]);
 });
 
 test('a silent save that conflicts reports existing, not failed', async () => {
@@ -384,4 +466,67 @@ test('switching projection re-arms the save with a fresh generation id', async (
     assert.notEqual(states[1].generation_uuid, states[0].generation_uuid);
     // And the second quotes the revision the first was given, or it is a stale writer.
     assert.equal(states[1].base_revision, 1);
+});
+
+// --- the way in, and what is behind it -------------------------------------------
+
+test('the Edit arch button waits for the CBCT, then appears', async () => {
+    // Clicking it before the volume is in the cache puts "The CBCT is still loading." on
+    // screen. The template ships it hidden and the surface is what offers it, so a page
+    // whose grid never finishes never shows a button that cannot work.
+    const harness = buildHarness();
+    const button = harness.elements.get(CONTROL_IDS.editButton);
+
+    await bootstrapPanoramic({ mount: harness.mount, doc: harness.doc, fetchImpl: okFetch(harness.saves) });
+    assert.equal(button.hidden, true, 'no way in while the grid is still loading');
+
+    harness.view.listeners.get(GRID_READY_EVENT)();
+    assert.equal(button.hidden, false);
+});
+
+test('a grid that was already loaded is not waited for', async () => {
+    // The two bundles start in no fixed order, so the event may have been dispatched
+    // before this one ever subscribed. The flag is the record of it.
+    const harness = buildHarness();
+    harness.view.CBCTViewer = { ready: true };
+
+    await bootstrapPanoramic({ mount: harness.mount, doc: harness.doc, fetchImpl: okFetch(harness.saves) });
+    assert.equal(harness.elements.get(CONTROL_IDS.editButton).hidden, false);
+});
+
+test('a reader opening the editor sees the arch the unattended pass fitted', async () => {
+    // The pass draws nothing -- there is no editor on screen to draw into -- so the
+    // geometry it leaves behind has never been handed to a viewport. `activate` returning
+    // on `if (geometry)` showed the reader an empty axial and a spline they could not grab.
+    const harness = buildHarness();
+    const surface = await bootstrapPanoramic({
+        mount: harness.mount, doc: harness.doc, fetchImpl: okFetch(harness.saves),
+    });
+    const mounted = harness.mounts[0];
+    completeGeneration(mounted);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(mounted.drawn.arches, [], 'nothing is drawn while nobody is watching');
+
+    await surface.activate();
+
+    assert.equal(mounted.drawn.arches.length, 1, 'the control points reach the axial');
+    assert.equal(mounted.drawn.masks.length, 1, 'and so does the mandible they were fitted to');
+    assert.equal(mounted.drawn.planes.length, 1, 'on the slice the arch is on');
+    assert.equal(mounted.drawn.strips.length, 1, 'and the strip is rebuilt for the live pane');
+});
+
+test('the entry re-measures both stages when they become visible', async () => {
+    // Not unit-testable -- it is the entry, and the entry imports Cornerstone and vtk --
+    // but it is the wiring the whole defect turned on, so the shape of it is pinned here.
+    // Both stages are `hidden` when their viewports are enabled, and the editor's is
+    // hidden for the entire unattended pass; without an observer the canvas stays at the
+    // 300x150 default it was built with and the axial, the mask and the spline handles end
+    // up crammed into the top-left corner of the box they are displayed in.
+    const entry = await readFile(new URL('../entries/panoramic-cpr.js', import.meta.url), 'utf8');
+
+    assert.match(entry, /observeSize\(stage/, 'both stages are observed');
+    assert.match(entry, /\[plan\.axialStage, plan\.cprStage\]/);
+    assert.match(entry, /renderingEngine\.resize\(true, true\)/, 'one call covers the shared engine');
+    assert.match(entry, /arch\.reframe\(!sized\)/, 'the camera is refit only on the first real sizing');
+    assert.match(entry, /cpr\.reframe\(\)/);
 });

@@ -40,7 +40,7 @@
 
 import { splines } from '@cornerstonejs/tools';
 
-const { CubicSpline } = splines;
+const { CardinalSpline } = splines;
 
 /** The `spline.type` key this class is registered under. */
 export const ARCH_SPLINE = 'YGG_ARCH';
@@ -105,8 +105,26 @@ export function centripetalPoint(p0, p1, p2, p3, u) {
  *
  * Only `_getPoint` is overridden. Arc length, closest-point, polyline generation, the AABB
  * and control-point insertion are upstream's and stay upstream's.
+ *
+ * **The base is `CardinalSpline`, not `CubicSpline`, and that is load-bearing even though
+ * the transform matrix is unused here.** `getTransformMatrix` is abstract on `Spline` and
+ * implemented only by `CardinalSpline`, `BSpline` and `QuadraticBezier`; `CubicSpline`
+ * *calls* it -- unconditionally, before dispatching to `_getPoint`
+ * (`splines/CubicSpline.js:30`, and again at `:12` and `:140`). Extending `CubicSpline`
+ * therefore threw `this.getTransformMatrix is not a function` on the first render of every
+ * arch, inside `renderAnnotationInstance` and before a single handle was drawn -- the
+ * editor looked like it had no control points at all. `tensionSpline.js` extends
+ * `CardinalSpline` for its own reason (`_updateSplineInstance` only pushes `scale` onto a
+ * `CardinalSpline`); this class needs it simply to have the method its base class calls.
+ *
+ * `fixedScale` is asserted so `_updateSplineInstance` never writes a `scale` onto an
+ * instance whose curve does not have one.
  */
-export class ArchSpline extends CubicSpline {
+export class ArchSpline extends CardinalSpline {
+    constructor(props = {}) {
+        super({ ...props, fixedScale: true });
+    }
+
     /**
      * @param {number} u the spline parameter; its integer part is the segment index.
      * @param {number[]} transformMatrix unused -- a centripetal spline has no constant
@@ -140,6 +158,11 @@ export class ArchSpline extends CubicSpline {
  *
  * `_getSplineConfig(type)` is a plain lookup in `configuration.spline.configuration`, so a
  * new type key with a `Class` is a supported extension point rather than a patch.
+ *
+ * Only keys of `DEFAULT_SPLINE_CONFIG` mean anything here -- an invented one is merged in
+ * and never read. In particular the arch being **open** (it runs condyle to condyle, and
+ * joining its ends would draw a loop through the tongue) is not stated here: the switch is
+ * the tool-level `allowOpenSplines`, set where the tool is added in `archViewport.js`.
  */
 export function archSplineConfiguration() {
     return {
@@ -147,11 +170,6 @@ export function archSplineConfiguration() {
         configuration: {
             [ARCH_SPLINE]: {
                 Class: ArchSpline,
-                // The arch is open: it runs from one condyle to the other and joining its
-                // ends would draw a loop through the tongue.
-                allowOpen: true,
-                allowClosed: false,
-                allowOpenEdit: true,
                 controlPointAdditionEnabled: true,
                 controlPointDeletionEnabled: true,
             },

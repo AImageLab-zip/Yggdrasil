@@ -252,7 +252,10 @@ export function bindControls({
                 // sequenced from here.
                 onAnnotationMode?.(enabled);
                 if (!enabled) {
-                    markActiveTool(plan.tools, NAVIGATION_TOOL);
+                    // The grid's own fallback, not the module constant: a brain grid has
+                    // no crosshair to fall back to and hands the left button to
+                    // window/level instead. See `grid.navigationTool`.
+                    markActiveTool(plan.tools, grid.navigationTool ?? NAVIGATION_TOOL);
                 }
                 setStatus('');
             })

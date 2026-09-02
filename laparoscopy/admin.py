@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
+from common.admin import DomainFolderAdmin, DomainProjectAdmin
 from common.annotation_lock import raw_data_is_locked
 
 from .models import (
@@ -26,21 +27,9 @@ class QuadrantClassificationMarkerInline(admin.TabularInline):
 
 
 @admin.register(LaparoscopyProject)
-class LaparoscopyProjectAdmin(admin.ModelAdmin):
+class LaparoscopyProjectAdmin(DomainProjectAdmin):
     """Laparoscopy projects, shown under the Laparoscopy admin section (domain forced)."""
-    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
-    list_filter = ['is_active', 'created_at']
-    search_fields = ['name', 'description', 'slug']
-    prepopulated_fields = {'slug': ('name',)}
-    filter_horizontal = ['modalities', 'annotation_methods', 'disabled_steps']
-    readonly_fields = ['domain']
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).filter(domain='laparoscopy')
-
-    def save_model(self, request, obj, form, change):
-        obj.domain = 'laparoscopy'
-        super().save_model(request, obj, form, change)
+    domain = 'laparoscopy'
 
 
 @admin.register(Dataset)
@@ -50,13 +39,9 @@ class DatasetAdmin(admin.ModelAdmin):
 
 
 @admin.register(Folder)
-class FolderAdmin(admin.ModelAdmin):
-    # See maxillo.FolderAdmin: `project` is shown so a mis-filed folder is visible.
-    list_display = ['name', 'project', 'parent', 'is_demo', 'created_at', 'created_by']
-    list_filter = ['project', 'is_demo']
-    list_editable = ['is_demo']
-    list_select_related = ['project', 'parent']
-    search_fields = ['name']
+class FolderAdmin(DomainFolderAdmin):
+    """Laparoscopy folders (project picker scoped to the laparoscopy domain)."""
+    domain = 'laparoscopy'
 
 
 @admin.register(Tag)

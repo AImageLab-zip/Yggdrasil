@@ -30,12 +30,23 @@ import { applyModalityLut, residualModalityLut } from '../metadata/modalityLutMo
 /**
  * Percentile cuts for the robust range.
  *
- * 2% and 98% match what NiiVue's `calMinMax` used, so the opening window on an already
- * -uploaded study does not visibly jump when Phase 3 replaces the viewer under it.
- * That continuity is the reason for these particular numbers; there is nothing
- * clinically special about them.
+ * These were 2% and 98%, chosen to match NiiVue's `calMinMax` so that replacing the
+ * viewer under an already-uploaded study would not visibly change it. That continuity
+ * argument has now been overtaken: driving both grids on real studies, the maintainer's
+ * call is that they open **too bright**, and the old viewer's choice is not a reason to
+ * keep a window nobody likes.
+ *
+ * The upper cut is what sets the white point, so raising it is the lever: at 99.5% the
+ * brightest half-percent of voxels -- restorations and metal on a CBCT, the skull's
+ * brightest fat on an MRI -- decide white instead of the brightest two percent, and
+ * everything below is mapped darker. The low cut moves with it so the window is not
+ * merely stretched at one end.
+ *
+ * Deliberately not a preset: CBCT and MRI greyscale are uncalibrated (decision #16), so
+ * this is still derived from each volume's own data. Window/level remains Shift+drag,
+ * and the value is reported in each viewport's overlay.
  */
-export const DEFAULT_ROBUST_PERCENTILES = Object.freeze({ low: 0.02, high: 0.98 });
+export const DEFAULT_ROBUST_PERCENTILES = Object.freeze({ low: 0.005, high: 0.995 });
 
 /**
  * Histogram resolution for {@link robustRange}.

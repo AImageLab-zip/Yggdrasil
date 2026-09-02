@@ -451,6 +451,17 @@ function initViewerToggle() {
         if (typeof window.PanoramicViewer.loadInlineForCBCT !== 'function') {
             return;
         }
+        // **A CBCT patient with no panoramic yet is not an error, so it must not be
+        // fetched as one.** The panoramic pane is offered for every CBCT (one can be
+        // generated from the volume), and asking `?meta=1` before one exists is a
+        // request the server can only answer 404 -- which the browser logs as a failed
+        // GET before any handler runs, so no amount of catching quiets it. The page is
+        // told at render time whether a panoramic file exists; where none does, show
+        // the pane's own empty state and make no request.
+        if (window.hasPanoramicImage === false) {
+            window.PanoramicViewer.showInlineEmptyForCBCT();
+            return;
+        }
         window.PanoramicViewer.loadInlineForCBCT();
     };
 
@@ -558,7 +569,16 @@ function initViewerToggle() {
                 if (panoramicViewer) {
                     panoramicViewer.style.display = 'block';
                     if (typeof window.PanoramicViewer !== 'undefined') {
-                        window.PanoramicViewer.load();
+                        // Same reasoning as `loadCbctInlinePanoramic`: the standalone
+                        // pane is offered for every CBCT, and asking for a panoramic
+                        // that does not exist is a 404 the browser logs on our behalf.
+                        if (window.hasPanoramicImage === false) {
+                            window.PanoramicViewer.showEmpty(
+                                window.PanoramicViewer.targets.standalone
+                            );
+                        } else {
+                            window.PanoramicViewer.load();
+                        }
                     }
                 }
             } else {
@@ -834,6 +854,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.scanId = djangoData.scanId;
     window.hasIOS = djangoData.hasIOS;
     window.hasCBCT = djangoData.hasCBCT;
+    window.hasPanoramicImage = djangoData.hasPanoramicImage;
     window.isCBCTProcessed = djangoData.isCBCTProcessed;
     window.modalities = Array.isArray(djangoData.modalities) ? djangoData.modalities : [];
     window.defaultModality = djangoData.defaultModality || null;

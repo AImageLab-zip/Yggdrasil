@@ -25,6 +25,7 @@ class Command(BaseCommand):
             {
                 'name': 'Video',
                 'slug': 'video',
+                'domain': 'laparoscopy',
                 'description': 'Surgical video recording (.mp4, .avi)',
                 'icon': 'fas fa-video',
                 'label': 'Video',

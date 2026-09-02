@@ -706,8 +706,6 @@ function initFolderContextMenu() {
     if (!menu) return;
 
     let selectedFolder = null;
-    const modalEl = document.getElementById('folderPermissionsModal');
-    const modal = modalEl && window.bootstrap ? new window.bootstrap.Modal(modalEl) : null;
 
     function hideMenu() {
         menu.style.display = 'none';
@@ -758,72 +756,42 @@ function initFolderContextMenu() {
         });
     }
 
-    const permBtn = document.getElementById('folderMenuPermissions');
-    if (permBtn) {
-        permBtn.addEventListener('click', function () {
-            if (!selectedFolder || !modal) return;
-            loadFolderPermissions(selectedFolder.id, selectedFolder.name);
-            modal.show();
+    const deleteBtn = document.getElementById('folderMenuDelete');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function () {
+            if (!selectedFolder) return;
+            const folder = selectedFolder;
+            if (!confirm(`Delete folder "${folder.name}"? Its patients stay in the project, unfiled.`)) return;
+            // Two-step by design: the unforced call answers "how many patients
+            // would this unfile?", and only that count is worth a second prompt.
+            deleteFolder(folder, false).catch(err => {
+                if (err && err.patientCount) {
+                    if (!confirm(`${err.message}\n\nDelete the folder anyway?`)) return;
+                    deleteFolder(folder, true).catch(inner =>
+                        showNotification('error', inner.message || 'Failed to delete folder'));
+                    return;
+                }
+                showNotification('error', (err && err.message) || 'Failed to delete folder');
+            });
         });
     }
 
-    function loadFolderPermissions(folderId, folderName) {
-        const title = document.getElementById('folderPermissionsModalLabel');
-        if (title) title.textContent = `Folder Permissions - ${folderName}`;
-        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/`)
-            .then(parseJsonResponse)
-            .then(data => {
-                if (!data.success) throw new Error(data.error || 'Failed to load permissions');
-                const userSel = document.getElementById('folderPermUser');
-                const body = document.querySelector('#folderPermTable tbody');
-                if (userSel) {
-                    userSel.innerHTML = '<option value="">Select user</option>';
-                    data.users.forEach(u => {
-                        const opt = document.createElement('option');
-                        opt.value = String(u.id);
-                        opt.textContent = u.username;
-                        userSel.appendChild(opt);
-                    });
+    function deleteFolder(folder, force) {
+        const url = `/${window.projectNamespace}/folders/${folder.id}/delete/${force ? '?force=true' : ''}`;
+        // parseJsonResponse for the content-type guard, but the body is needed on
+        // a 400 too -- that is where `patient_count` comes from.
+        return secureFetch(url, { method: 'DELETE' })
+            .then(response => parseJsonResponse(response).then(data => ({ response, data })))
+            .then(({ response, data }) => {
+                if (!response.ok || !data.success) {
+                    const error = new Error(data.error || 'Failed to delete folder');
+                    error.patientCount = data.patient_count;
+                    throw error;
                 }
-                if (body) {
-                    body.innerHTML = '';
-                    data.permissions.forEach(row => {
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `<td>${row.username}</td><td>${row.role}</td><td class="text-end"><button class="btn btn-sm btn-outline-danger" data-user-id="${row.user_id}">Remove</button></td>`;
-                        body.appendChild(tr);
-                    });
-                    body.querySelectorAll('button[data-user-id]').forEach(btn => {
-                        btn.addEventListener('click', function () {
-                            const uid = this.dataset.userId;
-                            secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/${uid}/delete/`, { method: 'DELETE' })
-                                .then(parseJsonResponse)
-                                .then(resp => {
-                                    if (!resp.success) throw new Error(resp.error || 'Failed to remove permission');
-                                    loadFolderPermissions(folderId, folderName);
-                                })
-                                .catch(err => showNotification('error', err.message || 'Failed to remove permission'));
-                        });
-                    });
-                }
-
-                const saveBtn = document.getElementById('folderPermAddBtn');
-                if (saveBtn) {
-                    saveBtn.onclick = function () {
-                        const userId = document.getElementById('folderPermUser')?.value;
-                        const role = document.getElementById('folderPermRole')?.value;
-                        if (!userId || !role) return;
-                        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/upsert/`, {
-                            method: 'POST',
-                            body: JSON.stringify({ user_id: Number(userId), role }),
-                        }).then(parseJsonResponse).then(resp => {
-                            if (!resp.success) throw new Error(resp.error || 'Failed to save permission');
-                            loadFolderPermissions(folderId, folderName);
-                        }).catch(err => showNotification('error', err.message || 'Failed to save permission'));
-                    };
-                }
-            })
-            .catch(err => showNotification('error', err.message || 'Failed to load permissions'));
+                window.location.reload();
+            });
     }
+
 }
 
 function initTagAddInline() {

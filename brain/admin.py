@@ -1,24 +1,14 @@
 from django.contrib import admin
 
+from common.admin import DomainFolderAdmin, DomainProjectAdmin
+
 from .models import BrainProject, Dataset, Export, Folder, Patient, Tag, VoiceCaption
 
 
 @admin.register(BrainProject)
-class BrainProjectAdmin(admin.ModelAdmin):
+class BrainProjectAdmin(DomainProjectAdmin):
     """Brain projects, shown under the Brain admin section (domain forced)."""
-    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
-    list_filter = ['is_active', 'created_at']
-    search_fields = ['name', 'description', 'slug']
-    prepopulated_fields = {'slug': ('name',)}
-    filter_horizontal = ['modalities', 'annotation_methods', 'disabled_steps']
-    readonly_fields = ['domain']
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).filter(domain='brain')
-
-    def save_model(self, request, obj, form, change):
-        obj.domain = 'brain'
-        super().save_model(request, obj, form, change)
+    domain = 'brain'
 
 
 @admin.register(Dataset)
@@ -28,13 +18,9 @@ class DatasetAdmin(admin.ModelAdmin):
 
 
 @admin.register(Folder)
-class FolderAdmin(admin.ModelAdmin):
-    # See maxillo.FolderAdmin: `project` is shown so a mis-filed folder is visible.
-    list_display = ['name', 'project', 'parent', 'is_demo', 'created_at', 'created_by']
-    list_filter = ['project', 'is_demo']
-    list_editable = ['is_demo']
-    list_select_related = ['project', 'parent']
-    search_fields = ['name']
+class FolderAdmin(DomainFolderAdmin):
+    """Brain folders (project picker scoped to the brain domain)."""
+    domain = 'brain'
 
 
 @admin.register(Tag)

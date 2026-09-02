@@ -166,12 +166,67 @@ export function calibratedPixelSpacingFor(record) {
 }
 
 /**
+ * Every mounted surface's live registry, oldest first.
+ *
+ * **One provider has to answer for all of them, because `metaData.addProvider` is
+ * process-wide and a patient page mounts more than one surface.** Registering per mount
+ * would stack duplicate providers, so the entry registers once -- and it used to do so
+ * over whichever surface's `Map` happened to be first. The second surface then set a
+ * stack of imageIds the provider had never heard of, and Cornerstone's `buildMetadata`
+ * destructures `imagePlaneModule` with no null check, so the miss arrived as
+ * `No imagePlaneModule found for imageId: yggweb:...front.jpg` and a black viewport
+ * rather than as a degraded one. Teleradiography and the intraoral photographs both
+ * mount on a maxillo patient, so whichever was second was always the broken one.
+ *
+ * The maps stay owned by their bootstrap and stay *live* -- a calibration writes into one
+ * and the stack is reset so Cornerstone re-reads the module, which a snapshot would
+ * defeat -- so this holds the maps themselves, never their contents.
+ */
+const registries = new Set();
+
+/**
+ * The composite {@link createPhotoMetadataProvider} reads by default: the first registry
+ * that knows an imageId answers for it. ImageIds carry a file id, so no two surfaces
+ * offer the same one and the order is not a tie-break anyone can observe.
+ */
+export const photoRecords = Object.freeze({
+    get(imageId) {
+        for (const registry of registries) {
+            const record = registry.get(imageId);
+            if (record) {
+                return record;
+            }
+        }
+        return undefined;
+    },
+});
+
+/** Let {@link photoRecords} answer for one surface's registry. */
+export function registerPhotoRegistry(registry) {
+    registries.add(registry);
+    return registry;
+}
+
+/**
+ * Forget one surface's registry.
+ *
+ * Called when a surface unmounts, so a map left over from a previous visit cannot answer
+ * for an imageId a later mount reuses -- the records differ once one of them has been
+ * calibrated.
+ */
+export function releasePhotoRegistry(registry) {
+    return registries.delete(registry);
+}
+
+/**
  * A Cornerstone metadata provider over a registry of image records.
  *
- * @param {Map<string, object>|{get: Function}} registry imageId -> record.
+ * @param {Map<string, object>|{get: Function}} [registry] imageId -> record. Defaults to
+ *   {@link photoRecords}, the composite over every mounted surface, which is what the
+ *   page-level registration wants; pass one explicitly only to scope a provider to it.
  * @returns {Function} `(type, imageId) => object|undefined`
  */
-export function createPhotoMetadataProvider(registry) {
+export function createPhotoMetadataProvider(registry = photoRecords) {
     return function providePhotoMetadata(type, imageId) {
         // An imageId Cornerstone passes as an array is a multi-frame query; a photo
         // stack has no multi-frame images, so nothing here answers one.

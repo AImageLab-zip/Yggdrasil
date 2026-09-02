@@ -8,6 +8,8 @@ import {
     DEFAULT_RENDER_MODE,
     RENDER_MODES,
     RENDER_MODE_LABELS,
+    LABELMAP_RENDER_SPEC,
+    applyLabelmapRenderMode,
     applyRenderMode,
     assertBlendModesMatch,
     renderModeSpec,
@@ -132,4 +134,60 @@ test('applying a mode returns the spec that was applied', () => {
         }),
     };
     assert.equal(applyRenderMode(actor, 'shaded').label, 'Shaded Volume');
+});
+
+test('a labelmap is never rendered darker than its own colour', () => {
+    // **This is the fix for "the CBCT segmentation loads bright and then goes dark".**
+    //
+    // vtk computes a volume normal by central difference and returns `vec4(0.0)` when the
+    // gradient is zero, which inside a label -- a piecewise-constant field -- it always
+    // is. `applyLighting` then finds `dot(vec3(0), lightDirection) == 0.0`, never takes
+    // its `df > 0.0` branch, and leaves the sample at `tColor * volume.ambient`. So the
+    // ambient term is a *floor on the whole interior*, not a fill light: at 0.3 every
+    // voxel rendered at 30% of the palette colour, composited over the depth of the
+    // structure, and the picture went dark the moment `setRenderMode` applied this spec
+    // over Cornerstone's own default.
+    assert.equal(LABELMAP_RENDER_SPEC.ambient, 1);
+
+    // Shading stays on for the boundary shell, which is the one place a labelmap has a
+    // gradient -- and the reason it was turned on at all, since a flat composite is a
+    // silhouette. Additive over a floor of 1, so it can only lighten.
+    assert.equal(LABELMAP_RENDER_SPEC.shade, true);
+    assert.ok(LABELMAP_RENDER_SPEC.diffuse > 0);
+    // Modest, because `tColor * (diffuse + ambient)` clips above 1 and a hard clip on a
+    // saturated palette entry loses its hue rather than brightening it.
+    assert.ok(LABELMAP_RENDER_SPEC.diffuse <= 0.5);
+    assert.equal(LABELMAP_RENDER_SPEC.specular, 0);
+
+    // And it is composited, not projected: a MIP through a labelmap takes the largest
+    // *label value* along the ray, so the highest-numbered tooth wins wherever two
+    // overlap on screen and rotating changes which colours win rather than what occludes.
+    assert.equal(LABELMAP_RENDER_SPEC.blendMode, BLEND_MODES.COMPOSITE_BLEND);
+});
+
+test('the labelmap actor is put onto that spec, lighting included', () => {
+    const property = {};
+    const record = (name) => (value) => {
+        property[name] = value;
+    };
+    const actor = {
+        getMapper: () => ({
+            setViewSpecificProperties() {},
+            getViewSpecificProperties: () => ({}),
+            setBlendMode: record('blendMode'),
+        }),
+        getProperty: () => ({
+            setShade: record('shade'),
+            setAmbient: record('ambient'),
+            setDiffuse: record('diffuse'),
+            setSpecular: record('specular'),
+        }),
+    };
+
+    applyLabelmapRenderMode(actor);
+
+    assert.equal(property.ambient, 1);
+    assert.equal(property.shade, true);
+    assert.equal(property.specular, 0);
+    assert.equal(property.blendMode, BLEND_MODES.COMPOSITE_BLEND);
 });

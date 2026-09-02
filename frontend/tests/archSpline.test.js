@@ -36,6 +36,38 @@ test('the upstream hooks the subclass stands on still exist', () => {
     assert.equal(typeof prototype._getNumCurveSegments, 'function');
     assert.equal(typeof prototype._getCurveSegmentPoints, 'function');
     assert.ok(ArchSpline.prototype instanceof splines.CubicSpline);
+
+    // **And the base must be `CardinalSpline`, not `CubicSpline`.** `getTransformMatrix`
+    // is abstract on `Spline`; `CubicSpline` calls it and does not define it, so a class
+    // that stops short of `CardinalSpline` throws on the first render -- which is what
+    // took the control points off the screen. Asserted as a required method, because the
+    // previous form of this suite reached for it as `getTransformMatrix?.()` and that
+    // optional call is precisely what hid the defect.
+    assert.ok(ArchSpline.prototype instanceof splines.CardinalSpline);
+    assert.equal(typeof ArchSpline.prototype.getTransformMatrix, 'function');
+    assert.ok(Array.isArray(new ArchSpline().getTransformMatrix()));
+});
+
+test('the arch renders through the entry point the tool actually calls', () => {
+    // `SplineROITool` never calls `_getPoint`. It calls `getPolylinePoints()`, which goes
+    // through `Spline._update` -> `CubicSpline.getSplineCurves` -> `getTransformMatrix`.
+    // Every other case here reaches past that path, which is how a missing base-class
+    // method survived a full suite.
+    const spline = new ArchSpline();
+    spline.setControlPoints(ARCH);
+    spline.closed = false;
+
+    const polyline = spline.getPolylinePoints();
+    assert.ok(polyline.length > ARCH.length, 'the curve was resampled, not echoed back');
+    assert.ok(polyline.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)));
+    assert.ok(spline.length > 0, 'arc length was computed from real curve segments');
+
+    // Two points is the shortest thing a fitted arch can be handed; the segment guard in
+    // `getSplineCurves` only spares an empty spline, so this is the smallest input that
+    // still reaches the matrix.
+    const pair = new ArchSpline();
+    pair.setControlPoints(ARCH.slice(0, 2));
+    assert.ok(pair.getPolylinePoints().length >= 2);
 });
 
 test('the knot spacing is centripetal, not uniform', () => {
@@ -80,7 +112,7 @@ test('coincident control points degrade to a straight segment, not to NaN', () =
 
     const spline = new ArchSpline();
     spline.setControlPoints([[5, 5], [5, 5], [9, 9], [12, 12]]);
-    const point = spline._getPoint(1.5, spline.getTransformMatrix?.() ?? []);
+    const point = spline._getPoint(1.5, spline.getTransformMatrix());
 
     assert.ok(Number.isFinite(point[0]) && Number.isFinite(point[1]));
 });
@@ -89,7 +121,7 @@ test('the drawn arch agrees with the baker over every interior segment', () => {
     const spline = new ArchSpline();
     spline.setControlPoints(ARCH);
     spline.closed = false;
-    const matrix = spline.getTransformMatrix?.() ?? [];
+    const matrix = spline.getTransformMatrix();
 
     // Cornerstone's open segment `j` spans control points j..j+1 from the quadruple
     // (j-1, j, j+1, j+2). The chain's segment `i` spans the quadruple (i, i+1, i+2, i+3),
@@ -120,7 +152,17 @@ test('the tool configuration registers the class under its own type key', () => 
 
     assert.equal(configuration.type, ARCH_SPLINE);
     assert.equal(configuration.configuration[ARCH_SPLINE].Class, ArchSpline);
-    // The arch runs condyle to condyle; closing it would draw a loop through the tongue.
-    assert.equal(configuration.configuration[ARCH_SPLINE].allowClosed, false);
-    assert.equal(configuration.configuration[ARCH_SPLINE].allowOpen, true);
+    assert.equal(configuration.configuration[ARCH_SPLINE].controlPointAdditionEnabled, true);
+    assert.equal(configuration.configuration[ARCH_SPLINE].controlPointDeletionEnabled, true);
+
+    // Only keys of `DEFAULT_SPLINE_CONFIG` are read, so the invented `allowOpen` /
+    // `allowClosed` / `allowOpenEdit` triple that used to sit here said nothing. The arch
+    // running condyle to condyle is stated where it is honoured: `allowOpenSplines` on
+    // the tool, asserted in `archSurface.test.js`.
+    for (const invented of ['allowOpen', 'allowClosed', 'allowOpenEdit']) {
+        assert.ok(
+            !(invented in configuration.configuration[ARCH_SPLINE]),
+            `${invented} is not a spline config key and must not read as one`
+        );
+    }
 });

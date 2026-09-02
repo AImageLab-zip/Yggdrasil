@@ -11,6 +11,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from . import presence
+from .domains import project_admin_add_targets
 from .models import Job, ProcessingJob, Project, Modality, UserSession
 from .object_storage import get_object_storage
 
@@ -171,6 +172,7 @@ def admin_control_panel(request):
         "user_count": user_count,
         "project_user_list": project_user_list,
         "projects": project_rows,
+        "project_add_targets": project_admin_add_targets(),
         "backup": _backup_health(),
         "backup_inventory": _backup_inventory(),
         "recent_backups": SystemCheck.objects.filter(name="database_backup")[:8],

@@ -27,20 +27,12 @@ def _namespace(request_or_namespace):
     return normalize_domain(namespace)
 
 
-def _folder_access_model(namespace):
-    """Legacy FolderAccess model lookup. FolderAccess rows are no longer
-    authoritative for authorization, but the helper is kept for tests and any
-    remaining callers that introspect the table."""
-    app_label = _namespace(namespace)
-    return apps.get_model(app_label, "FolderAccess")
-
-
 def _project_from_context(project_or_app_context):
     """Resolve a Project from a Project, a request, or a namespace string.
 
     For a request the session's current project wins (when it belongs to the
-    request's domain); otherwise the first active project of the domain is used
-    as a deterministic fallback.
+    request's domain); otherwise the domain's entry project for the requesting
+    user is used, so this agrees with the project the middleware put them in.
     """
     if isinstance(project_or_app_context, Project):
         return project_or_app_context
@@ -54,11 +46,29 @@ def _project_from_context(project_or_app_context):
             ).first()
             if project:
                 return project
-    return (
-        Project.objects.filter(domain=namespace, is_active=True)
-        .order_by("name")
-        .first()
-    )
+    return entry_project_for(getattr(project_or_app_context, "user", None), namespace)
+
+
+def entry_project_for(user, domain):
+    """The project ``user`` works in when they enter ``domain``.
+
+    Their first accessible project of the domain, by name. A user with no
+    ``ProjectAccess`` in the domain falls back to its first active project --
+    they are then refused by the normal checks rather than resolving to no
+    project at all.
+    """
+    active = Project.objects.filter(
+        domain=normalize_domain(domain), is_active=True
+    ).order_by("name")
+    if user is not None and getattr(user, "is_authenticated", False):
+        accessible = active.filter(
+            id__in=ProjectAccess.objects.filter(user=user).values_list(
+                "project_id", flat=True
+            )
+        ).first()
+        if accessible is not None:
+            return accessible
+    return active.first()
 
 
 def _access_for(user, project):
@@ -89,16 +99,6 @@ def user_has_project_access(user, project_or_app_context):
         return False
     access = _access_for(user, project)
     return bool(access and access.role in READ_ROLES)
-
-
-def get_user_folder_role(user, folder):
-    """Legacy FolderAccess lookup; returns the project role for the folder's
-    project (FolderAccess rows are no longer authoritative)."""
-    if not user or not user.is_authenticated or not folder:
-        return None
-    project = getattr(folder, "project", None)
-    access = _access_for(user, project)
-    return access.role if access else None
 
 
 def user_can_read_folder(user, folder, project_or_app_context=None):
@@ -174,10 +174,6 @@ def user_can_perform_bulk_operations(user, folder_or_project):
 def user_can_edit_metadata(user, patient_or_folder):
     project = getattr(patient_or_folder, "project", None) or patient_or_folder
     return user_is_project_admin(user, project)
-
-
-def user_can_manage_folder_access(user, folder):
-    return user_is_project_admin(user, getattr(folder, "project", None) or folder)
 
 
 def user_can_create_export(user, folder, project_or_app_context=None):

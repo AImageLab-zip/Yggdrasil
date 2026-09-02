@@ -64,7 +64,6 @@ class ArtifactCatalogTests(TestCase):
     def test_panoramic_variants_are_separable(self):
         mip = export_catalog.artifact_by_key("maxillo", "panoramic.mip")
         raysum = export_catalog.artifact_by_key("maxillo", "panoramic.raysum")
-        legacy = export_catalog.artifact_by_key("maxillo", "panoramic.legacy")
 
         class Row:
             metadata = {}
@@ -76,9 +75,11 @@ class ArtifactCatalogTests(TestCase):
         self.assertTrue(mip.matches(Row("panoramic_processed", "mip")))
         self.assertFalse(mip.matches(Row("panoramic_processed", "raysum")))
         self.assertTrue(raysum.matches(Row("panoramic_processed", "raysum")))
-        # An older sweep variant belongs to neither of the two current ones.
+        # An older sweep variant belongs to neither of the two current ones, and the
+        # catalog no longer offers a bucket for it: the Z-sweep is not exported.
         self.assertFalse(mip.matches(Row("panoramic_processed", "panoramic_zplus20_mean_png")))
-        self.assertTrue(legacy.matches(Row("panoramic_processed", "panoramic_zplus20_mean_png")))
+        self.assertFalse(raysum.matches(Row("panoramic_processed", "panoramic_zplus20_mean_png")))
+        self.assertIsNone(export_catalog.artifact_by_key("maxillo", "panoramic.legacy"))
 
     def test_legacy_query_params_resolve_to_the_same_content(self):
         artifacts = export_catalog.artifacts_from_legacy_selection(
@@ -100,17 +101,38 @@ class ArtifactCatalogTests(TestCase):
             include_bite_classification=False,
         )
         keys = {a.key for a in with_processed}
-        self.assertIn("cbct.volume", keys)
         self.assertIn("cbct.segmentation", keys)
+        self.assertNotIn("cbct.volume", keys)
         self.assertNotIn("cbct.raw", keys)
 
-    def test_legacy_bite_classification_flag_maps_to_the_occlusion_document(self):
+    def test_legacy_bite_classification_flag_maps_to_the_bite_artifact(self):
         artifacts = export_catalog.artifacts_from_legacy_selection(
             "maxillo", [],
             include_raw=False, include_processed=False,
             include_reports=False, include_bite_classification=True,
         )
-        self.assertEqual([a.key for a in artifacts], ["classification.occlusion"])
+        self.assertEqual([a.key for a in artifacts], ["ios.bite_classification"])
+
+    def test_merged_artifact_keys_on_old_export_rows_still_resolve(self):
+        # An Export row written before the merge names artifacts that no longer
+        # exist under those keys; re-running it must still produce the thing it
+        # asked for, not silently nothing.
+        resolved = export_catalog.resolve_artifacts(
+            "maxillo",
+            ["classification.occlusion", "ios.landmarks_prediction", "ios.landmarks"],
+        )
+        self.assertEqual(
+            [a.key for a in resolved], ["ios.bite_classification", "ios.landmarks"]
+        )
+
+    def test_retired_interop_and_rawzip_artifacts_are_gone(self):
+        keys = {a.key for a in export_catalog.artifacts_for_domain("maxillo")}
+        self.assertTrue(
+            keys.isdisjoint({
+                "cbct.dicom_seg", "cbct.dicom_sr", "cbct.dicom_rtstruct",
+                "rawzip.raw", "rawzip.processed",
+            })
+        )
 
 
 class FilterCatalogTests(TestCase):
@@ -129,7 +151,7 @@ class FilterCatalogTests(TestCase):
         self.assertIn("annotation_captions", ids)
         self.assertNotIn("modality_ios", ids)
         self.assertNotIn("annotation_landmarks", ids)
-        self.assertNotIn("annotation_occlusion", ids)
+        self.assertNotIn("annotation_bite_classification", ids)
 
     def test_panoramic_state_filter_needs_cbct(self):
         with_cbct = [s["id"] for s in export_catalog.build_filters("maxillo", self.project, ["cbct"])]
@@ -148,7 +170,7 @@ class FilterCatalogTests(TestCase):
             normalized,
             {
                 "modality_cbct": True,
-                "annotation_occlusion": True,
+                "annotation_bite_classification": True,
                 "annotation_captions": True,
             },
         )
@@ -214,7 +236,26 @@ class FilterApplicationTests(TestCase):
             transverse="normal", midline="centered",
         )
         self.assertEqual(
+            list(self._apply({"annotation_bite_classification": True})), [self.with_cbct]
+        )
+        # Same filter, pre-merge key: stored Export rows keep working.
+        self.assertEqual(
             list(self._apply({"annotation_occlusion": True})), [self.with_cbct]
+        )
+
+    def test_bite_classification_filter_also_matches_the_pipeline_file(self):
+        # The two used to be separate filters; a patient the pipeline classified but
+        # nobody opened has the file and no Classification row.
+        FileRegistry.objects.create(
+            patient=self.without,
+            domain="maxillo",
+            file_type="bite_classification",
+            file_path="maxillo/processed/ios/bite.json",
+            file_size=2,
+            file_hash="e" * 64,
+        )
+        self.assertEqual(
+            list(self._apply({"annotation_bite_classification": True})), [self.without]
         )
 
     def test_uploaded_by_and_tags(self):
@@ -407,6 +448,66 @@ class ExportProcessorSelectionTests(TestCase):
         self.assertEqual(processor.artifacts, [])
 
 
+class BiteClassificationArtifactTests(TestCase):
+    """One checkbox under IOS, covering both halves of the same fact.
+
+    It used to be two: a patient-level "Occlusion classification" reading
+    `maxillo.Classification`, and an IOS "Bite classification (pipeline output)"
+    reading the `bite_classification` file. They answer the same question, and a
+    reader had no way to tell which one to tick.
+    """
+
+    def setUp(self):
+        self.ios = _modality("ios", "IOS")
+        self.project = Project.objects.create(name="Bite", slug="bite-export", domain="maxillo")
+        self.project.modalities.set([self.ios])
+        self.folder = Folder.objects.create(name="Root", project=self.project)
+        self.patient = Patient.objects.create(
+            name="Classified", project=self.project, folder=self.folder
+        )
+        self.artifact = export_catalog.artifact_by_key("maxillo", "ios.bite_classification")
+
+    def test_the_artifact_reads_both_the_file_and_the_record(self):
+        self.assertEqual(self.artifact.modality, "ios")
+        self.assertEqual(self.artifact.label, "Bite Classification")
+        self.assertTrue(self.artifact.is_file_backed)
+        self.assertEqual(self.artifact.collector, "occlusion")
+
+    def test_the_classification_document_is_collected_with_no_file_row(self):
+        Classification.objects.create(
+            patient=self.patient, classifier="manual",
+            sagittal_left="I", sagittal_right="I", vertical="normal",
+            transverse="normal", midline="centered",
+        )
+        export = Export(user=None, query_params={
+            "domain": "maxillo",
+            "folder_ids": [self.folder.id],
+            "artifacts": ["ios.bite_classification"],
+        })
+        processor = ExportProcessor(export, domain="maxillo")
+        entries, _size = processor.collect_files(processor.query_patients())
+
+        self.assertEqual([e["filename"] for e in entries], ["classification.json"])
+        self.assertEqual(self.artifact.zip_directory(), "ios/bite_classification")
+
+    def test_the_checkbox_is_offered_even_when_no_pipeline_file_exists(self):
+        # Availability is a file count for file-backed artifacts; this one also
+        # produces a document, so a zero count must not grey it out.
+        groups = export_ui.artifact_groups(
+            "maxillo", self.project, Patient.objects.filter(pk=self.patient.pk)
+        )
+        entries = [
+            artifact
+            for group in groups
+            for bucket in group["buckets"]
+            for artifact in bucket["artifacts"]
+            if artifact["key"] == "ios.bite_classification"
+        ]
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(entries[0]["available"])
+        self.assertIsNone(entries[0]["count"])
+
+
 class ExportUiHelperTests(TestCase):
     def test_folder_tree_treats_an_unreachable_parent_as_a_root(self):
         project = Project.objects.create(name="Tree", slug="tree-export", domain="maxillo")
@@ -424,8 +525,6 @@ class CbctBundleShapeTests(TestCase):
 
     def setUp(self):
         self.segmentation = export_catalog.artifact_by_key("maxillo", "cbct.segmentation")
-        self.volume = export_catalog.artifact_by_key("maxillo", "cbct.volume")
-        self.pipeline_panoramic = export_catalog.artifact_by_key("maxillo", "cbct.panoramic_view")
 
     class Row:
         def __init__(self, subtype="", file_path="", file_size=0, metadata=None):
@@ -447,8 +546,6 @@ class CbctBundleShapeTests(TestCase):
             self.segmentation.resolve_output(row),
             {"path": "maxillo/processed/cbct/job_1/predictions/p.nii.gz", "size": 42},
         )
-        # ...and the volume artifact must not claim that row.
-        self.assertFalse(self.volume.matches(row))
 
     def test_bundled_shape_outputs_keyed_in_metadata(self):
         row = self.Row(
@@ -466,9 +563,15 @@ class CbctBundleShapeTests(TestCase):
 
         self.assertTrue(self.segmentation.matches(row))
         self.assertEqual(self.segmentation.resolve_output(row)["size"], 7)
-        self.assertFalse(self.volume.matches(row))
 
-    def test_legacy_shape_volume_plus_pipeline_panoramic(self):
+    def test_legacy_bundle_without_a_segmentation_offers_nothing(self):
+        """The old volume/pipeline-panoramic bundle is no longer exportable.
+
+        Both of the keys this row carries had their own artifact until the CBCT group
+        was cut back to the volume as uploaded and the segmentation the pipeline
+        returns. The row still matches nothing rather than falling into some other
+        artifact, which is the failure mode worth pinning.
+        """
         row = self.Row(
             subtype="processed",
             file_path="processed/cbct/case_pano.png",
@@ -480,20 +583,17 @@ class CbctBundleShapeTests(TestCase):
             },
         )
 
-        self.assertTrue(self.volume.matches(row))
-        self.assertEqual(self.volume.resolve_output(row)["path"], "processed/cbct/case.nii.gz")
-        self.assertTrue(self.pipeline_panoramic.matches(row))
-        self.assertEqual(
-            self.pipeline_panoramic.resolve_output(row)["path"], "processed/cbct/case_pano.png"
-        )
         self.assertFalse(self.segmentation.matches(row))
-
-    def test_the_pipeline_panoramic_lands_in_the_panoramic_folder(self):
-        self.assertEqual(self.pipeline_panoramic.zip_directory(), "panoramic/generated")
-        self.assertEqual(
-            export_catalog.artifact_by_key("maxillo", "panoramic.mip").zip_directory(),
-            "panoramic/generated",
+        self.assertFalse(
+            any(a.matches(row) for a in export_catalog.artifacts_for_domain("maxillo"))
         )
+
+    def test_the_cbct_group_offers_the_upload_and_the_segmentation_only(self):
+        cbct = [
+            a.key for a in export_catalog.artifacts_for_domain("maxillo")
+            if a.modality == "cbct" and a.zip_dir is None
+        ]
+        self.assertEqual(sorted(cbct), ["cbct.raw", "cbct.segmentation"])
 
 
 class ToothSegmentationExportTests(TestCase):
@@ -728,14 +828,13 @@ class IosLandmarkExportTests(TestCase):
         )
         self.assertEqual(self._documents(), [])
 
-    def test_the_landmarks_artifact_is_a_collector_and_the_prediction_stays_a_file(self):
+    def test_landmarks_are_one_collector_artifact_covering_predictions_too(self):
         artifacts = {a.key: a for a in export_catalog.artifacts_for_domain("maxillo")}
         self.assertEqual(artifacts["ios.landmarks"].collector, "ios_landmarks")
         self.assertFalse(artifacts["ios.landmarks"].is_file_backed)
-        self.assertTrue(artifacts["ios.landmarks_prediction"].is_file_backed)
-        self.assertEqual(
-            list(artifacts["ios.landmarks_prediction"].file_types), ["ios_landmarks_prediction"]
-        )
+        # Predictions land in the same record (origin=PREDICTION), so there is no
+        # second "predicted landmarks" artifact reading the pipeline's stale file.
+        self.assertNotIn("ios.landmarks_prediction", artifacts)
 
     def test_the_has_landmarks_filter_reads_the_record_not_the_file_row(self):
         # A file row with no landmarks left on it is history, and the filter means "does

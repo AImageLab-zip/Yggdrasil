@@ -13,11 +13,17 @@ from common.modality_config import get_step, modality_requires_processing
 from common.models import FileRegistry, Job
 from common.uploads import create_step_jobs
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import Classification, Patient, VoiceCaption
 
 logger = logging.getLogger(__name__)
+
+# ProcessingStep slug of the bite-classification stage, and so the value of
+# Job.modality_slug for its jobs. Distinct from the "bite_classification"
+# *file type* that get_file_type_for_modality returns for its outputs.
+BITE_CLASSIFICATION_SLUG = "ios-bite-classification"
 
 DEFAULT_PANORAMIC_OUTPUT = "panoramic_png"
 PANORAMIC_OUTPUT_KEYS = {
@@ -61,6 +67,160 @@ def _create_job_if_runner_enabled(modality_slug, **kwargs):
     if job.status == "pending":
         create_step_jobs(job)
     return job
+
+
+def _intraoral_images_by_reference(job, references):
+    """This job's intraoral photographs, indexed by every name an algorithm may use.
+
+    **Two names, because an algorithm on the cluster only knows one of them.** The
+    contract was written around ``FileRegistry`` ids, and the ids reach the cluster
+    only as *keys* of ``job.input_files`` -- what a ``run.sbatch`` is handed is
+    ``YGG_INPUT_KEYS``, a list of object-storage keys, and ``ygg-stage pull`` writes
+    each one under its basename. So an algorithm can name the image it segmented by
+    its storage key and cannot name it by id without the runner inventing a channel
+    to carry the mapping.
+
+    ``FileRegistry.file_path`` *is* the object-storage key, so accepting both costs a
+    second index over the same rows and no new plumbing. Ids stay valid: the existing
+    contract and everything written against it are unchanged.
+
+    Only ``intraoral_raw``/``intraoral_processed`` rows belonging to this job's patient
+    are indexed, so a reference to somebody else's image resolves to nothing rather
+    than to their image.
+    """
+    references = [str(reference) for reference in references]
+    ids = [int(ref) for ref in references if ref.lstrip("-").isdigit()]
+    rows = FileRegistry.objects.filter(
+        file_type__in=["intraoral_raw", "intraoral_processed"],
+        **_job_entity_fk_kwargs(job),
+    ).filter(Q(id__in=ids) | Q(file_path__in=references))
+
+    by_reference = {}
+    for row in rows:
+        by_reference[str(row.id)] = row
+        by_reference[row.file_path] = row
+    return by_reference
+
+
+#: The five standard intraoral views the classifier assigns, as it spells them.
+INTRAORAL_VIEWS = frozenset(
+    {"frontal", "left_buccal", "right_buccal", "upper_occlusal", "lower_occlusal"}
+)
+
+
+def _apply_intraoral_views(job, views_output):
+    """Record each photograph's clinical view on its own registry row.
+
+    IOP-Compass classifies the view *before* it segments, because the view selects the
+    SegmentAnyTooth detector -- so the label is produced whether or not anyone asks for
+    it, and it is the one fact about an intraoral photograph nothing else in Yggdrasil
+    records. Stored in ``FileRegistry.subtype``, which is already the column for "which
+    flavour of this file type this row is" and is blank on every ``intraoral_raw`` row;
+    the ``intraoral-photo.raw`` export artifact places no constraint on it, so nothing
+    downstream changes shape.
+
+    Unknown labels are ignored rather than written: ``subtype`` is shown to readers, and
+    a misspelling from a future model version would render as a view that does not
+    exist. Returns how many rows were labelled.
+    """
+    views_key = _resolve_output_path_or_key(views_output)
+    if not views_key:
+        return 0
+    try:
+        fh, _ = open_binary(views_key)
+        try:
+            views = json.loads(fh.read().decode("utf-8", errors="replace"))
+        finally:
+            with contextlib.suppress(Exception):
+                fh.close()
+    except Exception:
+        logger.exception("Could not read the intraoral view labels for job %s", job.id)
+        return 0
+
+    if not isinstance(views, dict):
+        return 0
+
+    rows = _intraoral_images_by_reference(job, views.keys())
+    labelled = 0
+    for reference, view in views.items():
+        row = rows.get(str(reference))
+        if row is None or str(view) not in INTRAORAL_VIEWS:
+            continue
+        if row.subtype != str(view):
+            row.subtype = str(view)
+            row.save(update_fields=["subtype"])
+        labelled += 1
+    return labelled
+
+
+#: Bits2Bites task name -> (Classification field, class labels in the model's own
+#: index order). The model's vocabularies live in its
+#: ``pointcept/datasets/dental.py`` (kept in Italian to match the annotation CSVs);
+#: these are the same lists in the same order, spelled as Classification's choices.
+#: Note ``transverse`` deliberately reads normal/scissor/cross -- the model's order --
+#: which is *not* the order of Classification.TRANSVERSE_CHOICES.
+BITE_TASK_FIELDS = {
+    "right_occ": ("sagittal_right", ["I", "II", "III"]),
+    "left_occ": ("sagittal_left", ["I", "II", "III"]),
+    "anterior_bite": ("vertical", ["normal", "deep", "open", "reverse"]),
+    "transverse_bite": ("transverse", ["normal", "scissor", "cross"]),
+    "midline": ("midline", ["centered", "deviated"]),
+}
+
+
+def bite_classification_values(predictions, patient_id):
+    """Map Bits2Bites ``predictions.json`` onto Classification field values.
+
+    ``predictions`` is the parsed file: a list with one object per patient, keyed
+    ``name`` = ``dental_<zero-padded id>`` (the id ``prepare_yggdrasil_input``
+    wrote), each task giving ``{"pred": <class index>, "prob": [...], "gt": -1}``.
+    ``gt`` is always -1 here: Yggdrasil supplies placeholder labels for pure
+    inference, so the run's own accuracy metrics are meaningless and only ``pred``
+    is read.
+
+    Returns a dict of the five Classification fields, each ``"Unknown"`` when the
+    task is absent or its index is out of vocabulary. Returns ``None`` -- writing
+    nothing rather than another patient's result -- when the file does not carry
+    exactly one entry, or that entry names a different patient.
+    """
+    if not isinstance(predictions, list) or len(predictions) != 1:
+        logger.error(
+            "Bite predictions for patient %s must hold exactly one entry, got %s",
+            patient_id,
+            len(predictions) if isinstance(predictions, list) else type(predictions),
+        )
+        return None
+
+    entry = predictions[0]
+    if not isinstance(entry, dict):
+        logger.error("Bite predictions entry for patient %s is not an object", patient_id)
+        return None
+
+    expected = f"dental_{int(patient_id):04d}"
+    if str(entry.get("name")) != expected:
+        logger.error(
+            "Bite predictions name %r does not identify patient %s (expected %r)",
+            entry.get("name"),
+            patient_id,
+            expected,
+        )
+        return None
+
+    values = {}
+    for task, (field, labels) in BITE_TASK_FIELDS.items():
+        task_result = entry.get(task)
+        index = task_result.get("pred") if isinstance(task_result, dict) else None
+        if isinstance(index, int) and 0 <= index < len(labels):
+            values[field] = labels[index]
+        else:
+            logger.warning(
+                "Bite task %r for patient %s has no usable prediction (%r)",
+                task,
+                patient_id,
+                index,
+            )
+            values[field] = "Unknown"
+    return values
 
 
 def _landmark_output(output_files):
@@ -528,11 +688,16 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     """
     Save a CBCT upload to object storage and create the processing job.
 
-    Accepts a compressed NIfTI (orientation metadata validated server-side) or a DICOM
-    instance, which is stored natively through ``common.dicom.ingest`` rather than
-    converted -- the whole point of Phase 8. The File control has advertised ``.dcm``
-    for as long as it has existed; until now that promise was kept only by a browser
-    conversion that threw the DICOM away.
+    Accepts a compressed NIfTI, whose orientation metadata is validated server-side.
+
+    **DICOM upload is disabled.** The refusal lives here, on the bytes, rather than in
+    the form or the template: it is the one point every upload path goes through (the
+    upload page, the project API, replacing a patient's files), and a ``.dcm`` that is
+    not DICOM or a DICOM instance with no extension both have to be judged by the DICM
+    marker, never by the filename. Native DICOM storage itself
+    (:func:`save_cbct_folder_to_dataset`, ``common.dicom.ingest``) is untouched and
+    still serves the series already in the database -- what is switched off is
+    accepting new ones.
 
     Args:
         patient_or_legacy: Patient or legacy object with .patient
@@ -541,13 +706,15 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     Returns:
         tuple: (file_path, processing_job)
     """
+    from django.core.exceptions import ValidationError
+
     patient = _get_patient(patient_or_legacy)
     original_name = getattr(cbct_file, "name", "cbct.nii.gz") or "cbct.nii.gz"
 
     if _is_dicom_upload(cbct_file):
-        # One instance is a one-instance series; the folder path already handles
-        # every part of that, including the refusals.
-        return save_cbct_folder_to_dataset(patient, [cbct_file])
+        raise ValidationError(
+            "DICOM upload is disabled. Upload the CBCT as a compressed NIfTI (.nii.gz)."
+        )
 
     orientation = _validate_and_extract_nifti_orientation(cbct_file)
 
@@ -605,7 +772,11 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
 
 
 def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
-    """Store an uploaded DICOM folder natively, as DICOM.
+    """Store a DICOM folder natively, as DICOM.
+
+    No upload path reaches this while DICOM upload is disabled (see
+    :func:`save_cbct_to_dataset`); it is kept, tested and correct so that re-enabling
+    the upload is a UI change and not a rewrite.
 
     Until Phase 8 this function existed only to raise: the folder was converted to a
     single ``.nii.gz`` in the browser and the DICOM was discarded, so reaching the
@@ -755,7 +926,7 @@ def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):
         bite_classification_job = None
         if processing_job:
             bite_classification_job = (
-                patient.jobs.filter(modality_slug="bite_classification")
+                patient.jobs.filter(modality_slug=BITE_CLASSIFICATION_SLUG)
                 .order_by("-created_at")
                 .first()
             )
@@ -1066,29 +1237,11 @@ def mark_job_completed(job_id, output_files, logs=None):
             if not landmark_path or not artifact_exists(landmark_path):
                 raise ValueError("IOS landmark completion output does not exist")
 
-        # For IOS -> bite stage chaining, update dependent job inputs before
-        # marking IOS as completed. This avoids enqueueing bite jobs without
-        # the oriented IOS artifacts when dependency status flips to pending.
-        if job.modality_slug == "ios" and output_files:
-            try:
-                dependent_bite_jobs = job.dependent_jobs.filter(
-                    modality_slug="bite_classification"
-                )
-                for bite_job in dependent_bite_jobs:
-                    bite_inputs = {}
-                    for logical_name, out_spec in output_files.items():
-                        path_or_key = _resolve_output_path_or_key(out_spec)
-                        if path_or_key:
-                            bite_inputs[str(logical_name)] = path_or_key
-                    bite_job.input_files = bite_inputs
-                    bite_job.save(update_fields=["input_files"])
-                    logger.info(
-                        f"Pre-updated bite classification job #{bite_job.id} with IOS output files: {list(output_files.keys())}"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Error pre-updating dependent bite classification jobs: {e}"
-                )
+        # IOS -> bite stage chaining is Job._pull_dependency_outputs' job: it
+        # merges every completed prerequisite's outputs in, keyed by the
+        # dependency's slug, when the dependent unblocks. A flat per-modality
+        # pre-update here would overwrite that nested structure and drop the
+        # other prerequisites' inputs (e.g. ios-landmarks' landmarks.json).
 
         job.mark_completed(output_files)
         logger.info(f"Job marked as completed successfully")
@@ -1126,14 +1279,7 @@ def mark_job_completed(job_id, output_files, logs=None):
                     fh.close()
 
             segmentations = segmentation_payload.get("segmentations") or {}
-            valid_files = {
-                row.id: row
-                for row in FileRegistry.objects.filter(
-                    id__in=[int(str(file_id)) for file_id in segmentations.keys()],
-                    file_type__in=["intraoral_raw", "intraoral_processed"],
-                    **_job_entity_fk_kwargs(job),
-                )
-            }
+            valid_files = _intraoral_images_by_reference(job, segmentations.keys())
 
             # Confirmation now lives on the annotation *target* (annotations/0003), which
             # is where a per-image claim belongs. The skip itself is unchanged: model
@@ -1144,11 +1290,15 @@ def mark_job_completed(job_id, output_files, logs=None):
 
             images = []
             skipped_confirmed_count = 0
-            for file_id_raw, teeth_payload in segmentations.items():
-                file_id = int(str(file_id_raw))
-                if file_id not in valid_files:
+            for reference, teeth_payload in segmentations.items():
+                row = valid_files.get(str(reference))
+                if row is None:
+                    logger.warning(
+                        "Intraoral completion for job %s names an image it cannot "
+                        "resolve: %r", job.id, reference,
+                    )
                     continue
-                if confirmations.get(file_id):
+                if confirmations.get(row.id):
                     skipped_confirmed_count += 1
                     continue
                 # Normalised before the adapter sees it, deliberately. `tooth_polygons`
@@ -1157,7 +1307,7 @@ def mark_job_completed(job_id, output_files, logs=None):
                 # completion instead of being dropped, as it always has been.
                 images.append(
                     {
-                        "file_obj": valid_files[file_id],
+                        "file_obj": row,
                         "teeth": _normalize_teeth_payload(teeth_payload),
                         "confirmed": False,
                     }
@@ -1193,6 +1343,9 @@ def mark_job_completed(job_id, output_files, logs=None):
 
             output_files["applied_segmentations"] = updated_count
             output_files["skipped_confirmed_segmentations"] = skipped_confirmed_count
+            output_files["applied_views"] = _apply_intraoral_views(
+                job, output_files.get("views_json")
+            )
             job.output_files = output_files
             job.save(update_fields=["output_files"])
         elif job.modality_slug == "cbct_to_panoramic":
@@ -1260,7 +1413,7 @@ def mark_job_completed(job_id, output_files, logs=None):
                         },
                     )
 
-        elif job.modality_slug != "bite_classification":
+        elif job.modality_slug != BITE_CLASSIFICATION_SLUG:
             # Generic registration: one FileRegistry row per output key, shared by
             # every modality that isn't intraoral-photo/bite_classification (both
             # genuine domain logic above/below, not naming) -- including cbct, ios,
@@ -1297,9 +1450,20 @@ def mark_job_completed(job_id, output_files, logs=None):
 
             # Idempotent replace only when this completion actually supplied scan
             # artifacts. A landmarks-only prediction must not remove the viewer STL.
+            #
+            # Scoped to rows this step produced (plus rows predating the
+            # processing_job link): `registry_type` comes from the step's
+            # *modality*, so sibling steps of one modality share it, and an
+            # unscoped delete would make each step's completion drop the others'
+            # outputs -- e.g. a step under `ios` wiping the oriented viewer pair
+            # the `ios` step registered. Steps and their order are admin-editable,
+            # so this must hold for any pipeline shape, not just today's.
             if generic_outputs:
                 FileRegistry.objects.filter(
                     file_type=registry_type, **_job_entity_fk_kwargs(job)
+                ).filter(
+                    Q(processing_job__isnull=True)
+                    | Q(processing_job__modality_slug=job.modality_slug)
                 ).delete()
 
             for file_type, out_spec in generic_outputs.items():
@@ -1333,6 +1497,23 @@ def mark_job_completed(job_id, output_files, logs=None):
                     },
                 )
                 logger.info("FileRegistry entry stored/updated successfully")
+
+            if output_modality_slug == "video" and generic_outputs:
+                # **A derivative has to be probed, and only completion can do it.**
+                # The annotator mounts the subsampled track, whose frame rate and frame
+                # count are its own (one frame per source second) and nothing like the
+                # raw video's -- and no browser can read either from an mp4. The upload
+                # path probes because it has the bytes on disk; the cluster writes these
+                # two straight into the bucket, so this is the one moment they are known
+                # to exist and can be fetched once. Registration above stays generic;
+                # what is domain-specific is which modality needs the question asked.
+                from laparoscopy import video_probe
+
+                for row in FileRegistry.objects.filter(
+                    file_type=registry_type, processing_job=job
+                ):
+                    if video_probe.recorded_probe(row) is None:
+                        video_probe.probe_and_record_stored(row)
 
             if landmark_output and step_modality_slug == "ios":
                 landmark_path = _resolve_output_path_or_key(landmark_output)
@@ -1375,7 +1556,7 @@ def mark_job_completed(job_id, output_files, logs=None):
 
         # Update related model status
         logger.info(f"Updating related model status for modality: {job.modality_slug}")
-        if job_patient and job.modality_slug == "bite_classification":
+        if job_patient and job.modality_slug == BITE_CLASSIFICATION_SLUG:
             logger.info(
                 f"Bite classification job completed for patient {getattr(job_patient, 'patient_id', 'unknown')}"
             )
@@ -1384,8 +1565,10 @@ def mark_job_completed(job_id, output_files, logs=None):
                 classification_file = None
                 for file_type, out_spec in output_files.items():
                     path_or_key = _resolve_output_path_or_key(out_spec)
+                    basename = os.path.basename(str(path_or_key)).lower()
                     if (
-                        str(path_or_key).endswith("_bite_classification_results.json")
+                        basename == "predictions.json"
+                        or str(path_or_key).endswith("_bite_classification_results.json")
                         or "bite_classification" in file_type.lower()
                         or "classification" in file_type.lower()
                     ):
@@ -1404,13 +1587,34 @@ def mark_job_completed(job_id, output_files, logs=None):
                         with contextlib.suppress(Exception):
                             fh.close()
 
-                    sagittal_left = classification_data.get("sagittal_left", "Unknown")
-                    sagittal_right = classification_data.get(
-                        "sagittal_right", "Unknown"
-                    )
-                    vertical = classification_data.get("vertical", "Unknown")
-                    transverse = classification_data.get("transverse", "Unknown")
-                    midline = classification_data.get("midline", "Unknown")
+                    # Bits2Bites emits per-task class indices; older/hand-made
+                    # results carry the five fields directly.
+                    if isinstance(classification_data, list):
+                        values = bite_classification_values(
+                            classification_data,
+                            getattr(job_patient, "patient_id", None),
+                        )
+                        if values is None:
+                            raise ValueError(
+                                "bite predictions do not identify this patient"
+                            )
+                    else:
+                        values = {
+                            field: classification_data.get(field, "Unknown")
+                            for field in (
+                                "sagittal_left",
+                                "sagittal_right",
+                                "vertical",
+                                "transverse",
+                                "midline",
+                            )
+                        }
+
+                    sagittal_left = values["sagittal_left"]
+                    sagittal_right = values["sagittal_right"]
+                    vertical = values["vertical"]
+                    transverse = values["transverse"]
+                    midline = values["midline"]
 
                     if any(
                         val != "Unknown"
@@ -1527,7 +1731,7 @@ def mark_job_failed(job_id, error_msg, can_retry=True):
         job_voice_caption = _job_voice_caption(job)
         job.mark_failed(error_msg, can_retry)
 
-        if job_patient and job.modality_slug == "bite_classification":
+        if job_patient and job.modality_slug == BITE_CLASSIFICATION_SLUG:
             logger.info(
                 f"Bite classification job failed for patient {getattr(job_patient, 'patient_id', 'unknown')}"
             )

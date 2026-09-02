@@ -117,6 +117,7 @@ export function createPhotoStack({
         tools,
         annotationState,
         annotationVisibility,
+        stackPrefetch,
     } = cornerstone;
     const ids = stackIds(instanceId);
 
@@ -178,11 +179,34 @@ export function createPhotoStack({
 
         currentIndex: () => viewport.getCurrentImageIdIndex?.() ?? 0,
 
+        /**
+         * Load the stack, and start fetching the images the user has not asked for yet.
+         *
+         * `viewport.setStack` decodes exactly one image -- the one on screen -- so on the
+         * intraoral surface, where a study is five photographs a clinician steps through
+         * one after another, every Next was a fresh network round trip and a decode with
+         * nothing on screen in the meantime.
+         *
+         * `stackPrefetch` is upstream's own answer and is what the stack surfaces in
+         * OHIF use: it queues the rest through `imageLoadPoolManager` at
+         * `RequestType.Prefetch`, which is *below* interaction priority, so a prefetch
+         * cannot delay the image the user is actually looking at. Its default
+         * `maxImagesToPrefetch` is `Infinity`; a photo study is five images and a
+         * teleradiograph is one, so the whole stack is cached and no cap is configured
+         * for a limit neither surface can reach.
+         *
+         * Re-armed on every `setStack` rather than once at mount, because calibration
+         * rebuilds the stack to make the metadata provider re-read -- and `enable` is
+         * idempotent, it re-registers its own listeners.
+         */
         async setStack(nextImageIds, startIndex = 0) {
             imageIds = [...nextImageIds];
             await viewport.setStack(imageIds, startIndex);
             syncWindowingTool();
             viewport.render();
+            if (imageIds.length > 1) {
+                stackPrefetch?.enable?.(element);
+            }
         },
 
         async scrollTo(index) {
@@ -492,6 +516,10 @@ export function createPhotoStack({
         },
 
         destroy() {
+            // Before the tool group: `disable` clears the queued prefetch requests, and a
+            // surface being torn down must not leave a pool fetching images for a viewport
+            // that no longer exists.
+            stackPrefetch?.disable?.(element);
             try {
                 ToolGroupManager.destroyToolGroup(ids.toolGroup);
             } catch {

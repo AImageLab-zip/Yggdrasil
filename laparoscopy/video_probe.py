@@ -8,9 +8,15 @@ chances to disagree about ``avg_frame_rate`` versus ``nb_frames``, which is exac
 sort of disagreement that moves every mask by a frame.
 """
 
+import contextlib
 import json
+import logging
 import math
+import os
 import subprocess
+import tempfile
+
+logger = logging.getLogger(__name__)
 
 
 def probe_video(local_video_path):
@@ -131,3 +137,89 @@ def probe_and_record(file_row, local_video_path):
     file_row.metadata = metadata
     file_row.save(update_fields=["metadata"])
     return probe
+
+
+def probe_and_record_stored(file_row):
+    """Record the probe for a video that is already in object storage.
+
+    The caller is job completion: the cluster writes the compressed and subsampled
+    derivatives straight into the bucket, so unlike an upload there is no moment at
+    which the bytes are on local disk. They have to be fetched once, which is why this
+    is not done lazily on a page render -- :func:`recorded_probe` exists precisely so a
+    patient-detail view never downloads a surgical recording to ask how many frames it
+    has.
+
+    **The derivative's own numbers, not the source's.** The subsampled track is one
+    frame per second of the original, so its frame rate and frame count are nothing like
+    the raw video's, and it is the track the annotator mounts. Copying the raw probe onto
+    it would put every mask on the wrong frame while looking entirely correct -- the same
+    failure guessing 30 for 25 fps produces.
+
+    Returns the probe, or ``None`` when it could not be taken: a job must not be failed
+    because ffprobe was unhappy, and a derivative with no probe is simply one the
+    annotator declines to open, which the surface already explains.
+    """
+    from common.object_storage import download_to_tempfile
+
+    key = getattr(file_row, "file_path", None)
+    if not key:
+        return None
+    suffix = os.path.splitext(key)[1] or ".mp4"
+    try:
+        with download_to_tempfile(key, suffix=suffix) as local_path:
+            return probe_and_record(file_row, local_path)
+    except Exception:
+        logger.exception("Could not probe stored video %s", key)
+        return None
+
+
+def probe_and_record_upload(file_row, uploaded_file):
+    """Record the probe for a video that has just been uploaded.
+
+    This is the caller the module was written for and **the one it never had**: the
+    docstring above claimed the upload path recorded a probe, and
+    ``_video_annotate_payload`` repeated the claim, but the only caller in the tree
+    was ``annotations_rasterize_video_masks`` -- a command that visits *only*
+    patients carrying legacy stroke rows. So a video uploaded after Phase 10 got no
+    probe from anywhere, the annotator declined to mount for the rest of that file's
+    life, and the page said "No video uploaded for this patient."
+
+    Django spools anything past ``FILE_UPLOAD_MAX_MEMORY_SIZE`` to disk, which a
+    surgical recording always is, so the usual path is ``temporary_file_path()`` and
+    costs nothing. A small in-memory upload is written out once rather than being
+    refused, because the size of the file is not a reason to know less about it.
+
+    Returns the probe, or ``None`` when it could not be taken -- **an upload must not
+    fail because ffprobe did**. The file is stored and playable either way; what a
+    missing probe costs is the annotator, and the page now says so.
+    """
+    local_path = None
+    scratch = None
+    with contextlib.suppress(Exception):
+        local_path = uploaded_file.temporary_file_path()
+
+    try:
+        if not local_path:
+            suffix = os.path.splitext(getattr(uploaded_file, "name", "") or "")[1]
+            fd, scratch = tempfile.mkstemp(prefix="ygg_probe_", suffix=suffix)
+            with os.fdopen(fd, "wb") as handle:
+                # The upload has already been read once by the storage helper, so
+                # rewind rather than assuming the cursor is where it started.
+                with contextlib.suppress(Exception):
+                    uploaded_file.seek(0)
+                for chunk in uploaded_file.chunks():
+                    handle.write(chunk)
+            local_path = scratch
+
+        return probe_and_record(file_row, local_path)
+    except Exception:
+        logger.exception(
+            "Could not probe uploaded video for file %s; it is stored and playable, "
+            "but the annotator will not mount until laparoscopy_probe_videos runs.",
+            getattr(file_row, "id", None),
+        )
+        return None
+    finally:
+        if scratch:
+            with contextlib.suppress(Exception):
+                os.remove(scratch)

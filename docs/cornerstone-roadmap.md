@@ -1389,15 +1389,52 @@ already: Phase 4 shipped four defects a green suite could not see, and Phase 5 s
 four more. There is no reason to think the rate has changed, and the later phases touch
 more.
 
+**Two of them have now been driven, and the rate held.** Phases 7 and 10 were opened in a
+browser and each was broken on arrival, in ways every test passed over:
+
+| Phase | What the browser found | Why the suite could not |
+|---|---|---|
+| 7 | `ArchSpline extends CubicSpline`, which *calls* `getTransformMatrix` and does not define it — only `CardinalSpline`, `BSpline` and `QuadraticBezier` do. Every arch render threw before a handle was drawn | `archSpline.test.js` reached for the method as `getTransformMatrix?.()` and exercised `_getPoint` directly. The entry point the tool calls — `getPolylinePoints()` — had never been run |
+| 7 | `vtkImageCPRMapper` was fed the Cornerstone volume's `imageData`, which carries a `voxelManager` and `hasScalarVolume: false` rather than point-data scalars. It is the one mapper here with no patched counterpart, so it dereferenced a null `volumeTexture` — and because `ContextPoolRenderingEngine._renderFlaggedViewports` has no `try` and clears `_animationFrameSet` only after its loop, **that froze every viewport on the shared engine**. The reported symptom was the axial background ignoring the Z control | The mapper is configured through setters that all exist; `cprMapperApi.test.js` pinned every one of them. Nothing asserted what the mapper was *given* |
+| 10 | `Viewport._removeActor` dereferences `getRenderer()` with no guard while `addActor` guards it, and a `VideoViewport` has no VTK renderer. Every labelmap actor removal threw, so the stale actor stayed, the next pass threw again, and a brush stroke had no actor left to draw it | `videoLabelmapSupport.test.js` pinned the four facts the *add* side rests on. The remove side is a different function and was never read |
+| 10 | The polygon button activated `PlanarFreehandContourSegmentationTool`, which refuses to create an annotation unless a Contour segmentation is active — and this surface has only ever created labelmaps | `videoToolNames.test.js` pinned that the name resolves to a registered tool. It cannot know that the tool's *preconditions* are unsatisfiable here |
+
+The shape is the same in all four: **the pins assert that an upstream symbol exists, and
+the defect is in what the app hands it.** Two of the new tests are written the other way
+round — `cprMapperApi.test.js` now asserts the mapper receives an imageData whose point
+data has scalars, and `videoEditor.test.js` drives a completed outline through to the
+plane it writes — and the `_removeActor` asymmetry is pinned *as a defect*, so a
+Cornerstone bump that fixes it fails the build and says the shim can go.
+
+Phases 6, 8 and 9 have still not been driven.
+
 What to drive, per surface, and what to look for:
 
 | Phase | Surface | Worth driving deliberately |
 |---|---|---|
 | 6 | IOS meshes + landmarks | A converted study's landmarks landing on the mesh they were picked against — the coordinate identity is algebra plus a pin against the shipped `Mesh.js`, and only a real study proves the wiring. Picking on a page that *also* mounts the grid and the photo stack, which is where the viewport-rect arithmetic bites |
-| 7 | Panoramic live CPR | Whether the live strip comes back mirrored against the baked one (`viewUpSign` is the one line to invert); whether the average-vs-clipped-sum difference during a drag reads as informative or as a bug; the warm-up over a folder; a locked patient's refusal |
+| 7 | Panoramic live CPR | Whether the live strip comes back mirrored against the baked one (`viewUpSign` is the one line to invert); whether the average-vs-clipped-sum difference during a drag reads as informative or as a bug; the warm-up over a folder; a locked patient's refusal. The first drive found two throws (above); the strip itself has still not been compared against a bake |
 | 8 | Native DICOM | A folder upload end to end; the series in the grid with measurements on it; a **JPEG Lossless** study, which is the codec wasm path no unit test can reach; an export containing the series |
 | 9 | Interop | The three objects opened by something that is not this repository. `pydicom` reading back what `highdicom` wrote proves self-consistency and nothing about a PACS |
-| 10 | Video | A brush stroke surviving a frame change and a reload; two overlapping regions staying independent; an export whose NPZ matches what the previous release produced for the same study |
+| 10 | Video | A brush stroke surviving a frame change and a reload; two overlapping regions staying independent; an export whose NPZ matches what the previous release produced for the same study. The polygon outline closing into a filled region, and a mask's tool attribution surviving a save |
+
+**Four defects were found by using the thing, and are fixed.** They are recorded here
+because they refine the estimate above rather than merely closing tickets: **three of the
+four were capabilities the migration dropped silently**, and in every one of those the
+server payload and the template markup survived intact while the JavaScript that read
+them did not. A grep for the payload key would have found each of them; the suite could
+not, because nothing was broken — something was simply never called.
+
+| Where | What was lost | Where it went |
+|---|---|---|
+| Phase 3 (brain + CBCT grid) | The SEG overlay toggle. `viewer_grid_data.segmentationFile` emitted by both views, read by nobody | `c03afa6`, not on that commit's list of what was re-implemented |
+| Phase 3 (brain grid) | Drag a modality chip onto a window. Chips still `draggable="true"`, hints still rendered; one arbitrary series loaded into all four windows | same commit |
+| Phase 3 (CBCT 3D) | Segmentation on the volume render. NiiVue composited it for free; Cornerstone needs a `Surface`, and `polySegInit` was imported and **never called** | same commit |
+| Phase 10 (video) | Nothing ever recorded an `ffprobe` result, so a video with no legacy strokes could never mount the annotator and the page said it had not been uploaded | `3999899`, whose own docstrings assert a caller that does not exist |
+
+The fourth is the one worth generalising from: **two docstrings stated that the upload
+path cached a probe, and no code did.** A claim in prose is not a caller, and the only
+check that would have caught it is the one this section is about.
 
 **One capability is missing.** The Magic Tool is not wired on the new video surface — see
 Phase 10. Decision #9 forbids regressing it, so this is a blocker rather than a deferral.

@@ -84,6 +84,24 @@ export const BACKGROUND = Object.freeze({
 /** The reference axes, as a fraction of the scans' bounding radius. */
 export const AXES_SCALE = 0.1;
 
+/**
+ * **The arrows are not captioned, and a caption is not worth what one costs here.**
+ *
+ * They were, briefly: three HTML spans over the canvas, depth-tested against the arches so
+ * a caption did not float in front of a jaw that was demonstrably in front of the arrow it
+ * named. The depth test is a `vtkCellPicker.pick` -- a CPU ray/triangle traversal of an
+ * intraoral scan, which routinely carries several hundred thousand cells -- three of them,
+ * on every animation frame of every drag. It made this surface unusable, and debouncing it
+ * only made the cost intermittent rather than absent.
+ *
+ * vtk.js does caption axes, but not these: `vtkAxesActor` has no labels, and the naming it
+ * does offer is `vtkAnnotatedCubeActor` inside a `vtkOrientationMarkerWidget` -- a
+ * different marker in a corner viewport, not this one. So the choice is the library's
+ * marker or none, and none is what an unlabelled `vtkAxesActor` already was: a small
+ * corner marker the reader orients by colour, drawn entirely by the GPU, costing nothing
+ * per frame.
+ */
+
 const VIEWPORT_ID = 'ios-mesh';
 const ENGINE_ID = 'ios-mesh-engine';
 const TOOL_GROUP_ID = 'ios-mesh-tools';

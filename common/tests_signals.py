@@ -3,7 +3,7 @@ from unittest import mock
 from django.conf import settings
 from django.test import TestCase, override_settings
 
-from common.models import Job
+from common.models import Job, Modality, ProcessingStep
 
 
 # None overrides neutralize a local .env (treated like absent settings) so
@@ -15,6 +15,13 @@ from common.models import Job
 )
 class JobEnqueueSignalTests(TestCase):
     def setUp(self):
+        # 'demo' is enqueued only because a step declares its processing; a slug
+        # with no step has no algo to run and is never dispatched (see
+        # test_a_modality_without_a_step_is_not_enqueued).
+        modality = Modality.objects.create(slug="demo", name="Demo")
+        ProcessingStep.objects.create(
+            modality=modality, name="Demo", slug="demo", is_enabled=True
+        )
         patcher = mock.patch("common.signals.celery_app.send_task")
         self.mock_send_task = patcher.start()
         self.addCleanup(patcher.stop)
@@ -73,9 +80,18 @@ class JobEnqueueSignalTests(TestCase):
         self.assertIsNone(job.started_at)
         self.assertIsNone(job.completed_at)
 
-    @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_disabled_modality_is_not_enqueued(self):
+    def test_disabled_step_is_not_enqueued(self):
+        ProcessingStep.objects.filter(slug="demo").update(is_enabled=False)
         Job.objects.create(domain="maxillo", modality_slug="demo")
+        self.mock_send_task.assert_not_called()
+
+    @override_settings(RUNNER_QUEUE_BY_MODALITY={"iop": "gpu-q"})
+    def test_a_modality_without_a_step_is_not_enqueued(self):
+        # Nothing declares an algo for it, so the runner could only fail the
+        # job -- which is what put a red "processing failed" pill on modalities
+        # that were only ever uploaded and read. A queue entry does not declare
+        # work either.
+        Job.objects.create(domain="maxillo", modality_slug="iop")
         self.mock_send_task.assert_not_called()
 
     def test_broker_failure_does_not_break_save(self):

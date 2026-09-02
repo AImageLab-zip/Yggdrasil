@@ -11,7 +11,7 @@ from unittest import mock
 
 from django.test import TestCase, override_settings
 
-from common.models import Job
+from common.models import Job, Modality, ProcessingStep
 
 TOKEN = "test-token"
 
@@ -28,12 +28,22 @@ CLAIM_JOB_PAYLOAD_KEYS = {
     # Added for the SLURM-over-SSH runner worker (Yggdrasil 2.0): tells the worker
     # which ALGO_BASE_DIR/<algo_name>/run.sbatch to submit for this job's step.
     "algo_name",
+    # The allocation an earlier attempt submitted, so a redelivered task reattaches
+    # instead of sbatching a duplicate.
+    "slurm_job_id",
 }
 
 
 @override_settings(RUNNER_API_TOKENS={TOKEN})
 class RunnerApiTestCase(TestCase):
     def setUp(self):
+        # The runner contract (claim/complete/fail, and the re-dispatch a fail
+        # triggers) only applies to a modality that declares a processing step;
+        # without one no Job is ever dispatched. See common.modality_config.
+        modality = Modality.objects.create(slug="demo", name="Demo")
+        ProcessingStep.objects.create(
+            modality=modality, name="Demo", slug="demo", algo_name="demo"
+        )
         patcher = mock.patch("common.signals.celery_app.send_task")
         self.mock_send_task = patcher.start()
         self.addCleanup(patcher.stop)
@@ -62,6 +72,7 @@ class RunnerApiTestCase(TestCase):
     def _endpoints(self, job_id):
         return [
             f"/api/runner/jobs/{job_id}/claim/",
+            f"/api/runner/jobs/{job_id}/attach/",
             f"/api/runner/jobs/{job_id}/complete/",
             f"/api/runner/jobs/{job_id}/fail/",
         ]
@@ -316,3 +327,78 @@ class RunnerFailContractTests(RunnerApiTestCase):
         response = self._fail(job, body={"error": "boom"})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["reason"], "job_already_failed")
+
+
+class RunnerAttachContractTests(RunnerApiTestCase):
+    """The stamp that makes a lost runner recoverable.
+
+    ``run_job`` blocks for the whole allocation; if the worker dies there, the SLURM id
+    recorded here is the only route back to a run that may already have finished and
+    pushed its outputs.
+    """
+
+    def _attach(self, job, worker="worker-a", **kwargs):
+        return self._post(
+            f"/api/runner/jobs/{job.id}/attach/", worker=worker, **kwargs
+        )
+
+    def test_attach_stamps_slurm_job_id(self):
+        job = self._job(status="processing", worker_id="worker-a")
+        response = self._attach(job, body={"slurm_job_id": "95734"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"attached": True, "reason": "attached", "slurm_job_id": "95734"},
+        )
+        job.refresh_from_db()
+        self.assertEqual(job.slurm_job_id, "95734")
+
+    def test_attach_surfaces_id_on_next_claim(self):
+        # The whole point: a redelivered task must learn the allocation to reattach to.
+        job = self._job(status="processing", worker_id="worker-a")
+        self._attach(job, body={"slurm_job_id": "95734"})
+        response = self._post(f"/api/runner/jobs/{job.id}/claim/", worker="worker-a")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["reason"], "already_claimed_by_same_worker")
+        self.assertEqual(data["job"]["slurm_job_id"], "95734")
+
+    def test_claim_of_fresh_job_reports_no_allocation(self):
+        job = self._job()
+        response = self._post(f"/api/runner/jobs/{job.id}/claim/", worker="worker-a")
+        self.assertEqual(response.json()["job"]["slurm_job_id"], "")
+
+    def test_redispatch_clears_the_stamp(self):
+        # Otherwise a retry would reattach to the allocation it is meant to replace.
+        job = self._job(status="processing", worker_id="worker-a")
+        self._attach(job, body={"slurm_job_id": "95734"})
+        job.refresh_from_db()
+        job.status = "retrying"
+        job.save()
+        job.refresh_from_db()
+        self.assertEqual(job.slurm_job_id, "")
+
+    def test_attach_worker_mismatch_is_409(self):
+        job = self._job(status="processing", worker_id="worker-a")
+        response = self._attach(job, worker="worker-b", body={"slurm_job_id": "1"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["reason"], "worker_mismatch")
+
+    def test_attach_unclaimed_job_is_409(self):
+        job = self._job()
+        response = self._attach(job, body={"slurm_job_id": "1"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["reason"], "job_not_in_processing_status_pending"
+        )
+
+    def test_attach_requires_non_empty_slurm_job_id(self):
+        job = self._job(status="processing", worker_id="worker-a")
+        for body in ({}, {"slurm_job_id": ""}, {"slurm_job_id": "  "}, {"slurm_job_id": 95734}):
+            with self.subTest(body=body):
+                response = self._attach(job, body=body)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.json(),
+                    {"error": "slurm_job_id must be a non-empty string"},
+                )

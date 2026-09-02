@@ -75,11 +75,12 @@ class CBCTUploadContractTests(TestCase):
 
 @override_settings(DICOM_UID_HMAC_KEY="cbct-contract-key")
 class CBCTDicomUploadTests(TestCase):
-    """A DICOM CBCT is stored as DICOM, through the same two upload controls.
+    """Native DICOM storage, and the upload that is currently closed to it.
 
-    The behaviour this replaces: ``save_cbct_folder_to_dataset`` raised
-    unconditionally, because a DICOM folder was converted to a ``.nii.gz`` in the
-    browser and the series was discarded before the server ever saw it.
+    ``save_cbct_folder_to_dataset`` stores a series as it arrived and is kept correct
+    and tested, but no upload path reaches it: uploading DICOM is disabled, and
+    ``save_cbct_to_dataset`` -- the one function every upload path goes through --
+    refuses it on the bytes.
     """
 
     def setUp(self):
@@ -110,12 +111,17 @@ class CBCTDicomUploadTests(TestCase):
         # Not a NIfTI anywhere: that is the whole point of the phase.
         self.assertFalse(any(k.endswith(".nii.gz") for k in self.storage.objects))
 
-    def test_a_single_dicom_file_takes_the_same_path(self):
-        # The File control has advertised '.dcm' since it existed; until now that
-        # promise was kept by a browser conversion that threw the DICOM away.
-        prefix, _job = save_cbct_to_dataset(self.patient, series_of(1)[0])
-        self.assertEqual(self.patient.files.get(file_type="cbct_raw").file_path, prefix)
-        self.assertEqual(DicomSeries.objects.get().instance_count, 1)
+    def test_uploading_a_dicom_instance_is_refused_and_stores_nothing(self):
+        # Judged by the DICM marker in the bytes, not by the filename: a DICOM
+        # instance off a burned disc routinely has no extension at all.
+        instance = series_of(1)[0]
+        instance.name = "no-extension"
+        with self.assertRaises(ValidationError) as ctx:
+            save_cbct_to_dataset(self.patient, instance)
+        self.assertIn("DICOM upload is disabled", str(ctx.exception))
+        self.assertEqual(self.patient.files.count(), 0)
+        self.assertEqual(DicomSeries.objects.count(), 0)
+        self.assertEqual(self.storage.objects, {})
 
     def test_the_job_input_names_the_series_not_a_converted_file(self):
         prefix, job = save_cbct_folder_to_dataset(self.patient, series_of(2))

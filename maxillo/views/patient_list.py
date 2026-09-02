@@ -10,7 +10,11 @@ from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as 
 from .helpers import bulk_upload_url_for, redirect_with_namespace, render_with_fallback
 from common.demo import landing_demo_url
 from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
-from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
+from common.modality_config import (
+    modality_status,
+    rerun_step_labels,
+    rerunnable_steps_for_patient,
+)
 from common.project_filters import presence_filter_specs
 from common.models import Project, ProjectAccess
 from common.permissions import (
@@ -356,20 +360,13 @@ def patient_list(request):
             if slug == 'rawzip' or slug == 'voice':
                 continue
             
-            status = 'absent'
-            has_any_files = slug in files_by_modality and len(files_by_modality[slug]) > 0
-            
-            # Determine status precedence: failed > processing > pending > processed > absent
-            # Check jobs using prefetched data
-            modality_jobs = jobs_by_modality.get(slug, [])
-            if any(job.status == 'failed' for job in modality_jobs):
-                status = 'failed'
-            elif any(job.status == 'processing' for job in modality_jobs):
-                status = 'processing'
-            elif any(job.status in ['pending', 'retrying'] for job in modality_jobs):
-                status = 'pending'
-            elif has_any_files:
-                status = 'processed'
+            # failed > processing > pending > processed > absent, and jobs only
+            # for a modality that declares a processing step (common.modality_config).
+            status = modality_status(
+                slug,
+                jobs_by_modality.get(slug, []),
+                bool(files_by_modality.get(slug)),
+            )
 
             modality_status_list.append({'slug': slug, 'name': name, 'icon': icon, 'label': label, 'status': status})
 

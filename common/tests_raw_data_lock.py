@@ -113,6 +113,19 @@ class LockTriggerTests(TestCase):
         Classification.objects.create(patient=self.patient)
         self.assertTrue(raw_data_is_locked(self.patient))
 
+    def test_a_pipeline_bite_classification_does_not_lock(self):
+        # Bits2Bites fills the occlusion facets, but machine output is not
+        # annotation work: the arch stays editable until a human classifies.
+        Classification.objects.create(patient=self.patient, classifier="pipeline")
+        self.assertEqual(annotation_lock_reasons(self.patient), [])
+        self.assertFalse(panoramic_is_locked(self.patient))
+
+    def test_a_manual_classification_alongside_a_pipeline_one_locks(self):
+        Classification.objects.create(patient=self.patient, classifier="pipeline")
+        Classification.objects.create(patient=self.patient, classifier="manual")
+        self.assertIn("an occlusion classification", annotation_lock_reasons(self.patient))
+        self.assertTrue(panoramic_is_locked(self.patient))
+
     def test_tooth_segmentation_locks(self):
         IntraoralToothSegmentation.objects.create(
             patient=self.patient,
@@ -473,6 +486,42 @@ class AnnotationSetLockTests(TestCase):
         annotation_set.revisions.all().delete()
 
         self.assertTrue(raw_data_is_locked(self.patient))
+
+    def test_a_predicted_landmark_file_does_not_lock_a_converted_patient(self):
+        """The reported bug: a machine-written file locking a patient nobody annotated.
+
+        The IOS pipeline writes an ``ios_landmarks`` FileRegistry row and the
+        conversion records it as a set with ``ever_annotated=False``. The
+        annotations half correctly reports nothing; the legacy half used to run
+        its ``.exists()`` on the file anyway and lock the case -- which showed up
+        as "Arch locked" on a patient whose only annotation work was a prediction.
+        Where the conversion has covered a kind, the set is the answer.
+        """
+        _registry(self.patient, "ios_landmarks")
+        self._set("ios_landmarks", ever_annotated=False)
+
+        self.assertFalse(raw_data_is_locked(self.patient))
+        self.assertFalse(panoramic_is_locked(self.patient))
+        self.assertEqual(annotation_lock_reasons(self.patient), [])
+
+    def test_an_unconverted_legacy_row_still_locks(self):
+        """The cross-check is only skipped where a set exists to answer instead.
+
+        With no ``ios_landmarks`` set at all the conversion has not reached this
+        surface, so the legacy check is still the only thing that knows, and it
+        must keep locking (decision #6).
+        """
+        _registry(self.patient, "ios_landmarks")
+
+        self.assertTrue(raw_data_is_locked(self.patient))
+        self.assertEqual(annotation_lock_reasons(self.patient), ["IOS landmarks"])
+
+    def test_a_converted_set_that_was_annotated_still_locks(self):
+        _registry(self.patient, "ios_landmarks")
+        self._set("ios_landmarks", ever_annotated=True)
+
+        self.assertTrue(raw_data_is_locked(self.patient))
+        self.assertEqual(annotation_lock_reasons(self.patient), ["IOS landmarks"])
 
     def test_a_migrated_patient_reports_each_reason_once(self):
         VoiceCaption.objects.create(patient=self.patient, user=self.user, duration=1.0)

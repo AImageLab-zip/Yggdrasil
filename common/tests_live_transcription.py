@@ -2,6 +2,7 @@ import asyncio
 import json
 from unittest import mock
 
+from channels.db import database_sync_to_async
 from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth.models import AnonymousUser, User
@@ -110,6 +111,56 @@ class LiveTranscriptionConsumerTests(TransactionTestCase):
             self.assertTrue(upstream.closed)
 
     async def test_rejects_user_without_annotation_access(self):
+        communicator = self.communicator(self.outsider)
+        connected, code = await communicator.connect()
+        self.assertFalse(connected)
+        self.assertEqual(code, 4403)
+
+    async def test_allows_a_patient_outside_the_domain_first_project(self):
+        """The project checked is the patient's, not the domain's first by name.
+
+        This is the case `_can_transcribe` used to get wrong, and the one a deployment
+        with more than one project per domain is made of: the consumer resolved the
+        permission context from the domain *slug*, which `_project_from_context` turns
+        into `entry_project_for(None, domain)` -- the first active project of the domain
+        by name. A patient in any other project was therefore checked against a project it
+        is not in, and every attempt closed 4403 while the patient page itself, which
+        resolves the project the normal way, kept working.
+        """
+        other = await database_sync_to_async(Project.objects.create)(
+            name="A Other", slug="maxillo-other", domain="maxillo"
+        )
+        # Named after "A Other" so it is *not* the one a domain-wide lookup would find,
+        # and holding no access for the user at all.
+        self.assertLess(other.name, self.project.name)
+
+        upstream = FakeWhisperSocket()
+        with (
+            mock.patch("common.consumers._ssl_context"),
+            mock.patch(
+                "common.consumers.websockets.connect",
+                new=mock.AsyncMock(return_value=upstream),
+            ),
+        ):
+            communicator = self.communicator(self.user)
+            connected, code = await communicator.connect()
+            self.assertTrue(connected, msg=f"refused with {code}")
+            await communicator.disconnect()
+
+    async def test_rejects_a_writer_of_another_project_in_the_domain(self):
+        """Access to one project of a domain is not access to its other patients.
+
+        The other half of the same fix: resolving the project from the domain also meant
+        an admin of whichever project sorted first could dictate into every patient of the
+        domain, including projects they hold nothing on.
+        """
+        other = await database_sync_to_async(Project.objects.create)(
+            name="A Other", slug="maxillo-other", domain="maxillo"
+        )
+        await database_sync_to_async(ProjectAccess.objects.create)(
+            user=self.outsider, project=other, role="admin"
+        )
+
         communicator = self.communicator(self.outsider)
         connected, code = await communicator.connect()
         self.assertFalse(connected)

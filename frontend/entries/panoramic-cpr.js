@@ -35,10 +35,10 @@ import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray.js';
 import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData.js';
 import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData.js';
 import vtkImageCPRMapper from '@kitware/vtk.js/Rendering/Core/ImageCPRMapper.js';
-import vtkImageMapper from '@kitware/vtk.js/Rendering/Core/ImageMapper.js';
 import vtkImageSlice from '@kitware/vtk.js/Rendering/Core/ImageSlice.js';
 
 import { initImaging } from '../imaging/runtime/init.js';
+import { isMeasurable, observeSize } from '../imaging/runtime/elementSize.js';
 import { volumeIdFor } from '../imaging/grid/layout.js';
 import { primaryVolumeFrom } from '../imaging/grid/bootstrap.js';
 import { volumeUrl } from '../imaging/ids/imageIds.js';
@@ -136,7 +136,7 @@ async function mount({ plan, data, source, onReady, onGeometry, onError }) {
     const cpr = createCprViewport({
         element: plan.cprStage,
         cornerstone: { renderingEngine, coreEnums },
-        vtk: { vtkImageCPRMapper, vtkImageSlice, vtkPolyData, vtkDataArray },
+        vtk: { vtkImageCPRMapper, vtkImageSlice, vtkPolyData, vtkDataArray, vtkImageData },
     });
     cpr.setVolume(cache.getVolume(volumeId));
 
@@ -147,7 +147,6 @@ async function mount({ plan, data, source, onReady, onGeometry, onError }) {
             setVolumesForViewports,
             tools: { PanTool, ZoomTool, SplineROITool },
         },
-        vtk: { vtkImageData, vtkDataArray, vtkImageMapper, vtkImageSlice },
         onArchEdited: (points) => surface?.editArch(points),
         onArchDragged: (points) => surface?.dragArch(points),
     });
@@ -173,6 +172,40 @@ async function mount({ plan, data, source, onReady, onGeometry, onError }) {
             onGeometry(geometry);
         },
     });
+
+    // **The stages are hidden when this runs, and Cornerstone cannot measure a hidden
+    // element.** For a patient with no saved panoramic the whole surface is mounted by the
+    // unattended pass, with `#cbctPanorexEditor` still `hidden`; the live strip's stage is
+    // hidden again whenever the baked pane is the one showing. `getOrCreateCanvas` leaves
+    // such a canvas at the HTML default 300x150, `sWidth`/`sHeight` follow it, and both the
+    // copy that puts the picture on screen and `worldToCanvas` -- which places the mask
+    // overlay and every control point the tools draw -- stay scaled to it. That is the
+    // reported defect: the axial, its mandible mask and the spline handles all correct
+    // relative to each other and all crammed into the top-left corner of the stage.
+    //
+    // One `resize()` covers every viewport on the engine, so it is called once here rather
+    // than per surface; each viewport then re-establishes the framing only it knows about.
+    // The first sizing that has a real element also refits the axial camera: a camera
+    // fitted to a 300x150 viewport is not a camera. Same idiom, same reason, as
+    // `grid/bootstrap.js` and `photos/bootstrap.js`.
+    let sized = false;
+    const resize = (measurable) => {
+        if (!measurable) {
+            return;
+        }
+        try {
+            renderingEngine.resize(true, true);
+            arch.reframe(!sized);
+            cpr.reframe();
+            sized = true;
+        } catch (error) {
+            console.info(`[ygg-panoramic] resize failed: ${error.message}`);
+        }
+    };
+    const unobserve = [plan.axialStage, plan.cprStage].map((stage) =>
+        observeSize(stage, () => resize(isMeasurable(plan.axialStage)))
+    );
+    resize(isMeasurable(plan.axialStage));
 
     let surface = null;
     const mounted = {
@@ -212,6 +245,9 @@ async function mount({ plan, data, source, onReady, onGeometry, onError }) {
             context.restore();
         },
         destroy() {
+            for (const stop of unobserve) {
+                stop();
+            }
             worker.terminate();
             arch.destroy();
             cpr.destroy();

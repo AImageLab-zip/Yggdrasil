@@ -29,9 +29,7 @@ from .folders_tags import (
     add_patient_tag,
     remove_patient_tag,
     folder_stats,
-    folder_permissions,
-    upsert_folder_permission,
-    delete_folder_permission,
+    delete_folder,
     rename_folder,
 )
 
@@ -144,9 +142,7 @@ __all__ = [
     'add_patient_tag',
     'remove_patient_tag',
     'folder_stats',
-    'folder_permissions',
-    'upsert_folder_permission',
-    'delete_folder_permission',
+    'delete_folder',
     'rename_folder',
     # Profile
     'user_profile',

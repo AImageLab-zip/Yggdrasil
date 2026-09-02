@@ -240,3 +240,32 @@ export function normalizeTeeth(teeth) {
     }
     return out;
 }
+
+/**
+ * The centre of a ring, as the mean of its vertices.
+ *
+ * Where the FDI code is drawn. The *area* centroid would be the textbook answer and is a
+ * shoelace sum away, but the two differ only for rings whose vertices are unevenly spaced
+ * around the shape -- and a tooth outline is a hand-drawn blob with control points laid
+ * down at a roughly even pace, so on this input they agree to within a few pixels. The
+ * vertex mean is what the label being legible actually needs.
+ *
+ * Neither is guaranteed to land *inside* a sufficiently concave ring. A crown outline is
+ * not that, and a label a few pixels outside a crescent is a cosmetic loss, not a wrong
+ * reading.
+ *
+ * @param {Array<number[]>} points canvas or image coordinates; the units are the caller's.
+ * @returns {number[]|null} `[x, y]`, or null for an empty ring.
+ */
+export function centroidOf(points) {
+    if (!Array.isArray(points) || !points.length) {
+        return null;
+    }
+    let sumX = 0;
+    let sumY = 0;
+    for (const point of points) {
+        sumX += point[0];
+        sumY += point[1];
+    }
+    return [sumX / points.length, sumY / points.length];
+}

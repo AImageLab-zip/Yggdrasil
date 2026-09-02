@@ -40,10 +40,6 @@
                                     title="Polygon (P) — click to add vertices, Enter to close, Esc to cancel">
                                 <i class="fas fa-draw-polygon"></i>
                             </button>
-                            <button type="button" class="btn btn-outline-primary" data-tool="point"
-                                    title="Point Tool — add Magic prompt points on the current frame">
-                                <i class="fas fa-crosshairs"></i>
-                            </button>
                             <button type="button" class="btn btn-outline-primary" data-tool="pan"
                                     title="Pan (H)">
                                 <i class="fas fa-hand-paper"></i>
@@ -55,6 +51,19 @@
                             <input id="brush-size-input" type="range" class="form-range" min="1" max="60" value="8" style="width:90px;">
                             <span id="brush-size-label" class="small text-muted" style="min-width:20px;">8</span>
                         </div>
+
+                        {% comment %}
+                            The save. `surface.save()` has existed since Phase 10 and had
+                            no caller, so nothing on this page could write an annotation
+                            to the server -- and `#savingIndicator` below sat orphaned.
+                            Replace-the-set against the revision the editor read, so a
+                            409 means somebody else saved first and the honest recovery
+                            is to reload; `imaging/video/pageControls.js` says so rather
+                            than swallowing it.
+                        {% endcomment %}
+                        <button id="save-annotations-btn" class="btn btn-sm btn-outline-primary" type="button" title="Save the annotations on this video">
+                            <i class="fas fa-floppy-disk me-1"></i>Save
+                        </button>
 
                         <div class="btn-group btn-group-sm" role="group">
                             <button id="zoom-in-btn" class="btn btn-outline-secondary" title="Zoom in">
@@ -70,7 +79,7 @@
 
                         <div class="ms-auto d-none d-lg-flex flex-column align-items-end" style="font-size:0.72rem;color:#6c757d;line-height:1.6;">
                             <span><kbd>B</kbd> brush &nbsp; <kbd>E</kbd> eraser &nbsp; <kbd>P</kbd> polygon &nbsp; <kbd>H</kbd> pan</span>
-                            <span><kbd>←</kbd><kbd>→</kbd> frame &nbsp;&middot;&nbsp; <kbd>Shift+←</kbd><kbd>Shift+→</kbd> ±10 seconds</span>
+                            <span><kbd>←</kbd><kbd>→</kbd> ±1 second &nbsp;&middot;&nbsp; <kbd>Shift+←</kbd><kbd>Shift+→</kbd> ±10 seconds</span>
                         </div>
 
                     </div>
@@ -78,10 +87,79 @@
             </div>
 
             <!-- Video + canvas container -->
+            {% comment %}
+                The placeholder is removed by the page glue below once the Cornerstone
+                surface mounts, so it is also what a *declined* mount leaves on screen.
+                It used to say "No video uploaded for this patient." in every such case,
+                including the one where the file is present and playable and only its
+                ffprobe result is missing -- which sent people looking for a lost
+                upload instead of running `laparoscopy_probe_videos`. `video_state`
+                (maxillo/views/patient_detail.py) distinguishes the three.
+            {% endcomment %}
             <div id="video-player-wrap" class="mb-2" style="background:#000;line-height:0;overflow:hidden;">
                 <p class="text-muted p-3 mb-0" id="video-placeholder" style="line-height:normal;">
-                    <i class="fas fa-hourglass-half me-2"></i>No video uploaded for this patient.
+                    {% if video_state == 'processing' %}
+                        {% comment %}
+                            The recording is here and plays; what is missing is the
+                            subsampled track the annotator works on. Annotating the raw
+                            video would put strokes on frames the export -- which reads
+                            the subsampled track -- cannot line up with, so the surface
+                            waits rather than producing a record nobody can use.
+                        {% endcomment %}
+                        <i class="fas fa-gears me-2"></i>This recording is still being
+                        processed. Annotation opens once the sampled track is ready — it
+                        is what annotations are recorded against, so it has to exist
+                        before the first stroke. The video below plays in the meantime.
+                    {% elif video_state == 'unprobed' %}
+                        <i class="fas fa-triangle-exclamation me-2"></i>This video has not
+                        been analysed yet, so the annotator cannot open. Its frame rate and
+                        frame size have to be read from the file before any annotation can
+                        be placed on the right frame.
+                        {% if is_admin_user %}
+                        <br><span class="small">An administrator can record them with
+                        <code>manage.py laparoscopy_probe_videos --patient {{ patient.patient_id }}</code>.</span>
+                        {% endif %}
+                    {% elif video_state == 'error' %}
+                        <i class="fas fa-triangle-exclamation me-2"></i>This patient's video
+                        could not be prepared. The failure is in the server log.
+                    {% elif video_state == 'ready' %}
+                        {% comment %}
+                            A different sentence, because this is a different state. It is
+                            replaced the moment the surface mounts; the reader sees it only
+                            while the file is being fetched, or -- if the surface never
+                            mounts at all -- instead of a claim that nothing was uploaded.
+                            That claim, made over a stored and playable recording, is what
+                            sent people looking for an upload that had already happened.
+                        {% endcomment %}
+                        <i class="fas fa-hourglass-half me-2"></i>Loading the recording…
+                    {% else %}
+                        <i class="fas fa-hourglass-half me-2"></i>No video uploaded for this patient.
+                    {% endif %}
+                    {% if is_admin_user and video_diagnosis %}
+                    {% comment %}
+                        The server's working, for staff only. "No video uploaded" over a
+                        file somebody can see in the bucket is a claim, and the page had
+                        no way to show how it reached it -- which cost a round trip.
+                    {% endcomment %}
+                    <br><span class="small text-muted">{{ video_diagnosis }}</span>
+                    {% endif %}
                 </p>
+                {% if has_video and video_url %}
+                {% comment %}
+                    The viewport goes *here*, inside the player wrap, because this is where
+                    the reader is looking: between the annotation toolbar above and the
+                    frame bar below. It was emitted at the very bottom of the page, after
+                    the back button and the saving indicator, alongside the payload and the
+                    entry tag -- so the recording rendered under the whole record and the
+                    controls that drive it acted on something off screen.
+
+                    `pageControls.js` removes `#video-placeholder` and clears `d-none` off
+                    this element once the surface mounts, which is why the two are
+                    siblings: the placeholder is what a declined mount leaves behind, and
+                    it must occupy the same box.
+                {% endcomment %}
+                <div id="video-annotate-viewport" class="d-none" style="width:100%;height:65vh;background:#000;"></div>
+                {% endif %}
             </div>
 
             <!-- Frame navigation bar (hidden until a video is loaded) -->
@@ -165,91 +243,20 @@
                             Drag the playhead to scrub. Use Add Marker for new markers. Click a marker to reassign or delete.
                         </div>
 
-                        {% if user_profile.is_admin %}
-                        <style>
-                            .quadrant-editor {
-                                display: flex;
-                                flex-wrap: wrap;
-                                gap: 0.35rem;
-                                align-items: center;
-                            }
-                            .quadrant-chip {
-                                display: inline-flex;
-                                align-items: center;
-                                gap: 0.35rem;
-                                max-width: 11rem;
-                                min-height: 1.75rem;
-                                padding: 0.18rem 0.25rem 0.18rem 0.45rem;
-                                border: 1px solid #d8dee7;
-                                border-radius: 999px;
-                                background: #fff;
-                                color: #26313d;
-                                font-size: 0.78rem;
-                                line-height: 1;
-                                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-                            }
-                            .quadrant-chip.is-active {
-                                border-color: var(--quadrant-color);
-                                background: color-mix(in srgb, var(--quadrant-color) 12%, white);
-                                box-shadow: 0 0 0 2px color-mix(in srgb, var(--quadrant-color) 18%, transparent);
-                            }
-                            .quadrant-chip-dot {
-                                width: 0.65rem;
-                                height: 0.65rem;
-                                border-radius: 999px;
-                                flex: 0 0 auto;
-                                background: var(--quadrant-color);
-                            }
-                            .quadrant-chip-name {
-                                overflow: hidden;
-                                text-overflow: ellipsis;
-                                white-space: nowrap;
-                            }
-                            .quadrant-chip-actions {
-                                display: inline-flex;
-                                gap: 0.1rem;
-                                margin-left: 0.1rem;
-                            }
-                            .quadrant-chip-btn {
-                                width: 1.25rem;
-                                height: 1.25rem;
-                                padding: 0;
-                                border: 0;
-                                border-radius: 999px;
-                                background: transparent;
-                                color: #667085;
-                                line-height: 1;
-                            }
-                            .quadrant-chip-btn:hover {
-                                background: rgba(15, 23, 42, 0.08);
-                                color: #111827;
-                            }
-                            .quadrant-chip-input {
-                                width: 6rem;
-                                height: 1.35rem;
-                                padding: 0 0.35rem;
-                                border-radius: 999px;
-                                font-size: 0.76rem;
-                            }
-                            .quadrant-add-chip {
-                                min-height: 1.75rem;
-                                padding: 0.18rem 0.65rem;
-                                border: 1px dashed #98a2b3;
-                                border-radius: 999px;
-                                background: #f8fafc;
-                                color: #344054;
-                                font-size: 0.78rem;
-                                line-height: 1;
-                            }
-                        </style>
+                        {% comment %} The chip styling lives in `static/css/patient_detail.css`
+                           as `.ygg-type-chip`, shared with the region-type list beside the
+                           viewer. It was seventy lines of inline `<style>` here, inside this
+                           gated block -- so a viewer's page did not carry the stylesheet
+                           for chips their own region list needed. {% endcomment %}
+                        {% if user_profile.is_annotator %}
                         <div id="quadrant-types-panel" class="d-none mt-2 pt-2 border-top">
                             <div class="d-flex justify-content-between align-items-center mb-1">
                                 <span class="small fw-semibold text-muted text-uppercase" style="letter-spacing:0.04em;">Quadrants</span>
-                                <button id="timeline-add-class-btn" class="quadrant-add-chip" type="button">
+                                <button id="timeline-add-class-btn" class="ygg-type-chip-add" type="button">
                                     <i class="fas fa-plus me-1"></i>Add Quadrant
                                 </button>
                             </div>
-                            <div id="timeline-class-admin-list" class="quadrant-editor"></div>
+                            <ul id="timeline-class-admin-list" class="ygg-type-chips list-unstyled mb-0"></ul>
                         </div>
                         {% endif %}
                     </div>
@@ -304,25 +311,32 @@
                                     title="Hide all regions">
                                 <i class="fas fa-eye-slash me-1"></i>Hide all
                             </button>
-                            {% if user_profile.is_admin %}
+                            {% if user_profile.is_annotator %}
                             <button id="add-region-btn" class="btn btn-sm btn-outline-success py-0">
                                 <i class="fas fa-plus me-1"></i>Add
                             </button>
                             {% endif %}
                         </div>
                     </div>
-                    <ul id="region-list" class="list-unstyled d-flex flex-wrap gap-2 mb-0"
-                        style="max-height:220px;overflow-y:auto;"></ul>
+                    <div class="card-body p-2">
+                        <ul id="region-list" class="ygg-type-chips list-unstyled mb-0"
+                            style="max-height:220px;overflow-y:auto;"></ul>
+                    </div>
                 </div>
             </div>
 
             <!-- Annotations list (visible only in annotation mode) -->
             <div id="shapes-list-panel" class="d-none mb-3">
                 <div class="card">
-                    <div class="card-header py-2">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
                         <strong class="small"><i class="fas fa-shapes me-1"></i>Annotations</strong>
+                        <button id="shapes-filter-btn" type="button"
+                                class="btn btn-sm btn-outline-secondary py-0"
+                                title="Show only the selected region">
+                            <i class="fas fa-filter"></i>
+                        </button>
                     </div>
-                    <ul id="shapes-list" class="list-group list-group-flush" style="max-height:200px;overflow-y:auto;"></ul>
+                    <ul id="shapes-list" class="list-group list-group-flush" style="max-height:220px;overflow-y:auto;"></ul>
                 </div>
             </div>
 
@@ -417,7 +431,13 @@
 {% endcomment %}
 <script id="videoAnnotateData" type="application/json">{{ video_annotate_data|safe }}</script>
 
-<div id="video-annotate-viewport" class="d-none" style="width:100%;height:65vh;background:#000;"></div>
+{% comment %}
+    `CSRF_USE_SESSIONS = True` (yggdrasil/settings.py:249), so there is no `csrftoken`
+    cookie to read and the hidden input is the only source. Every write this surface
+    makes -- the annotation save and the quadrant markers -- carries it, and without this
+    each one is a bare 403. The maxillo grid carries the same input for the same reason.
+{% endcomment %}
+<div hidden>{% csrf_token %}</div>
 
 {% comment %}
     The laparoscopy annotator on Cornerstone3D (Phase 10). Replaces the eight Konva
@@ -426,80 +446,16 @@
 
     The record is a labelmap per annotated frame (decision #14), so the brush, the
     eraser and the scissors mutate pixels and the revision chain is the audit trail.
+
+    **The page's glue lives in `frontend/imaging/video/pageControls.js`**, and the entry
+    calls it as soon as the surface exists. It was an inline `<script type="module">`
+    here that polled `window.YggVideoAnnotate.surface` every 50 ms and then wired three
+    things: the tool buttons, and nothing else. The frame bar, the timeline, the region
+    list and `#savingIndicator` were markup with no code behind them -- and because every
+    drawing tool needs a selected region, and nothing could select one, no drawing tool
+    could be activated at all. Moving it out is what lets the frame arithmetic and the
+    tool/region rules be unit tests rather than clicks; the markup stays Yggdrasil's own
+    (decision #4).
 {% endcomment %}
 {% cornerstone_entry 'video-annotate' %}
-
-<script type="module">
-/**
- * Page glue: the markup above is Yggdrasil's own UI and stays that way (decision #4).
- * This wires it to the mounted surface and does nothing a test could check -- every
- * decision worth asserting lives in imaging/video/, which is why this is short.
- */
-(function () {
-    'use strict';
-
-    const toolbar = document.getElementById('annotation-toolbar');
-    const viewport = document.getElementById('video-annotate-viewport');
-    const toggleBtn = document.getElementById('annotation-toggle-btn');
-    const placeholder = document.getElementById('video-placeholder');
-    const frameNavBar = document.getElementById('frame-nav-bar');
-    const temporalBar = document.getElementById('temporal-classification-bar');
-    const tourBtn = document.getElementById('laparoscopy-tour-btn');
-
-    function whenMounted(callback) {
-        // The entry mounts on DOMContentLoaded and resolves its own promise; the page
-        // does not race it, it waits for it. A `null` surface means the bootstrap
-        // declined, and it has already said why in the console.
-        const poll = window.setInterval(() => {
-            if (window.YggVideoAnnotate?.surface !== undefined) {
-                window.clearInterval(poll);
-                callback(window.YggVideoAnnotate.surface);
-            }
-        }, 50);
-    }
-
-    whenMounted((surface) => {
-        if (!surface) {
-            return;
-        }
-        if (placeholder) placeholder.remove();
-        viewport.classList.remove('d-none');
-        if (toggleBtn) toggleBtn.classList.remove('d-none');
-        if (frameNavBar) frameNavBar.classList.remove('d-none');
-        if (temporalBar) temporalBar.classList.remove('d-none');
-        if (tourBtn) tourBtn.classList.remove('d-none');
-
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => {
-                const on = toolbar.classList.toggle('d-none');
-                toggleBtn.classList.toggle('active', !on);
-            });
-        }
-
-        toolbar?.addEventListener('click', (event) => {
-            const button = event.target.closest('[data-tool]');
-            if (!button) {
-                return;
-            }
-            if (!surface.editor.setActiveTool(button.dataset.tool)) {
-                // Refused rather than silently ignored: the usual reason is that no
-                // region is selected, and a button that looks pressed and does nothing
-                // is worse than one that says so.
-                window.console.info('[ygg-video] pick a region before drawing on one');
-                return;
-            }
-            toolbar.querySelectorAll('[data-tool]').forEach((other) => {
-                other.classList.toggle('active', other === button);
-            });
-        });
-
-        window.addEventListener('beforeunload', (event) => {
-            if (surface.store.annotatedTimes().length && surface.dirty) {
-                event.preventDefault();
-                event.returnValue = '';
-            }
-        });
-    });
-})();
-</script>
 {% endif %}

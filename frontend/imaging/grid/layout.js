@@ -97,12 +97,55 @@ export const FIXED_CBCT_LAYOUT = Object.freeze([
     Object.freeze({ window: 3, orientation: ORIENTATIONS.RENDER, lazy: false }),
 ]);
 
-/** The free layout brain uses: four independent windows, all axial to begin with. */
+/**
+ * The layout brain uses: four axial windows, each showing whatever was dropped on it.
+ *
+ * This surface compares *sequences*, not planes. Four axial windows side by side is what
+ * FLAIR against T1 against T1c against T2 looks like, and it is the maintainer's call.
+ *
+ * It was briefly three orthogonal planes plus an axial, to give `CrosshairsTool`
+ * something to work with -- **the crosshair draws the intersection lines of the other
+ * viewports' planes, and four parallel planes intersect nowhere**. That reasoning is
+ * correct and the conclusion was backwards: the layout is the requirement, so the
+ * crosshair is what goes. {@link supportsCrosshairs} is how that is decided rather than
+ * remembered, and `createToolGroups` leaves the tool out of a grid that cannot use it
+ * instead of binding the primary mouse button to something inert.
+ *
+ * Dropping a modality into a window does not change its orientation --
+ * `loadVolumeIntoWindows` only swaps what the viewport shows -- so these assignments
+ * survive the page being rearranged.
+ */
 export const FREE_LAYOUT = Object.freeze(
     Array.from({ length: GRID_WINDOWS }, (unused, index) =>
         Object.freeze({ window: index, orientation: ORIENTATIONS.AXIAL, lazy: false })
     )
 );
+
+/**
+ * Whether `CrosshairsTool` can operate on this layout.
+ *
+ * It needs **two viewports cutting on different planes**, and neither half of that is
+ * negotiable. With fewer than two it warns "For crosshairs to operate, at least two
+ * viewports must be given" (`CrosshairsTool.js:190-193`); with two or more that are all
+ * parallel, `_calculateToolCenterFromAbsoluteCameras` collapses them to a single unique
+ * plane and returns `null` (`CrosshairsTool.js:1360-1366`), so the tool centre is never
+ * computed and every click on the image does nothing at all.
+ *
+ * A grid that fails this must not be given the tool: a left mouse button bound to a
+ * tool that cannot act is worse than a left mouse button bound to nothing, because it
+ * looks like it is working.
+ *
+ * @param {object[]} layout entries of `{window, orientation, lazy}`.
+ * @returns {boolean}
+ */
+export function supportsCrosshairs(layout = []) {
+    const planes = new Set(
+        layout
+            .filter((entry) => !entry.lazy && isSliceOrientation(entry.orientation))
+            .map((entry) => entry.orientation)
+    );
+    return planes.size >= 2;
+}
 
 /**
  * Runtime viewport id for a grid window.
@@ -208,4 +251,71 @@ export function assertEnumsMatch({ ViewportType, OrientationAxis }) {
                 '\nUpdate the inlined constants and the tests that pin them.'
         );
     }
+}
+
+/**
+ * How long a reference line is drawn, before it is clipped to the canvas.
+ *
+ * {@link crosshairLinesOnly} runs the tool in its `minimal` profile, and that profile
+ * exists to draw a *short stub* either side of the centre -- 40 px by default. This grid
+ * wants the full-width lines it has always had, and the tool gives that for free: the
+ * minimal branch builds each line as `centre + unit * lineLengthInPx` and then runs the
+ * same `liangBarksyClip` against the canvas box that the normal branch does, so any
+ * length past the canvas diagonal produces exactly the line the normal branch would.
+ * The normal branch itself uses `canvasDiagonalLength * 100`; this module cannot see a
+ * canvas, so it names a length no viewport will ever exceed.
+ */
+export const CROSSHAIR_LINE_LENGTH_PX = 100000;
+
+/**
+ * Crosshairs that draw reference lines and nothing else -- and still navigate.
+ *
+ * `CrosshairsTool` decorates each reference line with two kinds of handle: circles that
+ * rotate the plane, and squares that drag the slab thickness. Both were reported as
+ * clutter -- "an additional square and circle on all axis" -- and neither is wanted here:
+ * this grid's planes are orthogonal by construction, and its slab thickness is not a
+ * control the application exposes anywhere.
+ *
+ * **This was done by turning `getReferenceLineDraggableRotatable` off, and that switch
+ * does not mean what its name suggests.** It gates the *rotation handles*, yes -- and it
+ * also gates every **translation** the tool performs. `_jump`, which is what a click on
+ * the image runs, filters the other viewports through
+ *
+ *     this._getReferenceLineControllable(id) && this._getReferenceLineDraggableRotatable(id) && sameScene
+ *
+ * and returns `false` without moving anything when that leaves an empty list
+ * (`CrosshairsTool.js:942-952`). `_dragCallback`'s `OPERATION.DRAG` branch filters on the
+ * same flag (`:1029-1035`), and `addNewAnnotation` builds `activeViewportIds` from it
+ * too, so the drag had nothing to act on either. The result was a crosshair that drew
+ * three clean green lines and could not be moved by clicking or by dragging -- the
+ * reported bug, and a strictly worse one than the clutter it was fixing.
+ *
+ * So the handles are removed by the switch that removes *only* the handles: the tool's
+ * `minimal` profile. Under it, and only in the drawing and hit-testing paths,
+ * `viewportDraggableRotatable` and `viewportSlabThicknessControlsOn` are forced false
+ * (`:533-538`), the slab handle points are never even computed (`:588`), and
+ * `_getRotationHandleNearImagePoint` / `_getSlabThicknessHandleNearImagePoint` refuse to
+ * match (`:1668`, `:1695`) -- so neither handle can be drawn *or* grabbed invisibly.
+ * `_jump` and `_dragCallback` read the raw callbacks, which are left at their default
+ * `true`, so click-to-navigate and line dragging work exactly as they always should have.
+ * {@link CROSSHAIR_LINE_LENGTH_PX} is what keeps the lines full length under that profile.
+ *
+ * **`mobile.enabled` is the third switch, and it stays off.** `mobile` defaults to
+ * `{enabled: isMobile(), ...}` (`CrosshairsTool.js:80-85`) where `isMobile()` is
+ * `matchMedia('(any-pointer:coarse)').matches` (`utilities/touch/index.js:153-157`) --
+ * **true on any machine with a touchscreen attached**, which a clinical workstation
+ * frequently is. Mobile mode raises `handleRadius` to 9 and draws the handles
+ * *permanently* rather than during a drag (`:622-641`), which is how the clutter got
+ * reported in the first place. This grid is driven with a mouse.
+ *
+ * `getReferenceLineControllable` is deliberately left alone -- dragging a line is how the
+ * crosshair navigates, and that is the point of having it.
+ *
+ * @returns {object} configuration for `toolGroup.addTool`.
+ */
+export function crosshairLinesOnly() {
+    return {
+        minimal: { enabled: true, lineLengthInPx: CROSSHAIR_LINE_LENGTH_PX },
+        mobile: { enabled: false },
+    };
 }

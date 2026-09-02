@@ -9,6 +9,7 @@ rows (and every reader that hardcodes their exact old file_type strings) keep
 working unchanged -- see maxillo.tests_completion_registration for the
 old+new coexistence tests.
 """
+import json
 from unittest import mock
 
 from django.test import TestCase
@@ -404,3 +405,122 @@ class LegacyModalityUnifiedRegistrationTests(TestCase):
             patient=self.patient,
         )
         self.assertTrue(_processed_exists_for(raw_file, "ios"))
+
+
+class IntraoralCompletionReferenceTests(TestCase):
+    """How IOP-Compass names the photographs it segmented, and what its views do.
+
+    An algorithm on the cluster is handed `YGG_INPUT_KEYS` -- object-storage keys -- and
+    never sees a `FileRegistry` id, so it can only key its output by storage key. The
+    completion path accepts either; these pin both, and pin that a key belonging to
+    another patient resolves to nothing.
+    """
+
+    def setUp(self):
+        patcher = mock.patch("common.signals.celery_app.send_task")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        mock.patch("maxillo.file_utils.artifact_exists", return_value=True).start()
+        self.addCleanup(mock.patch.stopall)
+
+        self.project, _ = Project.objects.get_or_create(
+            slug="iop-completion",
+            defaults={"name": "IOP Completion", "domain": "maxillo"},
+        )
+        self.modality, _ = Modality.objects.get_or_create(
+            slug="intraoral-photo", defaults={"name": "Intraoral Photographs"}
+        )
+        self.patient = Patient.objects.create(name="IOP", project=self.project)
+        self.other = Patient.objects.create(name="Other", project=self.project)
+
+    def _photo(self, patient, name):
+        return FileRegistry.objects.create(
+            domain="maxillo",
+            patient=patient,
+            file_type="intraoral_raw",
+            file_path=f"maxillo/raw/intraoral-photo/{name}",
+            file_size=1,
+            file_hash=name,
+            modality=self.modality,
+        )
+
+    def _job(self):
+        return Job.objects.create(
+            domain="maxillo",
+            modality_slug="intraoral-photo",
+            patient=self.patient,
+            status="processing",
+        )
+
+    def test_a_storage_key_names_the_same_image_as_its_id(self):
+        photo = self._photo(self.patient, "front.jpg")
+        job = self._job()
+
+        from maxillo.file_utils import _intraoral_images_by_reference
+
+        by_key = _intraoral_images_by_reference(job, [photo.file_path])
+        by_id = _intraoral_images_by_reference(job, [str(photo.id)])
+
+        self.assertEqual(by_key[photo.file_path].id, photo.id)
+        self.assertEqual(by_id[str(photo.id)].id, photo.id)
+
+    def test_another_patients_image_does_not_resolve(self):
+        theirs = self._photo(self.other, "theirs.jpg")
+        job = self._job()
+
+        from maxillo.file_utils import _intraoral_images_by_reference
+
+        resolved = _intraoral_images_by_reference(job, [theirs.file_path, str(theirs.id)])
+
+        self.assertEqual(resolved, {})
+
+    def test_the_classified_view_lands_on_the_photographs_subtype(self):
+        front = self._photo(self.patient, "front.jpg")
+        upper = self._photo(self.patient, "upper.jpg")
+        job = self._job()
+
+        from maxillo.file_utils import _apply_intraoral_views
+
+        with mock.patch(
+            "maxillo.file_utils.open_binary",
+            return_value=(
+                mock.Mock(read=lambda: json.dumps({
+                    front.file_path: "frontal",
+                    str(upper.id): "upper_occlusal",
+                }).encode()),
+                None,
+            ),
+        ):
+            labelled = _apply_intraoral_views(job, "maxillo/processed/iop/views_json.json")
+
+        front.refresh_from_db()
+        upper.refresh_from_db()
+        self.assertEqual(labelled, 2)
+        self.assertEqual(front.subtype, "frontal")
+        self.assertEqual(upper.subtype, "upper_occlusal")
+
+    def test_a_view_the_classifier_does_not_have_is_not_written(self):
+        """`subtype` is shown to readers, so a label from a future model version that
+        nothing can render is dropped rather than stored."""
+        photo = self._photo(self.patient, "front.jpg")
+        job = self._job()
+
+        from maxillo.file_utils import _apply_intraoral_views
+
+        with mock.patch(
+            "maxillo.file_utils.open_binary",
+            return_value=(
+                mock.Mock(read=lambda: json.dumps({photo.file_path: "sideways"}).encode()),
+                None,
+            ),
+        ):
+            labelled = _apply_intraoral_views(job, "maxillo/processed/iop/views_json.json")
+
+        photo.refresh_from_db()
+        self.assertEqual(labelled, 0)
+        self.assertEqual(photo.subtype, "")
+
+    def test_no_views_output_is_not_an_error(self):
+        from maxillo.file_utils import _apply_intraoral_views
+
+        self.assertEqual(_apply_intraoral_views(self._job(), None), 0)

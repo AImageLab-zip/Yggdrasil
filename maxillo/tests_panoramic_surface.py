@@ -37,6 +37,7 @@ CONTROL_IDS = (
     "panorexPrevZ",
     "panorexNextZ",
     "panorexResetAuto",
+    "editSavedPanoramic",
 )
 
 
@@ -89,6 +90,20 @@ class PanoramicSurfaceRenderTests(TestCase):
         for control_id in CONTROL_IDS:
             with self.subTest(control=control_id):
                 self.assertIn(f'id="{control_id}"', html)
+
+    def test_the_cbct_grid_keeps_its_crosshair_and_its_shift_hint(self):
+        """The other branch of the shared toolbar, which the brain page takes the false
+        side of. `FIXED_CBCT_LAYOUT` is three orthogonal planes, so `supportsCrosshairs`
+        is true here and the crosshair holds the plain primary button -- which is why
+        window/level is behind Shift on this page and not on the brain one.
+        """
+        html = self._render()
+
+        self.assertIn('data-ygg-tool="Crosshairs"', html)
+        self.assertNotIn('data-ygg-tool="WindowLevel"', html)
+        self.assertIn("Shift+drag to adjust brightness", html)
+        # And this grid does pin a volume render, so the expand button means something.
+        self.assertIn('id="cbctExpand3D"', html)
 
     def test_the_two_preview_panes_are_both_present_and_both_start_hidden(self):
         """The live reformat and the baked strip share one box, one at a time.

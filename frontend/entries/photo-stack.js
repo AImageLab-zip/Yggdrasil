@@ -38,6 +38,7 @@ import {
     CircleROITool,
     LabelTool,
     SplineROITool,
+    utilities as toolsUtilities,
 } from '@cornerstonejs/tools';
 
 import { initImaging } from '../imaging/runtime/init.js';
@@ -48,6 +49,8 @@ import {
 import {
     PHOTO_METADATA_PRIORITY,
     createPhotoMetadataProvider,
+    registerPhotoRegistry,
+    releasePhotoRegistry,
 } from '../imaging/photos/metadataProvider.js';
 import {
     PHOTO_MEASUREMENT_TOOLS,
@@ -64,19 +67,147 @@ import {
     KONVA_TENSION,
     toothSplineConfiguration,
 } from '../imaging/annotations/tensionSpline.js';
+import { drawCenteredLabel } from '../imaging/annotations/centeredLabel.js';
+import { centroidOf } from '../imaging/photos/toothOutlines.js';
+import { isFdiCode } from '../imaging/photos/labelMapper.js';
+import { toothColor } from '../imaging/photos/toothGrid.js';
 
 export const SURFACE = 'photo-stack';
 
 /**
+ * How much of a tooth its own tint covers, at rest and while it is being worked on.
+ *
+ * A wash, not a paint. The thing under the outline is a photograph of the tooth, and the
+ * segmentation is a claim *about* that photograph -- an opaque fill would hide the
+ * evidence the reader is checking the claim against. The highlighted value is the same
+ * colour turned up rather than a different colour, which is what keeps a tooth's identity
+ * readable while it is selected: see {@link ToothOutlineTool#getAnnotationStyle}.
+ */
+export const TOOTH_FILL_OPACITY = Object.freeze({ rest: 0.28, highlighted: 0.5 });
+
+/**
  * The tooth-outline tool: `SplineROITool` drawing Konva's tension curve.
  *
- * Subclassed only to give it its own `toolName`. Sharing `'SplineROI'` with a general
- * spline tool would mean one entry in `toolOptions`, so binding the measurement spline
- * would bind tooth outlining with it -- and every stored contour would come back under a
- * name the segmentation reader does not recognise. Upstream's own
+ * Subclassed first of all to give it its own `toolName`. Sharing `'SplineROI'` with a
+ * general spline tool would mean one entry in `toolOptions`, so binding the measurement
+ * spline would bind tooth outlining with it -- and every stored contour would come back
+ * under a name the segmentation reader does not recognise. Upstream's own
  * `CatmullRomSplineROI`/`CardinalSplineROI` names exist for the same reason.
+ *
+ * It also *looks* different from a measurement, and the two overrides below are why.
  */
-class ToothOutlineTool extends SplineROITool {}
+class ToothOutlineTool extends SplineROITool {
+    constructor(...args) {
+        super(...args);
+        /**
+         * The FDI code, centred in the tooth, replacing upstream's linked text box.
+         *
+         * `_renderStats` is an instance property assigned in `SplineROITool`'s own
+         * constructor, so this reassignment after `super()` is the seam -- there is no
+         * prototype method to override.
+         *
+         * What it replaces: a text box parked off the outline's right edge with a dashed
+         * leader line back to it. On a measurement that is right. On thirty-two teeth it
+         * is a column of numbers stacked down one side of the photograph by the overlap
+         * registry, each roped to a tooth by a line longer than the label. See
+         * `annotations/centeredLabel.js`.
+         *
+         * `getLinkedTextBoxStyle` is still what decides the font and whether the label is
+         * drawn at all, so `textBoxVisibility: false` turns the numbers off through the
+         * public style API rather than through an edit here.
+         */
+        this._renderStats = (annotation, enabledElement, svgDrawingHelper) => {
+            const label = annotation?.data?.label;
+            // Closed only, matching upstream: a ring still being drawn has no inside to
+            // put a label in.
+            if (!label || !annotation.data?.spline?.instance?.closed) {
+                return;
+            }
+            const style = this.getLinkedTextBoxStyle(
+                {
+                    toolGroupId: this.toolGroupId,
+                    toolName: this.getToolName(),
+                    viewportId: enabledElement.viewport.id,
+                    annotationUID: annotation.annotationUID,
+                },
+                annotation,
+            );
+            if (!style.visibility) {
+                return;
+            }
+            const { worldToCanvas } = enabledElement.viewport;
+            drawCenteredLabel(
+                svgDrawingHelper,
+                annotation.annotationUID,
+                'fdi',
+                label,
+                centroidOf(annotation.data.handles.points.map((point) => worldToCanvas(point))),
+                {
+                    // White, not the tooth's own colour and not `textBoxColor`'s yellow.
+                    // The label sits on a translucent wash of the tooth colour over a
+                    // photograph: the tooth's own colour would be the one ink guaranteed
+                    // not to contrast with what is behind it, and the palette's yellow end
+                    // would be unreadable on the yellow teeth. White plus the drop shadow
+                    // reads on all sixteen.
+                    color: 'rgb(255, 255, 255)',
+                    fontFamily: style.fontFamily,
+                    fontSize: style.fontSize,
+                    shadow: style.shadow,
+                },
+            );
+        };
+    }
+
+    /**
+     * Tint each outline with its tooth's colour, from the same gradient as the grid.
+     *
+     * The grid under the viewer already colours the arch blue-to-yellow from the patient's
+     * right to their left, and that is how a clinician finds a tooth on it. Drawing every
+     * outline in the tool default's one yellow meant the two halves of the same screen
+     * named the same tooth two different ways, and told a reader nothing about which
+     * outline belonged to which button. `toothColor` is that gradient and stays the single
+     * definition of it -- see `photos/toothGrid.js`.
+     *
+     * The colour is derived from the annotation's own `data.label`, not registered in
+     * `annotation.config.style` per UID. A side table keyed by `annotationUID` would need
+     * an entry written on every restore and deleted on every removal, and the editor
+     * rebuilds the whole outline layer on every image change -- so it would leak an entry
+     * per outline per scroll, and any missed write would show as a tooth in the wrong
+     * colour.
+     *
+     * **`fillColor` and `fillOpacity` have to be set here, not through the style API.**
+     * `ContourBaseTool.renderAnnotationInstance` reads both off the style this returns,
+     * but `AnnotationTool.getAnnotationStyle` -- which builds it -- hardcodes them to
+     * `color` and `0` and never consults `getStyle`. Only `ContourSegmentationBaseTool`
+     * overrides that, and only for annotations belonging to a Cornerstone segmentation,
+     * which these are not. So a `setAnnotationStyles(uid, {fillOpacity})` would be read by
+     * nothing.
+     *
+     * Highlight is expressed as more of the same colour rather than as upstream's switch
+     * to green: the whole point of the tint is that a tooth's colour identifies it, and a
+     * tooth that changed colour when touched would break exactly that.
+     */
+    getAnnotationStyle(context) {
+        const style = super.getAnnotationStyle(context);
+        const label = context?.annotation?.data?.label;
+        if (!isFdiCode(label)) {
+            // An outline drawn before a tooth was picked. It is unsaveable and the editor
+            // says so; leaving it in the tool default keeps it visibly not-a-tooth.
+            return style;
+        }
+        const color = toothColor(label);
+        const highlighted = Boolean(context.annotation.highlighted);
+        return {
+            ...style,
+            color,
+            fillColor: color,
+            fillOpacity: highlighted
+                ? TOOTH_FILL_OPACITY.highlighted
+                : TOOTH_FILL_OPACITY.rest,
+            textbox: { ...style.textbox, color },
+        };
+    }
+}
 ToothOutlineTool.toolName = 'ToothOutline';
 
 /**
@@ -154,15 +285,12 @@ function toolConfiguration() {
         // adapter writes `closed=True` unconditionally, so allowing one here would let a
         // user draw something the server silently closes for them.
         allowOpenSplines: false,
-        /**
-         * The overlay text: the FDI code, and nothing else.
-         *
-         * Upstream's `defaultGetTextLines` destructures `data.cachedStats[targetId]`
-         * without a guard, which with `calculateStats: false` is `undefined` -- a
-         * `TypeError` on the first render rather than an empty label. So this is required,
-         * not a preference.
-         */
-        getTextLines: (data) => (data?.label ? [data.label] : []),
+        // No `getTextLines` override. It used to be required rather than preferred --
+        // upstream's `defaultGetTextLines` destructures `data.cachedStats[targetId]`
+        // without a guard, which with `calculateStats: false` is `undefined`, a
+        // `TypeError` on the first render. `ToothOutlineTool` now replaces `_renderStats`
+        // wholesale and draws `data.label` itself, so the default is never reached and a
+        // second place naming the overlay's content would be one place too many.
     });
     return configuration;
 }
@@ -184,6 +312,10 @@ let registered = false;
 export async function mountPhotoStack({ element, registry, instanceId = 'stack' }) {
     await initImaging();
 
+    // The page-level provider answers over every mounted surface's registry, not just
+    // the first one to arrive -- see `photos/metadataProvider.js`.
+    registerPhotoRegistry(registry);
+
     if (!registered) {
         imageLoader.registerImageLoader(
             WEB_IMAGE_SCHEME,
@@ -194,7 +326,7 @@ export async function mountPhotoStack({ element, registry, instanceId = 'stack' 
                 voxelManagerFactory: coreUtilities.VoxelManager.createImageVoxelManager,
             })
         );
-        metaData.addProvider(createPhotoMetadataProvider(registry), PHOTO_METADATA_PRIORITY);
+        metaData.addProvider(createPhotoMetadataProvider(), PHOTO_METADATA_PRIORITY);
         registered = true;
     }
 
@@ -209,6 +341,7 @@ export async function mountPhotoStack({ element, registry, instanceId = 'stack' 
             tools: STACK_TOOLS,
             annotationState: annotationApi.state,
             annotationVisibility: annotationApi.visibility,
+            stackPrefetch: toolsUtilities.stackPrefetch,
             imageToWorld: coreUtilities.imageToWorldCoords,
             uuid: coreUtilities.uuidv4,
         },

@@ -81,15 +81,13 @@ def is_raw_file_type(file_type):
     return str(file_type or "").endswith("_raw")
 
 
-def _annotation_set_reasons(patient, include_panoramic):
-    """Reasons drawn from ``annotations``: one query, on the monotonic flag.
+def _annotation_set_kinds(patient):
+    """``AnnotationSet.kind`` -> whether human work was ever recorded for it.
 
-    ``ever_annotated`` is what makes this a single indexed lookup instead of the
-    five per-domain existence checks the legacy half needs. It also puts the
-    machine-output rule in the data rather than in this module: a revision whose
-    origin is a prediction never sets the flag, so an ``ios_landmarks_prediction``
-    or an ``auto`` panoramic geometry does not lock a case, without this function
-    having to know either of those names.
+    One indexed query, and the answer to two different questions: which kinds
+    lock the patient (the ``True`` ones), and which kinds the ``annotations``
+    conversion has *covered at all* (every key, flag included) -- which is what
+    tells the legacy half to stay quiet. See :func:`_legacy_reasons`.
     """
     # Imported here rather than at module scope: ``common`` is imported by the
     # annotation models, so a top-level import would be a cycle.
@@ -97,39 +95,105 @@ def _annotation_set_reasons(patient, include_panoramic):
     from common.domains import fk_fields_for
 
     patient_fk, _ = fk_fields_for(patient._meta.app_label)
-    kinds = (
-        AnnotationSet.objects.filter(ever_annotated=True, **{patient_fk: patient})
-        .values_list("kind", flat=True)
-        .distinct()
-    )
-    for kind in kinds:
+    kinds = {}
+    for kind, ever in AnnotationSet.objects.filter(**{patient_fk: patient}).values_list(
+        "kind", "ever_annotated"
+    ):
+        kinds[kind] = kinds.get(kind, False) or bool(ever)
+    return kinds
+
+
+def _annotation_set_reasons(kinds, include_panoramic):
+    """Reasons drawn from ``annotations``: the monotonic flag, nothing else.
+
+    ``ever_annotated`` puts the machine-output rule in the data rather than in
+    this module: a revision whose origin is a prediction never sets the flag, so
+    an ``ios_landmarks_prediction`` or an ``auto`` panoramic geometry does not
+    lock a case, without this function having to know either of those names.
+    """
+    for kind, ever_annotated in kinds.items():
+        if not ever_annotated:
+            continue
         if kind == _PANORAMIC_KIND and not include_panoramic:
             continue
         yield _KIND_REASONS.get(kind, kind)
 
 
-def _legacy_reasons(patient, include_panoramic):
+#: Which ``AnnotationSet.kind`` each legacy existence check is the predecessor of.
+#: A kind the conversion has already produced a set for is answered by that set,
+#: never by the table underneath it -- see :func:`_legacy_reasons`.
+_LEGACY_KINDS = {
+    "voice captions": "voice_caption",
+    "an occlusion classification": "occlusion_classification",
+    "study notes": "study_notes",
+    "tooth segmentation": "intraoral_segmentation",
+    "IOS landmarks": "ios_landmarks",
+    "an edited panoramic arch": _PANORAMIC_KIND,
+    "quadrant markers": "video_quadrants",
+    "region annotations": "video_regions",
+}
+
+
+def _legacy_reasons(patient, include_panoramic, converted_kinds):
     """Reasons drawn from the per-domain tables that predate ``annotations``.
 
     Kept for the one release in which the legacy tables stay readable as a
-    cross-check (decision #6). Lazy, so a boolean caller can stop at the first
-    one: the admin changelists show a per-row lock column, and a generator turns
-    "up to five queries per row" into "one" for a locked case.
+    cross-check (decision #6): if the Phase-2 conversion misses a surface, the
+    patient stays locked instead of silently becoming editable. Lazy, so a
+    boolean caller can stop at the first one.
+
+    **The cross-check only applies to what the conversion has not covered.**
+    These are existence checks on rows, and a row's existence is not the
+    question -- whether a *human* produced it is, which is exactly the
+    distinction ``AnnotationSet.ever_annotated`` carries and a bare
+    ``.exists()`` cannot. A predicted ``ios_landmarks`` file is the case that
+    reported it: the conversion had already recorded the prediction as a set
+    with ``ever_annotated=False``, the annotations half correctly said "not
+    annotation work", and this half locked the arch anyway on the file the
+    prediction wrote -- so the panoramic editor refused a patient nobody had
+    annotated. Where a set exists for the kind, that set is the answer and the
+    table under it is skipped; where none exists, the conversion has not reached
+    this surface and the old check still speaks.
+
+    Where a legacy table records *who* produced a row, this half has to make the
+    same distinction itself. ``Classification.classifier`` is that column: the
+    Bits2Bites bite pipeline writes ``classifier="pipeline"`` rows, and counting
+    those as annotation work locked the panoramic arch on patients no human had
+    touched. The conversion already reads the same column -- a ``pipeline`` row
+    converts with a prediction origin and so never sets ``ever_annotated`` --
+    and this keeps the two halves saying the same thing during the cross-check
+    release.
     """
     domain = patient._meta.app_label
 
+    def uncovered(reason):
+        return _LEGACY_KINDS[reason] not in converted_kinds
+
+    def human_classifications():
+        """Classification rows the pipeline did not write.
+
+        Anything that is not ``pipeline`` counts as human: maxillo's
+        ``classifier`` column has no default, so a hand-made row can carry an
+        empty value, and excluding the one machine value -- rather than
+        requiring ``manual`` -- is what keeps that a lock instead of a hole.
+        """
+        return patient.classifications.exclude(classifier="pipeline")
+
     # Voice captions live on all three domains (common.base_models.VoiceCaptionBase).
-    if patient.voice_captions.exists():
+    if uncovered("voice captions") and patient.voice_captions.exists():
         yield "voice captions"
 
     if domain == "maxillo":
-        if patient.classifications.exists():
+        if uncovered("an occlusion classification") and human_classifications().exists():
             yield "an occlusion classification"
-        if patient.intraoral_segmentations.exists():
+        if uncovered("tooth segmentation") and patient.intraoral_segmentations.exists():
             yield "tooth segmentation"
-        if patient.files.filter(file_type="ios_landmarks").exists():
+        if (
+            uncovered("IOS landmarks")
+            and patient.files.filter(file_type="ios_landmarks").exists()
+        ):
             yield "IOS landmarks"
-        if include_panoramic:
+        if include_panoramic and uncovered("an edited panoramic arch"):
             # Imported here: common must not import a domain app at module scope.
             from maxillo.models import PanoramicState
 
@@ -138,11 +202,14 @@ def _legacy_reasons(patient, include_panoramic):
             ).exists():
                 yield "an edited panoramic arch"
     elif domain == "laparoscopy":
-        if patient.classifications.exists():
+        # The laparoscopy ``Classification`` row carries free-text notes, which the
+        # conversion records as ``study_notes``; the phrase below is the pre-existing
+        # mislabel documented on ``_KIND_REASONS``.
+        if uncovered("study notes") and human_classifications().exists():
             yield "an occlusion classification"
-        if patient.quadrant_markers.exists():
+        if uncovered("quadrant markers") and patient.quadrant_markers.exists():
             yield "quadrant markers"
-        if patient.region_annotations.exists():
+        if uncovered("region annotations") and patient.region_annotations.exists():
             yield "region annotations"
     # brain has no annotation models of its own yet; voice captions are it.
 
@@ -150,20 +217,20 @@ def _legacy_reasons(patient, include_panoramic):
 def _lock_reasons(patient, include_panoramic):
     """Yield reasons lazily, from both sources, without repeating one.
 
-    ``annotations`` is asked first so a converted patient answers in one query
-    and the legacy checks are only reached for whatever the conversion has not
-    covered. A patient present in both -- the normal state during the
-    cross-check release -- reports each reason once.
+    ``annotations`` is asked first, and its answer also decides how much of the
+    legacy half still has anything to say. A patient present in both -- the
+    normal state during the cross-check release -- reports each reason once.
     """
     if patient is None:
         return
 
+    kinds = _annotation_set_kinds(patient)
     seen = set()
-    for reason in _annotation_set_reasons(patient, include_panoramic):
+    for reason in _annotation_set_reasons(kinds, include_panoramic):
         if reason not in seen:
             seen.add(reason)
             yield reason
-    for reason in _legacy_reasons(patient, include_panoramic):
+    for reason in _legacy_reasons(patient, include_panoramic, kinds):
         if reason not in seen:
             seen.add(reason)
             yield reason

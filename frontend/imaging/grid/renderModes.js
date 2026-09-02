@@ -102,6 +102,74 @@ export function renderModeSpec(mode) {
 }
 
 /**
+ * How the segmentation's own actor renders, which is **not** the study's mode.
+ *
+ * The 3D window holds two volume actors: the study and, once the overlay is on, the
+ * labelmap. Applying the study's mode to both was the previous round's fix for a real
+ * problem -- the two were projected differently and the result was a haze -- and it
+ * produced a different wrong picture, which is what the screenshots show: an attenuated
+ * *maximum-intensity* projection through a labelmap takes the largest label value along
+ * each ray, so the tooth with the highest number wins regardless of which is in front,
+ * and the result is a flat translucent map rather than solid structures in depth.
+ *
+ * A labelmap is not an intensity field and must not be projected like one. It is
+ * composited, front to back, so a voxel that is in front is in front. Shading is on for
+ * the same reason: a composite of one flat colour is a silhouette, and a segmentation
+ * whose crowns and roots cannot be told apart is not showing anatomy.
+ *
+ * The *other* half of "coloured voxels" is Cornerstone's own labelmap style, which
+ * defaults to a 3px outline over a 50% fill (`labelmapConfig.js`) -- correct on a slice,
+ * and on a volume render exactly the outlined shells that were reported. See
+ * `solidVoxelStyle` in `imaging/grid/segmentation.js`.
+ *
+ * ## Ambient is 1, and that is the whole of why this stopped rendering black
+ *
+ * **A labelmap has no gradient to shade with, anywhere except its own surface.** vtk's
+ * volume shader computes a normal by central difference and gives up when there is none
+ * (`Rendering/OpenGL/glsl/vtkVolumeFS.glsl`):
+ *
+ * ```glsl
+ * result.w = length(result.xyz);
+ * if (result.w == 0.0) { return vec4(0.0); }
+ * ```
+ *
+ * A label's interior is piecewise constant, so the difference is exactly zero and the
+ * normal comes back as `vec4(0.0)`. `applyLighting` then computes
+ * `df = dot(normal, lightDirection)`, which is `0.0` and therefore not `> 0.0`, so the
+ * diffuse term never accumulates and the sample is left as
+ *
+ * ```glsl
+ * tColor * (diffuse * volume.diffuse + volume.ambient)  //  ->  tColor * ambient
+ * ```
+ *
+ * With `ambient: 0.3` that is **every interior voxel at 30% of its colour**, composited
+ * over the depth of the structure. The segmentation rendered dark, and the palette this
+ * module reproduces value-for-value from the NiiVue viewer was being multiplied by 0.3
+ * on its way to the screen -- a tooth specified `#38d66b` arrived as `#113f20`. It also
+ * explains the *timing* that was reported: the first frame is drawn from Cornerstone's
+ * own actor property, and the picture goes dark a moment later when
+ * `viewportManager.setRenderMode` applies this spec.
+ *
+ * So `ambient: 1` -- the floor is the colour the palette asked for, and nothing can make
+ * a voxel darker than the label it belongs to. `diffuse` stays, at a quarter, because the
+ * one place a labelmap *does* have a gradient is the boundary shell, which is the surface
+ * a reader is looking at: it lands as a lit rim on the faces turned towards the camera,
+ * which is the depth cue the shading was turned on for in the first place. It is additive
+ * over a floor of 1, so a fully-lit rim clips about 25% high and reads as a highlight
+ * rather than as a colour shift. `specular` is 0: a second additive term on top of that
+ * clips further and says nothing a labelmap can support.
+ */
+export const LABELMAP_RENDER_SPEC = Object.freeze({
+    blendMode: BLEND_MODES.COMPOSITE_BLEND,
+    shaderReplacements: Object.freeze([]),
+    shade: true,
+    ambient: 1,
+    diffuse: 0.25,
+    specular: 0,
+    label: 'Segmentation',
+});
+
+/**
  * Apply a mode to a vtk.js volume actor.
  *
  * The shader replacements go on **before** the blend mode, because
@@ -115,7 +183,20 @@ export function renderModeSpec(mode) {
  * @returns {object} the spec that was applied.
  */
 export function applyRenderMode(actor, mode) {
-    const spec = renderModeSpec(mode);
+    return applySpec(actor, renderModeSpec(mode));
+}
+
+/**
+ * Put one actor onto {@link LABELMAP_RENDER_SPEC}.
+ *
+ * @param {object} actor a vtk volume actor carrying a labelmap.
+ * @returns {object} the spec that was applied.
+ */
+export function applyLabelmapRenderMode(actor) {
+    return applySpec(actor, LABELMAP_RENDER_SPEC);
+}
+
+function applySpec(actor, spec) {
     const mapper = actor.getMapper();
     const property = actor.getProperty();
 

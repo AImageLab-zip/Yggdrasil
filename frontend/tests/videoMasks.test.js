@@ -100,3 +100,105 @@ test('a mask of the wrong size is refused by the store', () => {
     const store = createMaskStore({ width: 2, height: 2 });
     assert.throws(() => store.set(0, 'Liver', new Uint8Array(9)), /needs 4 values/);
 });
+
+
+test('the tool is recorded only where the mask actually changed', () => {
+    // The editor reads every region's buffer back on every frame change and offers the
+    // armed tool for all of them -- it has no way to know which one the reader touched.
+    // This is the only place that does, because it holds the previous plane. Recording
+    // the tool unconditionally would relabel every mask on a frame with whatever happened
+    // to be selected while the reader scrubbed past it.
+    const store = createMaskStore({ width: 4, height: 3 });
+    const painted = new Uint8Array(12);
+    painted[5] = 1;
+
+    assert.equal(store.set(100, 'Liver', painted, 'brush'), true);
+    assert.equal(store.toolAt(100, 'Liver'), 'brush');
+
+    // The same plane again, with a different tool armed: nothing changed, so nothing is
+    // relabelled.
+    assert.equal(store.set(100, 'Liver', painted, 'polygon'), false);
+    assert.equal(store.toolAt(100, 'Liver'), 'brush');
+
+    // A real change does take the new tool.
+    const more = Uint8Array.from(painted);
+    more[6] = 1;
+    assert.equal(store.set(100, 'Liver', more, 'polygon'), true);
+    assert.equal(store.toolAt(100, 'Liver'), 'polygon');
+});
+
+test('erasing a mask takes its attribution with it', () => {
+    const store = createMaskStore({ width: 4, height: 3 });
+    const painted = new Uint8Array(12);
+    painted[5] = 1;
+    store.set(100, 'Liver', painted, 'brush');
+
+    assert.equal(store.set(100, 'Liver', new Uint8Array(12), 'eraser'), true);
+    assert.equal(store.peek(100, 'Liver'), null);
+    // A tool naming a mask that is gone would show in the annotation list as a row with
+    // nothing behind it.
+    assert.equal(store.toolAt(100, 'Liver'), null);
+    // And clearing something that was never there is not a change.
+    assert.equal(store.set(100, 'Liver', new Uint8Array(12), 'eraser'), false);
+});
+
+test('a rename moves the masks and their attribution to the new code', () => {
+    // The archive is keyed by region code, so masks left behind would be stored under a
+    // name the project no longer has.
+    const store = createMaskStore({ width: 4, height: 3 });
+    const painted = new Uint8Array(12);
+    painted[5] = 1;
+    store.set(100, 'Liver', painted, 'brush');
+
+    assert.equal(store.rename('Liver', 'Fegato'), true);
+    assert.equal(store.peek(100, 'Liver'), null);
+    assert.deepEqual(Array.from(store.peek(100, 'Fegato')), Array.from(painted));
+    assert.equal(store.toolAt(100, 'Fegato'), 'brush');
+});
+
+test('forgetting a region drops its masks and leaves the others', () => {
+    const store = createMaskStore({ width: 4, height: 3 });
+    const painted = new Uint8Array(12);
+    painted[5] = 1;
+    store.set(100, 'Liver', painted, 'brush');
+    store.set(100, 'Fat', painted, 'polygon');
+
+    store.forget('Liver');
+
+    assert.deepEqual(store.regionsAt(100), ['Fat']);
+    assert.equal(store.toolAt(100, 'Liver'), null);
+    assert.equal(store.toolAt(100, 'Fat'), 'polygon');
+});
+
+test('the save body carries the tool, and omits it when the record does not say', () => {
+    const store = createMaskStore({ width: 4, height: 3 });
+    const painted = new Uint8Array(12);
+    painted[5] = 1;
+    store.set(100, 'Liver', painted, 'brush');
+    store.set(100, 'Fat', painted);
+
+    const body = buildSaveRequest({ store, expectedRevision: 3 });
+    const regions = body.frames[0].regions;
+    assert.equal(regions.Liver.tool, 'brush');
+    // Omitted rather than null: an explicit null would overwrite what an earlier
+    // revision knew, and the server distinguishes the two.
+    assert.equal('tool' in regions.Fat, false);
+});
+
+test('a state response restores the attribution it carried', () => {
+    const store = createMaskStore({ width: 4, height: 3 });
+    store.load([
+        {
+            timeMs: 100,
+            regions: {
+                Liver: { rle: [5, 1, 6], tool: 'polygon' },
+                Fat: { rle: [5, 1, 6] },
+            },
+        },
+    ]);
+
+    assert.equal(store.toolAt(100, 'Liver'), 'polygon');
+    // Every mask stored before attribution existed reads like this, and none can be
+    // invented for it -- the tool was never recorded anywhere.
+    assert.equal(store.toolAt(100, 'Fat'), null);
+});

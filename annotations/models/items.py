@@ -298,8 +298,7 @@ class EventAnnotationItem(AnnotationItemBase):
         max_length=60,
         help_text="What is being asserted about, e.g. 'occlusion.sagittal_left'.",
     )
-    value = models.CharField(
-        max_length=255,
+    value = models.TextField(
         blank=True,
         help_text="Free-text assertion, for statements no schema covers yet.",
     )

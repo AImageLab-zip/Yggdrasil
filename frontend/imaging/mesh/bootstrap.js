@@ -54,6 +54,7 @@ import {
 import { renderToothGrid, toothButtons } from '../photos/toothGrid.js';
 import { DEFAULT_GRID_SIZE, createOverlay, drawGrid, resizeOverlay } from './screenGrid.js';
 import { isPlacementEvent, isSelectionEvent } from './pickMath.js';
+import { observeSize } from '../runtime/elementSize.js';
 import { interpretSaveResponse } from '../annotations/protocol.js';
 
 export const LOG_PREFIX = '[ygg-ios]';
@@ -158,6 +159,7 @@ export async function bootstrapMeshLandmarks({
 
     const overlay = createOverlay(doc, controls.viewport);
     let themeObserver = null;
+    let unobserveSize = () => {};
 
     try {
         await viewport.load(meshUrls);
@@ -505,7 +507,19 @@ export async function bootstrapMeshLandmarks({
         });
 
         doc.addEventListener('keydown', onKeyDown);
-        globalThis.addEventListener?.('resize', onResize);
+        // **The container, not the window.**
+        //
+        // `#ios-viewer` ships `display: none` unless IOS is the default modality, and the
+        // landmark workbench opening and closing resizes the stage under it. Cornerstone
+        // builds its canvas at the size the element has when `enableElement` runs, so a
+        // surface mounted while hidden got a 0x0 canvas that CSS then stretched over the
+        // stage -- a scan rendered at a handful of pixels and scaled up, which is what
+        // "low quality until I resize the window by one pixel" was: the window listener
+        // was the only thing that ever called `resize()`, and nothing fires it when a tab
+        // is merely shown. `observeSize` is the signal the photo and grid surfaces
+        // already use, and it fires once on observe, so a stage that already had a size
+        // is picked up too.
+        unobserveSize = observeSize(controls.viewport, onResize);
     }
 
     /**
@@ -592,8 +606,8 @@ export async function bootstrapMeshLandmarks({
         reload: reloadLandmarks,
         destroy() {
             themeObserver?.disconnect();
+            unobserveSize();
             doc.removeEventListener('keydown', onKeyDown);
-            globalThis.removeEventListener?.('resize', onResize);
             viewport.destroy();
         },
         /** For tests: the document as it currently stands. */

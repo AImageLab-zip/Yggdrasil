@@ -26,7 +26,7 @@ class SlurmSSHError(RuntimeError):
 class SlurmSSH:
     def __init__(self, *, host, port=22, user=None, key_path=None,
                  password=None, poll_interval=15, max_wall_seconds=24 * 3600,
-                 connect_timeout=30):
+                 unknown_grace_seconds=300, connect_timeout=30):
         if not host:
             raise SlurmSSHError("SLURM_SSH_HOST is not configured")
         self.host = host
@@ -36,6 +36,7 @@ class SlurmSSH:
         self.password = password or None
         self.poll_interval = int(poll_interval)
         self.max_wall_seconds = int(max_wall_seconds)
+        self.unknown_grace_seconds = int(unknown_grace_seconds)
         self.connect_timeout = connect_timeout
         self._client = None
 
@@ -49,6 +50,9 @@ class SlurmSSH:
             password=getattr(settings, "SLURM_SSH_PASSWORD", "") or None,
             poll_interval=getattr(settings, "SLURM_POLL_INTERVAL", 15),
             max_wall_seconds=getattr(settings, "SLURM_MAX_WALL_SECONDS", 24 * 3600),
+            unknown_grace_seconds=getattr(
+                settings, "SLURM_UNKNOWN_GRACE_SECONDS", 300
+            ),
         )
 
     # -- connection --------------------------------------------------------
@@ -196,12 +200,29 @@ class SlurmSSH:
         return state.strip().split()[0].rstrip("+")
 
     def poll(self, slurm_id):
-        """Block until the job reaches a terminal state; return that state."""
+        """Block until the job reaches a terminal state; return that state.
+
+        An id absent from ``sacct`` is only legitimately absent for the few seconds
+        between ``sbatch`` returning and accounting catching up, so it is tolerated for
+        ``unknown_grace_seconds`` and then treated as an error. Without that bound, an
+        id accounting will never know -- a reattach to an allocation already purged
+        from sacct -- would block this worker for the full 24h wall clock.
+        """
         waited = 0
+        unknown_for = 0
         while True:
             state = self._state(slurm_id)
-            if state and state in _TERMINAL_STATES:
-                return state
+            if state:
+                unknown_for = 0
+                if state in _TERMINAL_STATES:
+                    return state
+            else:
+                unknown_for += self.poll_interval
+                if unknown_for > self.unknown_grace_seconds:
+                    raise SlurmSSHError(
+                        f"slurm job {slurm_id} is not visible in accounting after "
+                        f"{unknown_for}s; it never started or has been purged"
+                    )
             if waited >= self.max_wall_seconds:
                 raise SlurmSSHError(
                     f"slurm job {slurm_id} did not finish within "

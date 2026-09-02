@@ -1,6 +1,12 @@
 *.sql.gz
 .env.worker
 secrets
+# certs/ is TRACKED on purpose: it holds the pinned *public* certificate of the Live
+# Whisper upstream (docs/setup.md records its fingerprint). A private key must never
+# land there, so the shapes one arrives as are ignored rather than left to review.
+certs/*.key
+certs/*private*
+certs/*privkey*
 *.zip
 .claude
 backup*
@@ -204,6 +210,7 @@ node_modules/
 scripts/*
 !scripts/backup_prod.sh
 !scripts/restore_prod.sh
+!scripts/mirror_bucket.py
 !scripts/manual_test_external_api.py
 !scripts/dev_bootstrap.sh
 !scripts/build_frontend.sh
@@ -230,3 +237,10 @@ scripts/.bin/
 
 # External reference repo (browser panorex port source)
 seg2pano/
+
+# Local working copies of cluster algorithms (deployed to
+# /work/yggdrasil_workers/algo/<name>/, each with its own lifecycle). See seg2pano/.
+laparoscopy-video/
+iop-compass/
+# The weight files uploaded to algo/iop-compass/weights/ on the cluster.
+IOP_weights/

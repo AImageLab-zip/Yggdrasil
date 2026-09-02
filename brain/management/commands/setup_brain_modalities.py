@@ -11,6 +11,7 @@ class Command(BaseCommand):
             name='Brain',
             defaults={
                 'slug': 'brain',
+                'domain': 'brain',
                 'description': 'Brain tumor MRI project with T1, T2, FLAIR, and T1c modalities',
                 'icon': 'fas fa-brain',
                 'is_active': True,
@@ -31,6 +32,7 @@ class Command(BaseCommand):
             {
                 'name': 'Brain MRI T1',
                 'slug': 'braintumor-mri-t1',
+                'domain': 'brain',
                 'description': 'Brain MRI T1 weighted sequence',
                 'icon': 'fas fa-brain',
                 'label': 'T1',
@@ -41,6 +43,7 @@ class Command(BaseCommand):
             {
                 'name': 'Brain MRI T2',
                 'slug': 'braintumor-mri-t2',
+                'domain': 'brain',
                 'description': 'Brain MRI T2 weighted sequence',
                 'icon': 'fas fa-brain',
                 'label': 'T2',
@@ -51,6 +54,7 @@ class Command(BaseCommand):
             {
                 'name': 'Brain MRI FLAIR',
                 'slug': 'braintumor-mri-flair',
+                'domain': 'brain',
                 'description': 'Brain MRI FLAIR sequence',
                 'icon': 'fas fa-brain',
                 'label': 'FLAIR',
@@ -61,6 +65,7 @@ class Command(BaseCommand):
             {
                 'name': 'Brain MRI T1c',
                 'slug': 'braintumor-mri-t1c',
+                'domain': 'brain',
                 'description': 'Brain MRI T1 contrast-enhanced sequence',
                 'icon': 'fas fa-brain',
                 'label': 'T1c',
@@ -71,6 +76,7 @@ class Command(BaseCommand):
             {
                 'name': 'Brain MRI Segmentation',
                 'slug': 'braintumor-mri-seg',
+                'domain': 'brain',
                 'description': 'Brain Tumor Segmentation Mask',
                 'icon': 'fas fa-brain',
                 'label': 'SEG',

@@ -12,7 +12,7 @@ from django.apps import apps
 from django.conf import settings
 
 from common.domains import DOMAINS
-from common.permissions import user_can_write_annotations, user_is_project_admin
+from common.permissions import user_can_write_patient_annotations
 
 
 SUPPORTED_LANGUAGES = frozenset({"it", "en", "es", "fr", "de"})
@@ -37,6 +37,22 @@ def _ssl_context():
 
 @database_sync_to_async
 def _can_transcribe(user, domain, patient_id):
+    """Whether ``user`` may dictate into this patient's captions.
+
+    A caption is annotation work, so this is the same check the HTTP caption endpoints
+    make, through the same helper -- and deliberately not a second spelling of it.
+
+    **The project is the patient's, not the domain's.** This used to pass the domain
+    *slug* as the permission context, and a string resolves through
+    ``entry_project_for(None, domain)`` (``common.permissions._project_from_context``):
+    the domain's first active project by name, for nobody in particular. Every patient in
+    every other project of the domain was therefore checked against a project it is not
+    in, and refused with 4403 -- live captions stopped working on a page whose Record
+    button, save and every other write still did, because those resolve the project the
+    normal way. A deployment with one project per domain happens to agree, which is why
+    the suite passed; ``test_allows_a_patient_outside_the_domain_first_project`` is the
+    case that did not.
+    """
     if domain not in DOMAINS or not user or not user.is_authenticated:
         return False
 
@@ -44,15 +60,7 @@ def _can_transcribe(user, domain, patient_id):
     patient = Patient.objects.filter(patient_id=patient_id).first()
     if patient is None:
         return False
-    if user_is_project_admin(user, domain):
-        return True
-
-    if any(field.name == "folders" for field in Patient._meta.get_fields()):
-        folders = patient.folders.all()
-    else:
-        folder = getattr(patient, "folder", None)
-        folders = [folder] if folder else []
-    return any(user_can_write_annotations(user, folder, domain) for folder in folders)
+    return user_can_write_patient_annotations(user, patient)
 
 
 class LiveTranscriptionConsumer(AsyncWebsocketConsumer):
@@ -68,16 +76,19 @@ class LiveTranscriptionConsumer(AsyncWebsocketConsumer):
         )[0]
 
         if not user or not user.is_authenticated:
-            await self.close(code=4401)
+            await self._refuse(4401, "the handshake carried no authenticated session")
             return
         if language not in SUPPORTED_LANGUAGES:
-            await self.close(code=4400)
+            await self._refuse(4400, f"{language!r} is not a language Whisper is asked for")
             return
         if not await _can_transcribe(user, domain, patient_id):
-            await self.close(code=4403)
+            await self._refuse(
+                4403,
+                f"{user} may not write annotations on {domain} patient {patient_id}",
+            )
             return
         if not settings.WHISPER_API_TOKEN or not settings.WHISPER_WS_URL:
-            await self.close(code=4503)
+            await self._refuse(4503, "WHISPER_API_TOKEN or WHISPER_WS_URL is unset")
             return
 
         try:
@@ -95,6 +106,21 @@ class LiveTranscriptionConsumer(AsyncWebsocketConsumer):
         await self.accept()
         await self.send(text_data=json.dumps({"type": "ready"}))
         self.upstream_task = asyncio.create_task(self._relay_upstream())
+
+    async def _refuse(self, code, reason):
+        """Close before accepting, and say why in the log.
+
+        **Every one of these reaches the server log as the same line.** A close before
+        ``accept`` is reported by uvicorn as a bare
+        ``"WebSocket /ws/live-transcription/laparoscopy/15/?lang=it" 403``, so an expired
+        session, an unsupported language, a permission refusal, a missing token and an
+        unreachable Whisper are indistinguishable in it -- and "the live caption endpoint
+        does not work any more" is exactly the report that needs them told apart. The
+        browser is told only the code (`vocal_caption.js:transcriptionCloseMessage`),
+        which is the right amount for a clinician and not enough for whoever is asked why.
+        """
+        logger.warning("Refusing live transcription (%s): %s", code, reason)
+        await self.close(code=code)
 
     async def receive(self, text_data=None, bytes_data=None):
         if text_data is not None or bytes_data is None:

@@ -100,9 +100,7 @@ urlpatterns = [
     path("folders/create/", views.create_folder, name="create_folder"),
     path("folders/<int:folder_id>/stats/", views.folder_stats, name="folder_stats"),
     path("folders/<int:folder_id>/rename/", views.rename_folder, name="rename_folder"),
-    path("folders/<int:folder_id>/permissions/", views.folder_permissions, name="folder_permissions"),
-    path("folders/<int:folder_id>/permissions/upsert/", views.upsert_folder_permission, name="upsert_folder_permission"),
-    path("folders/<int:folder_id>/permissions/<int:user_id>/delete/", views.delete_folder_permission, name="delete_folder_permission"),
+    path("folders/<int:folder_id>/delete/", views.delete_folder, name="delete_folder"),
     path(
         "folders/move-patients/",
         views.move_patients_to_folder,
@@ -229,6 +227,11 @@ urlpatterns = [
         "api/runner/jobs/<int:job_id>/claim/",
         api_views.runner_claim_job,
         name="api_runner_claim_job",
+    ),
+    path(
+        "api/runner/jobs/<int:job_id>/attach/",
+        api_views.runner_attach_job,
+        name="api_runner_attach_job",
     ),
     path(
         "api/runner/jobs/<int:job_id>/complete/",

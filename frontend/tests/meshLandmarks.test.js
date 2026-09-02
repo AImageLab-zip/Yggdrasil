@@ -5,7 +5,13 @@ import { readFileSync } from 'node:fs';
 import { markersFor, markerUid, landmarkForUid } from '../imaging/mesh/landmarkMarkers.js';
 import { emptyDocument, place } from '../imaging/mesh/landmarkDocument.js';
 import { displayCoordinates, isPlacementEvent, isSelectionEvent } from '../imaging/mesh/pickMath.js';
-import { cameraFor, distanceForBounds } from '../imaging/mesh/cameraPresets.js';
+import {
+    CAMERA_PRESETS,
+    LEGACY_CAMERA_PRESETS,
+    cameraFor,
+    distanceForBounds,
+    rotatedHalfTurnAboutY,
+} from '../imaging/mesh/cameraPresets.js';
 
 /**
  * The coordinate-parity suite: the one thing every stored landmark depends on.
@@ -148,22 +154,49 @@ test('shift plus primary places; primary alone selects', () => {
 // Cameras
 // ---------------------------------------------------------------------------
 
-test('all seven presets resolve, and the odd viewUps are kept verbatim', () => {
-    // `viewUpper` and `viewLower` are at 45 degrees and are not unit vectors. That is what
-    // the legacy viewer did and what clinicians have learned; vtk normalises viewUp itself,
-    // so "fixing" them would rotate two views for no reason anybody asked for.
-    assert.deepEqual(cameraFor('upper', 10).viewUp, [0, 1, -1]);
-    assert.deepEqual(cameraFor('lower', 10).viewUp, [0, -1, 1]);
+test('all six presets resolve, and the odd viewUps are kept verbatim', () => {
+    // `upper` and `lower` are at 45 degrees and are not unit vectors. That is what the
+    // legacy viewer did and what clinicians have learned; vtk normalises viewUp itself,
+    // so "fixing" them would rotate two views for no reason anybody asked for. The
+    // numbers are the legacy ones after the half-turn about Y -- see the next test.
+    assert.deepEqual(cameraFor('upper', 10).viewUp, [0, 1, 1]);
+    assert.deepEqual(cameraFor('lower', 10).viewUp, [0, -1, -1]);
     for (const name of ['reset', 'front', 'right', 'left']) {
-        assert.deepEqual(cameraFor(name, 10).viewUp, [0, 0, -1]);
+        assert.deepEqual(cameraFor(name, 10).viewUp, [0, 0, 1]);
     }
     assert.equal(cameraFor('nope'), null);
 });
 
+test('every preset is the legacy camera turned 180 degrees about Y', () => {
+    // The legacy viewer rotated *each arch* by `mesh.rotation.y = Math.PI`
+    // (`ios.js:368`, `:394`) and wrote these cameras against the rotated scene. The
+    // arches must not be transformed here -- a landmark is a raw STL vertex coordinate
+    // and the picker reports world positions -- so the same half-turn is carried by the
+    // cameras instead. Dropping it, which is what shipped, presents as the upper and
+    // lower arches being swapped top for bottom in every view.
+    for (const [name, legacy] of Object.entries(LEGACY_CAMERA_PRESETS)) {
+        assert.deepEqual(
+            CAMERA_PRESETS[name].direction,
+            rotatedHalfTurnAboutY(legacy.direction),
+            `${name}: the camera direction must carry the legacy half-turn`
+        );
+        assert.deepEqual(
+            CAMERA_PRESETS[name].viewUp,
+            rotatedHalfTurnAboutY(legacy.viewUp),
+            `${name}: so must the view-up`
+        );
+        assert.deepEqual(CAMERA_PRESETS[name].shows, legacy.shows);
+    }
+    // Its own inverse, which is why one application is both "apply" and "undo".
+    assert.deepEqual(rotatedHalfTurnAboutY(rotatedHalfTurnAboutY([1, 2, 3])), [1, 2, 3]);
+    // And no `-0` creeps into a table that is compared strictly.
+    assert.ok(Object.is(rotatedHalfTurnAboutY([0, 1, 0])[0], 0));
+});
+
 test('presets point from the focal point outward at the given distance', () => {
     assert.deepEqual(cameraFor('reset', 80).position, [0, 80, 0]);
-    assert.deepEqual(cameraFor('right', 5).position, [-5, 0, 0]);
-    assert.deepEqual(cameraFor('left', 5).position, [5, 0, 0]);
+    assert.deepEqual(cameraFor('right', 5).position, [5, 0, 0]);
+    assert.deepEqual(cameraFor('left', 5).position, [-5, 0, 0]);
     assert.deepEqual(cameraFor('reset').focalPoint, [0, 0, 0]);
 });
 
@@ -207,4 +240,24 @@ test('the shipped STL reader still writes the cell scalars we switch off', () =>
         /scalarVisibility:\s*true/.test(mapper),
         'vtkMapper no longer defaults scalarVisibility to true',
     );
+});
+
+test('the reference axes carry no captions, and nothing picks per frame', async () => {
+    // The regression this exists for is a performance one, which is why it is pinned
+    // against the source rather than against behaviour: three `vtkCellPicker.pick` calls
+    // per animation frame, against meshes carrying several hundred thousand cells, made
+    // the IOS surface unusable while changing nothing about what was rendered. The arrows
+    // are read by colour, as an unlabelled `vtkAxesActor` always was.
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync('frontend/imaging/mesh/meshViewport.js', 'utf8');
+
+    assert.doesNotMatch(
+        source,
+        /CAMERA_MODIFIED/,
+        'nothing may run per camera event on this surface'
+    );
+    // The picker stays -- it is what places a landmark on a click -- but it must be
+    // reached from a pointer handler and from nothing else.
+    const pickCallSites = source.match(/\bpicker\.pick\(/g) ?? [];
+    assert.equal(pickCallSites.length, 1, 'exactly one pick, and it is the landmark click');
 });

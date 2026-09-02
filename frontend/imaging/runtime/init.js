@@ -18,8 +18,19 @@ let initialized = null;
 /**
  * Initialise core + tools exactly once per page.
  *
+ * **`addons` is not optional decoration.** `@cornerstonejs/tools` reaches its add-ons
+ * only through the config this call installs: `getPolySeg()` (tools `config.js`) returns
+ * `null` and warns unless `config.addons.polySeg` is set, and the Surface display path
+ * (`tools/displayTools/Surface/surfaceDisplay.js`) asks it before it will convert a
+ * labelmap into a surface. So a segmentation rendered perfectly on the slice viewports
+ * and produced nothing whatever on the 3D one -- which is exactly how it was reported.
+ * Importing the package, and even calling its own `init()`, does not register it; only
+ * this does. It is passed in rather than imported here so the surfaces that have no 3D
+ * segmentation do not pull the polySeg wasm into their bundles.
+ *
  * @param {object} [options]
  * @param {object} [options.env] forwarded to {@link detectCapabilities}, for tests.
+ * @param {object} [options.addons] tools add-ons, e.g. `{ polySeg }`.
  * @returns {Promise<{capabilities: object, enums: object}>}
  * @throws {Error} if WebGL2 is unavailable (decision #13 -- required, not degraded).
  */
@@ -37,7 +48,9 @@ export function initImaging(options = {}) {
         }
 
         await coreInit(RENDERING_CONFIG);
-        await toolsInit();
+        // `toolsInit` *replaces* the config wholesale, so the addons must go in here;
+        // there is no later hook that adds one.
+        await toolsInit(options.addons ? { addons: options.addons } : undefined);
 
         return { capabilities, enums: coreEnums };
     })();

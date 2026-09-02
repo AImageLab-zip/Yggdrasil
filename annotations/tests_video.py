@@ -97,10 +97,40 @@ class MaskArchiveTests(TestCase):
         content = build_mask_archive(
             width=4, height=3, frames={100: {"Liver": mask}}
         )
-        width, height, frames = read_mask_archive(content)
+        width, height, frames, tools = read_mask_archive(content)
         self.assertEqual((width, height), (4, 3))
         self.assertEqual(list(frames), [100])
         np.testing.assert_array_equal(frames[100]["Liver"], mask)
+        # No attribution was offered, so none is invented. Every archive written before
+        # the key existed reads exactly like this.
+        self.assertEqual(tools, {})
+
+    def test_the_tool_that_wrote_a_mask_travels_with_it(self):
+        """The annotation list names a tool, so the archive has to remember one."""
+        mask = np.zeros((3, 4), dtype=np.uint8)
+        mask[1, 2] = 1
+        content = build_mask_archive(
+            width=4, height=3,
+            frames={100: {"Liver": mask}, 200: {"Liver": mask}},
+            tools={100: {"Liver": "polygon"}},
+        )
+        _width, _height, frames, tools = read_mask_archive(content)
+        self.assertEqual(sorted(frames), [100, 200])
+        self.assertEqual(tools, {100: {"Liver": "polygon"}})
+        # Frame 200 has a mask and no tool. Absence is "the record does not say", which is
+        # a different statement from "no tool", and the reader is shown the difference.
+        self.assertNotIn(200, tools)
+
+    def test_attribution_cannot_name_a_mask_the_archive_does_not_hold(self):
+        """An empty plane is dropped, and its tool has to go with it."""
+        content = build_mask_archive(
+            width=4, height=3,
+            frames={100: {"Liver": np.zeros((3, 4), dtype=np.uint8)}},
+            tools={100: {"Liver": "brush"}},
+        )
+        _width, _height, frames, tools = read_mask_archive(content)
+        self.assertEqual(frames[100], {})
+        self.assertEqual(tools, {})
 
     def test_empty_planes_are_not_stored(self):
         """An all-zero plane is the absence of an annotation, not an annotation of nothing."""
@@ -108,7 +138,7 @@ class MaskArchiveTests(TestCase):
             width=4, height=3,
             frames={100: {"Liver": np.zeros((3, 4), dtype=np.uint8)}},
         )
-        _width, _height, frames = read_mask_archive(content)
+        _width, _height, frames, _tools = read_mask_archive(content)
         self.assertEqual(frames[100], {})
 
 

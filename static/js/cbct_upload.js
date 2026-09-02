@@ -70,36 +70,6 @@
         });
     }
 
-    function initUploadToggle() {
-        const container = document.querySelector('.volume-upload-container');
-        if (!container) return;
-        const hiddenType = document.querySelector('input[name="cbct_upload_type"]');
-        const fileRadio = container.querySelector('#cbct_file_upload');
-        const folderRadio = container.querySelector('#cbct_folder_upload');
-        const fileSection = container.querySelector('.cbct-file-section');
-        const folderSection = container.querySelector('.cbct-folder-section');
-        const fileInput = fileSection && fileSection.querySelector('input[type="file"]');
-        const folderInput = folderSection && folderSection.querySelector('input[type="file"]');
-
-        function setMode(mode) {
-            const folderMode = mode === 'folder';
-            if (hiddenType) hiddenType.value = mode;
-            if (fileSection) fileSection.hidden = folderMode;
-            if (folderSection) folderSection.hidden = !folderMode;
-            if (fileInput) fileInput.disabled = folderMode;
-            if (folderInput) folderInput.disabled = !folderMode;
-            const cleared = folderMode ? fileInput : folderInput;
-            if (cleared) {
-                cleared.value = '';
-                summarizeFiles(cleared);
-            }
-        }
-
-        fileRadio.addEventListener('change', () => setMode('file'));
-        folderRadio.addEventListener('change', () => setMode('folder'));
-        setMode(folderRadio.checked ? 'folder' : 'file');
-    }
-
     function setSubmitting(form, submitting) {
         const button = form.querySelector('[type="submit"]');
         if (!button) return;
@@ -202,18 +172,15 @@
     /**
      * Whether this input's selection has to go through the in-browser converter.
      *
-     * Only the two formats the server cannot store natively, plus the .nii.gz
-     * orientation repair the server-side validator demands. **DICOM is never
-     * converted**: since Phase 8 it is uploaded as-is and stored as DICOM
-     * (common/dicom/ingest.py), so a folder selection and anything the converter does
-     * not recognise are submitted untouched and the server decides what they are --
-     * by the DICM marker in the bytes, not by a filename.
+     * The two formats the server cannot store natively, plus the .nii.gz orientation
+     * repair the server-side validator demands. DICOM is not among them: uploading it
+     * is disabled (maxillo/file_utils.py refuses it by the DICM marker in the bytes,
+     * not by a filename), so nothing here converts it back either.
      */
     var BROWSER_CONVERTIBLE = /\.(nii|nii\.gz|mha)$/i;
 
     function needsBrowserConversion(input) {
         if (!input || input.dataset.converted === 'true') return false;
-        if (input.name === 'cbct_folder_files') return false;
         var files = Array.from(input.files || []);
         return files.length === 1 && BROWSER_CONVERTIBLE.test(files[0].name);
     }
@@ -237,9 +204,8 @@
             }
 
             const cbctInput = form.querySelector('input[name="cbct"]');
-            const folderInput = form.querySelector('input[name="cbct_folder_files"]');
-            const activeCbctInput = cbctInput && !cbctInput.disabled && cbctInput.files && cbctInput.files.length ? cbctInput :
-                (folderInput && !folderInput.disabled && folderInput.files && folderInput.files.length ? folderInput : null);
+            const activeCbctInput = cbctInput && !cbctInput.disabled && cbctInput.files && cbctInput.files.length
+                ? cbctInput : null;
 
             if (activeCbctInput && needsBrowserConversion(activeCbctInput) && window.CBCTConvert) {
                 event.preventDefault();
@@ -263,13 +229,6 @@
                         cbctInput.disabled = false;
                         cbctInput.dataset.converted = 'true';
                     }
-                    if (folderInput) {
-                        folderInput.value = '';
-                        folderInput.disabled = true;
-                    }
-                    const hiddenType = form.querySelector('input[name="cbct_upload_type"]');
-                    if (hiddenType) hiddenType.value = 'file';
-
                     uploadFormWithProgress(form);
                 }).catch(err => {
                     notify('danger', 'CBCT Conversion failed: ' + err.message);
@@ -292,7 +251,6 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         initDropZones();
-        initUploadToggle();
         initForm();
     });
 }());

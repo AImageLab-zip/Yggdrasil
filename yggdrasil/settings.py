@@ -436,6 +436,30 @@ SLURM_STAGE_DIR = config("SLURM_STAGE_DIR", default="")
 # sacct polling cadence and the wall-clock ceiling before a job is declared stuck.
 SLURM_POLL_INTERVAL = config("SLURM_POLL_INTERVAL", default=15, cast=int)
 SLURM_MAX_WALL_SECONDS = config("SLURM_MAX_WALL_SECONDS", default=24 * 3600, cast=int)
+# How long an id may stay invisible to sacct before poll() gives up. Covers the
+# submit -> accounting lag on the happy path, and bounds a reattach to an allocation
+# sacct has already purged (which would otherwise burn the full wall clock).
+SLURM_UNKNOWN_GRACE_SECONDS = config(
+    "SLURM_UNKNOWN_GRACE_SECONDS", default=300, cast=int
+)
+
+# Runner task durability. `run_job` blocks for the whole allocation, so the default
+# ack-on-receive means a worker restart mid-run destroys the task and strands the job
+# in `processing` with its outputs already in storage and nobody left to collect them.
+# Acking late (and rejecting on worker loss) puts the message back on the queue; the
+# redelivered task reattaches via Job.slurm_job_id instead of resubmitting.
+#
+# Redis re-delivers an un-acked message once visibility_timeout elapses, so it must
+# exceed the longest a task may legitimately hold one -- otherwise a slow-but-healthy
+# job is handed to a second worker while the first is still polling it.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# With acks_late, a prefetching worker holds messages it is not working on; those are
+# invisible to every other worker for the whole visibility window.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": SLURM_MAX_WALL_SECONDS + 3600,
+}
 
 # Worker -> web runner API (host-independent boundary). The runner worker is
 # intentionally off app-net, so configure a public/routable API URL.

@@ -2,7 +2,9 @@ import logging
 import time
 import json
 from common import presence
+from common.domains import DOMAINS
 from common.models import Project, ProjectAccess
+from common.permissions import entry_project_for
 from django.utils.deprecation import MiddlewareMixin
 import traceback
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
@@ -68,38 +70,39 @@ class RequestLoggingMiddleware(MiddlewareMixin):
 
 class ProjectSessionMiddleware(MiddlewareMixin):
     """
-    Middleware to automatically set the project session based on URL path
-    if not present in the session.
+    Middleware that keeps ``current_project_id`` pointing at a project of the
+    domain being browsed.
+
+    The session project is domain-scoped, so it must be re-resolved when the
+    user crosses into another domain -- keeping the previous domain's project
+    left every downstream check (and ``ActiveProfileMiddleware``) resolving the
+    wrong project and bouncing the user back to the landing page.
     """
-    
+
     def process_request(self, request):
         """Set project session based on URL path"""
         if getattr(request, "maintenance_mode", "normal") != "normal" and not getattr(request.user, "is_staff", False):
             return None
         if not request.user.is_authenticated:
             return None
-        if request.session.get('current_project_id'):
-            return None
         if not request.path.startswith('/'):
             return None
 
         url_start = request.path.split('/')[1]
-        if url_start not in ['maxillo', 'brain', 'laparoscopy']:
+        if url_start not in DOMAINS:
             return None
 
-        # Multiple projects live under one domain; default to the first active
-        # project of the domain the user can access.
-        accessible = ProjectAccess.objects.filter(user=request.user).values_list('project_id', flat=True)
-        project = (
-            Project.objects.filter(domain=url_start, is_active=True)
-            .filter(id__in=accessible)
-            .order_by('name')
-            .first()
-        ) or Project.objects.filter(domain=url_start, is_active=True).order_by('name').first()
+        pid = request.session.get('current_project_id')
+        if pid and Project.objects.filter(id=pid, domain=url_start, is_active=True).exists():
+            return None
+
+        # Multiple projects live under one domain; enter at the first the user
+        # can actually access.
+        project = entry_project_for(request.user, url_start)
         if project is None:
             return None
         request.session['current_project_id'] = project.id
-        
+
         return None
 
 
@@ -130,7 +133,7 @@ class ActiveProfileMiddleware(MiddlewareMixin):
 
         app_key = path_parts[0]
 
-        if app_key not in ['maxillo', 'brain', 'laparoscopy']:
+        if app_key not in DOMAINS:
             return None
 
         try:
@@ -144,11 +147,7 @@ class ActiveProfileMiddleware(MiddlewareMixin):
                     id=pid, domain=app_key, is_active=True
                 ).first()
             if project is None:
-                project = (
-                    Project.objects.filter(domain=app_key, is_active=True)
-                    .order_by('name')
-                    .first()
-                )
+                project = entry_project_for(request.user, app_key)
             if project is None:
                 logger.warning(f"ActiveProfileMiddleware: No project for domain '{app_key}'")
                 return redirect('/')

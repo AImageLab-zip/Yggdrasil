@@ -580,23 +580,22 @@
     justify-content: center;
 }
 
-/* Quality Badge Colors - Duration Based */
-.badge.bg-danger {
-    background-color: #dc3545 !important;
-}
-
-.badge.bg-warning {
-    background-color: #ffc107 !important;
-    color: #000 !important;
-}
-
-.badge.bg-success {
-    background-color: #198754 !important;
-}
-
-.badge.bg-secondary {
-    background-color: #6c757d !important;
-}
+/* Caption badges are `.badge-ygg` + a `badge-*` variant, like every other badge on the
+ * site -- see `templates/common/sections/vocal_caption_section.html`.
+ *
+ * **Four `.badge.bg-*` rules used to live here, and they set a background and no
+ * foreground.** Bootstrap's CSS is not loaded on this site (only its JS shim, see
+ * `templates/base.html`), so `.badge` is `static/css/bs-compat.css`'s own rule -- which
+ * pairs `--ygg-surface-2` with `--ygg-text-muted`. Overriding only the background with a
+ * saturated `!important` colour left muted grey text on dark green (`bg-success`, the
+ * "Text" badge) and on mid grey (`bg-secondary`, the modality badge, e.g. "FLAIR"): the
+ * reported contrast defect, in every domain, because the badge that carried it was the
+ * one `vocal_caption.js` builds for a caption it has just created. Only that file used
+ * these classes -- a caption looked one way when created and another after a reload -- so
+ * the fix is that it now emits the same badges the template does, and the trap that a
+ * background-only override is goes with it. Do not add another: a `badge-*` variant names
+ * both halves of the pair.
+ */
 
 /* No Captions State */
 .no-captions {
@@ -1275,8 +1274,13 @@
     user-select: none;
 }
 
+/* The same defect the `.badge.bg-*` block above documents, on hover: a hardcoded
+ * `#5a6268` background with no foreground, so the *server-rendered* modality badge went
+ * unreadable under the pointer -- muted grey on dark grey, and in light mode especially.
+ * The scale and the cursor already say "clickable"; full-contrast text is what a hover
+ * should add, and it holds in both themes because it names a token. */
 .modality-badge-clickable:hover {
-    background-color: #5a6268 !important;
+    color: var(--ygg-text);
     transform: scale(1.05);
 }
 
@@ -1950,4 +1954,176 @@
     color: var(--ygg-text, #fff);
     text-align: center;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ==========================================================================
+   Type chips — one component for the two lists of named, coloured things
+   ==========================================================================
+
+   The laparoscopy annotator lists *region types* beside the viewer and *quadrant
+   types* under the timeline. They are the same object to a reader: a name, a
+   colour, whether it is the one selected, and a couple of actions on it. They
+   were built twice -- the quadrant list had seventy lines of chip CSS inlined in
+   the template (inside `{% if user_profile.is_admin %}`, so a non-admin's page
+   did not even carry it), and the region list had none, so its rows came out as
+   a Bootstrap outline button with the visibility and edit buttons as separate
+   pills floating beside it. With two regions that reads as four unrelated
+   controls in a row, and nothing says which eye belongs to which name.
+
+   One chip: the actions live *inside* the pill they act on.
+
+   `--chip-color` is the type's own colour and `--chip-ink` the foreground that
+   is readable on it (`pageControls.js::readableOn`); both are set per chip by
+   the renderer, because they come from the database rather than the stylesheet. */
+
+.ygg-type-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    max-width: 100%;
+    min-height: 1.85rem;
+    padding: 0.15rem 0.25rem 0.15rem 0.15rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: 999px;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    font-size: 0.78rem;
+    line-height: 1;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+/* The selected one is filled with its *own* colour -- the same colour its mask
+   is painted in on the video. Bootstrap's `.active` on an outline button is a
+   faint grey that is the difference between "selected" and "hovered", which was
+   reported as not being able to tell which region was being drawn in at all. */
+.ygg-type-chip.is-active {
+    background: var(--chip-color);
+    border-color: var(--chip-color);
+    color: var(--chip-ink, #fff);
+}
+
+/* Folded away by the reader. Client-side state, so it reads as dimmed rather
+   than as anything the record says. */
+.ygg-type-chip.is-muted {
+    opacity: 0.55;
+}
+
+/* The selectable half: the dot, the name, and the check. A button inside the
+   chip rather than the chip being one, because a chip contains buttons and
+   nested buttons are not markup a browser will honour. */
+.ygg-type-chip__select {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    padding: 0.15rem 0.35rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 1;
+}
+
+.ygg-type-chip__dot {
+    width: 0.65rem;
+    height: 0.65rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--chip-color);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 25%);
+}
+
+/* On a filled chip the dot is the chip's own colour against itself, so it is
+   drawn in the foreground ink instead -- otherwise it disappears. */
+.ygg-type-chip.is-active .ygg-type-chip__dot {
+    background: var(--chip-ink, #fff);
+    box-shadow: none;
+}
+
+.ygg-type-chip__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Laid out whether or not it is showing, so picking a chip cannot resize it and
+   reflow the wrapped row around it. */
+.ygg-type-chip__check {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    visibility: hidden;
+}
+
+.ygg-type-chip.is-active .ygg-type-chip__check {
+    visibility: visible;
+}
+
+.ygg-type-chip__actions {
+    display: inline-flex;
+    gap: 0.05rem;
+    flex: 0 0 auto;
+}
+
+.ygg-type-chip__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ygg-text-muted);
+    font-size: 0.72rem;
+    line-height: 1;
+}
+
+.ygg-type-chip.is-active .ygg-type-chip__btn {
+    color: inherit;
+    opacity: 0.85;
+}
+
+.ygg-type-chip__btn:hover,
+.ygg-type-chip__btn:focus-visible {
+    background: rgb(15 23 42 / 10%);
+    color: var(--ygg-text);
+}
+
+.ygg-type-chip.is-active .ygg-type-chip__btn:hover,
+.ygg-type-chip.is-active .ygg-type-chip__btn:focus-visible {
+    background: rgb(255 255 255 / 22%);
+    color: inherit;
+    opacity: 1;
+}
+
+.ygg-type-chip__btn--danger:hover,
+.ygg-type-chip__btn--danger:focus-visible {
+    background: var(--ygg-danger-soft, #fdecec);
+    color: var(--ygg-danger, #c0392b);
+}
+
+/* The row the chips wrap in, and the dashed "add one" chip that closes it. */
+.ygg-type-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.ygg-type-chip-add {
+    min-height: 1.85rem;
+    padding: 0.18rem 0.65rem;
+    border: 1px dashed var(--ygg-text-faint);
+    border-radius: 999px;
+    background: var(--ygg-surface-alt);
+    color: var(--ygg-text-muted);
+    font-size: 0.78rem;
+    line-height: 1;
+}
+
+.ygg-type-chip-add:hover {
+    border-color: var(--ygg-primary);
+    color: var(--ygg-primary);
 }

@@ -233,7 +233,9 @@ class LaparoscopyExportProcessor:
 
         handle, _info = open_binary(payload.file.file_path)
         try:
-            stored_width, stored_height, frames = read_mask_archive(handle.read())
+            # The tool attribution is read past: an export carries the masks, and
+            # which brush drew one is provenance for the editor, not for the artifact.
+            stored_width, stored_height, frames, _tools = read_mask_archive(handle.read())
         finally:
             close = getattr(handle, "close", None)
             if close is not None:

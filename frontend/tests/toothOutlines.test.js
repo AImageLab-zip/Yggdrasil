@@ -14,6 +14,7 @@ import { describe, it } from 'node:test';
 
 import {
     MIN_VERTICES,
+    centroidOf,
     clampToImage,
     fdiOf,
     normalizeTeeth,
@@ -227,5 +228,26 @@ describe('roundCoordinate and clampToImage', () => {
     it('leaves a point alone when the bounds are unknown', () => {
         assert.deepEqual(clampToImage([-5, 900], null), [-5, 900]);
         assert.deepEqual(clampToImage([-5, 900], { width: 0, height: 0 }), [-5, 900]);
+    });
+});
+
+describe('centroidOf', () => {
+    it('is where the FDI code goes: the middle of the ring', () => {
+        // A square, so the answer is not in doubt.
+        assert.deepEqual(centroidOf([[0, 0], [10, 0], [10, 10], [0, 10]]), [5, 5]);
+    });
+
+    it('ignores anything past the first two components', () => {
+        // The caller hands over canvas points, but a world point carries a z it must not
+        // be tripped by.
+        assert.deepEqual(centroidOf([[0, 0, 7], [4, 2, -3]]), [2, 1]);
+    });
+
+    it('has no answer for an empty ring, and says so', () => {
+        // Null rather than [0, 0]: the origin is a real place on the image, and a label
+        // silently parked in the top-left corner is worse than no label.
+        assert.equal(centroidOf([]), null);
+        assert.equal(centroidOf(null), null);
+        assert.equal(centroidOf(undefined), null);
     });
 });

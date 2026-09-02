@@ -17,11 +17,16 @@ from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
+from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
 from common.demo import landing_demo_url
 from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
-from common.modality_config import rerunnable_steps_for_patient, rerun_step_labels
+from common.modality_config import (
+    modality_status,
+    rerun_step_labels,
+    rerunnable_steps_for_patient,
+)
 from common import export_catalog, export_ui
 from common.project_filters import presence_filter_specs
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
@@ -49,7 +54,7 @@ from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from .helpers import redirect_with_namespace, render_with_fallback
-from .models import Export, Folder, FolderAccess, Patient, Tag
+from .models import Export, Folder, Patient, Tag
 
 
 logger = logging.getLogger(__name__)
@@ -196,6 +201,14 @@ def patient_detail(request, patient_id):
             "projectNamespace": (request.resolver_match.namespace if request.resolver_match else None) or "brain",
             "modalityFiles": modality_files,
             "segmentationFile": segmentation_file,
+            # Stated rather than left to the client's default. Brain is the surface
+            # drag-and-drop exists for -- four co-registered sequences and no single
+            # primary -- and the flag now decides two things: that the chips are bound,
+            # and that the four windows start *empty* rather than showing one
+            # arbitrarily-chosen series four times over.
+            # maxillo/views/patient_detail.py sets it False for the CBCT grid, whose
+            # windows are three fixed planes and a render.
+            "enableDragDrop": True,
         },
         "patient_files": patient_files,
         # Brain has no add/remove raw controls of its own, but it renders the
@@ -318,16 +331,11 @@ def patient_list(request):
             slug = modality.slug or ""
             if slug in {"rawzip", "voice"}:
                 continue
-            jobs = jobs_by_modality.get(slug, [])
-            status = "absent"
-            if any(job.status == "failed" for job in jobs):
-                status = "failed"
-            elif any(job.status == "processing" for job in jobs):
-                status = "processing"
-            elif any(job.status in ["pending", "retrying"] for job in jobs):
-                status = "pending"
-            elif files_by_modality.get(slug):
-                status = "processed"
+            status = modality_status(
+                slug,
+                jobs_by_modality.get(slug, []),
+                bool(files_by_modality.get(slug)),
+            )
             modality_status_list.append({
                 "slug": slug,
                 "name": modality.name,
@@ -772,82 +780,30 @@ def rename_folder(request, folder_id):
 @login_required
 @require_http_methods(["DELETE"])
 def delete_folder(request, folder_id):
-    if not user_is_project_admin(request.user, "brain"):
+    """Delete a brain folder. Patients survive, unfiled.
+
+    The rule lives in :func:`common.deletion.delete_folder` so the three domains
+    cannot drift: this copy counted only the folder's *direct* patients, so a
+    folder with populated sub-folders read as empty and took them silently.
+    """
+    folder = get_object_or_404(Folder, id=folder_id)
+    # The folder's own project, not the domain slug: passing "brain" makes
+    # `_project_from_context` fall back to the first active brain project by
+    # name, so with more than one brain project the check consulted the wrong
+    # one -- refusing its own admins and admitting another project's.
+    if not user_is_project_admin(request.user, folder.project):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
 
-    folder = get_object_or_404(Folder, id=folder_id)
-
-    patient_count = folder.patients.count()
-    force = request.GET.get("force") == "true"
-    if patient_count and not force:
+    try:
+        unfiled = _delete_folder(folder, force=request.GET.get("force") == "true")
+    except FolderNotEmpty as exc:
         return JsonResponse(
-            {
-                "success": False,
-                "error": (
-                    f"Folder still contains {patient_count} patient(s). "
-                    "Move or delete them first, or pass ?force=true to delete the folder anyway."
-                ),
-            },
+            {"success": False, "error": str(exc), "patient_count": exc.patient_count},
             status=400,
         )
-
-    folder.delete()
-    return JsonResponse({"success": True})
+    return JsonResponse({"success": True, "unfiled_patients": unfiled})
 
 
-@login_required
-def folder_permissions(request, folder_id):
-    folder = get_object_or_404(Folder, id=folder_id)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    rows = folder.access_list.select_related("user").order_by("user__username")
-    users = User.objects.filter(is_active=True).order_by("username")
-    return JsonResponse(
-        {
-            "success": True,
-            "folder": {"id": folder.id, "name": folder.name},
-            "permissions": [
-                {"user_id": row.user_id, "username": row.user.username, "role": row.role}
-                for row in rows
-            ],
-            "users": [{"id": user.id, "username": user.username} for user in users],
-        }
-    )
-
-
-@login_required
-@require_POST
-def upsert_folder_permission(request, folder_id):
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    folder = get_object_or_404(Folder, id=folder_id)
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    user_id = data.get("user_id")
-    role = data.get("role")
-    valid_roles = {choice[0] for choice in FolderAccess.ROLE_CHOICES}
-    if role not in valid_roles:
-        return JsonResponse({"success": False, "error": "Invalid role"}, status=400)
-    if not user_id:
-        return JsonResponse({"success": False, "error": "user_id required"}, status=400)
-    row, _ = FolderAccess.objects.update_or_create(
-        folder=folder,
-        user_id=user_id,
-        defaults={"role": role},
-    )
-    return JsonResponse({"success": True, "user_id": row.user_id, "role": row.role})
-
-
-@login_required
-@require_http_methods(["DELETE"])
-def delete_folder_permission(request, folder_id, user_id):
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    folder = get_object_or_404(Folder, id=folder_id)
-    FolderAccess.objects.filter(folder=folder, user_id=user_id).delete()
-    return JsonResponse({"success": True})
 
 
 @login_required

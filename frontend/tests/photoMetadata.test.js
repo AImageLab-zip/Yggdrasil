@@ -12,6 +12,9 @@ import {
     generalSeriesModuleFor,
     imagePixelModuleFor,
     imagePlaneModuleFor,
+    photoRecords,
+    registerPhotoRegistry,
+    releasePhotoRegistry,
     upstreamWouldKeepSpacing,
 } from '../imaging/photos/metadataProvider.js';
 
@@ -162,4 +165,65 @@ test('a non-string imageId is not answered for', () => {
     const provider = createPhotoMetadataProvider(new Map([['id', UNCALIBRATED]]));
     assert.equal(provider('imagePlaneModule', ['id']), undefined);
     assert.equal(provider('imagePlaneModule', undefined), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// One provider, every mounted surface
+// ---------------------------------------------------------------------------
+
+test('the default provider answers for every registered surface, not just the first', () => {
+    // The reported failure: a maxillo patient mounts teleradiography *and* the intraoral
+    // photographs, `metaData.addProvider` is process-wide so it is called once, and the
+    // provider used to close over whichever registry mounted first. The second surface's
+    // imageIds then had no `imagePlaneModule` -- which Cornerstone's `buildMetadata`
+    // destructures with no null check, so it threw and left a black viewport.
+    const tele = registerPhotoRegistry(new Map([['yggweb:tele.jpg', UNCALIBRATED]]));
+    const intraoral = registerPhotoRegistry(new Map([['yggweb:front.jpg', CALIBRATED]]));
+    try {
+        const provider = createPhotoMetadataProvider();
+
+        assert.ok(provider('imagePlaneModule', 'yggweb:tele.jpg'));
+        assert.ok(provider('imagePlaneModule', 'yggweb:front.jpg'));
+        assert.equal(provider('imagePlaneModule', 'yggweb:absent.jpg'), undefined);
+    } finally {
+        releasePhotoRegistry(tele);
+        releasePhotoRegistry(intraoral);
+    }
+});
+
+test('a registry stays live after registration, so a calibration is seen', () => {
+    // The maps are owned by their bootstrap and written to in place; holding a snapshot
+    // would leave a freshly calibrated image reporting pixels until a reload.
+    const registry = registerPhotoRegistry(new Map([['yggweb:one.jpg', UNCALIBRATED]]));
+    try {
+        const provider = createPhotoMetadataProvider();
+        assert.equal(provider('calibratedPixelSpacing', 'yggweb:one.jpg'), undefined);
+
+        registry.set('yggweb:one.jpg', CALIBRATED);
+
+        assert.ok(provider('calibratedPixelSpacing', 'yggweb:one.jpg'));
+    } finally {
+        releasePhotoRegistry(registry);
+    }
+});
+
+test('a released registry stops answering, so a stale visit cannot shadow a new one', () => {
+    const registry = registerPhotoRegistry(new Map([['yggweb:one.jpg', CALIBRATED]]));
+    assert.ok(photoRecords.get('yggweb:one.jpg'));
+
+    releasePhotoRegistry(registry);
+
+    assert.equal(photoRecords.get('yggweb:one.jpg'), undefined);
+});
+
+test('an explicit registry still scopes a provider to it', () => {
+    const shared = registerPhotoRegistry(new Map([['yggweb:shared.jpg', UNCALIBRATED]]));
+    try {
+        const scoped = createPhotoMetadataProvider(new Map([['yggweb:own.jpg', UNCALIBRATED]]));
+
+        assert.ok(scoped('imagePlaneModule', 'yggweb:own.jpg'));
+        assert.equal(scoped('imagePlaneModule', 'yggweb:shared.jpg'), undefined);
+    } finally {
+        releasePhotoRegistry(shared);
+    }
 });

@@ -6,46 +6,31 @@ which is what ``Job.modality_slug`` carries: a modality's *root* step has
 ``slug == modality.slug``, so passing a plain modality slug resolves that root
 step, while a downstream step (e.g. ``ios_orientation``) resolves itself.
 
-When no step row exists for a slug (e.g. reads before the table is migrated, or
-an ad-hoc modality with no pipeline), readers fall back to the historical
-hardcoded/env behavior, so rollout stays zero-risk.
+A slug with **no** step row declares no pipeline, and that is not a gap to be
+filled by a fallback: the runner sbatches ``ALGO_BASE_DIR/<algo_name>/run.sbatch``
+and ``common.runner.run.run_job`` fails a job whose step has no ``algo_name``, so
+a Job created for a step-less modality can only ever end 'failed'. Every modality
+that predates the step table was given a row by migration 0034 (disabled for the
+ones that never processed), so "no row" means "declared after that, and never
+given a step" -- an admin-added modality like a photo type that is uploaded and
+read, never computed on.
 
 This module holds the single source of truth for the enablement rule so that
 ``common.job_routing`` can delegate here without circular recursion.
 """
 import logging
 
-from django.conf import settings
 from django.db.utils import DatabaseError
 
 logger = logging.getLogger(__name__)
-
-# Historical hardcoded list from maxillo/file_utils.py: image modalities whose
-# upload Job needs no runner processing.
-_LEGACY_NO_PROCESSING = {"panoramic", "teleradiography", "rawzip"}
-
-
-def _env_is_enabled(modality_slug):
-    """Current env behavior of is_runner_enabled_for_modality.
-
-    Empty/absent RUNNER_QUEUE_BY_MODALITY => everything enabled; otherwise a
-    modality is enabled only when it has a non-blank queue entry.
-    """
-    queue_by_modality = getattr(settings, "RUNNER_QUEUE_BY_MODALITY", None) or {}
-    if not isinstance(queue_by_modality, dict) or not queue_by_modality:
-        return True
-    slug = str(modality_slug or "").strip()
-    if not slug:
-        return False
-    queue = queue_by_modality.get(slug)
-    return isinstance(queue, str) and bool(queue.strip())
 
 
 def get_step(slug):
     """Return the ProcessingStep whose slug matches, or None if absent.
 
-    Swallows DatabaseError (e.g. reads before the table is migrated) so callers
-    fall back to legacy behavior.
+    Swallows DatabaseError (e.g. a read before the table is migrated) and
+    reports it as absent, which is the safe direction: callers then create no
+    Job rather than one no runner can execute.
     """
     slug = str(slug or "").strip()
     if not slug:
@@ -65,21 +50,23 @@ def get_step(slug):
 def modality_requires_processing(modality_slug):
     """Whether an upload for this slug needs runner processing.
 
-    True iff its step exists and is enabled; when no step row exists, fall back
-    to the historical no-processing list.
+    True iff an enabled ``ProcessingStep`` declares it. No row means no
+    pipeline, hence no Job: see this module's docstring for why a job for a
+    step-less modality is not merely useless but always failing.
     """
     step = get_step(modality_slug)
-    if step is not None:
-        return step.is_enabled
-    return str(modality_slug or "").strip() not in _LEGACY_NO_PROCESSING
+    return step is not None and step.is_enabled
 
 
 def modality_is_enabled(modality_slug):
-    """Whether the runner is enabled for this step slug (DB config or env)."""
-    step = get_step(modality_slug)
-    if step is not None:
-        return step.is_enabled
-    return _env_is_enabled(modality_slug)
+    """Whether the runner is enabled for this step slug.
+
+    Same rule as :func:`modality_requires_processing` -- a step declares the
+    work and its own enablement, and nothing else can. Kept as its own name
+    because ``common.job_routing`` asks the routing question, not the upload
+    one.
+    """
+    return modality_requires_processing(modality_slug)
 
 
 def queue_override_for(modality_slug):
@@ -99,6 +86,30 @@ def modality_is_blocking(modality_slug):
     if step is not None:
         return step.is_blocking
     return modality_requires_processing(modality_slug)
+
+
+def modality_status(modality_slug, jobs, has_files):
+    """The patient-row status for one modality's pill.
+
+    ``'failed' | 'processing' | 'pending' | 'processed' | 'absent'``, in that
+    precedence, from the patient's Jobs for this slug and whether it has any
+    file.
+
+    **A modality that declares no enabled step is read from its files alone.**
+    It has no processing, so it has no processing status to report: one upload
+    makes it green. That is also what clears the debris -- a patient uploaded
+    while a step-less modality still spawned a Job carries a 'failed' row that
+    no rerun can ever complete, because there is no algo to run.
+    """
+    if modality_requires_processing(modality_slug):
+        statuses = {getattr(job, "status", "") for job in jobs or ()}
+        if "failed" in statuses:
+            return "failed"
+        if "processing" in statuses:
+            return "processing"
+        if statuses & {"pending", "retrying"}:
+            return "pending"
+    return "processed" if has_files else "absent"
 
 
 def modality_discard_raw(modality_slug):

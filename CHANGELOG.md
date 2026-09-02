@@ -7,6 +7,768 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-02
+
+### Added
+- **A bucket-to-bucket clone, for moving the instance without moving the store.**
+  `scripts/mirror_bucket.py` copies one S3/Garage bucket into another key for key, so a
+  new deployment can be given its own bucket while the old instance keeps serving from
+  the original. The copy is server-side -- `CopyObject` is a single request to the
+  destination naming the source -- so no object bytes pass through the machine running
+  it, and one credential with read on the source and write on the destination is the
+  whole requirement. `ObjectStorage` gained `copy_from` (multipart above S3's 5 GiB
+  single-copy limit) and `list_objects`, which answers sizes where `list_keys` answers
+  only names.
+  Three things the shape of a real 650 GiB clone forced. `CopyObject` is *synchronous*,
+  so the store does not answer until the object is copied and botocore's 60s
+  `read_timeout` expires mid-copy on a few hundred MB -- and then retries work the store
+  is still doing, which is a feedback loop rather than a retry. `read_timeout` is
+  therefore configurable and defaults to 900s here, while the app's own default is
+  untouched. Work is issued **shuffled**, because keys sort by prefix and size
+  correlates with prefix, so key order points every worker at the same size class at
+  once and a run of multi-GB objects blocks the whole pool. And a heartbeat reports
+  in-flight progress on a timer rather than on completions, so a pool blocked on slow
+  objects is distinguishable from a hung process.
+  Concurrency is not the lever it looks like: measured against a single-node Garage,
+  4x the workers bought 1.35x the throughput, because the store's disk is the ceiling.
+  `--skip-existing` resumes and catches drift; `--verify` compares the two buckets
+  without writing and exits non-zero on any missing or size-mismatched key.
+- **The laparoscopy video algorithm runs on the cluster, and annotation waits for it.**
+  The algorithm arrived as a Docker/Celery worker speaking the old ToothFairy4M manifest
+  contract; the cluster it has to run on dispatches with `sbatch` and has no Docker
+  daemon, so its logic was ported to `algo/laparoscopy-video/` --
+  `--input-dir`/`--output-dir`, `ygg-stage` for I/O, `uv` for its environment, and
+  `imageio-ffmpeg` for the ffmpeg the compute nodes do not have. It writes
+  `compressed.mp4` (what the page plays) and `subsampled.mp4`, the sharpest frame of each
+  source second, losslessly encoded.
+  The sampled track is now what the annotator opens, and its existence is the gate: a raw
+  recording runs at 25-30 fps, the record is one labelmap per annotated frame, and the
+  export reads the sampled track -- so strokes drawn on the raw video described frames
+  nothing else could line up with. `video_state` gained a `processing` state saying so,
+  and both write endpoints re-check it (409, not 403: the request is fine, the state has
+  not arrived). Derivatives are probed on completion, because the sampled track's frame
+  rate is its own and nothing else can read it.
+- **IOP-Compass: intraoral view classification, then tooth segmentation.**
+  `algo/iop-compass/` on the cluster, beside a pristine checkout of the benchmark it
+  imports. The order is the method rather than a pipeline convenience -- SegmentAnyTooth
+  keeps one detector per clinical view, so the ResNet18's label selects the model; a
+  five-photograph series is resolved jointly (`constrained_assign`) rather than by five
+  independent argmaxes. Segmentation runs on the full image with no ROI stage, and the
+  contours -- not the rasters -- are scaled back to the uploaded photograph's pixels.
+  Polygons land through the existing intraoral completion path as
+  `AnnotationOrigin.PREDICTION`, so they never freeze a patient's raw data and never
+  overwrite a confirmed segmentation. Each photograph's view is recorded on its
+  `FileRegistry.subtype`.
+  Outputs are keyed by object-storage key: a cluster job is handed `YGG_INPUT_KEYS` and
+  never sees a `FileRegistry` id, and `file_path` *is* that key, so the completion path
+  now resolves either.
+
+### Changed
+- **The CBCT export offers the uploaded volume and the segmentation, and nothing else.**
+  "Processed volume" sat beside "Segmentation" with nothing telling a reader them apart,
+  and the resampled volume is not what anyone leaves with. The inference statistics and
+  the pipeline's own panoramic PNG went with it -- pipeline diagnostics, not the record,
+  and the panoramic images are offered under the panoramic modality where someone looks
+  for them. The panoramic Z-sweep, a bucket for pre-MIP sweep variants, is gone too.
+  Saved exports naming a dropped artifact degrade rather than break: `resolve_artifacts`
+  has always ignored keys it does not know.
+- **The export form names one thing per checkbox, and no longer explains itself.** The
+  DICOM interchange outputs (SEG, SR, RTSTRUCT) and the raw-archive artifacts are off the
+  form: interchange is not what anybody leaves this screen with, and the raw archive is
+  being retired as an input. "Predicted tooth landmarks" is gone as a separate box --
+  predictions are written into the same annotation record with `origin=PREDICTION`, so
+  "Tooth landmarks" already covers generated and hand-placed points and the second box
+  only offered the stale file the pipeline left behind. "Occlusion classification"
+  (patient level) and "Bite classification (pipeline output)" (IOS) were one fact under
+  two names: they are now a single **Bite Classification** under IOS, exporting the
+  pipeline's JSON and the manual / AI classes together, with the matching filter merged
+  the same way. The per-checkbox descriptions are gone; the labels say it. Saved exports
+  naming a merged key still resolve to what they asked for.
+- **DICOM upload is switched off.** The CBCT control accepts NIfTI and MetaImage only,
+  the DICOM-folder pane is gone, and the refusal is enforced in
+  `save_cbct_to_dataset` -- on the DICM marker in the bytes, not on a filename -- so the
+  upload page, the project API and replacing a patient's files are all closed to it.
+  Native DICOM storage (`save_cbct_folder_to_dataset`, `common.dicom.ingest`) is
+  untouched and still serves the series already stored; what is switched off is
+  accepting new ones.
+- **The modality tabs read `IOP` and `TR`.** `intraoral-photo` had been seeded with its
+  own slug as its label and teleradiography with none, so beside `IOS`, `OPT` and `RAW`
+  two tabs read a slug and a full word. Migration `0051` relabels existing rows, since
+  `get_or_create` only ever applied the seeder's defaults at creation.
+
+### Fixed
+- **One classification per patient per classifier, which production already enforced.**
+  A `UniqueConstraint(patient, classifier)` reached production out of band, ahead of this
+  line, together with a pass that collapsed existing duplicates. The invariant is the
+  right one -- there is the manual classification a human entered and the pipeline one
+  the model produced, every write site treats it that way, and a duplicate only ever
+  shadowed the newer row in `-timestamp` ordering, so the UI showed a stale
+  classification -- but the model never declared it, so a fresh database did not have it
+  and Django's recorded state did not know about it either.
+  Now declared on `Classification.Meta`, with the migration written to converge from
+  both starting points: the dedup only touches groups that are actually duplicated, and
+  the constraint is added through `SeparateDatabaseAndState` only if the table does not
+  already carry it, since a bare `AddConstraint` succeeds on an empty database and fails
+  on a restored one with a duplicate key name. `patient_detail`'s accept-AI path moved
+  from `create` to `update_or_create`: accepting the AI result twice, or accepting it
+  after classifying by hand, is an ordinary thing to do rather than an error to raise.
+- **The empty region panel named the wrong role.** With no Add button the laparoscopy
+  region panel offered "An annotator can add one" while its test asserted
+  "administrator" and its own comment claimed the button was administrator-only. The
+  server is unambiguous -- naming what a project draws is annotation work, gated on
+  `profile.is_annotator()`, and the template gates the button the same way -- so the
+  sentence was right and the test and the comment were both stale.
+- **A prediction locked the panoramic arch.** `annotation_lock` asks `annotations` first
+  and then the legacy per-domain tables, and takes the union -- a cross-check kept for
+  one release. But the legacy half is a bare `.exists()` on a row, and whether a *human*
+  produced it is the actual question, which is exactly what `AnnotationSet.ever_annotated`
+  carries. So an `ios_landmarks` file written by the landmark predictor locked a patient
+  nobody had annotated, and the editor answered "Arch locked" over an arch that had never
+  been touched. Where the conversion has produced a set for a kind, that set is now the
+  answer and the table under it is skipped; where it has not, the old check still speaks.
+- **A patient carrying several modalities lost its WebGL contexts, and two viewers went
+  dark with it.** `webGlContextCount` is allocated **per rendering engine** and the pool
+  fills eagerly, so 7 was 7 contexts for each of the four engines a maxillo patient page
+  builds -- 28 allocated against a browser that keeps around 16, on a page that uses
+  four. The oldest were dropped, which is the "Too many active WebGL contexts" storm, the
+  `vtkPolyDataVS` compile failure, the `isUniformUsed` of null crash, the black intraoral
+  viewport and the missing IOS mesh. The count only ever separates multiple *stack*
+  viewports inside one engine -- every other type lands on context 0 -- and no engine here
+  has more than one, so it is 1, with `renderingBudget.test.js` pinning that claim against
+  the surfaces rather than against a preference.
+- **`No imagePlaneModule found for imageId: ...front.jpg`, and a black intraoral stack.**
+  `metaData.addProvider` is process-wide so the photo entry registers once -- over
+  whichever surface's registry mounted first. A maxillo patient mounts two, and the second
+  one's imageIds had no provider; Cornerstone's `buildMetadata` destructures
+  `imagePlaneModule` with no null check, so the miss threw instead of degrading. One
+  provider now reads a composite over every mounted surface's live registry, and a surface
+  that unmounts drops out of it.
+- **A CBCT patient with no panoramic logged a failed request on every visit.** The pane is
+  offered for every CBCT because one can be generated from the volume, so it opened by
+  asking `?meta=1` for patients that had nothing yet -- which the server can only answer
+  404, and which the browser logs before any handler runs. The page is told at render time
+  whether a panoramic file exists and shows the pane's own empty state instead.
+- **The laparoscopy region chips changed size when one was selected.** They are a wrapped
+  row of buttons, and the selected one gained a bolder label and a check mark that existed
+  only while selected -- so picking a region resized two chips and shuffled the rest. The
+  box is fixed and the mark is always laid out; selection changes colour and nothing else.
+- **Video masks were too faint to see.** No labelmap style was set, so every region
+  rendered at Cornerstone's default half-transparent fill -- and all but the selected one
+  at the lower `*Inactive` alphas -- over saturated tissue under a specular highlight.
+
+- **The CBCT panoramic arch editor drew no control points, and its axial background
+  ignored the Z control.** Two independent throws, and neither could be seen from the
+  suite because it drives fakes.
+  - `ArchSpline extends CubicSpline`, but `getTransformMatrix` is abstract on `Spline`
+    and implemented only by `CardinalSpline`, `BSpline` and `QuadraticBezier` --
+    `CubicSpline` *calls* it and does not define it. So every render of the arch threw
+    `this.getTransformMatrix is not a function` inside `renderAnnotationInstance`,
+    before a single handle was drawn. The base is `CardinalSpline` now, the way
+    `annotations/tensionSpline.js` already had it, and the annotation names its spline
+    type and lets the tool build the instance rather than constructing one by hand
+    (`Spline`'s constructor does not read `controlPoints`, so the hand-built one was
+    born empty anyway). `archSpline.test.js` reached for the method as
+    `getTransformMatrix?.()`, which is exactly what hid this; it is a required method
+    now, and the suite exercises `getPolylinePoints()` -- the entry point the tool
+    actually calls, and the one nothing had ever run.
+  - `cprViewport.setVolume` handed `vtkImageCPRMapper` the Cornerstone volume's own
+    `imageData`. A 5.8.2 `ImageVolume` attaches a `voxelManager` and states
+    `hasScalarVolume: false`; it never calls `pointData.setScalars()`. The CPR mapper is
+    the one mapper in this stack with no Cornerstone-patched counterpart, so it read
+    null scalars, returned early from `buildBufferObjects`, and dereferenced a null
+    `volumeTexture`. **That throw froze the whole page**:
+    `ContextPoolRenderingEngine._renderFlaggedViewports` maps over the flagged viewports
+    with no `try` and clears `_animationFrameSet` only after the loop, so one throwing
+    viewport stops every viewport on the shared engine from ever repainting again -- the
+    axial slice stood still while the mask overlay, which `setMask` paints directly,
+    followed the Z control. The mapper is given a `vtkImageData` carrying the voxels in
+    its point data now, with the volume's own geometry and no copy of the array.
+  - The Z slider, prev/next and Reset auto were bound before the editor was mounted, so
+    touching one on a patient who already had a panoramic threw on a null descriptor.
+    They are no-ops until Edit is clicked, which is what they mean.
+  - The arch spline config carried an invented `allowOpen`/`allowClosed`/`allowOpenEdit`
+    triple that upstream merges in and never reads. The switch that exists is the
+    tool-level `allowOpenSplines`, which was on its `false` default -- so the tool closed
+    the arch on edit, drawing a loop through the tongue.
+- **The laparoscopy video annotator lost every brush stroke on mouse-up, and its polygon
+  tool could never draw at all.**
+  - `Viewport.addActor` guards its renderer with `renderer?.addActor(actor)`;
+    `Viewport._removeActor` does not. A `VideoViewport` has no VTK renderer -- it draws
+    on a 2D canvas and its labelmaps are `CanvasActor`s -- so every labelmap actor
+    removal was `Cannot read properties of undefined (reading 'removeActor')`, on every
+    frame change and after every stroke. The stale actor was then never removed, so the
+    next pass threw in the same place and the mask had no actor left to draw it. Both
+    upstream callers skip that line for a viewport exposing `removeData`, so the video
+    viewport now has one -- the missing half of the `declareCpuImageRendering` shim that
+    already patched the *add* side of the same asymmetry.
+  - The polygon button activated `PlanarFreehandContourSegmentationTool`, whose
+    `createAnnotation` throws unless a Contour segmentation is active. This surface has
+    only ever created labelmaps, so every stroke threw and was swallowed by
+    `mouseDownActivate` -- visible while the mouse was down, gone on release. It draws
+    with a plain `PlanarFreehandROI` now and the finished outline is rasterised into the
+    region's labelmap and dropped (`imaging/video/polygonFill.js`), which keeps the
+    labelmap the only record rather than adding a second representation of the same fact
+    for something to keep in step.
+  - The active tool was invisible. `selectTool` has always toggled `.active`, but
+    Bootstrap's CSS was removed and nothing in `static/css/` styled it, so the armed tool
+    rendered identically to the rest. The template also ships the brush pre-marked and
+    nothing ever armed it, so the toolbar opened asserting a selection Cornerstone did not
+    have -- harmless while the class had no styling, a false statement once it is filled
+    blue. It is armed on mount now, or the mark is dropped when it cannot be.
+  - At mount the brush painted into the **last** region while the panel and
+    `editor.region` said the **first**: Cornerstone marks the most recently added
+    representation active, and nothing re-asserted the selection afterwards.
+  - `saveMarkers` POSTed to a view that accepts `GET`/`PUT`, so every quadrant marker add
+    and every removal answered 405.
+  - The dead `point` toolbar button mapped to no tool and reported "Pick a region before
+    drawing on one" -- a true-sounding sentence with no action behind it. It is gone, and
+    an unknown tool is now told apart from a missing region.
+
+### Changed
+- `toolDecision` is gone from `imaging/video/bootstrap.js`. It was a pure, exported and
+  tested copy of the "which tool may be armed" rule with no caller anywhere;
+  `editor.setActiveTool` is the one that runs, and it now answers
+  `'ok' | 'unknown' | 'needs-region'` so the binder can tell the two refusals apart. Two
+  implementations of one rule, in two shapes, is how they drift.
+
+### Added
+- **The laparoscopy region panel manages region types, and lists what is drawn in them.**
+  Rename, recolour and delete have existed at `/laparoscopy/api/region-types/<pk>/` since
+  Phase 10 and the page called none of them; each row now offers all three, plus a
+  per-region show/hide (view state, deliberately not stored -- a persisted flag would
+  follow a reader to another workstation and read there as a missing annotation). A new
+  region type is born in the next unused colour from a shared palette instead of every
+  one being the same blue. A recolour writes the LUT entry directly
+  (`config.color.setSegmentIndexColor`): re-registering the representation is what colours
+  a *new* region and short-circuits for one already on screen, so the swatch would have
+  moved and the mask would not.
+- **An annotation list, with the tool that drew each mask.** One row per (region, frame)
+  -- the addressable unit of this record -- naming the tool, the region and the instant,
+  with go-to-frame, move-to-another-region and clear. The tool is carried through the save
+  body and the NPZ archive under a new self-describing `mask_tools` key; an archive
+  written before it reads back unchanged, and its masks show no tool rather than an
+  invented one, because the tool was never recorded anywhere.
+- **Quadrants can be created in the page.** `#quadrant-types-panel`,
+  `#timeline-add-class-btn` and `#timeline-class-admin-list` were authored in Phase 10
+  with their own chip CSS and appeared in no JavaScript file at all, so the panel kept
+  `d-none` for its whole life, `activeQuadrantId` could never leave null, and "Add
+  Marker" could only ever answer "Pick a quadrant before adding a marker." The panel is
+  bound now: add, rename, recolour and delete, with the reassignment the delete endpoint
+  demands when markers still use the type.
+
+- **A project could not be created from the Django admin, and could not be deleted at
+  all.** Both defects came from the same place -- the admin was still treating a project
+  as if it were a folder, which is what it used to be before the folder->project
+  migration made folders a sub-organization *inside* a project.
+  - **Create.** `Project.created_by` is a `null=True` audit column that was never
+    `blank=True`, so every `ModelForm` built from it -- the admin's add page, which the
+    control panel's "New project" button links straight to -- made it a required picker
+    and refused the POST with `created_by: This field is required`. It is `blank=True`
+    now and the admin fills it from the request. `Modality` and `AnnotationMethod`
+    carried the identical defect on the identical column and are fixed with it.
+  - **Delete.** `Project` CASCADEs to patients, which CASCADE to `FileRegistry`, which
+    the annotation graph guards with `PROTECT` (`SourceResource.file`,
+    `AnnotationPayload.file`, `AnnotationTarget.source_resource`). `PROTECT`, unlike
+    `RESTRICT`, raises *even when the protecting row is part of the same cascade*, so the
+    confirmation page rendered as "cannot be deleted" and the POST came back 200 with the
+    project still there -- a silent no-op for any project whose patients had ever been
+    annotated. The guards are deliberate: destroying annotation work has to be an
+    explicit decision. `common/deletion.py` is now that decision, in one place
+    and in dependency order -- the annotation items (which `PROTECT` the targets and
+    selectors they are anchored to, and so cannot be left to the set's own cascade),
+    then the annotation sets, then the source resources naming the
+    project's files, then the project, then the objects in storage by the keys the
+    `FileRegistry` rows recorded (a row's `file_path` is an object key *or* a bundle
+    prefix; listing the prefix covers both). The confirmation page states real counts,
+    annotation items and payloads included, and says the loss is permanent.
+  - **Who may.** Creating and deleting a project is now a superuser act; editing one
+    keeps the ordinary `change_project` permission, and folders stay creatable in the app
+    by project admins. The control panel's button is hidden from staff who cannot use it.
+  - **Folders read as folders.** The three copies of `FolderAdmin` are one
+    `DomainFolderAdmin`, whose project picker is scoped to the admin's own domain -- it
+    offered every project in the database, so a maxillo folder could be filed under a
+    brain project: invisible to every project-scoped listing while pointing across
+    domains. Folders also appear inline on their project, where the hierarchy is.
+- **Two of the three domains could create folders they could never delete.** The
+  endpoint existed for brain alone, and no UI in any domain called it -- the folder
+  context menu offered statistics, rename and permissions, and no way to remove the
+  folder. The rule is one function now (`common/deletion.py`, beside the project
+  cascade, because the two rules are opposites worth reading together: deleting a
+  project destroys everything below it, deleting a folder destroys nothing but the
+  folder). Maxillo's view serves laparoscopy as well -- laparoscopy includes
+  `maxillo.app_urls` under its own namespace -- and brain's copy now defers to the
+  same function. Patients are never deleted: `Patient.folder` is `SET_NULL`, so they
+  stay in their project and simply stop being filed, and the context menu says so
+  before asking. Two defects fell out of the consolidation:
+  - brain's copy counted only the folder's **direct** patients, so a folder whose
+    sub-folders held patients read as empty and took them silently. `Folder.parent` is
+    CASCADE, so the question is about the whole subtree; soft-deleted patients count
+    too, being restorable rows the cascade would unfile.
+  - brain's permission check passed the domain slug `"brain"`, which makes
+    `_project_from_context` fall back to *the first active brain project by name* --
+    so with more than one brain project it consulted the wrong one, refusing that
+    folder's own admins and admitting another project's. Both views now check against
+    the folder's own project, which is the only project that owns it.
+- **Every project created from the control panel became a maxillo project.** "New
+  project" was a single hardcoded link to `maxilloproject/add/`, and a project's domain
+  is immutable and forced by the admin class that serves it -- so the choice of domain
+  is the choice of button. There is now one per domain, reversed from the admin URLs
+  (via `common.domains.project_admin_add_targets`, keeping "adding a domain is a
+  one-line change" true) so a renamed proxy breaks a test rather than a user's link.
+- **A seventh round: four surfaces, four defects that a data-path check cannot see.**
+  - **The CBCT 3D segmentation had no depth in it.** Every tooth on the far side of the
+    arch showed through the near side, and rotating changed which colours won rather than
+    what occluded what. Last round put the labelmap actor on a composite through
+    `setRenderMode`, and that correction could never arrive in time:
+    `addSegmentationRepresentations` is **synchronous and returns `undefined`** -- it files
+    the representation and leaves the actor to the segmentation render loop -- so the
+    `await` at the call site resolves while the viewport still holds only the study, and
+    the walk over its actors finds no labelmap to correct. Meanwhile Cornerstone had
+    already built the actor with its own default, `config?.blendMode ??
+    MAXIMUM_INTENSITY_BLEND` (`legacyVolumePlan.js`), set on the mapper by
+    `createVolumeActor`; a MIP through a labelmap takes the largest *label value* along
+    each ray, which is a flat map rather than structures in depth. The blend mode is now
+    asked for at registration (`solidVoxelConfig`), so there is no race to lose. The
+    re-application stays: a drop rebuilds the actors and it is what puts them back.
+  - **The panoramic arch was drawn, filed, and then discarded on the way to the screen.**
+    `setArch` built its `SplineROITool` annotation by hand and omitted `isVisible`.
+    `filterAnnotationsWithinSlice` -- which every volume viewport's render *and* every hit
+    test passes through -- does a bare `if (!isVisible) continue`, so the arch was never
+    drawn and no handle was ever found under the pointer: the automatic spline appeared to
+    work and its control points could not be moved. `isLocked` and `FrameOfReferenceUID`
+    are stated too; upstream's own `hydrate` sets all three, and this is that object built
+    by hand. **And the mandible under it was invisible for two separate reasons.**
+    `setMask` drew through a window/level, which is a greyscale ramp -- so the blue was
+    white, and the mask's *zero* voxels were painted as translucent black over the whole
+    slice, darkening everything except the region meant to stand out. `MASK_COLOR` had
+    been declared and used by nothing. It is now a colour transfer function plus a
+    piecewise opacity, which is how a `vtkImageSlice` composites. The mask also carried no
+    direction matrix, so on the usual CBCT affine -- positive diagonal in RAS, negative in
+    LPS -- it was mirrored about the origin; its axes now come from `indexToWorldLps`, the
+    same function that places an arch control point.
+  - **The laparoscopy annotator worked on the first frame and no other.** `prepareFrame`
+    called `addSegmentations` with a fixed per-region id for every frame it prepared, and
+    `SegmentationStateManager.addSegmentation` **throws** on an id it already holds. The
+    throw came out of `prepareFrame`, through `showFrame`, and into an unhandled
+    rejection: masks unpainted, frame navigation half-applied, nothing reported. A region
+    is now registered once and its labelmap layer *grown* per frame with
+    `updateSegmentations`, which is also what lets Cornerstone resolve the labelmap
+    belonging to the frame on screen. Two things around it that made the surface hard to
+    read: every region drew in Cornerstone's default colour, because each is its own
+    segmentation using its own segment 1 and none was given a LUT -- so the swatches in
+    the region list described nothing; each region's `#rrggbb` is now its mask's colour.
+    And the selected region was marked only by Bootstrap's `.active`, a faint grey fill
+    that is the difference between selected and hovered; it is now filled with the
+    region's own colour, in a foreground chosen for contrast, and says so through
+    `aria-pressed`. The list also sat flush against the card border -- it had no
+    `card-body`.
+  - **Zooming the laparoscopy video did nothing at all.** The buttons called
+    `viewport.setZoom?.(viewport.getZoom?.() * factor)`. Optional chaining reads as a
+    guard and is not one: both methods exist, inherited from `Viewport`, and the inherited
+    `getZoom` goes through `getVtkActiveCamera()`. `VideoViewport` sets
+    `useCustomRenderingPipeline = true`, so the engine never makes it a vtk.js-driven
+    viewport and never adds a renderer for its id -- `getZoom()` throws before `setZoom`
+    is reached. Zoom now goes through the camera pair the class implements itself, via
+    `zoomBy`, which owns the one piece of arithmetic that is easy to invert:
+    `parallelScale` is half the world height on screen and therefore moves the *opposite*
+    way to magnification.
+  - **The IOS axis captions floated over the scan they were meant to orient.** The arrows
+    are actors and the GPU occludes them correctly; the `x`/`y`/`z` captions are HTML over
+    the canvas and were always on top, so a caption stayed legible in exactly the position
+    that proves it is behind a jaw -- contradicting the arrow it names, on the one control
+    a reader uses to work out which way round the scan is. Each caption is now depth-tested
+    against the arches with the mesh picker the surface already owns, coalesced to one
+    animation frame because `CAMERA_MODIFIED` fires on every step of a drag. A hidden arch
+    cannot hide a caption: `vtkPicker` requires `getNestedVisibility()` before it will
+    consider a prop, which is what keeps `viewUpper` honest.
+
+- **A sixth round. The legacy conversion now runs from `migrate`, and it had never
+  finished on real data.**
+  - **`annotations/migrations/0005` runs `annotations_convert_legacy`.** Upgrading a 1.9
+    or 2.0 deployment to 3.0 has to leave a working system without anybody remembering a
+    second step, and it did not: 54 browser-generated panoramics sat in object storage
+    while the viewer answered 404, because the conversion had never been run there. The
+    command's own header argues against a `RunPython` -- unbounded rows, no resume, a
+    blocked deploy -- and the migration answers each: it works patient by patient in its
+    own transaction, it is idempotent so a re-run *is* the resume, and
+    `continue_on_error` keeps one odd row from stranding an upgrade.
+  - **Three bugs stood between that command and a complete run**, all found by running it:
+    - **The region schema was keyed on the wrong project.** Region types predate the
+      project registry, so a stored stroke can name a `RegionType` that now belongs to a
+      different project than its patient does. `_resolve_label` refused it -- correctly,
+      for a live save -- and the conversion aborted on `label code 'Tool' is not defined
+      in schema 3`, taking every later surface with it. `region_label_schema` now takes
+      `extra_codes`, so history is representable while the live UI still offers only the
+      project's own types.
+    - **`EventAnnotationItem.value` could not hold a transcript.** It is a
+      `CharField(255)`; every domain stores `text_caption` as a `TextField`, and 4072 of
+      4111 maxillo captions and all 6 brain ones are longer than 255 characters. MySQL
+      answered `Data too long for column 'value' at row 1` and **no voice caption had
+      ever converted**. Widened to `TextField` in `0004` -- the column is in no index, so
+      there is no prefix-length question.
+    - **The panoramic conversion dropped half of what it read.** `PanoramicState` carries
+      `mip_file`, `raysum_file` and a segmentation source; the converter wrote only the
+      arch. `panoramic_arch_state` reads the strips back as `png_render` payloads and
+      `expected_fingerprint` covers the segmentation as well as the volume, so a study
+      converted this way had an arch, no strips, a fingerprint that could never match,
+      and a 404 over two PNGs sitting in storage -- "Panoramic image not available", as
+      reported. It now calls `services.panoramic.save_panoramic_arch`, the same writer
+      the live save uses, and `_panoramic_converted` treats a strip-less conversion as
+      *not done* so a re-run repairs it. Nothing is deleted to do that: `AnnotationTarget`
+      is `PROTECT`ed on purpose, and the repair lands as a new revision.
+  - **The laparoscopy region panel was blank and said nothing.** Patient 12's project
+    defines no `RegionType` rows, so every drawing tool answered "Pick a region before
+    drawing on one" over a panel offering nothing to pick -- a true sentence with no
+    action behind it. The panel now says the project defines none, and the **Add** button
+    that has been in the template since Phase 10 bound to nothing is wired to
+    `/laparoscopy/api/region-types/`. A region created that way is handed to the editor
+    (`addRegion`), which clears its per-frame labelmap cache so the new region has
+    buffers, rather than requiring a reload.
+  - **The timeline stood still while the video played.** "Playing is for looking; the
+    playhead catches up when it stops" is the right rule for *annotation* state -- running
+    `showFrame` sixty times a second would rebuild a labelmap per frame -- and it was
+    applied to the readouts too, so the clock and the playhead froze for the whole of a
+    recording. `showTime` now takes an instant, and playback drives it from the video
+    element's own `timeupdate`. No annotation state follows a playing video.
+  - **The 3D segmentation rendered outlines, not voxels.** Two causes, both visible in the
+    screenshots. Cornerstone's labelmap default is a 3px outline over a 50% fill, which is
+    right on a slice and is exactly the translucent shells reported on the volume render;
+    the 3D window now gets `solidVoxelStyle()` per viewport while the slices keep their
+    outline. And the study's render mode was applied to *every* actor -- itself a fix for
+    a real mismatch -- which put the labelmap on an attenuated **maximum-intensity**
+    projection: that takes the largest *label value* along each ray, so the
+    highest-numbered tooth wins wherever two overlap regardless of depth. A labelmap is
+    not an intensity field; it is composited and shaded (`LABELMAP_RENDER_SPEC`), and
+    `setRenderMode` tells the two apart by the window's own volume id.
+
+- **A fifth round: five defects, three of them one missing signal each.**
+  - **The laparoscopy recording was a black box, and always had been.** The viewport is
+    built while `#video-annotate-viewport` still carries `d-none`, so `enableElement`
+    sizes its canvas to 0x0; the page removes the class a moment later and nothing told
+    Cornerstone. `[ygg-video] mounted` was reported over a canvas with no pixels in it.
+    The volume grid solved this in Phase 3 and the photo stack had quietly grown its own
+    private copy of the same helper, so `isMeasurable`/`observeSize` moved to
+    `imaging/runtime/elementSize.js` and all three surfaces use the one. Moving the
+    element into `#video-player-wrap` last round changed nothing about this: the box was
+    black at the bottom of the page too.
+  - **A slice change on the panoramic arch threw, and took the whole editor with it.**
+    `showSlice` called `setViewReference({sliceIndex})`. That is not a view reference:
+    `BaseVolumeViewport.setViewReference` takes its slice branch only when
+    `viewRef.volumeId` matches the viewport's, every other branch is gated on the frame
+    of reference, and with neither field present the last `else` **throws**
+    `Incompatible view refs: undefined!==1.2.840.10008.1.4`. The throw happened inside
+    the geometry worker's `onmessage`, so it was uncaught and abandoned the rest of
+    `onGeometry` -- no arch, no CPR, no live pane, no bake. "Generated panoramic" stayed
+    empty forever. It now passes `getViewReference({sliceIndex})`, which is the companion
+    the library intends, and the worker bridge routes a throwing callback to `onError` so
+    the next handler bug becomes a message on the panel rather than a stack trace.
+  - **The brain grid put one sequence's window on all four.** Every window joined the VOI
+    synchroniser at construction, and `voiSyncCallback` copies the source's **absolute**
+    `voiRange` onto its targets. That is right on the CBCT grid -- four planes of one
+    study -- and wrong on the brain grid, where the four windows hold FLAIR, T1, T1c and
+    T2 on four different intensity scales. It fires on the opening `setProperties` too,
+    so three of the four wore the first-loaded volume's window before anybody touched
+    anything, and every later drag re-broke them. Membership now follows the volumes
+    rather than the layout: `voiSyncGroup` puts windows in the synchroniser exactly when
+    they are showing the same volume, and a grid whose windows disagree synchronises
+    nothing. Each sequence keeps the `openingVoi` derived from its own data, which is
+    what makes the four look like each other.
+  - **An empty collection is no longer a 404.** The intraoral and teleradiography
+    listings answered "this patient has none" with 404, so every CBCT page load logged
+    two failed requests in the browser console and the photo stack said "These images
+    could not be listed" over a study where nothing had gone wrong -- and a real failure
+    was indistinguishable from an ordinary patient. They return `{"images": [], "count":
+    0}` at 200, which is the shape `readImageRecords` already normalises both endpoints
+    into, so the viewer reaches its own "There are no images on this study yet." message
+    with no new branch. 404 still means a *named* thing is absent: an unknown patient, a
+    panoramic variant asked for by name, the bytes of an image that is not there.
+
+### Added
+- `yggdrasil/settings_sqlite_test.py`, so the Django suite runs against a throwaway
+  SQLite file instead of requiring the production MySQL server. `settings.py` hard-wires
+  MySQL and validates its credentials at import; a suite that only ever touches a `test_`
+  database should not need a database server to be reachable.
+
+- **A fourth round. Two of the third round's fixes were the cause of two of these.**
+  - **The crosshair drew clean lines and could not be moved.** Turning
+    `getReferenceLineDraggableRotatable` off removed the rotation circles, as intended,
+    and also removed every *translation* the tool performs: `_jump` — which is what a
+    click on the image runs — filters the other viewports through
+    `controllable && draggableRotatable && sameScene` and returns without moving anything
+    when that leaves an empty list (`CrosshairsTool.js:942-952`); `_dragCallback`'s
+    `OPERATION.DRAG` branch filters on the same flag, and `addNewAnnotation` builds
+    `activeViewportIds` from it too. So neither a click nor a drag did anything, on the
+    one control that navigates a CBCT. The handles now go through the switch that removes
+    *only* handles — the tool's `minimal` profile, which forces both handle flags false in
+    the drawing and hit-testing paths and never even computes the slab handle points —
+    while `_jump` and `_dragCallback` read the raw callbacks, left at their default. The
+    profile's own purpose is a 40px stub, so `lineLengthInPx` is set past any canvas and
+    the tool's existing `liangBarksyClip` gives back the full-width lines. `mobile` stays
+    off for the reason the third round found. The test now pins the *separation* — a bump
+    that merged the drawing switch into the navigation one would otherwise bring back
+    either the clutter or the frozen crosshair, with no build error.
+  - **Three of the video annotator's tools were never registered.** `TOOL_PLAN` and
+    `VIDEO_TOOL_NAMES` were written from the class names minus `Tool`, and three of
+    Cornerstone's `toolName` statics do not follow that pattern:
+    `RectangleScissorsTool.toolName` is `'RectangleScissor'`, `CircleScissorsTool.toolName`
+    is `'CircleScissor'`, and `PlanarFreehandContourSegmentationTool.toolName` keeps its
+    suffix. `ToolGroup.addTool` answers an unknown name with `console.warn` and a bare
+    `return`, so the scissors and the polygon tool were absent from the group and their
+    toolbar buttons did nothing — three warnings in a browser console and a green suite.
+    The names are corrected, `VIDEO_TOOL_NAMES` is derived from `TOOL_PLAN` rather than
+    typed a second time, the `LivewireContourSegmentationTool` registration that no group
+    added and no button named is gone, and `frontend/tests/videoToolNames.test.js` reads
+    the real statics out of `node_modules`.
+  - **The laparoscopy recording rendered at the bottom of the page.**
+    `#video-annotate-viewport` was emitted with the payload and the entry tag, after the
+    back button and the saving indicator, so the annotation toolbar and the frame bar sat
+    over an empty black box and drove a viewport below the whole record. It is now inside
+    `#video-player-wrap`, beside the placeholder it replaces, which is where both the
+    reader and `pageControls.js` already expect it.
+  - **The IOS viewer lost the legacy 180-degree turn, so both arches were upside down.**
+    `ios.js:368` and `:394` set `mesh.rotation.y = Math.PI` on **each arch**, and the
+    camera vectors transcribed into `cameraPresets.js` were written against that rotated
+    scene. The port kept the cameras and dropped the rotation — and it was right to: a
+    landmark is stored as a raw STL vertex coordinate and `vtkCellPicker` reports world
+    positions, so transforming the actors would move every historical landmark. The same
+    half-turn is carried by the *cameras* instead, which is visually identical and touches
+    no coordinate: `LEGACY_CAMERA_PRESETS` holds the untransformed numbers and
+    `CAMERA_PRESETS` is derived from them by `Rᵧ(180)`, so the relationship is asserted
+    rather than a table of hand-rotated vectors.
+  - **The reference axes are labelled.** Three coloured arrows with nothing naming them
+    read as decoration, and "which one is Y?" is the question they exist to answer — it is
+    also the axis the orientation above is stated in terms of. `x`, `y` and `z` are HTML
+    over the canvas, projected from each arrowhead through `worldToCanvas` on every camera
+    change, in `vtkAxesActor`'s own three colours. Not `vtkVectorText` (extruded geometry
+    the arches would occlude) and not `vtkTextActor` (the same projection, less legibly);
+    `pointer-events: none`, so a caption cannot swallow a landmark placement.
+
+- **A third round, and two of the second round's fixes were shipped and did not work.**
+  Both had the same shape as everything else on this branch: the code was written, it was
+  built into the bundle, and a library escape hatch or a load order meant nothing ever
+  read it. A green suite saw none of it.
+  - **The crosshair's square and circle were never gated on the switches that were
+    turned off.** `crosshairLinesOnly` set `getReferenceLineDraggableRotatable` and
+    `getReferenceLineSlabThicknessControlsOn` to false, correctly, and the handles stayed
+    on screen — because `CrosshairsTool.js:533-538` does not read those callbacks alone:
+
+        this._getReferenceLineDraggableRotatable(id) || this.configuration.mobile?.enabled
+
+    `mobile` defaults to `{enabled: isMobile()}`, and `isMobile()` is
+    `matchMedia('(any-pointer:coarse)').matches` — **true on any machine with a
+    touchscreen attached**, which a clinical workstation frequently is. Mobile mode ORed
+    past both flags, and its draw branch is `(lineActive || mobile.enabled) && …`, so the
+    rotation circle and the slab-thickness square were drawn *permanently* rather than
+    during a drag, at `handleRadius: 9` and hit-testable — which is also what swallowed
+    the primary drag and left the lines standing still under the cursor. The
+    configuration now turns the touch profile off, and a test reads the real
+    `CrosshairsTool.js` so a version bump that moves that `||` fails the build instead of
+    quietly bringing the clutter back.
+  - **The overlay threw on every viewport that held nothing.** `refreshOverlay` read
+    `viewport.getImageIds?.()?.length`, and `BaseVolumeViewport.getImageIds` *throws*
+    when there is no volume actor — `?.` guards a missing method, not a throwing one. So
+    every camera event on an empty window raised `No actor found for the given volumeId:
+    undefined`: during `setVolumes` on the CBCT grid, and permanently on the brain grid,
+    where the unguarded `refreshOverlays()` at the end of the mount took the entire grid
+    down with it (`The volume grid failed to start`), losing the toolbar and the
+    segmentation control. It reads `getNumberOfSlices()` now, which goes through the same
+    `getImageSliceDataForVolumeViewport(this) || {}` the neighbouring `getSliceIndex`
+    already relies on and answers `undefined` instead of throwing.
+  - **The brain grid is four axial windows again, and has no crosshair.** The previous
+    round bent the layout to suit the tool; the layout is the requirement. This surface
+    compares *sequences* — FLAIR against T1 against T1c against T2 — and four axial
+    windows is what that looks like. The consequence is handled rather than hidden:
+    `supportsCrosshairs` asks whether a layout has two or more non-parallel slice planes,
+    and a grid that fails it never registers the tool, so the left mouse button goes to
+    window/level and the toolbar offers that button instead of a crosshair. A control
+    that looks pressed and does nothing is the defect, not the fix. The CBCT grid is
+    unchanged, and its "For crosshairs to operate, at least two viewports must be given"
+    warning is gone too: the tool is now activated *after* the viewports join the group
+    rather than before.
+  - **The 3D segmentation was two volumes projected differently in one renderer.** The
+    labelmap reaches the `volume3d` window correctly — Cornerstone adds it as a second
+    `vtkVolume` — but it arrives under vtk's default composite blend while the study
+    beneath it is an attenuated MIP, because `legacyVolumePlan` asks for a blend mode on
+    the volume input and `VolumeViewport3D.setBlendMode()` is a no-op returning `null`.
+    That mismatch is the haze that was reported as "a weird broken segmentation". The
+    render mode now applies to *every* actor in that viewport rather than
+    `getActors()[0]`, and the segmentation control re-asserts it after adding the
+    representation, which is also what makes `reapply()` correct after a drop.
+  - **The segmentation no longer freezes the tab while it loads.** The labelmap was
+    filled one voxel at a time through `voxelManager.setAtIndex`, which re-resolves the
+    owning slice and re-marks it dirty on every call — for a CBCT, 10⁸ of them on the
+    main thread. `setCompleteScalarDataArray` is the library's own path: one typed-array
+    write per slice, each marked once.
+  - **The panoramic was never generated, for anyone, because of a load order.**
+    `bootstrapPanoramic` gated on `window.canEdit`, which is assigned inside
+    `patient_detail.js`'s `DOMContentLoaded` handler — while `{% cornerstone_entry %}`
+    emits a *module* script, which is deferred and runs first, with `readyState` already
+    `'interactive'`. The gate saw `undefined` and refused on every visit, so the
+    unattended pass that produces a patient's default panoramic never ran and no export
+    could contain one. `window.scanId` was undefined at the same moment, which is why
+    every announcement carried `patientId: null` and the admin warm-up page saw a wall of
+    indistinguishable skips. Both now come from `#django-data`, the same resolution
+    `grid/bootstrap.js` already documents for `window.CBCTViewer` — the page was served
+    with these facts and does not need to wait for a script to copy them onto a global.
+
+- **The laparoscopy annotator: a 500, and a surface that was never wired.**
+  - **Every GET of the video state was an HTTP 500.** `patient_video_annotations` called
+    `_types_payload(...)["types"]`, and `_types_payload` returns the list itself — the
+    `"types"` key belongs to `_handle_type_list`'s *response body*, one function below.
+    `TypeError: list indices must be integers`, on every patient, since `f5387cb`. The
+    annotator refuses to mount on a non-OK response, so this presented as a laparoscopy
+    page with no video on it. It was invisible to the suite because nothing ever issued
+    a GET to the view: the service beneath it is well covered and the surface test
+    asserted only that the endpoint's *URL* appeared in the payload, so the one line that
+    differs between the service and the wire had never been executed. It is now.
+  - **A failure to annotate no longer costs the recording.** The surface returned `null`
+    the moment that endpoint answered anything but 200, and the page then left the
+    viewport hidden and the placeholder on screen — a placeholder reading "No video
+    uploaded for this patient." over a file sitting in object storage exactly where it
+    should be, which sends somebody looking for an upload that already happened. It now
+    mounts either way: **full** when the state was read, and **degraded** when it was not
+    — the video plays, the frame navigation works, nothing can be drawn or saved, and the
+    page says why in a sentence. The frame-size disagreement keeps its meaning and joins
+    the degraded case rather than blanking the page: a stored mask must never be painted
+    over a differently-sized recording, and the recording is still watchable while that
+    is sorted out. `ready` also gets its own placeholder sentence, because sharing one
+    with `absent` is what let the false claim be made at all.
+  - **The frame bar, the timeline, the region list and the save button do something.**
+    All four were rendered by the template and connected to nothing; the page's inline
+    glue polled for the surface every 50 ms and then wired the tool buttons alone.
+    `surface.save()`, `goToInstant` and `editor.selectRegion` had **no callers** — and
+    because every drawing tool carries `needsRegion: true` and nothing could select a
+    region, *no drawing tool could be activated at all*. The glue is now
+    `frontend/imaging/video/pageControls.js`, called by the entry as soon as the surface
+    exists, so the frame arithmetic and the tool/region rules are unit tests rather than
+    clicks. The Magic Tool panel and the shapes list are hidden rather than bound — the
+    first is a known release blocker, the second describes per-stroke rows decision #14
+    removed — because a control that is present and inert is worse than one that is
+    absent.
+  - **Every write from that page was going to be a bare 403.** `readCsrfToken` read the
+    `csrftoken` *cookie*, and `CSRF_USE_SESSIONS = True` means this deployment sets none;
+    the hidden input is the only source, and the page carried no `{% csrf_token %}`. Both
+    fixed. Never observed, because the mount failed first.
+
+- **A second round on the same two surfaces, and the first round's 3D fix was wrong.**
+  - **The 3D segmentation never needed a surface.** The previous entry claimed a
+    `volume3d` viewport "cannot render a labelmap" and built the overlay's 3D half on
+    `@cornerstonejs/polymorphic-segmentation`. It can:
+    `getViewportLabelmapRenderMode` returns `'volume'` for anything extending
+    `BaseVolumeViewport`, and `VolumeViewport3D` does, so the labelmap becomes a second
+    volume actor with its own transfer function — which is what NiiVue was doing all
+    along. The surface route was also expensive in a way that would have bitten
+    regardless: it extracts one mesh per label in a worker, and each extraction calls
+    `getCompleteScalarDataArray()`, which allocates *a fresh copy of the whole volume*
+    (`VoxelManager.js:649`) — thirty-odd copies of a 10⁸-voxel study for a CBCT's teeth.
+    Every viewport now takes the same Labelmap representation and the polySeg add-on is
+    no longer registered, because nothing asks it for a conversion.
+  - **The per-class visibility list is gone.** All of it or none of it, on the
+    maintainer's call. The `segments` map behind it stays and is not optional:
+    Cornerstone hides a labelmap by marking every *segment* hidden, so a segmentation
+    that declares only segment 1 — which is what a missing `segments` config produces —
+    cannot be switched off past its first class.
+  - **The crosshair draws lines and nothing else** — ⚠️ *this shipped and did not work;
+    see the third round below.* `CrosshairsTool` decorates every reference line with
+    rotation circles and slab-thickness squares; both were reported as clutter. Turned
+    off through the tool's own `getReferenceLineDraggableRotatable` /
+    `getReferenceLineSlabThicknessControlsOn` switches rather than hidden in CSS, so the
+    handles and the drags they afford go together — a drag with no handle would be an
+    invisible control.
+  - **The brain grid had a crosshair and no reference lines, and the reason was the
+    layout** — ⚠️ *reverted in the third round below; the layout was the requirement.*
+    Its four windows were all axial, and the crosshair draws the intersection lines of
+    the *other* viewports' planes: four parallel planes intersect nowhere. The first
+    three windows became axial, sagittal and coronal, with the fourth a second axial.
+  - **Both grids open darker.** The robust percentiles were 2/98, chosen to match
+    NiiVue's `calMinMax` so replacing the viewer would not visibly change a study. Both
+    grids were reported as opening too bright, and the old viewer's choice is not a
+    reason to keep a window nobody likes; they are 0.5/99.5, so a narrower slice of the
+    brightest voxels sets the white point.
+  - **`video_state` could say `ready` over a page with no annotator.** It answered
+    `ready` whenever the namespace was not `laparoscopy` — a way of saying "this surface
+    is not here" — but the template reads it to choose its sentence, so a `ready` with a
+    `null` payload left the "No video uploaded" placeholder on screen. It now means one
+    thing: the payload is real and the annotator will mount from it.
+  - **The video placeholder shows the server's working, for staff.** "No video uploaded
+    for this patient." over a file somebody can see in the bucket is a claim, and the
+    page had no way to show how it reached it. An administrator now sees which rows
+    exist, which lack a probe, and — when none is found — what file types the patient
+    *does* have, because a `FileRegistry` row attached to the wrong patient FK is
+    invisible to this page while sitting in object storage exactly as expected.
+
+- **Four bugs found by driving the migrated surfaces.** Three are regressions from
+  `c03afa6` and `3999899`, and they share a shape worth naming: in each case **the
+  server payload and the markup survived and the JavaScript that read them did not**.
+  A green suite could not see any of them, which is the calibration the roadmap's
+  release section already gives for Phases 4 and 5.
+  - **The segmentation overlay is back, on the brain grid and on the CBCT one.**
+    `viewer_grid_data.segmentationFile` has been emitted by both views throughout and
+    read by nobody since NiiVue was deleted. `imaging/grid/segmentation.js` registers
+    it as a Cornerstone labelmap over the loaded volume; the SEG button is a toggle
+    plus a **per-class visibility list**, which the single on/off it replaces did not
+    have. The palette is the old one value for value — the fixed green/red/blue for
+    three or fewer classes, the golden-ratio hue walk above that — because a nicer
+    palette would silently recolour every segmentation anyone has approved.
+  - **A CBCT segmentation renders on the 3D window again.** NiiVue composited an
+    overlay volume into every slice type for free; Cornerstone needs a **Surface**
+    representation there, which no labelmap can supply. `@cornerstonejs/polymorphic-segmentation`
+    had been bundled since Phase 3 and **its `init` was never called**, so the 3D half
+    had nothing behind it. The slice windows get a labelmap and the `volume3d` window
+    gets a surface, decided per viewport.
+  - **A grid mismatch is refused, not resampled** — the posture `common/interop/seg.py`
+    already takes for a SEG whose grid disagrees with its series. Dimensions *and*
+    spacing, because two volumes can agree on voxel count and disagree on voxel size,
+    and that failure drifts with distance rather than being uniformly offset, which
+    reads as an overlay that slides rather than one that is wrong.
+  - **Dragging a modality chip onto a window works again, and the brain grid opens
+    empty.** The chips have carried `draggable="true"` and the windows a `.drop-hint`
+    the whole time. With nothing bound, `primaryVolumeFrom` loaded
+    `Object.keys(modalityFiles)[0]` — an arbitrary series, since brain sends no
+    `defaultModality` — into all four windows, and no interaction could change any of
+    them. Now nothing is fetched until a chip is dropped, and each window says which
+    series it holds: four unlabelled greyscale MRIs are four pictures nobody can tell
+    apart, which is why `viewer_grid.js` wrote a `.window-label` and why the overlay
+    has one again. `enableDragDrop` — in the payload since before 3.0, read by nobody —
+    is what tells the two surfaces apart, and `brain/views.py` now states it rather
+    than relying on a client-side default.
+  - **"No video uploaded for this patient." was said over a stored, playable
+    recording.** The annotator refuses to mount without a recorded `ffprobe` result,
+    correctly — a browser cannot read a frame rate, and guessing 30 for a 25 fps
+    recording mis-files every mask while looking right. **Nothing recorded one.**
+    `video_probe.probe_and_record` had exactly one caller,
+    `annotations_rasterize_video_masks`, which visits only patients carrying *legacy
+    stroke rows* and writes onto the `video_raw` row — while the page ranks a
+    `video_processed`/`compressed` derivative first. So a study with a video and no
+    legacy annotations could never mount the annotator, and one that had been
+    rasterised was asked about the wrong row. Three fixes, because it was three bugs:
+    the upload path records a probe as the file arrives; `laparoscopy_probe_videos`
+    backfills every existing video row, raw and processed alike, and **reports when a
+    patient's video files disagree on frame size** rather than papering over a mask
+    that cannot describe the file being played; and the page picks the highest-ranked
+    row it can actually *describe*, falling back to the top-ranked one so playback
+    survives either way. The placeholder now distinguishes "no video" from "not yet
+    analysed", because telling someone a stored file was never uploaded sends them
+    looking for it instead of running a command.
+  - **The widest `except` on the patient page no longer answers a bug with a claim
+    about the data.** Any failure building the video context — a mistyped URL name
+    included, which the code's own comment records having happened — became
+    `has_video = False`. It still catches, so a failure cannot take the patient record
+    down with it; what changed is that it logs, and reports `video_state = 'error'`
+    instead of "this patient has no video".
+  - **The admin offers a project only what its domain has.** Bite classification could
+    be enabled on a brain or laparoscopy project. `AnnotationMethod.domain` has existed
+    since migration 0043 and the admin never consulted it; `Modality` had no domain at
+    all, so one is added mirroring it exactly, blank meaning available everywhere, and
+    backfilled from the three per-domain seeder commands that were the de-facto map.
+    A `ProcessingStep` needs no column of its own — it is its modality's. The three
+    per-domain project admins were three copies of one class differing in a hardcoded
+    string; they are now `DomainProjectAdmin` plus a `domain` attribute each.
+    Filtering the *queryset* rather than hiding options client-side is what makes this
+    hold on save as well as on render, and having the domain belong to the admin class
+    rather than the object is what makes it work on the **add** form — the case a
+    `get_object(request)` filter cannot serve, and the case reported.
+
 ### Added
 - **The laparoscopy annotator is on Cornerstone3D, and Konva is gone from the whole
   repository (roadmap Phase 10).** `laparoscopy_annotator.js` and its six mixins —

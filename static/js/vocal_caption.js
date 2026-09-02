@@ -820,7 +820,7 @@ class VocalCaptionRecorder {
         
         // Create the caption HTML matching the existing structure
         const modalityBadge = (!this.isBrainProject && caption.modality_display)
-            ? `<span class="badge bg-secondary me-1">${caption.modality_display}</span>`
+            ? `<span class="badge-ygg badge-neutral me-1">${caption.modality_display}</span>`
             : '';
 
         const captionHtml = `
@@ -829,7 +829,7 @@ class VocalCaptionRecorder {
                     <div class="caption-info">
                         <small class="text-primary me-2">${caption.user_username}</small>
                         ${modalityBadge}
-                        <span class="badge bg-${caption.is_text_caption ? 'success' : caption.quality_color} me-2">${caption.is_text_caption ? 'Text' : caption.display_duration}</span>
+                        <span class="badge-ygg badge-neutral me-2">${caption.is_text_caption ? 'Text' : caption.display_duration}</span>
                         <small class="text-muted">${caption.created_at}</small>
                     </div>
                     <div class="caption-actions">
@@ -1061,7 +1061,7 @@ class VocalCaptionRecorder {
         }
         
         // Extract text without the [edited] badge
-        const editedBadge = fullTextElement ? fullTextElement.querySelector('.badge') : previewTextElement.querySelector('.badge');
+        const editedBadge = fullTextElement ? fullTextElement.querySelector('.badge-ygg') : previewTextElement.querySelector('.badge-ygg');
         if (editedBadge) {
             currentText = currentText.replace(editedBadge.textContent, '').trim();
         }
@@ -1215,7 +1215,7 @@ class VocalCaptionRecorder {
             }
             
             // Remove existing edited badge if present
-            const existingBadge = previewText.querySelector('.badge');
+            const existingBadge = previewText.querySelector('.badge-ygg');
             if (existingBadge) {
                 existingBadge.remove();
             }
@@ -1225,7 +1225,7 @@ class VocalCaptionRecorder {
             // Add edited badge if needed
             if (isEdited) {
                 const badge = document.createElement('span');
-                badge.className = 'badge bg-warning ms-1';
+                badge.className = 'badge-ygg badge-warn ms-1';
                 badge.title = 'Edited transcription';
                 badge.textContent = 'edited';
                 previewText.appendChild(badge);
@@ -1244,7 +1244,7 @@ class VocalCaptionRecorder {
         
         if (fullText) {
             // Remove existing edited badge if present
-            const existingBadge = fullText.querySelector('.badge');
+            const existingBadge = fullText.querySelector('.badge-ygg');
             if (existingBadge) {
                 existingBadge.remove();
             }
@@ -1254,7 +1254,7 @@ class VocalCaptionRecorder {
             // Add edited badge if needed
             if (isEdited) {
                 const badge = document.createElement('span');
-                badge.className = 'badge bg-warning ms-1';
+                badge.className = 'badge-ygg badge-warn ms-1';
                 badge.title = 'Edited transcription';
                 badge.textContent = 'edited';
                 fullText.appendChild(badge);

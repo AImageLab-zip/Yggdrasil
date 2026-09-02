@@ -15,6 +15,7 @@ from .jobs import (
 
 # Runner callbacks
 from .runner import (
+    runner_attach_job,
     runner_claim_job,
     runner_complete_job,
     runner_fail_job,
@@ -41,6 +42,7 @@ __all__ = [
     "get_job_status",
     "ProcessingJobListView",
     # Runner callbacks
+    "runner_attach_job",
     "runner_claim_job",
     "runner_complete_job",
     "runner_fail_job",

@@ -77,33 +77,37 @@ class SelectRunnerQueueTests(TestCase):
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)
 class RunnerEnabledForModalityTests(TestCase):
-    def test_enabled_when_no_map_configured(self):
-        self.assertTrue(is_runner_enabled_for_modality("demo"))
+    """A step declares the work; the env map only says which queue it runs on.
 
-    @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_disabled_when_slug_absent_from_map(self):
+    RUNNER_QUEUE_BY_MODALITY used to double as an enablement switch, and its
+    empty default enabled *everything* -- so an admin-added modality with no
+    step got a Job the runner could only fail ("No algo_name configured for
+    this step"). Enablement now comes from the step alone.
+    """
+
+    def _step(self, slug="demo", **kwargs):
+        modality = Modality.objects.create(slug=slug, name=slug.upper())
+        return ProcessingStep.objects.create(
+            modality=modality, name=slug, slug=slug, **kwargs
+        )
+
+    def test_disabled_when_no_step_declares_the_slug(self):
         self.assertFalse(is_runner_enabled_for_modality("demo"))
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "q"})
-    def test_enabled_when_slug_in_map(self):
-        self.assertTrue(is_runner_enabled_for_modality("demo"))
-
-    @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "  "})
-    def test_disabled_when_mapped_queue_is_blank(self):
+    def test_a_queue_entry_alone_does_not_enable(self):
         self.assertFalse(is_runner_enabled_for_modality("demo"))
 
-    @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "q"})
-    def test_disabled_for_empty_slug_when_map_configured(self):
+    def test_disabled_for_empty_slug(self):
         self.assertFalse(is_runner_enabled_for_modality(""))
         self.assertFalse(is_runner_enabled_for_modality(None))
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"other": "q"})
-    def test_db_config_enables_when_env_would_disable(self):
-        modality = Modality.objects.create(slug="demo", name="Demo")
-        ProcessingStep.objects.create(modality=modality, name="demo", slug="demo", is_enabled=True)
+    def test_enabled_step_wins_over_an_env_map_without_it(self):
+        self._step(is_enabled=True)
         self.assertTrue(is_runner_enabled_for_modality("demo"))
 
-    def test_db_config_disables_when_env_would_enable(self):
-        modality = Modality.objects.create(slug="demo", name="Demo")
-        ProcessingStep.objects.create(modality=modality, name="demo", slug="demo", is_enabled=False)
+    @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "q"})
+    def test_disabled_step_wins_over_its_env_queue_entry(self):
+        self._step(is_enabled=False)
         self.assertFalse(is_runner_enabled_for_modality("demo"))

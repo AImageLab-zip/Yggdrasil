@@ -99,7 +99,7 @@ function fakeViewport() {
         setBackground(name) { calls.background = name; },
         setCamera(name) { calls.cameras.push(name); return null; },
         bounds: () => [-1, 1, -1, 1, -1, 1],
-        resize() {},
+        resize() { calls.resizes = (calls.resizes ?? 0) + 1; },
         destroy() { calls.destroyed = true; },
     };
 }
@@ -331,4 +331,44 @@ test('the landmark switches report their state', async () => {
     doc.get('toggleLandmarkMode').click();
     assert.equal(doc.get('toggleLandmarkMode').attributes['aria-checked'], 'true');
     assert.equal(visibility.disabled, true);
+});
+
+test('it follows its own container, not just the window', async () => {
+    // The defect this covers: `#ios-viewer` ships `display: none` unless IOS is the
+    // default modality, so Cornerstone built its canvas at 0x0 and CSS then stretched
+    // that over the stage -- a scan rendered at a handful of pixels and scaled up. The
+    // only thing that ever called `resize()` was a window listener, and showing a tab
+    // fires no window resize, so the viewer stayed blurry until the user nudged the
+    // window border by a pixel.
+    const observers = [];
+    const doc = fakeDocument();
+    const stage = doc.get('scan-viewer');
+    stage.ownerDocument = {
+        defaultView: {
+            ResizeObserver: class {
+                constructor(callback) {
+                    this.callback = callback;
+                    this.targets = [];
+                    this.disconnected = false;
+                    observers.push(this);
+                }
+                observe(target) { this.targets.push(target); }
+                disconnect() { this.disconnected = true; }
+            },
+        },
+    };
+
+    const { viewport, surface } = await mountFixture({ doc });
+    assert.equal(observers.length, 1, 'the stage is observed');
+    assert.deepEqual(observers[0].targets, [stage]);
+
+    const before = viewport.calls.resizes ?? 0;
+    observers[0].callback();
+    assert.equal(viewport.calls.resizes, before + 1, 'a stage that gains a size is picked up');
+
+    // And the observer is released, so a page navigated away from does not keep resizing
+    // a destroyed rendering engine.
+    surface.destroy();
+    assert.ok(observers[0].disconnected);
+    assert.ok(viewport.calls.destroyed);
 });

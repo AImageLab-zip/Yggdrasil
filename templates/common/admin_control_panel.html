@@ -114,7 +114,15 @@
 <div class="card-ygg card-ygg-body mb-6">
     <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold mb-0">Projects</h2>
-        <a href="/admin/maxillo/maxilloproject/add/" class="btn btn-secondary btn-sm">{% icon 'plus' %}<span>New project</span></a>
+        {% if request.user.is_superuser %}
+        {% comment %}A project's domain is fixed at creation and forced by the
+        admin that serves it, so the choice of domain is the choice of button.{% endcomment %}
+        <div class="flex flex-wrap gap-2">
+            {% for target in project_add_targets %}
+            <a href="{{ target.url }}" class="btn btn-secondary btn-sm">{% icon 'plus' %}<span>New {{ target.label }} project</span></a>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
     {% if projects %}
     <div class="overflow-x-auto"><table class="table-ygg">

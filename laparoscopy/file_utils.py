@@ -3,12 +3,14 @@ import logging
 
 from django.utils import timezone
 
-from common.models import FileRegistry, Job
+from common.models import FileRegistry
 from common.uploads import (
     raw_key_prefix_for,
     upload_uploaded_file_to_storage,
     entity_fk_kwargs,
 )
+from laparoscopy import video_probe
+from maxillo.file_utils import _create_job_if_runner_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -52,45 +54,36 @@ def save_video_to_dataset(patient, video_file):
         logger.exception("Failed to create FileRegistry for video; proceeding to create Job anyway")
         fr = None
 
+    if fr is not None:
+        # The frame rate and frame size are properties of these bytes that a browser
+        # cannot read, and the annotator refuses to mount without them rather than
+        # guess 30 fps for a 25 fps recording. This is the moment the file is on
+        # local disk, so this is where the question is asked. It never fails the
+        # upload -- see probe_and_record_upload.
+        video_probe.probe_and_record_upload(fr, video_file)
+
     job_obj = None
     try:
-        job_obj = Job.objects.create(
-            modality_slug="video",
+        # **The same helper every other modality's upload uses.** This built its Job by
+        # hand, which meant `is_runner_enabled_for_modality` was never consulted -- a
+        # project with the video step switched off still queued work nothing would claim
+        # -- and `create_step_jobs` was re-implemented below it.
+        #
+        # `output_files` used to be pre-seeded here with a `derivatives` manifest, from
+        # the Docker/Celery runner the algorithm was first written against. The cluster
+        # contract has no manifest: `run.sbatch` is handed the input keys and an output
+        # prefix, and `common/runner/run.py::_collect_output_files` *discovers* what was
+        # written. Seeding it was worse than redundant -- `_job_pre_save` clears
+        # `output_files` on dispatch, so the shape only ever existed between two lines of
+        # this function, while reading as a contract somebody could rely on. What the
+        # algorithm produces is stated in `algo/laparoscopy/run.sbatch`, once.
+        job_obj = _create_job_if_runner_enabled(
+            "video",
             **entity_fk_kwargs(patient),
-            # input_file_path=key,
             input_files={"input": key},
             status="pending",
-            output_files={
-                "schema_version": 1,
-                "input_type": "video",
-                "processing_profile": "laparoscopy_video_v1",
-                "expected_outputs": ["compressed", "subsampled"],
-                "derivatives": {
-                    "compressed": {
-                        "type": "video",
-                        "make_primary": True,
-                        "container": "mp4",
-                        "video_codec": "h264",
-                    },
-                    "subsampled": {
-                        "type": "video",
-                        "make_primary": False,
-                        "container": "mp4",
-                        "video_codec": "h264",
-                        "sampling": {
-                            "mode": "fps",
-                            "target_fps": 1.0,
-                        },
-                    },
-                },
-            },
         )
     except Exception as e:
         logger.error(f"Failed to create Job for video: {e}")
-
-    if job_obj and job_obj.status == "pending":
-        # Spawn the modality's downstream step pipeline, if any is declared.
-        from common.uploads import create_step_jobs
-        create_step_jobs(job_obj)
 
     return fr, job_obj

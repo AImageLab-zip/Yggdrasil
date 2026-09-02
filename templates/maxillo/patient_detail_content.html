@@ -102,98 +102,12 @@
             </div>
 
             <div class="viewer-toolbar__group" id="cbctControls" {% if patient.has_ios_scans %}style="display: none;"{% endif %}>
-                <span class="viewer-toolbar__label">View</span>
-                <button type="button" class="icon-btn" id="resetCBCTView" title="Reset view"><i class="fas fa-house" aria-hidden="true"></i></button>
                 {% comment %}
-                Crosshairs navigate; they do not measure (see
-                `frontend/imaging/grid/measurements.js`, which excludes the crosshair
-                annotation from a save). So the button lives with the viewer controls
-                and stays available whether or not annotation mode is on -- it is also
-                the tool the grid falls back to when annotation mode is switched off.
+                Shared with the brain page since both carry the same grid; see
+                templates/common/sections/volume_grid_toolbar.html. `grid_has_3d` is
+                true here because FIXED_CBCT_LAYOUT pins a volume render in window 3.
                 {% endcomment %}
-                <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Crosshairs" aria-pressed="true" title="Navigate (crosshairs)"><i class="fas fa-crosshairs" aria-hidden="true"></i></button>
-                <button type="button" class="icon-btn" id="cbctExpand3D" aria-pressed="false" title="Expand the 3D view to fill the grid"><i class="fas fa-expand" aria-hidden="true"></i></button>
-                {% comment %}
-                Decision #5 of docs/cornerstone-roadmap.md, as a clean break. These were
-                `min=0 max=100` percent-of-this-volume's-data-range sliders, which is not a
-                clinical quantity: two scans of the same patient on the same machine give
-                different percentages for the same bone, so no window could be written down
-                or compared. Window/level is now Shift+drag on the image, and the value is
-                reported in each viewport's own overlay in modality units -- next to the
-                image it describes, rather than in a toolbar.
-                {% endcomment %}
-                <span class="cbct-window-hint">Shift+drag to adjust brightness</span>
-
-                <div class="viewer-toolbar__divider"></div>
-
-                {% comment %}
-                Annotation mode. A switch rather than a button, and off by default: a
-                clinician opening a study is reading it, not measuring it, and the seven
-                measurement buttons plus a save button on a toolbar that is mostly used
-                for reading were simply noise. `role="switch"` with a visible on/off word
-                because "is this eye icon telling me the state or the action?" is exactly
-                the ambiguity that got reported -- the same reason the previous eye button
-                could be clicked in the belief it was *enabling* something while it hid.
-
-                One control, two effects, and they are deliberately the same control:
-                turning the mode on reveals the tools **and** shows the annotations. A
-                separate visibility button meant two states that could disagree, which is
-                how "I clicked show and saw nothing" happened.
-                {% endcomment %}
-                <button type="button" class="cbct-mode-toggle" id="cbctAnnotationMode" role="switch" aria-checked="false" aria-controls="cbctAnnotationTools" title="Show the measurement tools and the measurements on this study">
-                    <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
-                    <span class="cbct-mode-toggle__label">Annotations</span>
-                    <span class="cbct-mode-toggle__state" data-mode-state>off</span>
-                </button>
-
-                {% comment %}
-                Measurement tools. The roadmap's "Why" table opens with "one measurement
-                tool exists, and it is never saved" -- these are the tools that close it,
-                and every one of them persists through
-                `annotations/services/viewer.py`. `data-ygg-tool` is the Cornerstone tool
-                name; `frontend/imaging/grid/controls.js` binds whatever is present, so a
-                tool can be added or removed here without touching the JavaScript.
-
-                `hidden` here is the default state, not a decoration: `bindControls`
-                re-asserts it on load so the DOM and the grid cannot start out disagreeing.
-                {% endcomment %}
-                <div class="cbct-annotation-tools" id="cbctAnnotationTools" hidden>
-                    <span class="viewer-toolbar__label">Measure</span>
-                    <div class="cbct-tool-group" role="group" aria-label="Measurement tools">
-                        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Length" aria-pressed="false" title="Length"><i class="fas fa-ruler" aria-hidden="true"></i></button>
-                        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Angle" aria-pressed="false" title="Angle"><i class="fas fa-drafting-compass" aria-hidden="true"></i></button>
-                        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Bidirectional" aria-pressed="false" title="Bidirectional"><i class="fas fa-up-down-left-right" aria-hidden="true"></i></button>
-                        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Probe" aria-pressed="false" title="Probe a point"><i class="fas fa-eye-dropper" aria-hidden="true"></i></button>
-                        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="EllipticalROI" aria-pressed="false" title="Elliptical ROI"><i class="far fa-circle" aria-hidden="true"></i></button>
-                        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="RectangleROI" aria-pressed="false" title="Rectangular ROI"><i class="far fa-square" aria-hidden="true"></i></button>
-                    </div>
-                    {% if can_modify_segmentation %}
-                    {% comment %}
-                    Clear asks first, and removes from the *viewer* only: the server
-                    replaces the whole set on save, so the next save is what makes a
-                    clear permanent and a reload is what undoes it. Both the confirm and
-                    the notification say so -- `frontend/imaging/grid/controls.js`.
-                    {% endcomment %}
-                    <button type="button" class="icon-btn" id="cbctClearMeasurements" title="Remove every measurement on this study"><i class="fas fa-trash" aria-hidden="true"></i></button>
-                    <button type="button" class="icon-btn" id="cbctSaveMeasurements" title="Save measurements"><i class="fas fa-floppy-disk" aria-hidden="true"></i></button>
-                    {% comment %}
-                    `CSRF_USE_SESSIONS = True` in settings, so there is no `csrftoken`
-                    cookie to read -- the hidden input is the only source, and the only
-                    other `{% csrf_token %}` on this page is inside the IOS branch, which
-                    does not render for a CBCT-only patient. Without this every save was a
-                    bare 403.
-                    {% endcomment %}
-                    <div hidden>{% csrf_token %}</div>
-                    {% endif %}
-                </div>
-                {% comment %}
-                Kept for the failures a toast cannot carry -- a handler that threw, a
-                reset that found no viewport. The *save* outcome is a toast now
-                (`window.appNotify`, the platform's own), because "Saved 3 measurements."
-                sitting in a toolbar is a sentence nobody reads and everybody has to
-                scan past.
-                {% endcomment %}
-                <span class="cbct-render-status" id="cbctRenderStatus" role="status" aria-live="polite"></span>
+                {% include 'common/sections/volume_grid_toolbar.html' with grid_has_3d=True grid_has_crosshairs=True grid_can_annotate=can_modify_segmentation %}
             </div>
         </div>
 
@@ -321,11 +235,18 @@
                         </div>
                     </div>
                 {% else %}
+                    {# No `.drop-hint` here, unlike the brain grid. That placeholder is an #}
+                    {# invitation to drop a series into a window, and this grid takes none:  #}
+                    {# its four windows are the fixed axial / sagittal / coronal / 3D of the #}
+                    {# one CBCT the page is about. All it did was put a grey icon over the   #}
+                    {# black canvas for as long as the volume took to load -- which is       #}
+                    {# exactly what a viewer that failed to load looks like. Black is the    #}
+                    {# honest empty state; the overlay names each window once it has one.    #}
                     <div class="viewer-grid">
-                        <div class="viewer-window" data-window-index="0"><div class="drop-hint"><i class="fas fa-brain"></i><p>Axial</p></div></div>
-                        <div class="viewer-window" data-window-index="1"><div class="drop-hint"><i class="fas fa-brain"></i><p>Sagittal</p></div></div>
-                        <div class="viewer-window" data-window-index="2"><div class="drop-hint"><i class="fas fa-brain"></i><p>Coronal</p></div></div>
-                        <div class="viewer-window" data-window-index="3"><div class="drop-hint"><i class="fas fa-cube"></i><p>3D loads on demand</p></div></div>
+                        <div class="viewer-window" data-window-index="0"></div>
+                        <div class="viewer-window" data-window-index="1"></div>
+                        <div class="viewer-window" data-window-index="2"></div>
+                        <div class="viewer-window" data-window-index="3"></div>
                     </div>
                     <div class="cbct-inline-panoramic" id="cbctInlinePanoramic">
                         <div class="cbct-inline-panoramic-header">

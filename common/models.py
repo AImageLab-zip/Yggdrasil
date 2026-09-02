@@ -66,7 +66,12 @@ class Project(models.Model):
 	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
-	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+	# blank=True as well as null=True: this is an audit column nobody fills in by
+	# hand. Without it every ModelForm -- the admin's "add project" page, which
+	# the control panel's "New project" button links to -- made it a required
+	# picker and refused the form when it was left empty, so a project could not
+	# be created from the admin at all. The admin fills it from the request.
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 	modalities = models.ManyToManyField('Modality', blank=True, related_name='projects')
 	# Annotation methods enabled for this project. Empty = none; the UI hides
 	# annotation tools whose method is not enabled here.
@@ -115,7 +120,9 @@ class AnnotationMethod(models.Model):
 	)
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
-	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+	# See Project.created_by: null=True without blank=True made the admin's add
+	# form demand a value it exists to record automatically.
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
 	class Meta:
 		ordering = ['domain', 'name']
@@ -130,9 +137,20 @@ class AnnotationMethod(models.Model):
 
 
 class Modality(models.Model):
+	"""An imaging modality a Project may collect (e.g. 'cbct').
+
+	``domain`` is blank for a modality available in every domain, or one domain
+	slug for a domain-specific one -- 'cbct' only means anything under maxillo.
+	Same field, same meaning and same blank-is-everywhere rule as
+	:class:`AnnotationMethod`, so the admin scopes both with one filter.
+	"""
 	name = models.CharField(max_length=50, unique=True)
 	slug = models.SlugField(max_length=60, unique=True, blank=True)
 	description = models.TextField(blank=True)
+	domain = models.CharField(
+		max_length=20, choices=DOMAIN_CHOICES, blank=True, default='',
+		help_text="Leave blank for a modality available in every domain.",
+	)
 	# Optional icon CSS class for UI (e.g., 'fas fa-cube', 'fas fa-tooth')
 	icon = models.CharField(max_length=100, blank=True)
 	# Optional short UI label used when no icon is provided (e.g., 'F', 'T1')
@@ -144,7 +162,8 @@ class Modality(models.Model):
 	requires_multiple_files = models.BooleanField(default=False)
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
-	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+	# See Project.created_by.
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
 	class Meta:
 		ordering = ['name']

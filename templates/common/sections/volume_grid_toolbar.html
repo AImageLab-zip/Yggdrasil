@@ -1,0 +1,163 @@
+{% comment %}
+    The volume grid's toolbar, shared by the CBCT page and the brain page.
+
+    It was written for CBCT and lived in `templates/maxillo/patient_detail_content.html`.
+    The brain page carried the same grid with none of it: no crosshair, no measurement
+    tools, no save — the controls existed, `bindControls` would have bound them, and the
+    markup was simply never written for that surface. Extracting it is what keeps the two
+    from drifting, and it is why `bindControls` was already written to bind "whatever is
+    present" rather than a fixed list.
+
+    Two flags the caller sets:
+
+      * `grid_has_3d` — the CBCT layout pins a volume render in window 3, so it has a
+        view to expand. The brain layout is four freely-assigned windows and has none,
+        so the expand button would act on nothing.
+      * `grid_can_annotate` — `can_modify_segmentation` on both pages today; passed in
+        rather than read here so the include states what it depends on.
+
+    The element ids are `CONTROL_IDS` in `frontend/imaging/grid/controls.js` and
+    `SEGMENTATION_IDS` in `frontend/imaging/grid/bootstrap.js`. They keep their historical
+    `cbct*` spelling: they are internal names, they appear in no URL and no stored record,
+    and renaming them would touch the one file that resolves them for no behavioural gain.
+{% endcomment %}
+
+<span class="viewer-toolbar__label">View</span>
+<button type="button" class="icon-btn" id="resetCBCTView" title="Reset view"><i class="fas fa-house" aria-hidden="true"></i></button>
+{% comment %}
+    The navigation tool: the one thing on the left mouse button that does not measure, and
+    therefore the tool the grid falls back to when annotation mode is switched off. It
+    lives with the viewer controls rather than the measurement tools for that reason, and
+    stays available whether or not annotation mode is on (see
+    `frontend/imaging/grid/measurements.js`, which excludes the crosshair annotation from
+    a save).
+
+    Which tool it is depends on the layout, and `grid_has_crosshairs` is that fact. A
+    crosshair draws the intersection lines of the *other* windows' planes, so a grid whose
+    windows all cut the same way has none to draw and its tool centre can never be
+    computed -- `supportsCrosshairs` in `frontend/imaging/grid/layout.js` decides this once
+    and `createVolumeGrid` binds the left button accordingly. Offering the button anyway
+    would be a control that looks pressed and does nothing.
+{% endcomment %}
+{% if grid_has_crosshairs %}
+<button type="button" class="icon-btn cbct-tool" data-ygg-tool="Crosshairs" aria-pressed="true" title="Navigate (crosshairs)"><i class="fas fa-crosshairs" aria-hidden="true"></i></button>
+{% else %}
+<button type="button" class="icon-btn cbct-tool" data-ygg-tool="WindowLevel" aria-pressed="true" title="Adjust brightness (drag on the image)"><i class="fas fa-circle-half-stroke" aria-hidden="true"></i></button>
+{% endif %}
+{% if grid_has_3d %}
+<button type="button" class="icon-btn" id="cbctExpand3D" aria-pressed="false" title="Expand the 3D view to fill the grid"><i class="fas fa-expand" aria-hidden="true"></i></button>
+{% endif %}
+{% comment %}
+    Decision #5 of docs/cornerstone-roadmap.md, as a clean break. These were
+    `min=0 max=100` percent-of-this-volume's-data-range sliders, which is not a clinical
+    quantity: two scans of the same patient on the same machine give different
+    percentages for the same bone, so no window could be written down or compared.
+    Window/level is now a drag on the image, and the value is reported in each viewport's
+    own overlay in modality units -- next to the image it describes, rather than in a
+    toolbar.
+
+    Shift only where the crosshair holds the plain primary button. Where it does not,
+    window/level *is* the primary tool and the hint would be telling the user to hold a
+    key for something a plain drag already does.
+{% endcomment %}
+{% if grid_has_crosshairs %}
+<span class="cbct-window-hint">Shift+drag to adjust brightness</span>
+{% else %}
+<span class="cbct-window-hint">Drag to adjust brightness</span>
+{% endif %}
+
+{% if viewer_grid_data.segmentationFile %}
+{% comment %}
+    The segmentation overlay. Before 3.0 NiiVue composited the mask volume into every
+    view for free, including the 3D one; Cornerstone needs an explicit representation per
+    viewport -- the same labelmap everywhere, the 3D window included -- so
+    `frontend/imaging/grid/segmentation.js` builds it and `bootstrap.js` binds this to it.
+    Deferred: the mask is a whole second volume and nothing fetches it until this is on.
+
+    The same switch as annotation mode below, and for the same reason its comment gives:
+    a button whose pressed state is the only thing distinguishing "show" from "hide" is
+    the ambiguity that got reported. `role="switch"` with a visible on/off word says which
+    it is without being clicked.
+{% endcomment %}
+<div class="viewer-seg-control">
+    <button type="button" class="cbct-mode-toggle" id="viewerSegToggle" role="switch"
+            aria-checked="false"
+            title="Show the segmentation overlay on this study">
+        <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+        <span class="cbct-mode-toggle__label">Segmentation</span>
+        <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+    </button>
+    {% comment %}
+        No per-class list. There was one -- a colour swatch and a checkbox per label --
+        and it is gone on the maintainer's call: the overlay is all of it or none of it.
+        The `segments` map the JS still builds is not part of that UI and is still
+        required; see `segmentsConfig` in frontend/imaging/grid/segmentation.js.
+    {% endcomment %}
+</div>
+{% endif %}
+
+<div class="viewer-toolbar__divider"></div>
+
+{% comment %}
+    Annotation mode. A switch rather than a button, and off by default: a clinician
+    opening a study is reading it, not measuring it, and the seven measurement buttons
+    plus a save button on a toolbar that is mostly used for reading were simply noise.
+    `role="switch"` with a visible on/off word because "is this eye icon telling me the
+    state or the action?" is exactly the ambiguity that got reported -- the same reason
+    the previous eye button could be clicked in the belief it was *enabling* something
+    while it hid.
+
+    One control, two effects, and they are deliberately the same control: turning the
+    mode on reveals the tools **and** shows the annotations. A separate visibility button
+    meant two states that could disagree, which is how "I clicked show and saw nothing"
+    happened.
+{% endcomment %}
+<button type="button" class="cbct-mode-toggle" id="cbctAnnotationMode" role="switch" aria-checked="false" aria-controls="cbctAnnotationTools" title="Show the measurement tools and the measurements on this study">
+    <span class="cbct-mode-toggle__track" aria-hidden="true"><span class="cbct-mode-toggle__knob"></span></span>
+    <span class="cbct-mode-toggle__label">Annotations</span>
+    <span class="cbct-mode-toggle__state" data-mode-state>off</span>
+</button>
+
+{% comment %}
+    Measurement tools. The roadmap's "Why" table opens with "one measurement tool exists,
+    and it is never saved" -- these are the tools that close it, and every one of them
+    persists through `annotations/services/viewer.py`. `data-ygg-tool` is the Cornerstone
+    tool name; `frontend/imaging/grid/controls.js` binds whatever is present, so a tool
+    can be added or removed here without touching the JavaScript.
+
+    `hidden` here is the default state, not a decoration: `bindControls` re-asserts it on
+    load so the DOM and the grid cannot start out disagreeing.
+{% endcomment %}
+<div class="cbct-annotation-tools" id="cbctAnnotationTools" hidden>
+    <span class="viewer-toolbar__label">Measure</span>
+    <div class="cbct-tool-group" role="group" aria-label="Measurement tools">
+        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Length" aria-pressed="false" title="Length"><i class="fas fa-ruler" aria-hidden="true"></i></button>
+        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Angle" aria-pressed="false" title="Angle"><i class="fas fa-drafting-compass" aria-hidden="true"></i></button>
+        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Bidirectional" aria-pressed="false" title="Bidirectional"><i class="fas fa-up-down-left-right" aria-hidden="true"></i></button>
+        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="Probe" aria-pressed="false" title="Probe a point"><i class="fas fa-eye-dropper" aria-hidden="true"></i></button>
+        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="EllipticalROI" aria-pressed="false" title="Elliptical ROI"><i class="far fa-circle" aria-hidden="true"></i></button>
+        <button type="button" class="icon-btn cbct-tool" data-ygg-tool="RectangleROI" aria-pressed="false" title="Rectangular ROI"><i class="far fa-square" aria-hidden="true"></i></button>
+    </div>
+    {% if grid_can_annotate %}
+    {% comment %}
+        Clear asks first, and removes from the *viewer* only: the server replaces the
+        whole set on save, so the next save is what makes a clear permanent and a reload
+        is what undoes it. Both the confirm and the notification say so --
+        `frontend/imaging/grid/controls.js`.
+    {% endcomment %}
+    <button type="button" class="icon-btn" id="cbctClearMeasurements" title="Remove every measurement on this study"><i class="fas fa-trash" aria-hidden="true"></i></button>
+    <button type="button" class="icon-btn" id="cbctSaveMeasurements" title="Save measurements"><i class="fas fa-floppy-disk" aria-hidden="true"></i></button>
+    {% comment %}
+        `CSRF_USE_SESSIONS = True` in settings, so there is no `csrftoken` cookie to read
+        -- the hidden input is the only source. Without this every save was a bare 403.
+    {% endcomment %}
+    <div hidden>{% csrf_token %}</div>
+    {% endif %}
+</div>
+{% comment %}
+    Kept for the failures a toast cannot carry -- a handler that threw, a reset that found
+    no viewport. The *save* outcome is a toast now (`window.appNotify`, the platform's
+    own), because "Saved 3 measurements." sitting in a toolbar is a sentence nobody reads
+    and everybody has to scan past.
+{% endcomment %}
+<span class="cbct-render-status" id="cbctRenderStatus" role="status" aria-live="polite"></span>

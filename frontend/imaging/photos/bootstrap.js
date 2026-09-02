@@ -10,6 +10,7 @@
  * decision worth testing lives in the pure modules beside this one.
  */
 
+import { observeSize } from '../runtime/elementSize.js';
 import {
     PHOTO_CONTROL_IDS,
     bindControls,
@@ -630,13 +631,3 @@ function showMessage(element, message) {
     element.replaceChildren?.(note);
 }
 
-/** Resize on container change, including the moment a hidden tab is shown. */
-function observeSize(element, callback) {
-    const Observer = globalThis.ResizeObserver;
-    if (!Observer) {
-        globalThis.addEventListener?.('resize', () => callback());
-        return;
-    }
-    const observer = new Observer(() => callback());
-    observer.observe(element);
-}

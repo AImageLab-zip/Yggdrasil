@@ -1,28 +1,13 @@
 <article class="upload-modality upload-modality--wide volume-upload-container" data-group="cbct">
     <div class="upload-modality__head"><i class="fas fa-cube" aria-hidden="true"></i><h3>CBCT scan</h3></div>
-    <div class="upload-type-toggle" role="group" aria-label="CBCT upload type">
-        <input type="radio" name="cbct_upload_type_choice" id="cbct_file_upload" value="file" checked>
-        <label for="cbct_file_upload"><i class="fas fa-file" aria-hidden="true"></i> File</label>
-        <input type="radio" name="cbct_upload_type_choice" id="cbct_folder_upload" value="folder">
-        <label for="cbct_folder_upload"><i class="fas fa-folder" aria-hidden="true"></i> DICOM folder</label>
-    </div>
     <div class="cbct-file-section">
         <label class="upload-dropzone" for="{{ patient_upload_form.cbct.id_for_label }}">
             {{ patient_upload_form.cbct }}
             <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
             <strong>Drop a CBCT file</strong>
-            <small>DICOM, NIfTI or MetaImage (.mha)</small>
+            <small>NIfTI or MetaImage (.mha)</small>
             <span class="upload-file-summary" data-file-summary>No file selected</span>
         </label>
         {% for error in patient_upload_form.cbct.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
-    </div>
-    <div class="cbct-folder-section" hidden>
-        <label class="upload-dropzone" for="cbct_folder">
-            <input type="file" name="cbct_folder_files" id="cbct_folder" webkitdirectory directory multiple accept=".dcm,.dicom,application/dicom">
-            <i class="fas fa-folder-open" aria-hidden="true"></i>
-            <strong>Select a DICOM folder</strong>
-            <small>DICOM, DICOMDIR or extensionless files</small>
-            <span class="upload-file-summary" data-file-summary>No folder selected</span>
-        </label>
     </div>
 </article>

@@ -179,8 +179,22 @@ test('robustRange survives an empty volume without throwing', () => {
     assert.ok(Number.isNaN(min) && Number.isNaN(robustMin));
 });
 
-test('the default percentiles are the 2/98 pair the NiiVue path used', () => {
-    assert.deepEqual(DEFAULT_ROBUST_PERCENTILES, { low: 0.02, high: 0.98 });
+test('the default percentiles clip narrowly, so a study opens darker', () => {
+    // Was the 2/98 pair NiiVue used, kept for continuity with the viewer this replaced.
+    // Both grids were reported as opening too bright; the upper cut sets the white
+    // point, so raising it maps everything below darker.
+    assert.deepEqual(DEFAULT_ROBUST_PERCENTILES, { low: 0.005, high: 0.995 });
+    assert.ok(DEFAULT_ROBUST_PERCENTILES.high > 0.98, 'darker than the NiiVue window');
+});
+
+test('a narrower clip really does widen the window upwards', () => {
+    // The property that makes the study darker, rather than the constant restated: a
+    // higher upper cut can only move the white point up, never down.
+    const data = Float32Array.from({ length: 1000 }, (unused, index) => index);
+    const wide = robustRange(data, { low: 0.005, high: 0.995 });
+    const narrow = robustRange(data, { low: 0.02, high: 0.98 });
+    assert.ok(wide.robustMax >= narrow.robustMax);
+    assert.ok(wide.robustMin <= narrow.robustMin);
 });
 
 // ---------------------------------------------------------------------------

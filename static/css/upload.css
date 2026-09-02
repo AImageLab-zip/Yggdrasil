@@ -159,10 +159,6 @@
 .upload-file-summary { max-width: 100%; overflow: hidden; color: var(--ygg-text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .upload-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .upload-pair .upload-dropzone { min-height: 92px; }
-.upload-type-toggle { display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: var(--ygg-surface-2); }
-.upload-type-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.upload-type-toggle label { flex: 1; padding: 5px 7px; border-radius: 6px; color: var(--ygg-text-muted); font-size: 10px; font-weight: 700; text-align: center; cursor: pointer; }
-.upload-type-toggle input:checked + label { background: var(--ygg-surface); color: var(--ygg-primary); box-shadow: var(--ygg-shadow-card-light); }
 .upload-progress { display: grid; gap: 5px; }
 .upload-progress__label { display: flex; justify-content: space-between; color: var(--ygg-text-muted); font-size: 10px; }
 .upload-progress__track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ygg-surface-2); }

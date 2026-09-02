@@ -10,6 +10,7 @@ from common.annotation_lock import (
     lock_message,
     raw_data_is_locked,
 )
+from common.admin import DomainFolderAdmin, DomainProjectAdmin
 from common.models import Modality, ProcessingStep, ProjectAccess, Job, FileRegistry, Invitation, AnnotationMethod
 from .models import Tag, Folder
 
@@ -50,27 +51,9 @@ class PatientAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(MaxilloProject)
-class MaxilloProjectAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+class MaxilloProjectAdmin(ReadOnlyAdminMixin, DomainProjectAdmin):
     """Maxillo projects, shown under the Maxillo admin section (domain forced)."""
-    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
-    list_filter = ['is_active', 'created_at']
-    search_fields = ['name', 'description', 'slug']
-    prepopulated_fields = {"slug": ("name",)}
-    filter_horizontal = ['modalities', 'annotation_methods', 'disabled_steps']
-    readonly_fields = ['domain']
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).filter(domain='maxillo')
-
-    def save_model(self, request, obj, form, change):
-        obj.domain = 'maxillo'
-        super().save_model(request, obj, form, change)
-
-    def get_form(self, request, obj=None, **kwargs):
-        form = super().get_form(request, obj, **kwargs)
-        if 'domain' in form.base_fields:
-            form.base_fields['domain'].initial = 'maxillo'
-        return form
+    domain = 'maxillo'
 
 
 @admin.register(AnnotationMethod)
@@ -92,8 +75,8 @@ class ProcessingStepInline(admin.TabularInline):
 
 @admin.register(Modality)
 class ModalityAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ['name', 'slug', 'label', 'icon', 'is_active', 'created_at', 'created_by']
-    list_filter = ['is_active', 'created_at']
+    list_display = ['name', 'slug', 'domain', 'label', 'icon', 'is_active', 'created_at', 'created_by']
+    list_filter = ['domain', 'is_active', 'created_at']
     search_fields = ['name', 'description', 'slug', 'label', 'icon']
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = []
@@ -403,14 +386,9 @@ class TagAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(Folder)
-class FolderAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
-    # `project` is shown and filterable: a folder in the wrong project (or, before
-    # it was required, in none at all) is invisible in the app but looks fine here.
-    list_display = ['name', 'project', 'parent', 'is_demo', 'created_at', 'created_by']
-    list_editable = ['is_demo']
-    list_select_related = ['project', 'parent']
-    search_fields = ['name']
-    list_filter = ['project', 'is_demo', 'created_at']
+class FolderAdmin(ReadOnlyAdminMixin, DomainFolderAdmin):
+    """Maxillo folders (project picker scoped to the maxillo domain)."""
+    domain = 'maxillo'
 
 
 @admin.register(Export)

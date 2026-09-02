@@ -82,9 +82,6 @@ urlpatterns = [
     path("folders/<int:folder_id>/stats/", views.folder_stats, name="folder_stats"),
     path("folders/<int:folder_id>/rename/", views.rename_folder, name="rename_folder"),
     path("folders/<int:folder_id>/delete/", views.delete_folder, name="delete_folder"),
-    path("folders/<int:folder_id>/permissions/", views.folder_permissions, name="folder_permissions"),
-    path("folders/<int:folder_id>/permissions/upsert/", views.upsert_folder_permission, name="upsert_folder_permission"),
-    path("folders/<int:folder_id>/permissions/<int:user_id>/delete/", views.delete_folder_permission, name="delete_folder_permission"),
     path(
         "folders/move-patients/",
         views.move_patients_to_folder,

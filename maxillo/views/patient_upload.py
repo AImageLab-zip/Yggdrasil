@@ -69,30 +69,9 @@ def upload_patient(request):
         patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user, current_project=current_project, domain=namespace)
         patient_form = PatientForm()
 
-        # Validate CBCT folder uploads before creating the patient so invalid
-        # folder selections do not leave behind empty patient rows.
-        cbct_upload_type = request.POST.get('cbct_upload_type', 'file')
-        cbct_folder_files = request.FILES.getlist('cbct_folder_files')
-        if cbct_upload_type == 'folder' and cbct_folder_files:
-            try:
-                from ..models import validate_cbct_folder
-
-                validate_cbct_folder(cbct_folder_files)
-            except Exception as e:
-                messages.error(request, f'Error validating CBCT folder: {e}')
-                # Re-render with the *project's* folders: an unscoped list here
-                # offered folders from every other project.
-                return render(request, 'common/upload/upload.html', {
-                    'patient_form': patient_form,
-                    'patient_upload_form': patient_upload_form,
-                    'folders': folders,
-                    'allowed_modalities': allowed_modalities,
-                    'bulk_upload_url': bulk_upload_url_for(request, namespace),
-                })
-
         upload_field_names = (
             {'video'} if namespace == 'laparoscopy' else
-            {'cbct', 'cbct_folder_files', 'ios_upper', 'ios_lower', 'teleradiography', 'panoramic', 'intraoral-photos'}
+            {'cbct', 'ios_upper', 'ios_lower', 'teleradiography', 'panoramic', 'intraoral-photos'}
         )
         has_upload = any(request.FILES.getlist(field_name) for field_name in upload_field_names)
         form_is_valid = patient_upload_form.is_valid()
@@ -144,30 +123,21 @@ def upload_patient(request):
             processing_job_ids = []
             bite_job_ids = []
             
-            # Handle CBCT (single file or folder)
+            # Handle CBCT
             cbct_file = request.FILES.get('cbct')
             cbct_error = None
-            if (cbct_file or cbct_folder_files) and _mod_allowed('cbct'):
+            if cbct_file and _mod_allowed('cbct'):
                 try:
                     modality = Modality.objects.get(slug='cbct')
                     patient.modalities.add(modality)
-                    
-                    if cbct_file:
-                        from ..file_utils import save_cbct_to_dataset
 
-                        file_path, job = save_cbct_to_dataset(patient, cbct_file)
-                        if file_path:
-                            uploaded_modalities.append('CBCT')
-                            if job:
-                                processing_job_ids.append(job.id)
-                    elif cbct_folder_files:
-                        from ..file_utils import save_cbct_folder_to_dataset
+                    from ..file_utils import save_cbct_to_dataset
 
-                        folder_path, job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
-                        if folder_path:
-                            uploaded_modalities.append('CBCT')
-                            if job:
-                                processing_job_ids.append(job.id)
+                    file_path, job = save_cbct_to_dataset(patient, cbct_file)
+                    if file_path:
+                        uploaded_modalities.append('CBCT')
+                        if job:
+                            processing_job_ids.append(job.id)
                 except Exception as e:
                     err_text = str(e)
                     if hasattr(e, 'message') and e.message:

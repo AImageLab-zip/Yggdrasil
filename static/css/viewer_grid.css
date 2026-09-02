@@ -870,6 +870,17 @@
   letter-spacing: 0.02em;
 }
 
+/* Beside the panel name: which series this window is showing. Constant on the
+   CBCT grid, and the only way to tell four MRIs apart on the brain one. */
+.ygg-overlay__modality {
+  position: absolute;
+  top: 0.5rem;
+  left: 3rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
 /* Bottom-left, matching where every viewer puts it. */
 .ygg-overlay__slice {
   position: absolute;
@@ -1190,4 +1201,21 @@
    question dialogs do not. */
 .ygg-photo-dialog:has(.modal-title .fa-crop) .modal-dialog {
   max-width: min(64rem, 92vw);
+}
+
+/* Segmentation overlay control -----------------------------------------------
+   Just the on/off switch now. It briefly carried a per-class list -- a colour
+   swatch and a checkbox per label -- which is gone on the maintainer's call: the
+   overlay is all of it or none of it. The switch itself reuses
+   `.cbct-mode-toggle`, the same control annotation mode uses. */
+.viewer-seg-control {
+  display: inline-flex;
+}
+
+
+/* A chip being dragged. The pre-3.0 handler set `style.opacity` inline; a class
+   keeps the appearance in the stylesheet with the rest of the chip's states. */
+.modality-chip.is-dragging {
+  opacity: 0.5;
+  cursor: grabbing;
 }

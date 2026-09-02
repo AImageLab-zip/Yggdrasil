@@ -1,18 +1,19 @@
 """Folder and tag management views.
 
-Folders live inside Projects; folder creation is scoped to the session's
-current project, and folder "permissions" are really project access
-(ProjectAccess). The legacy FolderAccess rows are untouched.
+Folders live inside Projects: a folder is a way to file patients, never a unit
+of access. Nothing here grants anything -- authorization is per project
+(``ProjectAccess``), granted on the project's Django admin page, and the
+per-folder access dialog that used to live here promised a granularity the
+system has never had. The legacy ``FolderAccess`` rows are untouched.
 """
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
 import json
 import logging
 
-from common.models import ProjectAccess
+from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
 from .domain import get_domain_models, get_namespace
 from common.permissions import (
     user_can_write_patient_annotations,
@@ -58,6 +59,38 @@ def create_folder(request):
 
 
 @login_required
+@require_http_methods(["DELETE"])
+def delete_folder(request, folder_id):
+    """Delete a folder of the current domain. Patients survive, unfiled.
+
+    Served for maxillo *and* laparoscopy: laparoscopy includes
+    ``maxillo.app_urls`` under its own namespace, and ``get_domain_models``
+    resolves the Folder model from that namespace. Only brain had this endpoint
+    before, so two of the three domains could create folders they could never
+    remove.
+
+    ``?force=true`` is the caller's answer to "it still has patients in it";
+    without it a non-empty folder is refused with the count, which is what the
+    UI turns into its confirmation.
+    """
+    Folder = get_domain_models(request)['Folder']
+    folder = get_object_or_404(Folder, id=folder_id)
+    # Against the folder's *own* project, not the session's current one: the two
+    # can differ, and only the former is the project whose admins own this folder.
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+    try:
+        unfiled = _delete_folder(folder, force=request.GET.get('force') == 'true')
+    except FolderNotEmpty as exc:
+        return JsonResponse(
+            {'success': False, 'error': str(exc), 'patient_count': exc.patient_count},
+            status=400,
+        )
+    return JsonResponse({'success': True, 'unfiled_patients': unfiled})
+
+
+@login_required
 @require_http_methods(["GET"])
 def folder_stats(request, folder_id):
     if not user_is_project_admin(request.user, request):
@@ -77,77 +110,14 @@ def folder_stats(request, folder_id):
 
 
 @login_required
-@require_http_methods(["GET"])
-def folder_permissions(request, folder_id):
-    """List ProjectAccess rows for the folder's project (roles viewer/annotator/admin)."""
-    if not user_is_project_admin(request.user, request):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
-
-    Folder = get_domain_models(request)['Folder']
-    folder = get_object_or_404(Folder, id=folder_id)
-    project = folder.project
-    rows = ProjectAccess.objects.filter(project=project).select_related('user').order_by('user__username')
-    users = User.objects.filter(is_active=True).order_by('username').values('id', 'username', 'email')
-    return JsonResponse({
-        'success': True,
-        'folder': {'id': folder.id, 'name': folder.name},
-        'permissions': [
-            {'user_id': row.user_id, 'username': row.user.username, 'role': row.role}
-            for row in rows
-        ],
-        'users': list(users),
-        'roles': ['viewer', 'annotator', 'admin'],
-    })
-
-
-@login_required
-@require_http_methods(["POST"])
-def upsert_folder_permission(request, folder_id):
-    """Grant/update a user's ProjectAccess on the folder's project."""
-    if not user_is_project_admin(request.user, request):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
-
-    Folder = get_domain_models(request)['Folder']
-    folder = get_object_or_404(Folder, id=folder_id)
-    project = folder.project
-
-    data = json.loads(request.body) if request.body else request.POST
-    user_id = data.get('user_id')
-    role = (data.get('role') or '').strip()
-    if role not in {'viewer', 'annotator', 'admin'}:
-        return JsonResponse({'error': 'Invalid role'}, status=400)
-    if not user_id:
-        return JsonResponse({'error': 'user_id required'}, status=400)
-
-    user = get_object_or_404(User, id=user_id)
-    row, _ = ProjectAccess.objects.update_or_create(
-        user=user,
-        project=project,
-        defaults={'role': role},
-    )
-    return JsonResponse({'success': True, 'user_id': row.user_id, 'role': row.role})
-
-
-@login_required
-@require_http_methods(["DELETE"])
-def delete_folder_permission(request, folder_id, user_id):
-    if not user_is_project_admin(request.user, request):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
-
-    Folder = get_domain_models(request)['Folder']
-    folder = get_object_or_404(Folder, id=folder_id)
-    ProjectAccess.objects.filter(project=folder.project, user_id=user_id).delete()
-    return JsonResponse({'success': True})
-
-
-@login_required
 @require_http_methods(["POST"])
 def rename_folder(request, folder_id):
-    if not user_is_project_admin(request.user, request):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
-
     Folder = get_domain_models(request)['Folder']
     folder = get_object_or_404(Folder, id=folder_id)
+    # The folder's own project, for the same reason as delete_folder.
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
     data = json.loads(request.body) if request.body else request.POST
     name = (data.get('name') or '').strip()
     if not name:

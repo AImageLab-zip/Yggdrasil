@@ -21,7 +21,7 @@ class PatientForm(forms.ModelForm):
 class PatientUploadForm(forms.ModelForm):
     """
     Simple patient upload form with hardcoded modality fields:
-    - CBCT (single file or folder)
+    - CBCT (single volume; DICOM upload is disabled, see save_cbct_to_dataset)
     - IOS (upper + lower STL files)
     - Teleradiography (single image)
     - Intraoral photos (multiple images - NOT in form, handled in view)
@@ -36,11 +36,10 @@ class PatientUploadForm(forms.ModelForm):
         label='CBCT File',
         widget=forms.FileInput(attrs={
             'class': 'form-control',
-            'accept': '.dcm,.dicom,.nii,.nii.gz,.mha,application/dicom'
+            'accept': '.nii,.nii.gz,.mha'
         })
     )
-    cbct_upload_type = forms.CharField(widget=forms.HiddenInput(), required=False)
-    
+
     # IOS fields (upper + lower)
     ios_upper = forms.FileField(
         required=False,

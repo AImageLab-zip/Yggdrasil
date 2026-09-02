@@ -15,6 +15,7 @@ import {
     assertEnumsMatch,
     assertWindowIndex,
     isSliceOrientation,
+    supportsCrosshairs,
     IMAGE_LOADER_SCHEME,
     VOLUME_ID_SCHEME,
     toolGroupIdFor,
@@ -126,7 +127,45 @@ test('the fixed CBCT layout is three orthogonal planes plus a volume render', ()
         [false, false, false, false]
     );
     assert.equal(FREE_LAYOUT.length, GRID_WINDOWS);
-    assert.ok(FREE_LAYOUT.every((entry) => entry.orientation === ORIENTATIONS.AXIAL && !entry.lazy));
+    assert.ok(FREE_LAYOUT.every((entry) => !entry.lazy));
+    // Four axial. This surface compares sequences, not planes, and the consequence --
+    // that a crosshair has no intersecting planes to draw -- is handled by leaving the
+    // tool out rather than by bending the layout around it. See `supportsCrosshairs`.
+    assert.deepEqual(
+        FREE_LAYOUT.map((entry) => entry.orientation),
+        [ORIENTATIONS.AXIAL, ORIENTATIONS.AXIAL, ORIENTATIONS.AXIAL, ORIENTATIONS.AXIAL]
+    );
+    // And no volume render: unlike the CBCT grid this one has no single primary volume,
+    // so a render would have to pick one of four sequences arbitrarily.
+    assert.ok(FREE_LAYOUT.every((entry) => entry.orientation !== ORIENTATIONS.RENDER));
+});
+
+test('a crosshair is offered only to a layout whose planes intersect', () => {
+    // The CBCT grid: three distinct planes among its slice windows.
+    assert.equal(supportsCrosshairs(FIXED_CBCT_LAYOUT), true);
+    // The brain grid: four windows, one plane. `_calculateToolCenterFromAbsoluteCameras`
+    // collapses parallel cameras to a single unique plane and returns null, so the tool
+    // centre is never computed and every click on the image is a no-op.
+    assert.equal(supportsCrosshairs(FREE_LAYOUT), false);
+    // One window is not two, whatever it cuts.
+    assert.equal(supportsCrosshairs([{ window: 0, orientation: ORIENTATIONS.AXIAL }]), false);
+    // The volume render is not a plane and cannot make up the second one.
+    assert.equal(
+        supportsCrosshairs([
+            { window: 0, orientation: ORIENTATIONS.AXIAL },
+            { window: 1, orientation: ORIENTATIONS.RENDER },
+        ]),
+        false
+    );
+    // A lazy window is not on screen, so it cannot be intersected with either.
+    assert.equal(
+        supportsCrosshairs([
+            { window: 0, orientation: ORIENTATIONS.AXIAL },
+            { window: 1, orientation: ORIENTATIONS.CORONAL, lazy: true },
+        ]),
+        false
+    );
+    assert.equal(supportsCrosshairs([]), false);
 });
 
 test('runtime ids are derived, and window indices are bounds-checked', () => {
@@ -299,7 +338,15 @@ test('an empty window is not a sync target', () => {
 test('orientation groups are derived from the windows, so they cannot go stale', () => {
     // The old implementation kept `synchronizationGroups` as a mutable index alongside
     // the window states, which could disagree with them.
-    const state = loadedGrid(FREE_LAYOUT); // all four axial
+    // Built explicitly rather than from FREE_LAYOUT: what is under test is the
+    // derivation, not the brain grid's particular plane assignment.
+    const state = loadedGrid(
+        Array.from({ length: 4 }, (unused, index) => ({
+            window: index,
+            orientation: ORIENTATIONS.AXIAL,
+            lazy: false,
+        }))
+    );
     assert.deepEqual(orientationGroup(state, ORIENTATIONS.AXIAL), [0, 1, 2, 3]);
 
     setOrientation(state, 2, ORIENTATIONS.CORONAL);
@@ -663,4 +710,174 @@ test('the build copies the orientation figure into the bundle', async () => {
     const build = await readFile(join(REPO, 'scripts', 'build_frontend.mjs'), 'utf8');
     assert.match(build, /from: 'static\/vendor\/slicer'/);
     assert.match(build, /to: 'orientation'/);
+});
+
+test('the crosshair draws no handles and can still be moved', async () => {
+    // Two requirements that a previous round proved are in tension. "An additional
+    // square and circle on all axis" was reported as clutter; turning
+    // `getReferenceLineDraggableRotatable` off removed them and also removed every
+    // *translation* the tool performs, so the lines stood still under the cursor.
+    const { crosshairLinesOnly, CROSSHAIR_LINE_LENGTH_PX } = await import('../imaging/grid/layout.js');
+    const config = crosshairLinesOnly();
+
+    // The handles go through the profile that gates drawing and hit-testing only.
+    assert.equal(config.minimal.enabled, true);
+    // And the lines stay full length under it -- the profile's own purpose is 40px stubs.
+    assert.ok(config.minimal.lineLengthInPx >= 10000);
+    assert.equal(config.minimal.lineLengthInPx, CROSSHAIR_LINE_LENGTH_PX);
+
+    // **Neither reference-line callback is overridden.** `_jump` and `_dragCallback` read
+    // them raw, so overriding either to false is what disables click-to-navigate.
+    assert.equal(config.getReferenceLineDraggableRotatable, undefined);
+    assert.equal(config.getReferenceLineSlabThicknessControlsOn, undefined);
+    assert.equal(config.getReferenceLineControllable, undefined);
+
+    // The touch profile stays off: it raises the handle radius and draws the handles
+    // permanently, which is how the clutter was reported.
+    assert.equal(config.mobile.enabled, false);
+});
+
+test('the crosshair still separates its drawing switches from its navigation ones', async () => {
+    // Read from the vendored tool rather than paraphrased, the way the attenuated-MIP
+    // test reads the real shader. `crosshairLinesOnly` rests on exactly one property of
+    // this file: `minimal` suppresses the handles in the *render* and *hit-test* paths
+    // while `_jump` and `_dragCallback` consult the raw callbacks. A version bump that
+    // merges the two would either bring the clutter back or freeze the crosshair again,
+    // with no build error either way.
+    const tool = await readFile(
+        join(REPO, 'node_modules', '@cornerstonejs', 'tools', 'dist', 'esm', 'tools', 'CrosshairsTool.js'),
+        'utf8'
+    );
+
+    // Drawing: both handle kinds are forced off by the minimal profile.
+    assert.match(
+        tool,
+        /const viewportDraggableRotatable = !minimalCrosshairConfig\.enabled &&/,
+        'the rotation handles must still be suppressed by the minimal profile'
+    );
+    assert.match(
+        tool,
+        /const viewportSlabThicknessControlsOn = !minimalCrosshairConfig\.enabled &&/,
+        'and so must the slab-thickness handles'
+    );
+    // Hit-testing: neither handle can be grabbed invisibly under it either.
+    assert.match(
+        tool,
+        /_getRotationHandleNearImagePoint\(viewport, annotation, canvasCoords, proximity\) \{\s*const minimalCrosshairConfig = getMinimalCrosshairConfig/,
+        'the rotation handle hit test must still consult the minimal profile'
+    );
+    // Navigation: `_jump` filters on the raw callback, which is why it is left alone.
+    assert.match(
+        tool,
+        /return \(this\._getReferenceLineControllable\(otherViewport\.id\) &&\s*this\._getReferenceLineDraggableRotatable\(otherViewport\.id\) &&\s*sameScene\);/,
+        'a click moves the crosshair only through viewports this callback approves'
+    );
+    // And the minimal branch still clips its line to the canvas, which is what lets a
+    // very large lineLengthInPx stand in for a full-width reference line.
+    assert.match(
+        tool,
+        /if \(minimalCrosshairConfig\.enabled\) \{[\s\S]*?liangBarksyClip\(refLinePointThree, refLinePointFour, canvasBox\);/,
+        'the minimal branch must still clip to the canvas box'
+    );
+
+    // The touch default this configuration overrides: true on any coarse pointer.
+    assert.match(tool, /enabled: isMobile\(\)/);
+});
+
+
+test('window/level is shared only by windows showing the same volume', async () => {
+    // The CBCT grid is four planes of one study, and a brightness drag in any of them
+    // belongs to all of them. The brain grid is four *different* sequences, and
+    // Cornerstone's `voiSyncCallback` copies the source's absolute `voiRange` onto every
+    // target -- so synchronising there put FLAIR's window on T1, T1c and T2, on load as
+    // well as on every drag. Reported as "the brightness of the brains change" and "they
+    // seem not to use all 4 the same lighting".
+    const { createGridState, voiSyncGroup } = await import('../imaging/grid/windowState.js');
+    const { FIXED_CBCT_LAYOUT, FREE_LAYOUT } = await import('../imaging/grid/layout.js');
+
+    const cbct = createGridState(FIXED_CBCT_LAYOUT);
+    for (const window of cbct.windows) {
+        window.volumeId = 'ygg-volume:one-study';
+    }
+    assert.deepEqual(voiSyncGroup(cbct), [0, 1, 2, 3]);
+
+    const brain = createGridState(FREE_LAYOUT);
+    brain.windows.forEach((window, index) => {
+        window.volumeId = `ygg-volume:sequence-${index}`;
+    });
+    assert.deepEqual(voiSyncGroup(brain), [], 'four different series must not share a window');
+});
+
+test('a half-loaded grid synchronises nothing rather than guessing', async () => {
+    const { createGridState, voiSyncGroup } = await import('../imaging/grid/windowState.js');
+    const { FREE_LAYOUT } = await import('../imaging/grid/layout.js');
+
+    const state = createGridState(FREE_LAYOUT);
+    // One window holding a volume has nothing to synchronise with.
+    state.windows[0].volumeId = 'ygg-volume:a';
+    assert.deepEqual(voiSyncGroup(state), []);
+
+    // Two windows on the same series do share a window/level -- the rule is about the
+    // volume, not about which layout the page happens to be using.
+    state.windows[2].volumeId = 'ygg-volume:a';
+    assert.deepEqual(voiSyncGroup(state), [0, 2]);
+
+    // And one disagreeing window is enough to stop it: pushing an absolute range from
+    // one series onto another is what misreports an intensity.
+    state.windows[3].volumeId = 'ygg-volume:b';
+    assert.deepEqual(voiSyncGroup(state), []);
+});
+
+test('the VOI sync callback still copies an absolute range, which is why it is scoped', async () => {
+    // Pinned against the vendored library. If a bump made this relative -- window width
+    // and centre as a fraction of each volume's own range -- the scoping above would be
+    // unnecessary rather than wrong, and this is where to notice.
+    const callback = await readFile(
+        join(REPO, 'node_modules', '@cornerstonejs', 'tools', 'dist', 'esm',
+             'synchronizers', 'callbacks', 'voiSyncCallback.js'),
+        'utf8'
+    );
+    assert.match(callback, /const tProperties = \{\s*voiRange: range,/);
+});
+
+test('the grid reuses a rendering engine the panoramic already opened under its id', async () => {
+    // `entries/panoramic-cpr.js` attaches its two viewports to the grid's engine, by the
+    // grid's id, to stay inside the WebGL context budget. `new RenderingEngine(id)` ends
+    // with `renderingEngineCache.set(this)`, which overwrites that id silently -- and
+    // `getEnabledElement` resolves every viewport through that cache, so the displaced
+    // engine's viewports keep drawing while the library can no longer find them: no
+    // annotation is rendered or hit-tested on them, and no segmentation representation on
+    // them can be shown or hidden.
+    const { readFileSync } = await import('node:fs');
+    const core = readFileSync(
+        'node_modules/@cornerstonejs/core/dist/esm/RenderingEngine/BaseRenderingEngine.js',
+        'utf8'
+    );
+    assert.match(
+        core,
+        /this\.id = id \? id : uuidv4\(\);[\s\S]{0,200}renderingEngineCache\.set\(this\);/,
+        'the constructor still files itself under its id, replacing whatever was there'
+    );
+    const resolve = readFileSync(
+        'node_modules/@cornerstonejs/core/dist/esm/getEnabledElement.js',
+        'utf8'
+    );
+    assert.match(
+        resolve,
+        /const renderingEngine = getRenderingEngine\(renderingEngineId\);/,
+        'and everything resolves a viewport through that cache'
+    );
+
+    const manager = readFileSync('frontend/imaging/grid/viewportManager.js', 'utf8');
+    assert.match(
+        manager,
+        /getRenderingEngine\?\.\(RENDERING_ENGINE_ID\) \?\? new RenderingEngine\(RENDERING_ENGINE_ID\)/,
+        'so the grid must reuse rather than construct unconditionally'
+    );
+    const panoramic = readFileSync('frontend/entries/panoramic-cpr.js', 'utf8');
+    assert.match(
+        panoramic,
+        /getRenderingEngine\(GRID_ENGINE_ID\) \?\? new RenderingEngine\(GRID_ENGINE_ID\)/,
+        'and so must the panoramic, from its side'
+    );
 });

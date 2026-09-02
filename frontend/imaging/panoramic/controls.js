@@ -30,6 +30,7 @@ export const CONTROL_IDS = Object.freeze({
     nextZ: 'panorexNextZ',
     resetAuto: 'panorexResetAuto',
     savedViewer: 'cbctInlinePanoramic',
+    editButton: 'editSavedPanoramic',
 });
 
 /** The projection buttons, which are keyed by data attribute rather than by id. */
@@ -155,6 +156,25 @@ export function setEditorVisible(plan, visible) {
     }
     if (plan.savedViewer) {
         plan.savedViewer.hidden = visible;
+    }
+}
+
+/**
+ * Show or hide the button that opens this editor.
+ *
+ * **Owned here, and by nothing else.** The button lives in the saved-panoramic card, which
+ * `static/js/modality_viewers/panoramic.js` also writes to, and that module used to reveal
+ * it as soon as it knew the user could edit -- which is a fact about the *user*, not about
+ * whether the editor can run. Clicking it before the CBCT volume has finished loading puts
+ * "The CBCT is still loading." on screen, and there was nothing to tell the reader to wait.
+ * The surface knows when it can mount; it is the surface that offers the way in.
+ *
+ * The template ships the button `hidden`, so a page whose bundle never runs shows no
+ * button rather than a broken one.
+ */
+export function setEditReady(plan, ready) {
+    if (plan.editButton) {
+        plan.editButton.hidden = !ready;
     }
 }
 

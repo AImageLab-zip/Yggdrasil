@@ -13,7 +13,6 @@ from common.file_access import exists as artifact_exists
 from common.object_storage import get_object_storage
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.permissions import (
-    get_user_folder_role,
     project_allows_annotation,
     user_can_edit_caption,
     user_can_read_patient,
@@ -337,15 +336,21 @@ def patient_detail(request, patient_id):
             ):
                 messages.error(request, 'Occlusion classification is disabled for this project.')
                 return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
-            Classification.objects.create(
+            # update_or_create, not create: one manual classification per patient is
+            # a database constraint, and accepting the AI result twice -- or accepting
+            # it after a human already classified by hand -- is an ordinary thing for a
+            # user to do, not an error to raise at them.
+            Classification.objects.update_or_create(
                 patient=patient,
                 classifier='manual',
-                sagittal_left=ai_classification.sagittal_left,
-                sagittal_right=ai_classification.sagittal_right,
-                vertical=ai_classification.vertical,
-                transverse=ai_classification.transverse,
-                midline=ai_classification.midline,
-                annotator=request.user
+                defaults={
+                    'sagittal_left': ai_classification.sagittal_left,
+                    'sagittal_right': ai_classification.sagittal_right,
+                    'vertical': ai_classification.vertical,
+                    'transverse': ai_classification.transverse,
+                    'midline': ai_classification.midline,
+                    'annotator': request.user,
+                },
             )
             messages.success(request, 'AI classification accepted!')
             return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
@@ -365,7 +370,6 @@ def patient_detail(request, patient_id):
             has_upper_scan = 'upper_scan' in request.FILES
             has_lower_scan = 'lower_scan' in request.FILES
             has_cbct_file = 'cbct' in request.FILES
-            has_cbct_folder = 'cbct_folder_files' in request.FILES
             
             if has_upper_scan:
                 updated_files.append('upper scan')
@@ -377,10 +381,6 @@ def patient_detail(request, patient_id):
             
             if has_cbct_file:
                 updated_files.append('CBCT')
-                reprocess_cbct = True
-            
-            if has_cbct_folder:
-                updated_files.append('CBCT Folder')
                 reprocess_cbct = True
             
             if updated_files:
@@ -406,33 +406,16 @@ def patient_detail(request, patient_id):
                     except Exception as e:
                         messages.error(request, f'Error uploading IOS scan(s): {e}')
                 
-                if reprocess_cbct and (has_cbct_file or has_cbct_folder):
-                    if has_cbct_folder:
-                        try:
-                            from ..file_utils import save_cbct_folder_to_dataset
-                            from ..models import validate_cbct_folder
-                            
-                            cbct_folder_files = request.FILES.getlist('cbct_folder_files')
-                            validate_cbct_folder(cbct_folder_files)
-                            
-                            folder_path, processing_job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
-                            if processing_job:
-                                queued_processing = True
-                                messages.success(request, f'CBCT folder uploaded and queued for processing (Job #{processing_job.id})')
-                            else:
-                                messages.success(request, 'CBCT folder uploaded successfully')
-                        except Exception as e:
-                            messages.error(request, f'Error uploading CBCT folder: {e}')
-                    elif has_cbct_file:
-                        try:
-                            file_path, processing_job = save_cbct_to_dataset(patient, request.FILES['cbct'])
-                            if processing_job:
-                                queued_processing = True
-                                messages.success(request, f'CBCT uploaded and queued for processing (Job #{processing_job.id})')
-                            else:
-                                messages.success(request, 'CBCT uploaded successfully')
-                        except Exception as e:
-                            messages.error(request, f'Error uploading CBCT: {e}')
+                if reprocess_cbct:
+                    try:
+                        file_path, processing_job = save_cbct_to_dataset(patient, request.FILES['cbct'])
+                        if processing_job:
+                            queued_processing = True
+                            messages.success(request, f'CBCT uploaded and queued for processing (Job #{processing_job.id})')
+                        else:
+                            messages.success(request, 'CBCT uploaded successfully')
+                    except Exception as e:
+                        messages.error(request, f'Error uploading CBCT: {e}')
                 
                 files_str = ', '.join(updated_files)
                 if queued_processing:
@@ -631,12 +614,14 @@ def patient_detail(request, patient_id):
     # Voice captions
     # Viewers and admins see all captions; annotators see only their own (to
     # avoid bias during annotation).
+    # Through the canonical helper, which resolves the role from the patient's
+    # *project*. This used to read it from `patient.folder`, so an unfiled
+    # patient -- `Patient.folder` is SET_NULL, and folders come and go -- had no
+    # role at all, and its captions were hidden from the project's own viewers.
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, patient.project)
-    folder_role = get_user_folder_role(request.user, patient.folder) if patient.folder else None
-    can_see_all_captions = is_admin_user or folder_role == 'viewer'
     for caption in voice_captions:
-        caption.can_view_content = bool(can_see_all_captions or caption.user_id == request.user.id)
+        caption.can_view_content = user_can_view_caption_content(request.user, caption)
         caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
     can_create_caption = can_modify
@@ -688,6 +673,13 @@ def patient_detail(request, patient_id):
         'scanId': patient.patient_id,
         'hasIOS': _call_patient_flag(patient, 'has_ios_scans'),
         'hasCBCT': bool(has_cbct),
+        # Whether a panoramic image exists at all, so the viewer can show its empty
+        # state without asking the API. Every CBCT patient offers the panoramic pane
+        # (a panoramic can be generated from the volume), so the pane used to open by
+        # fetching `?meta=1` for patients that have nothing yet -- an answer the server
+        # can only give as a 404, which the browser logs as a failed request before any
+        # of our code sees it. The page already knows.
+        'hasPanoramicImage': bool(has_uploaded_panoramic),
         'isCBCTProcessed': _call_patient_flag(patient, 'is_cbct_processed'),
         'modalities': patient_modalities,
         'defaultModality': default_modality_slug,
@@ -854,7 +846,7 @@ def patient_detail(request, patient_id):
         from django.db.models import Case, When, IntegerField as _IntegerField
         from django.urls import reverse as _reverse
         ns = get_namespace(request)
-        video_file = patient.files.filter(
+        video_candidates = list(patient.files.filter(
             file_type__in=['video_processed', 'video_raw']
         ).annotate(
             _prio=Case(
@@ -863,7 +855,15 @@ def patient_detail(request, patient_id):
                 default=2,
                 output_field=_IntegerField(),
             )
-        ).order_by('_prio', '-created_at').first()
+        ).order_by('_prio', '-created_at'))
+        # The best file we can *describe* wins over the best file, because the
+        # annotator needs a recorded ffprobe result and there is no point preferring
+        # a compressed derivative nobody has probed over a raw file somebody has.
+        # Falling back to the top-ranked row keeps plain playback working either way;
+        # only the annotator is withheld, and `video_state` says why.
+        video_file = _first_probed_video(video_candidates) or (
+            video_candidates[0] if video_candidates else None
+        )
         if video_file:
             context['video_file'] = video_file
             context['video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': video_file.id})
@@ -877,15 +877,35 @@ def patient_detail(request, patient_id):
         if worker_source_file and getattr(worker_source_file, 'file_path', None):
             context['worker_video_source_ref'] = worker_source_file.file_path
             context['worker_video_source_file_id'] = worker_source_file.id
+        # **Playback and annotation are two different files, on purpose.** Playback takes
+        # the best thing there is, raw included. Annotation takes the subsampled track and
+        # nothing else -- see `_video_annotate_payload`, which now carries both so the one
+        # surface on the page can watch the first and annotate the second.
         context['video_annotate_data'] = _video_annotate_payload(
-            request, ns, patient, video_file
+            request, ns, patient, subsampled_file, video_file
         )
+        context['video_state'] = _video_state(
+            ns, video_file, subsampled_file, context['video_annotate_data']
+        )
+        context['video_diagnosis'] = _video_diagnosis(patient, video_candidates, video_file)
     except Exception:
+        # Narrow on purpose. This used to be the widest `except` on the page and it
+        # answered every failure inside it -- a mistyped URL name included, see the
+        # comment in `_video_annotate_payload` -- with "this patient has no video",
+        # which is a *claim about the data* made on the strength of a bug in the view.
+        # It still must not take the rest of the patient record down, so it still
+        # catches; what changed is that it now says so where someone will see it.
+        logger.exception(
+            "Could not build the video context for patient %s; the page will render "
+            "without a viewer.", patient.patient_id,
+        )
         context['has_video'] = False
         context['video_url'] = None
         context['worker_video_source_ref'] = None
         context['worker_video_source_file_id'] = None
-        context['video_annotate_data'] = 'null' 
+        context['video_annotate_data'] = 'null'
+        context['video_state'] = 'error'
+        context['video_diagnosis'] = ''
 
     # Record for the landing "Continue where you left off" strip (best-effort).
     from common.activity import record_recent
@@ -933,17 +953,123 @@ def update_patient_name(request, patient_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-def _video_annotate_payload(request, namespace, patient, video_file):
+def _first_probed_video(candidates):
+    """The highest-ranked video row that carries a recorded probe, or ``None``.
+
+    ``annotations_rasterize_video_masks`` records a probe on the **``video_raw``**
+    row, while this page ranks a ``video_processed`` / ``compressed`` derivative
+    first. Asking only the top-ranked row therefore reported "no probe" on studies
+    that had one, which the surface renders as "No video uploaded for this patient."
+    """
+    from laparoscopy import video_probe
+
+    for candidate in candidates:
+        if video_probe.recorded_probe(candidate) is not None:
+            return candidate
+    return None
+
+
+def _video_state(namespace, video_file, subsampled_file, annotate_data):
+    """Why the video surface looks the way it does, for the template to say out loud.
+
+    ``absent`` -- there is no video row at all. ``processing`` -- the recording is
+    uploaded and plays, but the job that makes the annotation track has not produced it
+    yet, so there is nothing to annotate *on*. ``unprobed`` -- the track exists but
+    nothing has recorded its frame rate, so the annotator declines rather than guess
+    (run ``manage.py laparoscopy_probe_videos``). ``ready`` -- the annotator has what it
+    needs and will mount.
+
+    Separate sentences because the page had one for all of them, and a stored, playable
+    recording being described as "not uploaded" sends people looking for a lost file
+    instead of waiting for a job or running a command.
+
+    **Derived from the payload, not from the namespace.** The first version answered
+    ``ready`` whenever the namespace was not ``laparoscopy``, which was a way of saying
+    "this surface is not on this page" -- but the template reads this to choose its
+    sentence, and ``ready`` with a ``null`` payload means the placeholder stays on
+    screen still claiming no video was uploaded. ``ready`` means exactly one thing: the
+    payload is real and the annotator will mount from it.
+    """
+    if not video_file:
+        return 'absent'
+    if annotate_data and annotate_data != 'null':
+        return 'ready'
+    if subsampled_file is None:
+        return 'processing'
+    return 'unprobed'
+
+
+def _video_diagnosis(patient, candidates, video_file):
+    """One line naming what the server looked for and what it found, for staff.
+
+    "No video uploaded for this patient." over a file somebody can see in object
+    storage is a claim, and the page had no way to show its working. This is that
+    working, rendered only for an administrator.
+
+    It answers the two questions that actually distinguish the cases, because a
+    ``FileRegistry`` row can exist and still not be found here: it might carry a
+    ``file_type`` this page does not look for, or it might be attached to the wrong
+    patient FK -- a video registered against ``patient`` instead of
+    ``laparoscopy_patient`` is invisible to ``patient.files`` while sitting in the
+    bucket exactly as expected.
+    """
+    if video_file is not None:
+        from laparoscopy import video_probe
+
+        rows = ', '.join(
+            f"#{row.id} {row.file_type}"
+            + (f"/{row.subtype}" if row.subtype else '')
+            + ('' if video_probe.recorded_probe(row) else ' (no probe)')
+            for row in candidates
+        )
+        return f"Video rows for this patient: {rows}. Playing #{video_file.id}."
+
+    types = sorted({row.file_type for row in patient.files.all()})
+    if not types:
+        return "This patient has no registered files at all."
+    return (
+        "No video_raw or video_processed row is registered against this patient. "
+        f"It has {len(types)} other file type(s): {', '.join(types)}. "
+        "A video in object storage that is not registered here, or registered "
+        "against a different patient, will not be found."
+    )
+
+
+def _video_annotate_payload(request, namespace, patient, video_file, playback_file=None):
     """The JSON the Phase 10 annotator mounts from, or ``'null'``.
 
     ``null`` is a real answer and the surface handles it: the bootstrap reports that it
-    declined and mounts nothing. The one case worth spelling out is a video with **no
-    recorded probe** -- ``fps`` is a property of the file that a browser cannot read, and
-    ``laparoscopy/video_probe.py`` caches it at upload or on the first rasterisation.
-    Without it the viewer would have to guess a frame rate, and guessing 30 for a 25 fps
-    recording puts every mask on the wrong frame while looking entirely correct. So the
-    payload is withheld and the page says why, rather than mounting an editor that would
-    quietly mis-file work.
+    declined and mounts nothing. The caller turns it into a ``video_state`` the template
+    has a sentence for, because the placeholder left on screen used to read "No video
+    uploaded for this patient." over a stored, playable recording.
+
+    **``video_file`` here is the subsampled track, not whatever plays best.** A raw
+    laparoscopy recording runs at 25-30 fps and the annotator draws a labelmap per
+    *annotated* frame, so opening it on the raw video offers thirty times more frames
+    than anyone can annotate and produces a record whose frames no export can line up
+    with: `laparoscopy/export_processor.py` reads the subsampled track, and the two would
+    be describing different films. So annotation waits for the derivative the video job
+    produces -- one sharpest frame per source second -- and the page says it is
+    processing until then. Playback is unaffected and still takes the best file there is.
+
+    **``playback_file`` is the film to watch, and it is a different one.** The subsampled
+    track is literally one frame per second: pressing play on it steps through stills, and
+    "the video plays the cut frames" is the accurate description of watching a 1 fps film.
+    So the payload carries both -- for patient 15 the subsampled track probes at 1 fps /
+    187 frames and the compressed one at 30 fps / 5608 frames, over the same 187 seconds
+    of surgery -- and the surface watches the compressed film while continuing to file
+    every mask against a subsampled frame. The two are addressable by the same clock,
+    which is what makes the pair safe: stopping at 42.7 s lands on subsampled frame 43,
+    the frame the export writes an NPZ for. Nothing about the record changes.
+
+    ``None`` (or the annotation track itself) means there is no second film, and the
+    surface watches the one it annotates -- which is what every non-laparoscopy caller and
+    any study without a compressed derivative gets.
+
+    The other withholding is a track with **no recorded probe**: ``fps`` is a property of
+    the file that a browser cannot read, and ``laparoscopy/video_probe.py`` caches it
+    when the file arrives. Without it the viewer would have to guess a frame rate, and
+    guessing wrong puts every mask on the wrong frame while looking entirely correct.
     """
     import json
 
@@ -957,15 +1083,21 @@ def _video_annotate_payload(request, namespace, patient, video_file):
     if probe is None:
         logger.info(
             "Patient %s has a video with no recorded probe; the annotator is not "
-            "mounted. Run annotations_rasterize_video_masks, or re-upload.",
-            patient.patient_id,
+            "mounted. Run `manage.py laparoscopy_probe_videos --patient %s`.",
+            patient.patient_id, patient.patient_id,
         )
         return 'null'
+    playback_id = getattr(playback_file, 'id', None)
     return json.dumps(
         {
             'patientId': patient.patient_id,
             'videoUrl': _reverse(
                 f'{namespace}:api_serve_file', kwargs={'file_id': video_file.id}
+            ),
+            'playbackUrl': (
+                _reverse(f'{namespace}:api_serve_file', kwargs={'file_id': playback_id})
+                if playback_id and playback_id != video_file.id
+                else None
             ),
             # Unnamespaced: laparoscopy/urls.py is included without a namespace, and
             # the `laparoscopy:` prefix belongs to the maxillo app urls it re-includes.

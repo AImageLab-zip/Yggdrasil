@@ -337,10 +337,39 @@ class Command(BaseCommand):
             self._attempt(marker, work)
 
     def _convert_panoramic(self):
+        """The arch, its segmentation source **and** its baked strips.
+
+        Through ``services.panoramic.save_panoramic_arch`` rather than this command's own
+        ``_write``, which is the one place in this file that delegates wholesale. The
+        reason is that a converted arch is not merely *similar* to a saved one -- the
+        viewer decides whether to show a panoramic at all by asking
+        ``current_browser_panoramic`` two questions, and the hand-rolled write answered
+        neither:
+
+        * **The strips were dropped.** ``PanoramicState`` carries ``mip_file`` and
+          ``raysum_file``; ``panoramic_arch_state`` reads them back as the revision's
+          ``png_render`` payloads. Converted without them, 54 studies had an arch, no
+          strips, and ``patient_panoramic_data`` answered 404 over two PNGs sitting in
+          object storage -- "Panoramic image not available", as reported.
+        * **The segmentation source was dropped.** ``expected_fingerprint`` covers the
+          volume *and* the segmentation, so a revision whose fingerprint names only the
+          volume can never satisfy ``arch_describes_source`` and ``matchesSource`` is
+          permanently false -- the same 404 by a second route.
+
+        Both are things the live writer already does correctly, and a second
+        implementation of "write a panoramic arch" is a second thing to get right on the
+        one path where being wrong is silent. ``note=marker`` keeps
+        ``_already_converted``'s bookkeeping, and ``save_panoramic_arch`` picks the origin
+        from ``geometry_source`` itself -- ``auto`` is machine output and stays a
+        prediction, which is the same rule this command applied by hand.
+        """
+        from annotations.services.panoramic import save_panoramic_arch
         from maxillo.models import PanoramicState
 
         rows = (
-            PanoramicState.objects.select_related("patient", "source_file")
+            PanoramicState.objects.select_related(
+                "patient", "source_file", "source_segmentation_file", "mip_file", "raysum_file"
+            )
             .order_by("pk")
             .iterator()
         )
@@ -348,63 +377,102 @@ class Command(BaseCommand):
             if self._budget_exhausted():
                 return
             marker = f"legacy:maxillo.panoramic:{row.pk}"
-            if self._already_converted(row.patient, "panoramic_arch", marker=marker):
+            if self._panoramic_converted(row, marker):
                 self.skipped += 1
                 continue
-            descriptors = legacy_maxillo.panoramic_arch(
-                row.spline,
-                axial_slice=row.axial_slice,
-                volume_shape=row.volume_shape,
-                geometry_source=row.geometry_source,
-                default_mode=row.default_mode,
-                algorithm_version=row.algorithm_version,
-            )
-            # ``auto`` geometry is machine output: it explains the baked strips
-            # but has never locked a case, and must not start now.
-            origin = (
-                AnnotationOrigin.MIGRATION
-                if row.geometry_source == "custom_cp"
-                else AnnotationOrigin.PREDICTION
-            )
 
-            def work(row=row, marker=marker, descriptors=descriptors, origin=origin):
+            def work(row=row, marker=marker):
                 if row.source_file is None:
                     raise ValidationError(
                         "the arch names no source volume, so its coordinates "
                         "cannot be anchored"
                     )
-                resource = services.register_logical_volume(
-                    row.source_file,
-                    file_key=row.source_file_key,
-                    content_hash=row.source_file_hash,
-                    descriptor={"volume_shape": row.volume_shape},
+                strips = [
+                    {
+                        "variant": variant,
+                        "file_obj": file_obj,
+                        "content_hash": file_obj.file_hash or "",
+                        "byte_size": file_obj.file_size,
+                    }
+                    for variant, file_obj in (("mip", row.mip_file), ("raysum", row.raysum_file))
+                    if file_obj is not None
+                ]
+                save_panoramic_arch(
+                    row.patient,
+                    volume_file=row.source_file,
+                    volume_file_key=row.source_file_key,
+                    volume_hash=row.source_file_hash,
+                    segmentation_file=row.source_segmentation_file,
+                    segmentation_file_key=row.source_segmentation_key,
+                    segmentation_hash=row.source_segmentation_hash,
+                    spline=row.spline,
+                    axial_slice=row.axial_slice,
+                    volume_shape=row.volume_shape,
+                    geometry_source=row.geometry_source,
+                    default_mode=row.default_mode,
+                    algorithm_version=row.algorithm_version,
+                    strips=strips,
+                    author=None,
+                    note=marker,
                 )
-                self._write(
-                    patient=row.patient,
-                    kind="panoramic_arch",
-                    marker=marker,
-                    descriptors=descriptors,
-                    resource=resource,
-                    role="volume",
-                    origin=origin,
-                )
+                if self.dry_run:
+                    transaction.set_rollback(True)
 
-            self._attempt(marker, work)
+            self._attempt(marker, transaction.atomic(work))
+
+    def _panoramic_converted(self, row, marker):
+        """Whether this arch is converted **and usable**, not merely present.
+
+        The same rule ``_already_converted`` states for an empty set -- "a set with no
+        revisions is what a crashed run leaves behind" -- one level down. An earlier
+        version of this converter wrote the arch and dropped the strips, so 54 studies
+        carried a `panoramic_arch` set that the viewer could do nothing with: it reads the
+        strips back as the revision's ``png_render`` payloads and answers 404 without
+        them. Treating that as done would make the defect permanent on every database
+        that ran it, because a re-run is the only repair this command offers and the
+        marker alone would skip forever.
+
+        Nothing is deleted to repair it. ``AnnotationTarget`` is ``PROTECT``ed on purpose
+        -- annotations are not disposable -- so the corrected conversion lands as a new
+        revision on the same set, which is what revisions are for, and the previous one
+        stays as the audit trail of what the earlier run produced.
+        """
+        if not self._already_converted(row.patient, "panoramic_arch", marker=marker):
+            return False
+        if row.mip_file is None and row.raysum_file is None:
+            # Nothing to attach, so the arch alone is the whole record.
+            return True
+        patient_fk, _ = fk_fields_for(row.patient._meta.app_label)
+        latest = (
+            AnnotationSet.objects.filter(
+                kind="panoramic_arch", **{patient_fk: row.patient}
+            )
+            .order_by("id")
+            .first()
+        )
+        revision = latest.revisions.order_by("-revision_number").first() if latest else None
+        return bool(revision and revision.payloads.exists())
 
     # --------------------------------------------------------- laparoscopy
 
-    def _region_schema(self, project):
-        """The per-project region vocabulary.
+    def _region_schema(self, project, extra_codes=()):
+        """The per-project region vocabulary, widened to what this row actually says.
 
         Delegated to ``annotations.services.video`` in Phase 10: the live save needs the
         same schema, and two implementations of "which labels does this project have"
         would make a converted study and an edited one resolve their region names
         against different rows -- which the cross-check would then report as a gap on
         every field.
+
+        ``extra_codes`` carries the row's own region name. Region types predate the
+        project registry, so a stored stroke can reference a ``RegionType`` that now
+        belongs to a *different* project than its patient does; without this the
+        conversion aborts on it -- "label code 'Tool' is not defined in schema 3" -- and
+        every later surface goes unconverted behind it.
         """
         from annotations.services.video import region_label_schema
 
-        return region_label_schema(project)
+        return region_label_schema(project, extra_codes=extra_codes)
 
     def _convert_video_regions(self):
         from laparoscopy.models import RegionAnnotation
@@ -447,7 +515,10 @@ class Command(BaseCommand):
                     descriptors=descriptors,
                     resource=resource,
                     role="video",
-                    label_schema=self._region_schema(row.patient.project),
+                    label_schema=self._region_schema(
+                        row.patient.project,
+                        extra_codes=[row.region_type.name] if row.region_type else [],
+                    ),
                 )
 
             self._attempt(marker, work)

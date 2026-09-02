@@ -117,6 +117,30 @@ def landing_cards(projects):
     return cards
 
 
+def project_admin_add_targets():
+    """One "add project" admin URL per domain, for the control panel.
+
+    A project's domain is immutable and is forced by the admin class that serves
+    it, so "New project" is not one button: it is one per domain. The single
+    hardcoded ``/admin/maxillo/maxilloproject/add/`` link filed every project
+    created from the control panel under maxillo, whatever the user meant.
+
+    Reversed rather than formatted so a renamed proxy or a moved admin breaks
+    here instead of 404-ing for the user. A domain whose proxy is not registered
+    is skipped.
+    """
+    from django.urls import NoReverseMatch, reverse
+
+    targets = []
+    for slug, label in DOMAIN_CHOICES:
+        try:
+            url = reverse(f"admin:{slug}_{slug}project_add")
+        except NoReverseMatch:
+            continue
+        targets.append({"domain": slug, "label": label, "url": url})
+    return targets
+
+
 def landing_domain_cards():
     """The landing page's three domain cards (one per domain, not per project).
 

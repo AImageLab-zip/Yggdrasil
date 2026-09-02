@@ -73,6 +73,51 @@ export function videoImageId({ url, frameNumber = 1, origin } = {}) {
 }
 
 /**
+ * The prefix `VideoViewport` puts in front of a frame id when it names a *view*.
+ *
+ * `getViewReferenceId()` returns `` `videoId:${this.getCurrentImageId()}` ``
+ * (`RenderingEngine/VideoViewport.js:557-560`), and `getViewReference()` hands that
+ * string to `AnnotationDisplayTool.createAnnotation` as `metadata.referencedImageId`. So
+ * an annotation drawn on a video records `videoId:yggvideo:.../frames/7`, which is *not*
+ * an imageId any loader answers for and is not what {@link videoImageId} builds.
+ *
+ * Nothing about that is documented and it is easy to miss, because the two strings are
+ * identical apart from the prefix and both print like an imageId.
+ */
+export const VIEW_REFERENCE_PREFIX = 'videoId:';
+
+/**
+ * Does an annotation's `referencedImageId` name this frame?
+ *
+ * **The prefix above is why this function exists rather than a `===`.** The video
+ * annotator rasterises a finished freehand outline into the frame's labelmap and then
+ * drops the outline; the test for "was this drawn on the frame I am showing" was a direct
+ * comparison against {@link videoImageId}, which the `videoId:` prefix made false for
+ * every outline ever drawn. The consequence was silent and looked like two other bugs at
+ * once: the outline was never burned into a mask, so nothing was stored and nothing
+ * saved, *and* it was never removed from the annotation store, so it stayed on screen
+ * looking like an annotation that existed. "The stroke draws but never saves" is exactly
+ * that.
+ *
+ * Compared after normalising rather than by parsing out the frame number: the two ids
+ * differ only by a prefix, and a comparison that rebuilt the id from parts would be a
+ * third spelling of the same string.
+ *
+ * @param {string|null|undefined} referencedImageId as an annotation records it.
+ * @param {string} frameImageId as {@link videoImageId} builds it.
+ * @returns {boolean}
+ */
+export function isSameVideoFrame(referencedImageId, frameImageId) {
+    if (typeof referencedImageId !== 'string' || !frameImageId) {
+        return false;
+    }
+    const named = referencedImageId.startsWith(VIEW_REFERENCE_PREFIX)
+        ? referencedImageId.slice(VIEW_REFERENCE_PREFIX.length)
+        : referencedImageId;
+    return named === frameImageId;
+}
+
+/**
  * `{url, frameNumber}` out of a `yggvideo:` imageId.
  *
  * @param {string} imageId

@@ -1,12 +1,10 @@
-"""The CBCT upload surface, now that DICOM is stored rather than converted away.
+"""The CBCT upload surface, now that uploading DICOM is switched off.
 
-Phase 8's change is invisible on this page by design -- same two controls, same copy --
-which is exactly why it needs a test. The interfaces asserted here are the ones
-`static/js/cbct_upload.js` resolves *by name* to decide whether a selection goes
-through the in-browser converter, and Phase 5's lesson applies unchanged: **a template
-id or an input name joining two files is an untested interface**. A rename leaves the
-JS treating a DICOM folder as a NIfTI to convert, which is the exact data loss this
-phase exists to end.
+Two interfaces are asserted here, and they are the ones that go wrong quietly.
+`static/js/cbct_upload.js` resolves the file input **by name** to decide whether a
+selection goes through the in-browser converter, so a rename leaves the converter
+inert; and the DICOM controls have to be gone from the page at the same time as the
+server refuses DICOM, or the page offers an upload that can only fail.
 """
 
 from django.contrib.auth.models import User
@@ -36,34 +34,28 @@ class CbctUploadSurfaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return response.content.decode()
 
-    def test_both_cbct_controls_are_rendered_with_the_names_the_js_resolves(self):
+    def test_the_one_cbct_control_keeps_the_name_the_js_resolves(self):
         html = self._render()
+        self.assertIn('name="cbct"', html)
 
-        # cbct_upload.js reads all four: the two radios to switch panes, and the two
-        # file inputs by name -- `cbct_folder_files` is how it knows never to convert.
+    def test_the_page_offers_no_dicom_upload(self):
+        html = self._render()
         for marker in (
-            'id="cbct_file_upload"',
-            'id="cbct_folder_upload"',
+            "DICOM",
+            "webkitdirectory",
             'name="cbct_folder_files"',
             'name="cbct_upload_type"',
+            'id="cbct_folder_upload"',
         ):
             with self.subTest(marker=marker):
-                self.assertIn(marker, html)
-
-    def test_the_folder_control_still_offers_a_dicom_folder(self):
-        # The user-facing promise is unchanged; what changed is that keeping it no
-        # longer costs the series.
-        html = self._render()
-        self.assertIn("DICOM folder", html)
-        self.assertIn("webkitdirectory", html)
+                self.assertNotIn(marker, html)
 
     def test_the_converter_is_still_loaded_for_the_formats_it_still_handles(self):
-        """MetaImage and raw NIfTI still convert in the browser; DICOM does not.
+        """MetaImage and raw NIfTI still convert in the browser.
 
-        Deleting `cbct_convert.js` outright would have been a silent regression on
-        `.mha` and on the `.nii.gz` orientation repair that
-        `_validate_and_extract_nifti_orientation` demands server-side. Only its DICOM
-        half is gone.
+        Deleting `cbct_convert.js` outright would be a silent regression on `.mha` and
+        on the `.nii.gz` orientation repair that
+        `_validate_and_extract_nifti_orientation` demands server-side.
         """
         html = self._render()
         self.assertIn("js/cbct_convert.js", html)

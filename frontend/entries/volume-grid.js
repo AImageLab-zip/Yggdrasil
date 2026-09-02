@@ -18,6 +18,7 @@
 
 import {
     RenderingEngine,
+    eventTarget,
     Enums as coreEnums,
     volumeLoader,
     imageLoader,
@@ -86,9 +87,12 @@ import {
 import { init as initDicomImageLoader } from '@cornerstonejs/dicom-image-loader';
 import { metaDataManager as dicomMetaDataManager } from '@cornerstonejs/dicom-image-loader/wadors';
 
-// Labelmap <-> contour <-> surface conversion (decision #11). Used in memory only:
-// per docs/cornerstone-future-work.md #7, labelmap is the one canonical form at rest.
-import { init as polySegInit } from '@cornerstonejs/polymorphic-segmentation';
+// Labelmap <-> contour <-> surface conversion (decision #11). Imported, exported and
+// **not registered**: the import is what pulls the ICRPolySeg wasm into the emitted
+// tree so `npm run verify` has something to check, which is why it was added in Phase
+// 1. Registering it as a tools add-on is a separate act and nothing here needs one --
+// see `mountVolumeGrid` below.
+import * as polySeg from '@cornerstonejs/polymorphic-segmentation';
 
 // Segmentation accelerator (roadmap Phase 5). Pulls the itk-wasm pipelines that F5
 // would otherwise fetch from jsdelivr.
@@ -156,7 +160,7 @@ export {
     createNiftiImageIdsAndCacheMetadata,
     dicomMetaDataManager,
     initDicomImageLoader,
-    polySegInit,
+    polySeg,
     interpolateLabelmap,
     initImaging,
     GRID_VIEWPORT_COUNT,
@@ -176,6 +180,7 @@ import {
     IMAGE_LOADER_SCHEME,
     ORIENTATIONS,
     VOLUME_ID_SCHEME,
+    crosshairLinesOnly,
 } from '../imaging/grid/layout.js';
 import { formatWindow, modalityWindowFromVoiRange, openingVoi, unitFor } from '../imaging/grid/voi.js';
 import {
@@ -226,7 +231,15 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
         );
     }
 
+    // **No polySeg add-on.** It was registered here for one release, to convert the
+    // labelmap into a surface for the 3D window -- on the belief that a `volume3d`
+    // viewport cannot render a labelmap. It can, so nothing in this grid needs a
+    // representation conversion, and registering an add-on nothing asks for would spawn
+    // a worker for no reason. `initImaging` still takes `addons`, because that is the
+    // only hook tools offers and a later surface would need it. See
+    // imaging/grid/segmentation.js.
     await initImaging();
+
     // The NIfTI loader is an **image** loader: it serves the per-frame
     // `nifti:<url>?frame=N` ids. Registering it as a *volume* loader routes volume
     // loading into it, where it looks up `imagePlaneModule` for an id that has no
@@ -258,11 +271,22 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
         // codebase already refuses to *store* those numbers from the client for exactly
         // that reason. Printing them in the overlay while refusing to store them would be
         // one claim made in two voices.
-        toolConfiguration: areaOnlyConfiguration(GRID_TOOLS, coreUtilities.roundNumber),
+        // Per-tool configuration, merged from the two modules that own a piece of it:
+        // the ROI tools' text lines, and the crosshair's handles.
+        toolConfiguration: new Map([
+            ...areaOnlyConfiguration(GRID_TOOLS, coreUtilities.roundNumber),
+            [GRID_TOOLS.Crosshairs.toolName, crosshairLinesOnly()],
+        ]),
         cornerstone: {
             RenderingEngine,
+            // So the grid *reuses* an engine the panoramic surface may already have opened
+            // under this id rather than displacing it -- see `createVolumeGrid`.
+            getRenderingEngine,
             coreEnums,
             toolsEnums,
+            // The segmentation overlay listens for SEGMENTATION_RENDERED, which is
+            // dispatched globally rather than on an element.
+            eventTarget,
             addTool,
             ToolGroupManager,
             tools: GRID_TOOLS,
@@ -279,6 +303,11 @@ export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) 
             orientationMarkerUrl: new URL('../orientation/Human.vtp', import.meta.url).href,
             volumeLoader,
             createNiftiImageIdsAndCacheMetadata,
+            // The segmentation overlay (brain classes, CBCT teeth). Exported from this
+            // module since Phase 3 to pull its workers into the bundle, and injected
+            // for the first time here -- `imaging/grid/segmentation.js` reads
+            // `addSegmentations`, `addSegmentationRepresentations` and `config`.
+            segmentation,
             // Registering a series' metadata is a step the DICOM path has to take
             // explicitly; see imaging/grid/dicomVolume.js.
             dicomMetaDataManager,

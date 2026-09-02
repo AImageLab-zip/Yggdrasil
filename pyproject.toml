@@ -29,6 +29,11 @@ ignore = ["S110", "S112"]
 "common/tasks.py" = ["S603", "S607"]
 "common/export_processing.py" = ["S603", "S607"]
 "laparoscopy/export_processor.py" = ["S603"]
+# The same ffprobe call, extracted from export_processor.py in Phase 10 and not
+# given the ignore its origin carried -- so `ruff check .` has been failing on
+# release/3.0 since that commit. argv is a fixed list plus a local path this
+# process just wrote or downloaded; no shell=True.
+"laparoscopy/video_probe.py" = ["S603"]
 # Magic Tool worker proxy: target URL comes from settings (WORKER_*_URL),
 # not from the request.
 "laparoscopy/views.py" = ["S310"]

@@ -29,6 +29,7 @@ import {
     ORIENTATIONS,
     assertEnumsMatch,
     isSliceOrientation,
+    supportsCrosshairs,
     toolGroupIdFor,
     viewportId,
     viewportSpecFor,
@@ -41,10 +42,11 @@ import {
     createGridState,
     failLoad,
     setOrientation,
+    voiSyncGroup,
     windowAt,
 } from './windowState.js';
 import { modalityWindowFromVoiRange, openingVoi, unitFor } from './voi.js';
-import { DEFAULT_RENDER_MODE, applyRenderMode } from './renderModes.js';
+import { DEFAULT_RENDER_MODE, applyLabelmapRenderMode, applyRenderMode } from './renderModes.js';
 import { createOverlay, updateOverlay } from './viewportOverlay.js';
 import { formatWindow } from './voi.js';
 import { residualModalityLut } from '../metadata/modalityLutModule.js';
@@ -137,6 +139,7 @@ export function createVolumeGrid({
         orientationUtilities,
         createVOISynchronizer,
         orientationMarkerUrl,
+        getRenderingEngine,
     } = cornerstone;
 
     // The inlined enum strings in layout.js are a copy; check it before anything is
@@ -145,7 +148,24 @@ export function createVolumeGrid({
     assertEnumsMatch(coreEnums);
 
     const state = createGridState(layout);
-    const renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
+    // **Reused, never re-created.** `new RenderingEngine(id)` ends with
+    // `renderingEngineCache.set(this)` (`BaseRenderingEngine.js:33`), which *overwrites*
+    // whatever was filed under that id without a word -- and the constructor eagerly opens
+    // `webGlContextCount` WebGL contexts, so the displaced engine keeps seven of them,
+    // keeps its animation frame, and keeps its elements in the tools' enabled-element
+    // list. Everything that resolves a viewport does so through that cache:
+    // `getEnabledElement(element)` reads `element.dataset.renderingEngineUid` and asks the
+    // cache (`getEnabledElement.js:10-20`), so every viewport on the displaced engine
+    // becomes invisible to the library while still being on screen. Its annotations are
+    // never rendered and never hit-tested, and its segmentation representations cannot be
+    // reached to be shown or hidden.
+    //
+    // That is not hypothetical: `entries/panoramic-cpr.js` deliberately attaches its two
+    // viewports to *this* engine, by this id, to stay inside the context budget (F6). If
+    // it gets there first -- which it does whenever the unattended pass runs while the
+    // grid is still loading -- this line used to throw its engine away underneath it.
+    const renderingEngine =
+        getRenderingEngine?.(RENDERING_ENGINE_ID) ?? new RenderingEngine(RENDERING_ENGINE_ID);
 
     // Keyed by volume id, so two windows on one file share one entry. The header is
     // kept alongside the volume because everything that needs real values needs both,
@@ -177,6 +197,11 @@ export function createVolumeGrid({
         overlays.set(entry.window, createOverlay(elements[entry.window], { orientation: entry.orientation }));
     }
 
+    // Four parallel axial windows cannot carry a crosshair -- see `supportsCrosshairs`.
+    // Decided once, here, and read by the tool groups, by the annotation-mode fallback and
+    // by the page, so those three cannot disagree about which tool owns the left button.
+    const navigationTool = supportsCrosshairs(layout) ? NAVIGATION_TOOL : 'WindowLevel';
+
     const toolGroups = createToolGroups({
         toolConfiguration,
         addTool,
@@ -184,11 +209,20 @@ export function createVolumeGrid({
         tools,
         toolsEnums,
         orientationMarkerUrl,
+        navigationTool,
     });
 
     // Brightness applies to the whole study, not to one plane. Cornerstone's own
     // synchronizer, so a Shift+drag in any window moves them all -- including the
     // volume render, whose transfer function `setProperties({voiRange})` drives.
+    //
+    // **Membership follows the volumes, not the layout.** Every window joined this at
+    // construction, and `voiSyncCallback` copies the source's *absolute* `voiRange` onto
+    // its targets -- correct on the CBCT grid, where the four windows are four planes of
+    // one study, and wrong on the brain grid, where they are four different sequences on
+    // four different intensity scales. It also fires on the opening `setProperties`, so
+    // three of the four brain windows wore the first-loaded volume's window before anybody
+    // touched anything. See {@link voiSyncGroup}.
     const voiSynchronizer = createVOISynchronizer?.('ygg-grid-voi', { syncColormap: false });
     for (const entry of layout) {
         if (entry.lazy) {
@@ -198,11 +232,47 @@ export function createVolumeGrid({
             viewportId(entry.window),
             RENDERING_ENGINE_ID
         );
-        voiSynchronizer?.add({
-            renderingEngineId: RENDERING_ENGINE_ID,
-            viewportId: viewportId(entry.window),
-        });
     }
+
+    /**
+     * Put exactly the windows that share a volume into the VOI synchroniser.
+     *
+     * Called after anything that changes what a window holds. Idempotent: `add` and
+     * `remove` both no-op on a viewport that is already in the state they ask for.
+     */
+    const refreshVoiSync = () => {
+        if (!voiSynchronizer) {
+            return [];
+        }
+        const group = new Set(voiSyncGroup(state));
+        for (const entry of layout) {
+            if (entry.lazy) {
+                continue;
+            }
+            const member = {
+                renderingEngineId: RENDERING_ENGINE_ID,
+                viewportId: viewportId(entry.window),
+            };
+            if (group.has(entry.window)) {
+                voiSynchronizer.add(member);
+            } else {
+                voiSynchronizer.remove(member);
+            }
+        }
+        return [...group];
+    };
+
+    // **After the viewports, not before.** `setToolActive` on the crosshair runs
+    // `onSetToolActive -> _reinitializeListenersAndCenter -> _computeToolCenter`
+    // (`CrosshairsTool.js:1428-1430`), which needs at least two viewports in the group to
+    // do anything but warn. Activating it inside `createToolGroups` -- before a single
+    // `addViewport` -- is what printed "For crosshairs to operate, at least two viewports
+    // must be given" twice on every CBCT page load.
+    setPrimaryTool({
+        toolGroup: toolGroups[toolGroupIdFor(ORIENTATIONS.AXIAL)],
+        toolsEnums,
+        toolName: navigationTool,
+    });
 
     /**
      * Refresh one window's overlay from its viewport.
@@ -226,8 +296,21 @@ export function createVolumeGrid({
         updateOverlay(nodes, {
             camera: viewport.getCamera?.(),
             sliceIndex: viewport.getSliceIndex?.(),
-            sliceCount: viewport.getImageIds?.()?.length,
+            // **Not `getImageIds().length`.** That throws `No actor found for the given
+            // volumeId: undefined` on a viewport holding nothing
+            // (`BaseVolumeViewport.js:317-320`), and `?.` guards a missing method, not a
+            // throwing one. Every camera event on an empty window landed there: during
+            // `setVolumes` before the actors attach, and permanently on a drag-and-drop
+            // grid, where it took the whole mount down from `refreshOverlays` below.
+            // `getNumberOfSlices` reads the same slice data through the same
+            // `getImageSliceDataForVolumeViewport(this) || {}` that `getSliceIndex` on the
+            // line above already relies on, and answers `undefined` instead of throwing.
+            sliceCount: viewport.getNumberOfSlices?.(),
             windowText,
+            // Which series this window holds. Constant on the CBCT grid; on the brain
+            // grid it is whatever was last dropped here, and four unlabelled MRIs are
+            // indistinguishable without it.
+            modality: window.modality,
             utilities: orientationUtilities,
         });
     };
@@ -250,13 +333,24 @@ export function createVolumeGrid({
         toolGroups,
         elements,
         overlays,
+        // Which tool owns the left mouse button when nothing else does. `'Crosshairs'`
+        // on a grid with intersecting planes, `'WindowLevel'` on one without. The
+        // toolbar reads it so the button it marks pressed is the tool that is actually
+        // bound; `NAVIGATION_TOOL` in `measurements.js` is a different question -- which
+        // annotation is not a measurement -- and stays the crosshair either way.
+        navigationTool,
         refreshOverlay,
         refreshOverlays: () => overlays.forEach((unused, index) => refreshOverlay(index)),
         volumeCache,
+        // The injected bag, handed back out. `imaging/grid/segmentation.js` needs the
+        // same Cornerstone this grid was built with -- a second import would be a
+        // second module instance in a bundle that code-splits, and the segmentation
+        // state manager is module-level singleton state.
+        cornerstone,
 
         /** Load one volume into one or more windows. Returns the F2 warning, if any. */
-        loadVolumeIntoWindows: (windowIndices, descriptor) =>
-            loadVolumeIntoWindows({
+        loadVolumeIntoWindows: async (windowIndices, descriptor) => {
+            const warning = await loadVolumeIntoWindows({
                 cornerstone,
                 renderingEngine,
                 state,
@@ -264,7 +358,15 @@ export function createVolumeGrid({
                 descriptor,
                 volumeCache,
                 elements,
-            }),
+            });
+            // What the windows hold has just changed, and that is the only thing the VOI
+            // synchroniser's membership depends on.
+            refreshVoiSync();
+            return warning;
+        },
+
+        /** Which windows currently share one window/level, for the caller to assert on. */
+        refreshVoiSync,
 
         /** Point a window at a different plane, rebuilding its viewport. */
         setWindowOrientation: (windowIndex, orientation) =>
@@ -279,8 +381,13 @@ export function createVolumeGrid({
             enable3DWindow({ cornerstone, renderingEngine, state, elements, toolGroups, windowIndex, mode }),
 
         /** Switch the volume render between mip / amip / shaded. */
-        setRenderMode: (windowIndex, mode) =>
-            setRenderMode({ renderingEngine, windowIndex, mode }),
+        // The mode defaults because nothing chooses one: the toolbar's render-mode
+        // select went with decision #5, so `DEFAULT_RENDER_MODE` is the only mode this
+        // grid has ever shown. A caller that only wants "put this window back the way
+        // it renders" -- the segmentation overlay, after it adds a second actor -- says
+        // so by omitting it rather than by repeating the constant.
+        setRenderMode: (windowIndex, mode = DEFAULT_RENDER_MODE) =>
+            setRenderMode({ renderingEngine, state, windowIndex, mode }),
 
         /**
          * Re-fit every viewport to its element.
@@ -399,7 +506,7 @@ export function createVolumeGrid({
             const on = Boolean(enabled);
             const toolGroup = toolGroups[toolGroupIdFor(ORIENTATIONS.AXIAL)];
             if (!on) {
-                setPrimaryTool({ toolGroup, toolsEnums, toolName: NAVIGATION_TOOL });
+                setPrimaryTool({ toolGroup, toolsEnums, toolName: navigationTool });
             }
             setMeasurementToolModes({ toolGroup, enabled: on });
             return grid.setAnnotationsVisible(on);
@@ -483,8 +590,14 @@ export function createVolumeGrid({
             return on;
         },
 
-        /** Drop volumes no window is showing any more. */
-        releaseUnusedVolumes: () => releaseUnusedVolumes({ cornerstone, state, volumeCache }),
+        /**
+         * Drop volumes no window is showing any more.
+         *
+         * @param {string[]} [keepVolumeIds] ids to spare although no window holds them
+         *   -- the segmentation overlay's, which are in use without being on screen.
+         */
+        releaseUnusedVolumes: (keepVolumeIds = []) =>
+            releaseUnusedVolumes({ cornerstone, state, volumeCache, keepVolumeIds }),
 
         destroy() {
             for (const group of new Set(Object.values(toolGroups))) {
@@ -510,6 +623,7 @@ function createToolGroups({
     tools,
     toolsEnums,
     orientationMarkerUrl,
+    navigationTool,
     toolConfiguration = new Map(),
 }) {
     for (const tool of Object.values(tools)) {
@@ -535,6 +649,13 @@ function createToolGroups({
             threeD.addTool(tool.toolName, configuration);
             continue;
         }
+        // Not added at all on a grid whose planes are all parallel. A crosshair there
+        // can never compute a tool centre, so every one of its clicks would be a
+        // no-op; leaving it out is what lets `setPrimaryTool` hand the left button to
+        // something that works. See `supportsCrosshairs`.
+        if (name === 'Crosshairs' && navigationTool !== tools.Crosshairs.toolName) {
+            continue;
+        }
         twoD.addTool(tool.toolName, configuration);
         if (SHARED_NAVIGATION_TOOLS.includes(name)) {
             threeD.addTool(tool.toolName, configuration);
@@ -553,21 +674,19 @@ function createToolGroups({
     });
     twoD.setToolActive(tools.StackScroll.toolName, { bindings: [{ mouseButton: MouseBindings.Wheel }] });
 
-    // Crosshairs is the opening primary tool, and it is the reason the three slice
-    // views feel like one study rather than three pictures: it draws the coloured
-    // reference lines showing where each plane cuts the others, and dragging them
-    // navigates all three at once. `viewer_grid.js` synchronised NiiVue's crosshairPos
-    // by hand to get this; Cornerstone ships it.
-    twoD.setToolActive(tools.Crosshairs.toolName, {
-        bindings: [{ mouseButton: MouseBindings.Primary }],
-    });
-
-    // Window/level keeps the primary button too, behind Shift. It was the default
-    // before crosshairs took the button, and it is the second thing anybody does with
-    // a new volume -- putting it behind a toolbar mode switch would be a regression.
+    // Window/level on Shift+Primary. It was the default before crosshairs took the
+    // button, and it is the second thing anybody does with a new volume -- putting it
+    // behind a toolbar mode switch would be a regression. `setToolPassive` only strips
+    // bindings matching `getDefaultPrimaryBindings()` -- plain Primary, no modifier --
+    // so this survives every later swap of the primary tool, and on a grid where
+    // window/level *is* the primary the two bindings merge rather than replace.
     twoD.setToolActive(tools.WindowLevel.toolName, {
         bindings: [{ mouseButton: MouseBindings.Primary, modifierKey: KeyboardBindings.Shift }],
     });
+
+    // The opening primary tool is **not** set here. It is set by `createVolumeGrid`
+    // after the viewports have joined the group, because the crosshair cannot compute
+    // its centre before then -- see the call site.
 
     threeD.setToolActive(tools.TrackballRotate.toolName, {
         bindings: [{ mouseButton: MouseBindings.Primary }],
@@ -653,7 +772,12 @@ function setPrimaryTool({ toolGroup, toolsEnums, toolName }) {
         throw new Error(`'${toolName}' is not a primary tool; it cannot take the left button.`);
     }
     for (const name of PRIMARY_TOOLS) {
-        if (name !== toolName) {
+        // Guarded the same way `setMeasurementToolModes` is, and for a second reason
+        // now: a grid with no crosshair never added one, and `setToolPassive` on a tool
+        // the group does not hold only warns into the console.
+        // `hasTool`, not `getToolInstance`: the latter warns into the console for a
+        // tool the group does not hold, which is the normal case here.
+        if (name !== toolName && toolGroup?.hasTool?.(name)) {
             toolGroup.setToolPassive(name);
         }
     }
@@ -759,7 +883,7 @@ async function loadVolumeIntoWindows({
             // and the transfer function. Setting `voiRange` on it does nothing, and
             // leaving it unconfigured renders an opaque block.
             try {
-                setRenderMode({ renderingEngine, windowIndex: index, mode: DEFAULT_RENDER_MODE });
+                setRenderMode({ renderingEngine, state, windowIndex: index, mode: DEFAULT_RENDER_MODE });
                 // Frontal, not superior. Set after the volume so `resetCamera` has real
                 // bounds to fit, and before the render so the first frame is already
                 // the right way round.
@@ -866,8 +990,12 @@ function setWindowOrientation({ renderingEngine, state, windowIndex, orientation
  * Asks `activeVolumeIds`, which deduplicates: clearing one of three windows on a
  * shared CBCT must not blank the other two.
  */
-function releaseUnusedVolumes({ cornerstone, state, volumeCache }) {
-    const keep = new Set(activeVolumeIds(state));
+function releaseUnusedVolumes({ cornerstone, state, volumeCache, keepVolumeIds = [] }) {
+    // `keepVolumeIds` exists because "in a window" is not the same as "in use": the
+    // segmentation overlay owns a source volume and a derived labelmap that no window
+    // holds, and evicting them mid-session leaves Cornerstone's segmentation state
+    // pointing at volumes the cache no longer has.
+    const keep = new Set([...activeVolumeIds(state), ...keepVolumeIds]);
     const released = [];
     for (const volume of cornerstone.cache.getVolumes()) {
         if (!keep.has(volume.volumeId)) {
@@ -924,30 +1052,64 @@ async function enable3DWindow({
     window.fileId = source.fileId;
 
     await setVolumesForViewports(renderingEngine, [{ volumeId: source.volumeId }], [id]);
-    setRenderMode({ renderingEngine, windowIndex, mode });
+    setRenderMode({ renderingEngine, state, windowIndex, mode });
     renderingEngine.renderViewports([id]);
     return window;
 }
 
 /**
- * Apply a render mode to the 3D viewport.
+ * Apply a render mode to **every** volume actor in the 3D viewport.
  *
- * Reaches for the actor rather than the viewport's own helpers because the blend mode
+ * Reaches for the actors rather than the viewport's own helpers because the blend mode
  * and the shader replacements both live on the mapper, and `renderModes.js` owns the
  * order they have to be set in.
+ *
+ * **Every actor, not the first one.** The 3D window holds one actor while it shows only
+ * the study, and two the moment the segmentation overlay is switched on: Cornerstone adds
+ * the labelmap as a second `vtkVolume` through `addVolumesToViewports`
+ * (`legacyVolumePlan.js`). It asks for `MAXIMUM_INTENSITY_BLEND` on that volume input and
+ * does not get it, because `VolumeViewport3D.setBlendMode()` is a no-op returning `null`
+ * (`VolumeViewport3D.js:77-79`) -- so the labelmap kept vtk's default composite while the
+ * study beneath it was an attenuated MIP. Two volume actors projected differently in one
+ * renderer is not an overlay; it is the haze that got reported as "a weird broken
+ * segmentation". Both actors now carry the same projection, which is what makes the
+ * labelmap read as coloured voxels standing in the study rather than a fog over it.
  */
-function setRenderMode({ renderingEngine, windowIndex, mode }) {
+function setRenderMode({ renderingEngine, state, windowIndex, mode }) {
     const viewport = renderingEngine.getViewport(viewportId(windowIndex));
     if (!viewport) {
         throw new Error(`Window ${windowIndex} has no viewport to render into.`);
     }
-    const actor = viewport.getActors?.()?.[0]?.actor;
-    if (!actor?.getMapper) {
+    const entries = (viewport.getActors?.() ?? []).filter(
+        (entry) => typeof entry?.actor?.getMapper === 'function'
+    );
+    if (entries.length === 0) {
         throw new Error('The 3D viewport has no volume actor yet.');
     }
-    const spec = applyRenderMode(actor, mode);
+    // **The study's mode is the study's, not the viewport's.** This applied `mode` to
+    // every actor, which was itself a fix: before it, the labelmap kept vtk's default
+    // composite while the study was an attenuated MIP and the mismatch read as haze. The
+    // correction over-reached. A labelmap is not an intensity field, and projecting it
+    // with `MAXIMUM_INTENSITY_BLEND` takes the largest *label value* along each ray -- so
+    // the highest-numbered tooth wins wherever two overlap on screen, and the result is
+    // the flat translucent map that was reported as "doesn't render coloured voxels".
+    //
+    // The study actor is the one holding this window's own volume; anything else in the
+    // viewport arrived from the segmentation overlay. See `LABELMAP_RENDER_SPEC`.
+    const studyVolumeId = state ? windowAt(state, windowIndex).volumeId : null;
+    let spec;
+    for (const entry of entries) {
+        const isStudy = !studyVolumeId || entry.referencedId === studyVolumeId;
+        if (isStudy) {
+            spec = applyRenderMode(entry.actor, mode);
+        } else {
+            applyLabelmapRenderMode(entry.actor);
+        }
+    }
     viewport.render();
-    return spec;
+    // Never null: with no `state` every actor is treated as the study, and with one the
+    // window's own volume is what put it here.
+    return spec ?? applyRenderMode(entries[0].actor, mode);
 }
 
 /** Reset the camera on one window, or every loaded one. */

@@ -20,8 +20,9 @@
  * back rather than logging it; this is what puts it on screen.
  */
 
-import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS } from './layout.js';
+import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, ORIENTATIONS, viewportId } from './layout.js';
 import { windowAt } from './windowState.js';
+import { isMeasurable, observeSize } from '../runtime/elementSize.js';
 import { volumeUrl } from '../ids/imageIds.js';
 import { dicomSeriesUrl } from './dicomVolume.js';
 import {
@@ -32,9 +33,32 @@ import {
     markActiveTool,
 } from './controls.js';
 import { buildSaveRequest, interpretSaveResponse, measurementAnnotations } from './measurements.js';
+import { bindDragDrop } from './dragDrop.js';
+import {
+    SEGMENTATION_ID,
+    gridMismatch,
+    loadSegmentation,
+    ownedVolumeIds,
+    paletteFor,
+    segmentationUrl,
+    setOverlayVisible,
+    showSegmentation,
+} from './segmentation.js';
 
 /** The element `viewer_grid_data` is rendered into by both content templates. */
 export const DATA_ELEMENT_ID = 'viewerGridData';
+
+/**
+ * The SEG control's id, as the shared grid toolbar renders it.
+ *
+ * Named here for the reason `laparoscopy/tests_video_surface.py` gives: a template id
+ * joining two files is an untested interface, and a rename leaves the JS holding
+ * `null` and a button that does nothing. `frontend/tests/gridSegmentation.test.js`
+ * asserts it against the template.
+ */
+export const SEGMENTATION_IDS = Object.freeze({
+    toggle: 'viewerSegToggle',
+});
 
 /** One `.viewer-window` per grid position. */
 export const WINDOW_SELECTOR = '.viewer-window[data-window-index]';
@@ -98,7 +122,22 @@ export function primaryVolumeFrom(data) {
           ? data.defaultModality
           : Object.keys(files)[0];
 
-    const entry = slug ? files[slug] : null;
+    return volumeFor(data, slug);
+}
+
+/**
+ * What the payload says about one modality, or null if it says nothing.
+ *
+ * Split out of {@link primaryVolumeFrom} because a dropped chip asks the same question
+ * about a slug the user picked rather than one the page chose. Two readers of the same
+ * payload shape is how the two would drift.
+ *
+ * @param {object} data the `viewer_grid_data` payload.
+ * @param {string} slug a modality slug.
+ * @returns {{fileId: number, bundleKey: string, filename: string, modality: string, dicom: object|null}|null}
+ */
+export function volumeFor(data, slug) {
+    const entry = slug ? (data?.modalityFiles || {})[slug] : null;
     if (!entry?.id) {
         return null;
     }
@@ -112,6 +151,51 @@ export function primaryVolumeFrom(data) {
         // every NIfTI row, so neither side has to guess from a filename.
         dicom: entry.dicom ?? null,
     };
+}
+
+/**
+ * The descriptor `loadVolumeIntoWindows` takes, for one modality.
+ *
+ * One URL either way, because it is also the volume cache key (`volumeIdFor`): one per
+ * volume, stable across reloads, unique. For a series that is its metadata endpoint;
+ * for a file, its serve path.
+ *
+ * @param {object} volume from {@link volumeFor}.
+ * @param {object} options `namespace` and `origin`.
+ * @returns {{url: string, modality: string, fileId: number, dicom: object|null}}
+ */
+export function descriptorFor(volume, { namespace, origin } = {}) {
+    const url = volume.dicom
+        ? dicomSeriesUrl({
+              studyUid: volume.dicom.studyUid,
+              seriesUid: volume.dicom.seriesUid,
+              origin,
+          })
+        : volumeUrl({
+              fileId: volume.fileId,
+              bundleKey: volume.bundleKey,
+              filename: volume.filename,
+              namespace,
+              origin,
+          });
+    return { url, modality: volume.modality, fileId: volume.fileId, dicom: volume.dicom };
+}
+
+/**
+ * Whether this page lets the user put a modality in a window by dragging a chip.
+ *
+ * The flag has been in the payload since before 3.0 -- `maxillo/views/patient_detail.py`
+ * sets `enableDragDrop: False` because a CBCT grid is three fixed planes and a render,
+ * and brain leaves it unset, meaning yes. It has been read by nobody since `c03afa6`
+ * deleted `viewer_grid.js`. Reading it again is what tells the two surfaces apart, and
+ * it also decides what loads on arrival: a grid whose windows are the user's to fill
+ * should not pre-fill them.
+ *
+ * @param {object} data
+ * @returns {boolean}
+ */
+export function dragDropEnabled(data) {
+    return data?.enableDragDrop !== false;
 }
 
 /**
@@ -164,34 +248,25 @@ export function report(message, detail) {
 }
 
 /**
- * Whether an element can currently be measured.
- *
- * Used to decide when to *resize*, not whether to mount -- see
- * {@link bootstrapVolumeGrid}.
- *
- * @param {HTMLElement} element
- * @returns {boolean}
+ * Re-exported so this module's readers -- and `frontend/tests/bootstrap.test.js` -- keep
+ * finding them where the grid has always named them. The definitions moved to
+ * `runtime/elementSize.js` when the video surface turned out to need the same signal and
+ * the photos surface turned out to have quietly grown its own copy.
  */
-export function isMeasurable(element) {
-    return Boolean(element) && element.offsetParent !== null && element.clientWidth > 0;
-}
+export { isMeasurable, observeSize };
 
 /**
- * Call back whenever an element's size changes, and once it first has one.
+ * Announced on the window once the grid has a volume on screen.
  *
- * @param {HTMLElement} element
- * @param {(measurable: boolean) => void} callback
- * @returns {() => void} disconnect.
+ * The panoramic editor is a **separate bundle on the same page**, and the one thing it
+ * cannot do without is a loaded CBCT: `mount()` reads the volume out of the cache and
+ * throws "The CBCT is still loading." if it is not there yet. Offering the reader an Edit
+ * button before that is offering them an error. `window.CBCTViewer.ready` carries the same
+ * fact for anything that arrives after the event -- the two bundles' start order is not
+ * fixed, which is the race `bootstrapPanoramic` already documents for `window.canEdit`.
  */
-export function observeSize(element, callback) {
-    const view = element?.ownerDocument?.defaultView ?? globalThis;
-    if (!element || typeof view.ResizeObserver !== 'function') {
-        return () => {};
-    }
-    const observer = new view.ResizeObserver(() => callback(isMeasurable(element)));
-    observer.observe(element);
-    return () => observer.disconnect();
-}
+export const GRID_READY_EVENT = 'ygg:volume-grid-ready';
+
 
 /**
  * Start the grid on this page.
@@ -269,11 +344,17 @@ export async function bootstrapVolumeGrid({ mount, doc = globalThis.document }) 
     const view = doc.defaultView ?? globalThis;
     view.CBCTViewer = Object.assign(view.CBCTViewer || {}, {
         loading: false,
+        ready: true,
         init: () => {
             resize(isMeasurable(elements[0]));
             return grid;
         },
     });
+    try {
+        view.dispatchEvent(new view.CustomEvent(GRID_READY_EVENT));
+    } catch (error) {
+        report(`could not announce readiness: ${error.message}`);
+    }
 
     return grid;
 }
@@ -308,90 +389,161 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         return null;
     }
 
-    const volume = primaryVolumeFrom(data);
-    if (!volume) {
-        report('this patient has no volume to show.', { modalities: Object.keys(data.modalityFiles || {}) });
-        return grid;
+    const dragDrop = dragDropEnabled(data);
+
+    /**
+     * Load one modality into a set of windows, with the progress indicator and the
+     * F2 warning that belong to any load.
+     *
+     * Used by the opening load and by a dropped chip, so a window filled by hand
+     * behaves exactly like one filled on arrival -- the same indicator, the same
+     * orientation warning, the same error text.
+     */
+    async function loadModality(slug, windowIndices) {
+        const volume = volumeFor(data, slug);
+        if (!volume) {
+            report(`no file for modality '${slug}' on this patient.`);
+            return null;
+        }
+
+        // A CBCT takes real seconds to arrive, and without an indicator the grid is
+        // simply black for all of them -- which is indistinguishable from a viewer
+        // that failed, and was reported as exactly that.
+        const indicators = windowIndices.map((index) => loadingIndicator(elements[index]));
+        const onProgress = (event) => {
+            const { loaded: done, total } = event?.detail ?? {};
+            if (Number.isFinite(done) && Number.isFinite(total) && total > 0) {
+                for (const indicator of indicators) {
+                    indicator.update(done / total);
+                }
+            }
+        };
+        view.addEventListener?.('CORNERSTONE_NIFTI_VOLUME_PROGRESS', onProgress);
+
+        // One call for every window: the same volume in three viewports is one load,
+        // and one read of its scalar data. See `loadVolumeIntoWindows`.
+        report(`loading ${volume.modality} #${volume.fileId}…`);
+        try {
+            const result = await grid.loadVolumeIntoWindows(
+                windowIndices,
+                descriptorFor(volume, { namespace, origin })
+            );
+            if (result?.orientationWarning) {
+                for (const windowIndex of result.windows ?? windowIndices) {
+                    showWindowMessage(elements[windowIndex], result.orientationWarning, 'warning');
+                }
+            }
+            return result?.superseded ? null : volume;
+        } catch (error) {
+            report(`load failed: ${error.message}`);
+            for (const windowIndex of windowIndices) {
+                showWindowMessage(
+                    elements[windowIndex],
+                    `Could not load this volume: ${error.message}`,
+                    'error'
+                );
+            }
+            return null;
+        } finally {
+            // In `finally` so a failed load does not leave a spinner turning forever
+            // over an error message.
+            view.removeEventListener?.('CORNERSTONE_NIFTI_VOLUME_PROGRESS', onProgress);
+            for (const indicator of indicators) {
+                indicator.done();
+            }
+        }
     }
 
-    // One URL either way, because it is also the volume cache key (`volumeIdFor`):
-    // one per volume, stable across reloads, unique. For a series that is its
-    // metadata endpoint; for a file, its serve path.
-    const url = volume.dicom
-        ? dicomSeriesUrl({
-              studyUid: volume.dicom.studyUid,
-              seriesUid: volume.dicom.seriesUid,
-              origin,
-          })
-        : volumeUrl({
-              fileId: volume.fileId,
-              bundleKey: volume.bundleKey,
-              filename: volume.filename,
-              namespace,
-              origin,
-          });
+    // The SEG overlay. Built here rather than in `controls.js` because it needs the
+    // grid, the payload and the load path, and `controls.js` is a DOM binder.
+    const segmentationControl = createSegmentationControl({
+        grid,
+        doc,
+        data,
+        namespace,
+        origin,
+    });
 
-    const targets = layout.filter((entry) => !entry.lazy).map((entry) => entry.window);
+    // `volume` is what the *measurement* endpoint is narrowed by, so it tracks
+    // whatever the grid is actually showing rather than staying at the opening choice.
+    // It starts null on a drag-and-drop page because nothing is showing yet.
+    let volume = null;
     let loaded = false;
 
-    // A CBCT takes real seconds to arrive, and without an indicator the grid is simply
-    // black for all of them -- which is indistinguishable from a viewer that failed,
-    // and was reported as exactly that.
-    const indicators = elements.map((element) => loadingIndicator(element));
-    const onProgress = (event) => {
-        const { loaded, total } = event?.detail ?? {};
-        if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
-            for (const indicator of indicators) {
-                indicator.update(loaded / total);
+    /**
+     * Draw whatever measurements this volume already has.
+     *
+     * **After a load, never before.** An annotation needs a viewport with a volume in
+     * it to be drawn against, and on a drag-and-drop page there is no volume until
+     * something is dropped -- so this is called when one arrives rather than at mount.
+     * Once per volume: re-restoring on a later drop would add a second copy of every
+     * annotation, since `addAnnotation` mints a fresh UID each time.
+     */
+    const restored = new Set();
+    async function restoreMeasurements(shown) {
+        if (!shown || restored.has(shown.fileId)) {
+            return;
+        }
+        restored.add(shown.fileId);
+        try {
+            const stored = await fetch(
+                measurementsUrl(data, shown, namespace, origin, '/state/'),
+                { credentials: 'same-origin' }
+            ).then((response) => (response.ok ? response.json() : null));
+            const count = grid.restoreAnnotations?.(stored?.annotations ?? []) ?? 0;
+            if (count) {
+                report(`restored ${count} saved measurement(s).`);
             }
-        }
-    };
-    view.addEventListener?.('CORNERSTONE_NIFTI_VOLUME_PROGRESS', onProgress);
-
-    // One call for every window: the same volume in three viewports is one load, and
-    // one read of its scalar data. See `loadVolumeIntoWindows`.
-    report(`loading ${volume.modality} #${volume.fileId}…`);
-    try {
-        const result = await grid.loadVolumeIntoWindows(targets, {
-            url,
-            modality: volume.modality,
-            fileId: volume.fileId,
-            dicom: volume.dicom,
-        });
-        loaded = !result?.superseded;
-        if (result?.orientationWarning) {
-            for (const windowIndex of result.windows ?? targets) {
-                showWindowMessage(elements[windowIndex], result.orientationWarning, 'warning');
-            }
-        }
-    } catch (error) {
-        report(`load failed: ${error.message}`);
-        for (const windowIndex of targets) {
-            showWindowMessage(elements[windowIndex], `Could not load this volume: ${error.message}`, 'error');
-        }
-    } finally {
-        // In `finally` so a failed load does not leave a spinner turning forever over
-        // an error message.
-        view.removeEventListener?.('CORNERSTONE_NIFTI_VOLUME_PROGRESS', onProgress);
-        for (const indicator of indicators) {
-            indicator.done();
+        } catch (error) {
+            // A study whose measurements cannot be fetched is still usable; failing to
+            // draw them must not cost the images.
+            report(`could not restore measurements: ${error.message}`);
         }
     }
 
-    // Draw whatever the study already has. After the load, because an annotation needs
-    // a viewport with a volume in it to be drawn against.
-    try {
-        const stored = await fetch(measurementsUrl(data, volume, namespace, origin, '/state/'), {
-            credentials: 'same-origin',
-        }).then((response) => (response.ok ? response.json() : null));
-        const restored = grid.restoreAnnotations?.(stored?.annotations ?? []) ?? 0;
-        if (restored) {
-            report(`restored ${restored} saved measurement(s).`);
+    if (dragDrop) {
+        // **Nothing is loaded on arrival.** A grid whose windows are the user's to
+        // fill should not pre-fill them: before 3.0 a brain page could show FLAIR,
+        // T1, T1c and T2 side by side, and the replacement loaded one arbitrary
+        // series -- `Object.keys(modalityFiles)[0]`, since brain sends no
+        // `defaultModality` -- into all four windows and offered no way to change
+        // any of them. Four `.drop-hint` placeholders and four series' worth of
+        // bandwidth unspent is the honest opening state.
+        bindDragDrop({
+            doc,
+            elements,
+            onDrop: async (windowIndex, slug) => {
+                const dropped = await loadModality(slug, [windowIndex]);
+                if (!dropped) {
+                    return;
+                }
+                volume = dropped;
+                // A window that changed series may have left a volume nothing is
+                // showing any more; without this the cache grows by a whole MRI per
+                // drop and the third or fourth one runs the GPU out of memory. The
+                // overlay's own volumes are spared: they are in use without being in
+                // a window.
+                grid.releaseUnusedVolumes?.(ownedVolumeIds());
+                grid.refreshOverlay?.(windowIndex);
+                await restoreMeasurements(dropped);
+                await segmentationControl?.reapply();
+            },
+        });
+        report('drag-and-drop bound; windows start empty.', {
+            modalities: Object.keys(data.modalityFiles || {}),
+        });
+    } else {
+        const opening = primaryVolumeFrom(data);
+        if (!opening) {
+            report('this patient has no volume to show.', {
+                modalities: Object.keys(data.modalityFiles || {}),
+            });
+            return grid;
         }
-    } catch (error) {
-        // A study whose measurements cannot be fetched is still usable; failing to
-        // draw them must not cost the images.
-        report(`could not restore measurements: ${error.message}`);
+        const targets = layout.filter((entry) => !entry.lazy).map((entry) => entry.window);
+        volume = await loadModality(opening.modality, targets);
+        loaded = Boolean(volume);
+        await restoreMeasurements(volume);
     }
 
     // Bound after the load, and bound at all only on pages that have a toolbar --
@@ -410,9 +562,11 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         // something switches it off.
         onAnnotationMode: (enabled) => grid.setAnnotationMode?.(enabled),
     });
-    // The template marks Crosshairs pressed; make the grid agree rather than trusting
-    // two places to say the same thing.
-    markActiveTool(controls.plan.tools, 'Crosshairs');
+    // The template marks the navigation tool pressed; make the grid agree rather than
+    // trusting two places to say the same thing. Which tool that is depends on the
+    // layout -- a grid of parallel planes has no crosshair -- so it comes from the grid
+    // and is not spelled here.
+    markActiveTool(controls.plan.tools, grid.navigationTool);
 
     // The window/level readout now lives in each viewport's own overlay rather than in
     // the toolbar: it belongs to the image it describes, and the toolbar `<output>` it
@@ -420,9 +574,9 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     grid.refreshOverlays?.();
 
     if (loaded) {
-        report(`loaded ${volume.modality} #${volume.fileId} into ${targets.length} window(s).`);
+        report(`loaded ${volume.modality} #${volume.fileId}.`);
     }
-    return { ...grid, controls };
+    return { ...grid, controls, segmentation: segmentationControl };
 }
 
 export { windowAt };
@@ -444,8 +598,11 @@ async function saveMeasurements({ grid, data, volume, view, origin, namespace })
     // state tools keep for themselves, and the crosshair's has no handles at all.
     const annotations = measurementAnnotations(grid.readAnnotations?.() ?? []);
     const header = grid.currentHeader?.();
-    if (!header) {
-        return { level: 'warning', message: 'Nothing to save yet: the volume is still loading.' };
+    // `volume` as well as the header: on a drag-and-drop grid nothing is showing until
+    // something is dropped, so a save before then has no resource to anchor to and
+    // would otherwise be a TypeError inside a click handler.
+    if (!header || !volume) {
+        return { level: 'warning', message: 'Nothing to save yet: no volume is loaded.' };
     }
 
     const state = await fetch(measurementsUrl(data, volume, namespace, origin, '/state/'), {
@@ -531,4 +688,245 @@ export function measurementsUrl(data, volume, namespace, origin, suffix) {
 export function csrfToken(doc) {
     const input = doc?.querySelector?.('input[name="csrfmiddlewaretoken"]');
     return input?.value ?? '';
+}
+
+
+/**
+ * The SEG on/off switch, or null on a page with no segmentation.
+ *
+ * **Deferred.** The overlay is a whole second volume, and most visits to a study never
+ * ask for it, so nothing is fetched until the button is first pressed -- which is also
+ * how it behaved before 3.0.
+ *
+ * Two failure modes are surfaced rather than logged, because both look identical to a
+ * broken viewer from the outside: a segmentation whose grid is not the volume's, and
+ * one with no labels in it. {@link loadSegmentation} returns a reason for each.
+ */
+export function createSegmentationControl({ grid, doc, data, namespace, origin }) {
+    const toggle = doc.getElementById(SEGMENTATION_IDS.toggle);
+    const url = segmentationUrl({
+        segmentationFile: data?.segmentationFile,
+        namespace,
+        origin,
+        volumeUrl,
+    });
+    if (!toggle || !url) {
+        // Not an error: most studies have no segmentation, and the template only
+        // renders the button when the payload names one.
+        return null;
+    }
+
+    const cornerstone = grid.cornerstone;
+    let state = { loaded: false, labelValues: [] };
+
+    /**
+     * Which viewports are showing a volume, and which of them is the 3D one.
+     *
+     * Once the overlay is loaded, a window is only a target if its volume is on the
+     * *same grid* as the labelmap. On the brain page the four sequences are
+     * co-registered so they all are; a window holding something that is not -- which a
+     * dropped chip can produce -- is skipped rather than given an overlay that
+     * describes different voxels. Same rule as {@link gridMismatch} applies at load.
+     */
+    function targets() {
+        const labelmap = state.loaded
+            ? grid.cornerstone.cache.getVolume(SEGMENTATION_ID)
+            : null;
+        return grid.state.windows
+            .filter((window) => {
+                if (!window.volumeId) {
+                    return false;
+                }
+                if (!labelmap) {
+                    return true;
+                }
+                const shown = grid.cornerstone.cache.getVolume(window.volumeId);
+                return shown ? gridMismatch(shown, labelmap) === null : false;
+            })
+            .map((window) => ({
+                index: window.index,
+                orientation: window.orientation,
+                viewportId: viewportId(window.index),
+                volumeId: window.volumeId,
+            }));
+    }
+
+    function setBusy(busy) {
+        toggle.disabled = Boolean(busy);
+        toggle.title = busy
+            ? 'Loading the segmentation overlay'
+            : (isOn() ? 'Hide the segmentation overlay' : 'Show the segmentation overlay');
+    }
+
+    /**
+     * The DOM holds the state, and it is `aria-checked`.
+     *
+     * The same `role="switch"` the annotation-mode control uses, for the reason that
+     * one's comment gives: a pressed-looking button is the ambiguity that got reported,
+     * and reading the state back off the DOM at click time is what stops a closure
+     * variable that started out disagreeing with the markup from inverting every click
+     * after it.
+     */
+    function isOn() {
+        return toggle.getAttribute('aria-checked') === 'true';
+    }
+
+    /** Render the switch: the flag and the word beside it. */
+    function setOn(on) {
+        toggle.setAttribute('aria-checked', String(Boolean(on)));
+        const word = toggle.querySelector('[data-mode-state]');
+        if (word) {
+            word.textContent = on ? 'on' : 'off';
+        }
+    }
+
+    /** Load once, then show in every window that currently holds a volume. */
+    async function apply() {
+        const shown = targets();
+        if (shown.length === 0) {
+            showMessageOnToggle('Load a volume before showing its segmentation.');
+            return false;
+        }
+
+        if (!state.loaded) {
+            const result = await loadSegmentation({
+                cornerstone,
+                referenceVolumeId: shown[0].volumeId,
+                url,
+            });
+            if (!result.ok) {
+                showMessageOnToggle(result.reason);
+                return false;
+            }
+            state = { loaded: true, labelValues: result.labelValues };
+        }
+
+        const colorLUT = paletteFor(state.labelValues);
+        const { shown: reached, colorLUTIndex } = await showSegmentation({
+            cornerstone,
+            viewports: shown,
+            colorLUT,
+            // The index the first switch-on minted, so a second one overwrites that LUT
+            // rather than appending an identical copy nothing ever collects.
+            colorLUTIndex: state.colorLUTIndex ?? null,
+            // The volume render wants solid voxels; the three slice windows keep the
+            // outline that makes a tooth's border readable against the bone.
+            solidViewportIds: shown
+                .filter((target) => target.orientation === ORIENTATIONS.RENDER)
+                .map((target) => target.viewportId),
+        });
+        // Said out loud, because the failure this had twice was a window that showed
+        // nothing and reported nothing. If a viewport is missing from `reached`, or
+        // reached and still blank, that line is where to start.
+        report('segmentation shown', {
+            labels: state.labelValues,
+            viewports: reached,
+            declined: shown
+                .map((target) => target.viewportId)
+                .filter((id) => !reached.includes(id)),
+        });
+        // Re-asserted on every switch-on, because switching *off* marks every segment
+        // hidden -- that is how Cornerstone hides a labelmap -- and those flags survive
+        // until something sets them back.
+        for (const target of shown) {
+            setOverlayVisible({ cornerstone, viewportId: target.viewportId, visible: true });
+        }
+        state.colorLUTIndex = colorLUTIndex;
+        // The 3D window gained a second volume actor just now, and it arrived with vtk's
+        // default projection rather than this grid's: Cornerstone asks for a blend mode on
+        // the volume input and `VolumeViewport3D.setBlendMode()` drops it. Re-asserting the
+        // render mode puts both actors on the same projection -- see `setRenderMode`. Also
+        // the reason `reapply()` works after a drop, which rebuilds those actors again.
+        reassertRenderModes();
+        grid.renderingEngine.renderViewports(shown.map((t) => t.viewportId));
+        return true;
+    }
+
+    /** Put every 3D window's actors back on this grid's projections. */
+    function reassertRenderModes() {
+        for (const target of targets()) {
+            if (target.orientation !== ORIENTATIONS.RENDER) {
+                continue;
+            }
+            try {
+                grid.setRenderMode?.(target.index);
+            } catch (error) {
+                report(`could not re-apply the 3D render mode: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * Re-assert the projections **after** Cornerstone has mounted the labelmap actor.
+     *
+     * **The second switch-on is not the first, and that is the whole defect.**
+     * `addSegmentationRepresentations` reads `config.blendMode` only when it *creates* a
+     * representation (`createLegacyVolumeLabelmapPlan`); on a re-show it recognises the
+     * one it already holds and the config is never read again. Switching the overlay off
+     * and on rebuilds the labelmap's actor without it, so the actor falls back to
+     * Cornerstone's default for a labelmap volume input -- `MAXIMUM_INTENSITY_BLEND` --
+     * while the study beneath it stays on this grid's mode. Two volume actors projected
+     * differently in one renderer is the haze that was reported, the second time round, as
+     * the segmentation "becoming dark".
+     *
+     * Calling {@link reassertRenderModes} straight after `showSegmentation` cannot fix it:
+     * that call is **synchronous and returns undefined**, filing the representation and
+     * leaving the actor to be mounted by the segmentation render loop, so the `await`
+     * resolves while the viewport still holds only the study. `SEGMENTATION_RENDERED` is
+     * the signal that the actor exists. Re-applying a spec an actor already carries costs
+     * nothing -- vtk's setters compare before they mark modified -- so this is left
+     * registered rather than armed and disarmed around each toggle.
+     */
+    cornerstone.eventTarget?.addEventListener?.(
+        cornerstone.toolsEnums.Events.SEGMENTATION_RENDERED,
+        reassertRenderModes
+    );
+
+    function showMessageOnToggle(message) {
+        report(`segmentation: ${message}`);
+        const notify = globalThis.appNotify;
+        if (typeof notify === 'function') {
+            notify('warning', message);
+        }
+    }
+
+    toggle.addEventListener('click', async () => {
+        const turningOn = !isOn();
+        setBusy(true);
+        try {
+            if (turningOn) {
+                setOn(await apply());
+                return;
+            }
+            // Off means off: the whole representation in every viewport, including the
+            // 3D one, whose surface is a separate representation of the same
+            // segmentation and is not touched by hiding the labelmap.
+            for (const target of targets()) {
+                setOverlayVisible({ cornerstone, viewportId: target.viewportId, visible: false });
+            }
+            grid.renderingEngine.renderViewports(targets().map((t) => t.viewportId));
+            setOn(false);
+        } catch (error) {
+            showMessageOnToggle(`could not be shown: ${error.message}`);
+            setOn(false);
+        } finally {
+            setBusy(false);
+        }
+    });
+
+    return {
+        /**
+         * Put the overlay back after a window changed what it shows.
+         *
+         * A dropped chip rebuilds that window's actors, so a representation added
+         * before the drop is no longer on it. No-op while the overlay is off.
+         */
+        reapply: async () => {
+            if (!isOn()) {
+                return;
+            }
+            await apply();
+        },
+        isOn,
+    };
 }

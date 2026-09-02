@@ -291,43 +291,15 @@
 </div>
 
 {% if is_admin_user %}
+{% comment %}No per-folder access entry here: access is granted per *project*,
+which is the only thing authorization reads, and it is edited on the project's
+Django admin page. The dialog that used to live here promised folder-level
+granularity the system has never had.{% endcomment %}
 <!-- Folder right-click menu -->
 <div id="folderContextMenu" class="folder-menu" style="display: none;">
     <button type="button" class="folder-menu__item" id="folderMenuStats">Statistics</button>
-    <button type="button" class="folder-menu__item" id="folderMenuPermissions">Edit permissions</button>
     <button type="button" class="folder-menu__item" id="folderMenuRename">Rename folder</button>
-</div>
-
-<div class="modal" id="folderPermissionsModal" tabindex="-1" aria-labelledby="folderPermissionsModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="folderPermissionsModalLabel">Folder Permissions</h5>
-        <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="perm-form">
-            <div class="perm-form__field">
-                <label for="folderPermUser" class="form-label">User</label>
-                <select id="folderPermUser" class="filter-select"></select>
-            </div>
-            <div class="perm-form__field">
-                <label for="folderPermRole" class="form-label">Role</label>
-                <select id="folderPermRole" class="filter-select">
-                    <option value="viewer">viewer</option>
-                    <option value="annotator">annotator</option>
-                    <option value="admin">admin</option>
-                </select>
-            </div>
-            <button class="ygg-btn ygg-btn--primary" id="folderPermAddBtn">Save</button>
-        </div>
-        <table class="table-ygg" id="folderPermTable">
-            <thead><tr><th>User</th><th>Role</th><th></th></tr></thead>
-            <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+    <button type="button" class="folder-menu__item folder-menu__item--danger" id="folderMenuDelete">Delete folder</button>
 </div>
 {% endif %}
 

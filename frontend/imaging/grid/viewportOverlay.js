@@ -1,5 +1,5 @@
 /**
- * The per-viewport overlay: panel name, orientation letters, slice counter.
+ * The per-viewport overlay: panel name, modality, orientation letters, slice counter.
  *
  * Everything anatomical here comes from **Cornerstone's own utilities**, not from a
  * table of our own. `getOrientationStringLPS` and `invertOrientationStringLPS`
@@ -32,10 +32,33 @@ export const PANEL_LABELS = Object.freeze({
 export const OVERLAY_CLASSES = Object.freeze({
     root: 'ygg-overlay',
     panel: 'ygg-overlay__panel',
+    // Which series this window is showing. Nothing said so while every window
+    // necessarily showed the same volume; once a chip can be dropped into one window
+    // and a different one into the next, four unlabelled greyscale MRIs are four
+    // pictures nobody can tell apart. `viewer_grid.js` wrote a `.window-label` for
+    // exactly this reason, and it went with the rest of that file.
+    modality: 'ygg-overlay__modality',
     slice: 'ygg-overlay__slice',
     window: 'ygg-overlay__window',
     edge: 'ygg-overlay__edge',
 });
+
+/**
+ * How a modality slug is shown in a window corner.
+ *
+ * The payload does not carry a modality's display label, so this trims the domain
+ * prefix the brain slugs all share rather than inventing names: `braintumor-mri-t1c`
+ * reads as `T1C`, which is what the chip beside it says.
+ *
+ * @param {string} slug
+ * @returns {string}
+ */
+export function modalityText(slug) {
+    if (!slug) {
+        return '';
+    }
+    return String(slug).replace(/^braintumor-mri-/, '').toUpperCase();
+}
 
 /**
  * The screen-right vector of a camera, in patient LPS.
@@ -147,6 +170,7 @@ export function createOverlay(element, { orientation }) {
     const nodes = {
         root,
         panel: make(OVERLAY_CLASSES.panel, PANEL_LABELS[orientation] ?? ''),
+        modality: make(OVERLAY_CLASSES.modality),
         slice: make(OVERLAY_CLASSES.slice),
         window: make(OVERLAY_CLASSES.window),
         edges: {},
@@ -168,9 +192,10 @@ export function createOverlay(element, { orientation }) {
  * @param {number} [state.sliceIndex]
  * @param {number} [state.sliceCount]
  * @param {string} [state.windowText] the window/level readout.
+ * @param {string} [state.modality] the modality slug this window is showing.
  * @param {object} state.utilities Cornerstone's orientation helpers.
  */
-export function updateOverlay(nodes, { camera, sliceIndex, sliceCount, windowText, utilities }) {
+export function updateOverlay(nodes, { camera, sliceIndex, sliceCount, windowText, modality, utilities }) {
     if (!nodes) {
         return;
     }
@@ -180,4 +205,7 @@ export function updateOverlay(nodes, { camera, sliceIndex, sliceCount, windowTex
     }
     nodes.slice.textContent = sliceText(sliceIndex, sliceCount);
     nodes.window.textContent = windowText || '';
+    if (nodes.modality) {
+        nodes.modality.textContent = modalityText(modality);
+    }
 }

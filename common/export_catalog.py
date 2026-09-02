@@ -69,7 +69,6 @@ class Artifact:
         collector=None,
         filename=None,
         zip_dir=None,
-        description="",
     ):
         self.key = key
         self.modality = modality
@@ -83,7 +82,6 @@ class Artifact:
         self.collector = collector
         self.filename = filename
         self.zip_dir = zip_dir
-        self.description = description
 
     def __repr__(self):
         return f"<Artifact {self.key}>"
@@ -191,37 +189,25 @@ _SHARED_ARTIFACTS = [
     Artifact(
         "reports.captions", None, "Voice caption reports", BUCKET_DERIVED,
         collector="captions", zip_dir="reports",
-        description="Text captions attached to the patient, one file per caption.",
     ),
 ]
 
 _MAXILLO_ARTIFACTS = [
     # --- CBCT ---------------------------------------------------------------
+    # Two entries, and deliberately only two. "Processed volume" sat next to
+    # "Segmentation" with nothing telling a reader them apart, and the resampled volume
+    # is not what anyone leaves with -- the segmentation our pipeline returns is. The
+    # inference statistics and the pipeline's own panoramic PNG are pipeline
+    # diagnostics, not part of the record; the panoramic images are offered under the
+    # panoramic modality, which is where someone looks for them.
     Artifact(
         "cbct.raw", "cbct", "Uploaded volume", BUCKET_RAW,
         file_types=["cbct_raw"],
-        description="The .nii.gz as uploaded.",
-    ),
-    Artifact(
-        "cbct.volume", "cbct", "Processed volume", BUCKET_PROCESSED,
-        file_types=["cbct_processed"], nested_key="volume_nifti",
-        filename="volume.nii.gz",
     ),
     Artifact(
         "cbct.segmentation", "cbct", "Segmentation", BUCKET_PROCESSED,
         file_types=["cbct_processed"], nested_key="segmentation_nifti",
         filename="segmentation.nii.gz",
-    ),
-    Artifact(
-        "cbct.inference_stats", "cbct", "Inference statistics", BUCKET_PROCESSED,
-        file_types=["cbct_processed"], nested_key="inference_stats_json",
-        filename="inference_stats.json",
-    ),
-    Artifact(
-        "cbct.panoramic_view", "cbct", "Panoramic image (pipeline)", BUCKET_DERIVED,
-        file_types=["cbct_processed"], nested_key="panoramic_view",
-        zip_dir="panoramic/generated", filename="panoramic_pipeline.png",
-        description="Panoramic PNG published by the CBCT processing step, where one exists.",
     ),
     # --- Panoramic ----------------------------------------------------------
     Artifact(
@@ -232,18 +218,11 @@ _MAXILLO_ARTIFACTS = [
         "panoramic.mip", "panoramic", "Panoramic image (MIP)", BUCKET_DERIVED,
         file_types=["panoramic_processed"], subtypes=["mip"],
         zip_dir="panoramic/generated", filename="panoramic_mip.png",
-        description="Reconstructed from the CBCT along the dental arch.",
     ),
     Artifact(
         "panoramic.raysum", "panoramic", "Panoramic image (X-ray)", BUCKET_DERIVED,
         file_types=["panoramic_processed"], subtypes=["raysum"],
         zip_dir="panoramic/generated", filename="panoramic_xray.png",
-    ),
-    Artifact(
-        "panoramic.legacy", "panoramic", "Panoramic Z-sweep (legacy)", BUCKET_DERIVED,
-        file_types=["panoramic_processed"], exclude_subtypes=["mip", "raysum"],
-        zip_dir="panoramic/generated",
-        description="Older server-generated sweep variants, where they still exist.",
     ),
     # --- IOS ----------------------------------------------------------------
     Artifact(
@@ -259,17 +238,24 @@ _MAXILLO_ARTIFACTS = [
     # Rendered from the annotation record, not read back from a stored document
     # (decision #20). The `ios_landmarks` FileRegistry rows survive as read-only history
     # for the cross-check release; the export stopped reading them.
+    #
+    # One entry, covering predicted and hand-placed points alike: predictions are
+    # landmarks, written into the same record by `_record_predicted_landmarks` with
+    # `origin=PREDICTION`, so the separate "Predicted tooth landmarks" checkbox only
+    # ever offered the stale file the pipeline happened to leave behind.
     Artifact(
         "ios.landmarks", "ios", "Tooth landmarks", BUCKET_DERIVED,
         collector="ios_landmarks", zip_dir="ios/landmarks",
     ),
+    # Both halves of the same question -- the pipeline's own JSON and the manual / AI
+    # classes held in `maxillo.Classification` -- under the modality that produces it.
     Artifact(
-        "ios.landmarks_prediction", "ios", "Predicted tooth landmarks", BUCKET_DERIVED,
-        file_types=["ios_landmarks_prediction"], zip_dir="ios/landmarks",
-    ),
-    Artifact(
-        "ios.bite_classification", "ios", "Bite classification (pipeline output)", BUCKET_DERIVED,
-        file_types=["bite_classification"], zip_dir="ios/bite_classification",
+        # No `filename`: that would rename the pipeline's own file too, and both
+        # halves land in one directory. The collector names its document
+        # `classification.json`; the file keeps the basename it was stored under.
+        "ios.bite_classification", "ios", "Bite Classification", BUCKET_DERIVED,
+        file_types=["bite_classification"], collector="occlusion",
+        zip_dir="ios/bite_classification",
     ),
     # --- Intraoral photographs ---------------------------------------------
     Artifact(
@@ -293,51 +279,6 @@ _MAXILLO_ARTIFACTS = [
     Artifact(
         "teleradiography.processed", "teleradiography", "Processed image", BUCKET_PROCESSED,
         file_types=["teleradiography_processed"],
-    ),
-    # --- Interchange (roadmap Phase 9) --------------------------------------
-    # Produced from the annotation record, and only where the annotations are anchored
-    # to a natively-stored DICOM series: SEG, SR and RTSTRUCT all reference source SOP
-    # instances, and a patient whose CBCT arrived as a .nii.gz has no DICOM identity to
-    # reference. Selecting these for such a patient yields nothing rather than a
-    # fabricated Secondary Capture series -- see common/interop/__init__.py.
-    Artifact(
-        "cbct.dicom_seg", "cbct", "Segmentation (DICOM SEG)", BUCKET_DERIVED,
-        collector="dicom_seg", zip_dir="interop",
-        description="Pipeline segmentation as DICOM SEG. Requires a natively-stored DICOM series.",
-    ),
-    Artifact(
-        "cbct.dicom_sr", "cbct", "Measurements (DICOM SR)", BUCKET_DERIVED,
-        collector="dicom_sr", zip_dir="interop",
-        description=(
-            "Measurements as a Comprehensive3DSR. Uncalibrated values stay uncalibrated: "
-            "they are reported in pixels with an explicit qualifier, never converted to mm. "
-            "Requires a natively-stored DICOM series."
-        ),
-    ),
-    Artifact(
-        "cbct.dicom_rtstruct", "cbct", "Contours (DICOM RTSTRUCT)", BUCKET_DERIVED,
-        collector="dicom_rtstruct", zip_dir="interop",
-        description=(
-            "Three-dimensional contours as an RT Structure Set. Boxes and spheres have no "
-            "RTSTRUCT primitive and are omitted rather than approximated. Requires a "
-            "natively-stored DICOM series."
-        ),
-    ),
-    # --- Raw archive --------------------------------------------------------
-    Artifact(
-        "rawzip.raw", "rawzip", "Uploaded archive", BUCKET_RAW,
-        file_types=["generic_raw"],
-    ),
-    Artifact(
-        "rawzip.processed", "rawzip", "Processed archive", BUCKET_PROCESSED,
-        file_types=["generic_processed"],
-    ),
-    # --- Patient-level ------------------------------------------------------
-    Artifact(
-        "classification.occlusion", None, "Occlusion classification", BUCKET_DERIVED,
-        collector="occlusion", zip_dir="bite_classification",
-        filename="classification.json",
-        description="Manual and AI sagittal / vertical / transverse / midline classes.",
     ),
 ]
 
@@ -378,14 +319,29 @@ def artifacts_for_project(domain, modality_slugs):
     ]
 
 
+# Keys stored on Export rows written before an artifact was merged into another.
+# Re-running such a row must still produce the thing it named.
+_RENAMED_ARTIFACT_KEYS = {
+    "ios.landmarks_prediction": "ios.landmarks",
+    "classification.occlusion": "ios.bite_classification",
+}
+
+
 def resolve_artifacts(domain, keys):
     """Artifact specs for the given keys, silently dropping unknown ones.
 
     Unknown keys are dropped rather than raising: an artifact can be renamed or
-    retired while old Export rows still reference it.
+    retired while old Export rows still reference it. Retired *interop* keys
+    (``cbct.dicom_seg`` / ``_sr`` / ``_rtstruct``) drop this way; merged ones are
+    translated through ``_RENAMED_ARTIFACT_KEYS`` instead of being lost.
     """
     known = {artifact.key: artifact for artifact in artifacts_for_domain(domain)}
-    return [known[key] for key in keys or () if key in known]
+    resolved = []
+    for key in keys or ():
+        artifact = known.get(_RENAMED_ARTIFACT_KEYS.get(key, key))
+        if artifact is not None and artifact not in resolved:
+            resolved.append(artifact)
+    return resolved
 
 
 # Legacy selections: an Export row written before artifacts existed carries
@@ -416,7 +372,8 @@ def artifacts_from_legacy_selection(
             if include_reports:
                 selected.append(artifact)
             continue
-        if artifact.key == "classification.occlusion":
+        if artifact.key == "ios.bite_classification":
+            # Legacy rows drove this from its own checkbox, not from "processed".
             if include_bite_classification:
                 selected.append(artifact)
             continue
@@ -475,14 +432,13 @@ _ANNOTATION_FILTERS = [
         "method": "voice_caption",
         "label": "Has voice captions",
     },
-    {
-        "suffix": "occlusion",
-        "method": "classification",
-        "label": "Has occlusion classification",
-    },
+    # One filter, two ways of holding the same fact: the manual / AI classes in
+    # `maxillo.Classification` and the pipeline's `bite_classification` file. A
+    # project enabling either method is offered it, and it matches either source.
     {
         "suffix": "bite_classification",
         "method": "bite_classification",
+        "also_method": "classification",
         "label": "Has bite classification",
     },
     {
@@ -536,7 +492,7 @@ def build_filters(domain, project, modality_slugs):
             project.annotation_methods.filter(is_active=True).values_list("slug", flat=True)
         )
     for spec in _ANNOTATION_FILTERS:
-        if spec["method"] not in enabled_methods:
+        if not enabled_methods & {spec["method"], spec.get("also_method")}:
             continue
         required_modality = spec.get("modality")
         if required_modality and required_modality not in modality_slugs:
@@ -628,7 +584,7 @@ def normalize_filters(payload):
     normalized = {}
     for key, value in values.items():
         if key == "has_bite_classification":
-            normalized["annotation_occlusion"] = True
+            normalized["annotation_bite_classification"] = True
         elif key.startswith("has_reports_"):
             normalized["annotation_captions"] = True
         elif key.startswith("has_"):
@@ -716,10 +672,11 @@ def _filter_has_annotation(patients, domain, suffix):
         # The remaining annotations only exist on maxillo patients; asking for
         # them elsewhere can only mean "no patients".
         return patients.none()
-    if suffix == "occlusion":
-        return patients.filter(classifications__isnull=False)
-    if suffix == "bite_classification":
-        return patients.filter(files__file_type="bite_classification")
+    if suffix in {"bite_classification", "occlusion"}:
+        # `occlusion` is the pre-merge key, still stored on old Export rows.
+        return patients.filter(
+            Q(classifications__isnull=False) | Q(files__file_type="bite_classification")
+        )
     if suffix == "landmarks":
         # From `annotations/`, not `files__file_type`: the file row survives as history
         # after every landmark on it has been deleted, so asking object storage answers

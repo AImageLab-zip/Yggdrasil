@@ -29,8 +29,22 @@
             </div>
         </div>
 
-        <div class="d-flex justify-content-end mb-2">
-            <button type="button" class="icon-btn" id="viewerHelpBtn" data-ygg-toggle="modal" data-ygg-target="#viewerHelpModal" title="How to use the viewer">
+        {% comment %}
+            The same toolbar the CBCT grid has, on the same grid. It was missing here
+            entirely -- no crosshair, no measurement tools, no save -- although the grid
+            builds both tool groups for every surface and `bindControls` binds whatever
+            it finds. `grid_has_3d` is false: the brain layout is four freely-assigned
+            windows and pins no volume render, so there is nothing to expand.
+
+            The chips above deliberately exclude `braintumor-mri-seg`. It is not a series
+            to put in a window; it is a labelmap over whichever series is there, which is
+            what the Segmentation switch in this toolbar applies.
+        {% endcomment %}
+        <div class="viewer-toolbar">
+            <div class="viewer-toolbar__group" id="cbctControls">
+                {% include 'common/sections/volume_grid_toolbar.html' with grid_has_3d=False grid_has_crosshairs=False grid_can_annotate=can_modify_segmentation %}
+            </div>
+            <button type="button" class="icon-btn ms-auto" id="viewerHelpBtn" data-ygg-toggle="modal" data-ygg-target="#viewerHelpModal" title="How to use the viewer">
                 <i class="fas fa-circle-question" aria-hidden="true"></i>
             </button>
         </div>

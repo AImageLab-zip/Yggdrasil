@@ -45,6 +45,8 @@ class ObjectStorage:
         verify_ssl: bool = True,
         addressing_style: str = "path",
         key_prefix: str = "",
+        max_pool_connections: Optional[int] = None,
+        read_timeout: Optional[int] = None,
     ):
         self.bucket = bucket
         self.endpoint_url = endpoint_url
@@ -80,6 +82,16 @@ class ObjectStorage:
             config=Config(
                 s3={"addressing_style": self.addressing_style or "path"},
                 retries={"max_attempts": 3, "mode": "standard"},
+                # botocore's default pool is 10 connections; a caller fanning out wider
+                # than that silently serialises on the pool instead of the network, so
+                # a bulk copy has to raise it or its concurrency is a fiction.
+                max_pool_connections=max_pool_connections or 10,
+                # Default (60s) is right for serving a file to a browser. A caller
+                # driving server-side copies needs far more: CopyObject is
+                # *synchronous* -- the store does not answer until the object is fully
+                # copied -- so a few hundred MB legitimately outlives 60s, and timing
+                # out mid-copy makes the retry redo work the store is still doing.
+                read_timeout=read_timeout or 60,
                 # Garage can advertise flexible checksums that botocore then
                 # rejects on plain get_object reads. Keep validation only for
                 # operations that explicitly require it.
@@ -253,6 +265,141 @@ class ObjectStorage:
             self._client.delete_object(Bucket=self.bucket, Key=key_n)
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
+
+    def list_objects(self, prefix: str = "") -> Generator[ObjectInfo, None, None]:
+        """Every object under ``prefix``, with its size.
+
+        ``list_keys`` answers "what is there"; a bucket-to-bucket copy also has to know
+        how big each object is, because the server-side copy path forks on the 5 GiB
+        ``CopySource`` limit. Same prefix handling as ``list_keys``.
+        """
+        prefix_n = self.normalize_key(prefix) if prefix else self.key_prefix
+        kwargs = {"Bucket": self.bucket}
+        if prefix_n:
+            kwargs["Prefix"] = prefix_n
+        paginator = self._client.get_paginator("list_objects_v2")
+        try:
+            for page in paginator.paginate(**kwargs):
+                for obj in page.get("Contents", []) or []:
+                    key_n = obj.get("Key")
+                    if not key_n:
+                        continue
+                    if self.key_prefix and key_n.startswith(self.key_prefix + "/"):
+                        key = key_n[len(self.key_prefix) + 1 :]
+                    else:
+                        key = key_n
+                    etag = obj.get("ETag")
+                    if isinstance(etag, str):
+                        etag = etag.strip('"')
+                    yield ObjectInfo(
+                        key=key, content_length=obj.get("Size"), etag=etag
+                    )
+        except ClientError as exc:
+            raise ObjectStorageError(str(exc)) from exc
+
+    # S3 refuses a single CopyObject above 5 GiB; above it the copy must be assembled
+    # from ranged UploadPartCopy calls. 5 GiB exactly is the documented boundary.
+    COPY_OBJECT_MAX_BYTES = 5 * 1024**3
+    COPY_PART_BYTES = 128 * 1024**2
+
+    def copy_from(
+        self,
+        *,
+        source_bucket: str,
+        source_key: str,
+        dest_key: str,
+        size: Optional[int] = None,
+    ) -> None:
+        """Copy one object into this bucket, server-side.
+
+        The bytes never travel through this process: ``CopyObject`` is a single request
+        to the *destination* naming the source, so one credential granted read on the
+        source and write on the destination moves the object entirely inside the store.
+        That is the whole reason this exists rather than a get/put loop.
+
+        ``size`` selects the path when known -- pass it from a ``list_objects`` sweep to
+        avoid a HEAD per object. Without it, an object over the limit is discovered by
+        the failed single copy and retried as multipart.
+        """
+        dest_key_n = self.normalize_key(dest_key)
+        copy_source = {"Bucket": source_bucket, "Key": source_key}
+
+        if size is None or size <= self.COPY_OBJECT_MAX_BYTES:
+            try:
+                self._client.copy_object(
+                    Bucket=self.bucket, Key=dest_key_n, CopySource=copy_source
+                )
+                return
+            except ClientError as exc:
+                code = self._client_error_code(exc)
+                # Only "too big" is worth retrying as multipart; anything else is real.
+                if size is not None or code not in {
+                    "InvalidRequest",
+                    "EntityTooLarge",
+                    "InvalidArgument",
+                }:
+                    raise ObjectStorageError(
+                        f"copy {source_bucket}/{source_key} -> {self.bucket}/{dest_key_n}: {exc}"
+                    ) from exc
+                size = self.head_source(source_bucket, source_key)
+
+        self._multipart_copy(
+            copy_source=copy_source,
+            dest_key_n=dest_key_n,
+            size=size,
+            label=f"{source_bucket}/{source_key}",
+        )
+
+    def head_source(self, bucket: str, key: str) -> int:
+        """Size of an object in an arbitrary bucket this client can read."""
+        try:
+            return int(self._client.head_object(Bucket=bucket, Key=key)["ContentLength"])
+        except ClientError as exc:
+            raise ObjectStorageError(f"head {bucket}/{key}: {exc}") from exc
+
+    def _multipart_copy(self, *, copy_source, dest_key_n, size, label) -> None:
+        try:
+            upload_id = self._client.create_multipart_upload(
+                Bucket=self.bucket, Key=dest_key_n
+            )["UploadId"]
+        except ClientError as exc:
+            raise ObjectStorageError(f"multipart init for {label}: {exc}") from exc
+
+        parts = []
+        try:
+            offset = 0
+            number = 1
+            while offset < size:
+                last = min(offset + self.COPY_PART_BYTES, size) - 1
+                resp = self._client.upload_part_copy(
+                    Bucket=self.bucket,
+                    Key=dest_key_n,
+                    UploadId=upload_id,
+                    PartNumber=number,
+                    CopySource=copy_source,
+                    CopySourceRange=f"bytes={offset}-{last}",
+                )
+                parts.append(
+                    {"ETag": resp["CopyPartResult"]["ETag"], "PartNumber": number}
+                )
+                offset = last + 1
+                number += 1
+            self._client.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=dest_key_n,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except Exception as exc:
+            # An abandoned multipart upload holds storage indefinitely, so abort before
+            # surfacing the failure -- and never let the abort mask the original error.
+            try:
+                self._client.abort_multipart_upload(
+                    Bucket=self.bucket, Key=dest_key_n, UploadId=upload_id
+                )
+            except ClientError:
+                pass
+            raise ObjectStorageError(f"multipart copy of {label}: {exc}") from exc
 
     def list_keys(self, prefix: str) -> Generator[str, None, None]:
         prefix_n = self.normalize_key(prefix)

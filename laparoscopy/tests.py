@@ -438,3 +438,90 @@ class LaparoscopyProjectAccessTests(TestCase):
     def test_project_admin_sees_all_patients(self):
         qs = filter_patients_for_user(self.admin, Patient.objects.all(), "laparoscopy")
         self.assertEqual(qs.count(), 2)
+
+
+class LaparoscopyRegionTypeAccessTests(TestCase):
+    """Who may edit the project's region vocabulary.
+
+    Naming what is drawn is annotation work: an annotator who finds a type missing or
+    misnamed fixes it. A viewer reads only.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.project = Project.objects.get_or_create(
+            slug="laparoscopy", defaults={"name": "Laparoscopy", "domain": "laparoscopy"}
+        )[0]
+        self.annotator = User.objects.create_user(username="lap-rt-annotator", password="pw")
+        ProjectAccess.objects.create(user=self.annotator, project=self.project, role="annotator")
+        self.viewer = User.objects.create_user(username="lap-rt-viewer", password="pw")
+        ProjectAccess.objects.create(user=self.viewer, project=self.project, role="viewer")
+
+    def _type(self, name="Liver"):
+        return RegionType.objects.create(project=self.project, name=name, color="#3498db", order=0)
+
+    def test_annotator_creates_region_type(self):
+        self.client.force_login(self.annotator)
+        response = self.client.post(
+            "/laparoscopy/api/region-types/",
+            data=json.dumps({"name": "Gallbladder"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(RegionType.objects.filter(project=self.project, name="Gallbladder").exists())
+
+    def test_annotator_renames_region_type(self):
+        region = self._type()
+        self.client.force_login(self.annotator)
+        response = self.client.patch(
+            f"/laparoscopy/api/region-types/{region.id}/",
+            data=json.dumps({"name": "Liver segment"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        region.refresh_from_db()
+        self.assertEqual(region.name, "Liver segment")
+
+    def test_annotator_deletes_region_type(self):
+        region = self._type()
+        self.client.force_login(self.annotator)
+        response = self.client.delete(f"/laparoscopy/api/region-types/{region.id}/")
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(RegionType.objects.filter(pk=region.pk).exists())
+
+    def test_viewer_cannot_create_rename_or_delete(self):
+        region = self._type()
+        self.client.force_login(self.viewer)
+        self.assertEqual(
+            self.client.post(
+                "/laparoscopy/api/region-types/",
+                data=json.dumps({"name": "Gallbladder"}),
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.patch(
+                f"/laparoscopy/api/region-types/{region.id}/",
+                data=json.dumps({"name": "Nope"}),
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.delete(f"/laparoscopy/api/region-types/{region.id}/").status_code, 403
+        )
+        region.refresh_from_db()
+        self.assertEqual(region.name, "Liver")
+
+    def test_viewer_still_recolours_their_own_view(self):
+        # A per-user colour is a preference, not a change to the project's vocabulary.
+        region = self._type()
+        self.client.force_login(self.viewer)
+        response = self.client.patch(
+            f"/laparoscopy/api/region-types/{region.id}/",
+            data=json.dumps({"color": "#123456"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["color"], "#123456")

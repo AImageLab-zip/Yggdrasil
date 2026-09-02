@@ -57,6 +57,21 @@ export function openArchWorker({
     };
 
     worker.onmessage = (event) => {
+        // **The handler must not throw.** Every branch below calls back into the surface,
+        // which touches Cornerstone, and an exception raised there is raised inside a
+        // `message` event -- uncaught, invisible to the promise above, and silently
+        // abandoning whatever the callback had left to do. That is not hypothetical: a
+        // bad `setViewReference` in `onGeometry` left the panoramic editor with no arch,
+        // no CPR and no bake, reporting nothing but a stack trace in the console. The
+        // surface's own contract is that a failure becomes a message on the panel.
+        try {
+            handleMessage(event);
+        } catch (error) {
+            onError(error instanceof Error ? error : new Error(String(error)), !ready);
+        }
+    };
+
+    function handleMessage(event) {
         const message = event?.data ?? {};
         // A reply with no id belongs to whatever is in flight; one with a stale id belongs
         // to a request the surface has already moved past.
@@ -101,7 +116,7 @@ export function openArchWorker({
                 mask: message.mask,
             });
         }
-    };
+    }
 
     // The buffer is transferred, so the copy is deliberate: the caller memoises the
     // segmentation bytes to re-open the worker after a `pagehide`, and a transferred

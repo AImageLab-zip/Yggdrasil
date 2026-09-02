@@ -20,6 +20,7 @@ from laparoscopy.models import (
     QuadrantTypeUserColor,
     RegionType,
     RegionTypeUserColor,
+    next_palette_color,
 )
 from annotations.services.exceptions import AnnotationConflict, AnnotationNotAllowed
 from annotations.services.video import (
@@ -112,6 +113,39 @@ def _patient_permissions(profile, patient):
     return can_view, can_view
 
 
+def _unprocessed_video_response(patient):
+    """Refuse a write while the annotation track does not exist yet, or ``None``.
+
+    **The same gate the page applies, applied again where it is enforceable.** The
+    surface withholds the annotator until the video job has produced the subsampled
+    track (`maxillo/views/patient_detail.py::_video_state`), because a raw recording runs
+    at 25-30 fps, the record is one labelmap per annotated frame, and
+    `laparoscopy/export_processor.py` reads the subsampled track -- annotating the raw
+    video would file strokes against frames no export can line up with. A hidden editor
+    is a UI courtesy, not a guarantee: these endpoints are reachable directly, and a
+    stale tab from before the job finished is the ordinary way to reach them.
+
+    Anchoring is unchanged: annotations still hang off the ``video_raw`` row, which is
+    the study's identity. What this checks is that the track they will be *drawn on*
+    exists.
+    """
+    subsampled = patient.files.filter(
+        file_type="video_processed", subtype="subsampled"
+    ).exists()
+    if subsampled:
+        return None
+    return JsonResponse(
+        {
+            "error": (
+                "This recording has not finished processing. Annotation opens once its "
+                "sampled track is ready."
+            ),
+            "video_processing": True,
+        },
+        status=409,
+    )
+
+
 def _normalize_float(value, field_name):
     try:
         parsed = float(value)
@@ -143,8 +177,11 @@ def _handle_type_list(request, TypeModel, ColorModel, type_fk, default_color):
             {"types": _types_payload(profile.project, request.user, TypeModel, ColorModel, type_fk)}
         )
 
-    if not profile.is_admin():
-        return JsonResponse({"error": "Administrator access required"}, status=403)
+    # Naming the things a project draws is annotation work, not administration: the
+    # people who place the regions are the ones who find a type missing, misnamed or
+    # redundant. Viewers stay read-only.
+    if not profile.is_annotator():
+        return JsonResponse({"error": "Annotator access required"}, status=403)
 
     try:
         data = _parse_json_body(request)
@@ -155,7 +192,10 @@ def _handle_type_list(request, TypeModel, ColorModel, type_fk, default_color):
     if not name:
         return JsonResponse({"error": "name is required"}, status=400)
 
-    color = data.get("color", default_color)
+    # A colour the caller did not state is the next one the project has not used, not the
+    # model's default -- otherwise every region type a project creates is the same blue
+    # and the masks are told apart only by which was drawn last.
+    color = data.get("color") or next_palette_color(TypeModel, profile.project, default_color)
     if not _is_hex_color(color):
         return JsonResponse({"error": "color must be a hex value like " + default_color}, status=400)
 
@@ -189,8 +229,8 @@ def _handle_type_detail(request, pk, TypeModel, ColorModel, type_fk, conflict_ms
         if not has_name and not has_color:
             return JsonResponse({"error": "At least one of name or color is required"}, status=400)
 
-        if has_name and not profile.is_admin():
-            return JsonResponse({"error": "Administrator access required for rename"}, status=403)
+        if has_name and not profile.is_annotator():
+            return JsonResponse({"error": "Annotator access required for rename"}, status=403)
 
         if has_name:
             name = (data.get("name") or "").strip()
@@ -219,8 +259,8 @@ def _handle_type_detail(request, pk, TypeModel, ColorModel, type_fk, conflict_ms
         return JsonResponse({"id": obj.id, "name": obj.name, "color": effective_color})
 
     # DELETE
-    if not profile.is_admin():
-        return JsonResponse({"error": "Administrator access required"}, status=403)
+    if not profile.is_annotator():
+        return JsonResponse({"error": "Annotator access required"}, status=403)
 
     if before_delete is not None:
         maybe_response = before_delete(request, profile, obj)
@@ -508,6 +548,9 @@ def patient_quadrant_markers(request, patient_id):
         return JsonResponse({"error": "Permission denied"}, status=403)
     if not project_allows_annotation(patient, "video_regions"):
         return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
+    unprocessed = _unprocessed_video_response(patient)
+    if unprocessed is not None:
+        return unprocessed
 
     try:
         data = _parse_json_body(request)
@@ -572,15 +615,21 @@ def patient_video_annotations(request, patient_id):
 
     if request.method == "GET":
         state = video_regions_state(patient)
+        # `_types_payload` returns the list itself. Subscripting it with "types" -- the
+        # key `_handle_type_list` wraps it in on the way out -- raised a TypeError on
+        # every GET, for every patient, so the annotator could never read its own state.
         state["regionTypes"] = _types_payload(
             profile.project, request.user, RegionType, RegionTypeUserColor, "region_type"
-        )["types"]
+        )
         return JsonResponse(state)
 
     if not can_modify:
         return JsonResponse({"error": "Permission denied"}, status=403)
     if not project_allows_annotation(patient, "video_regions"):
         return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
+    unprocessed = _unprocessed_video_response(patient)
+    if unprocessed is not None:
+        return unprocessed
 
     try:
         data = _parse_json_body(request)

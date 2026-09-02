@@ -28,6 +28,11 @@ urlpatterns = [
         name="api_runner_claim_job",
     ),
     path(
+        "runner/jobs/<int:job_id>/attach/",
+        api_views.runner_attach_job,
+        name="api_runner_attach_job",
+    ),
+    path(
         "runner/jobs/<int:job_id>/complete/",
         api_views.runner_complete_job,
         name="api_runner_complete_job",
