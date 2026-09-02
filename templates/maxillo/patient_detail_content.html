@@ -317,23 +317,23 @@
                 {% endcomment %}
                 <div hidden>{% csrf_token %}</div>
 
-                <div class="photo-toolbar" role="toolbar" aria-label="Intraoral photograph tools">
-                    <div class="photo-toolbar-group" role="group" aria-label="View">
-                        <span class="photo-toolbar-label">View</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoPrev" title="Previous photograph">
+                <div class="viewer-toolbar" role="toolbar" aria-label="Intraoral photograph tools">
+                    <div class="viewer-toolbar__group" role="group" aria-label="View">
+                        <span class="viewer-toolbar__label">View</span>
+                        <button type="button" class="icon-btn" id="intraoralPhotoPrev" title="Previous photograph">
                             <i class="fas fa-chevron-left"></i>
                         </button>
                         <span class="photo-counter" id="intraoralPhotoCounter"></span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoNext" title="Next photograph">
+                        <button type="button" class="icon-btn" id="intraoralPhotoNext" title="Next photograph">
                             <i class="fas fa-chevron-right"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoEditImage" title="Crop, mirror or rotate this photograph">
+                        <button type="button" class="icon-btn icon-btn--text" id="intraoralPhotoEditImage" title="Crop, mirror or rotate this photograph">
                             <i class="fas fa-crop"></i> Edit
                         </button>
                     </div>
 
-                    <div class="photo-toolbar-group" role="group" aria-label="Calibration" id="intraoralPhotoCalibrationGroup" hidden>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="intraoralPhotoCalibrate"
+                    <div class="viewer-toolbar__group" role="group" aria-label="Calibration" id="intraoralPhotoCalibrationGroup" hidden>
+                        <button type="button" class="icon-btn icon-btn--text" id="intraoralPhotoCalibrate"
                                 title="Draw a Length line over something of known size, then press this and enter its real length">
                             <i class="fas fa-ruler"></i> Calibrate
                         </button>
@@ -349,26 +349,26 @@
                         <span class="cbct-mode-toggle__state" data-mode-state>off</span>
                     </button>
 
-                    <div class="photo-toolbar-group cbct-annotation-tools" id="intraoralPhotoAnnotationTools" role="group" aria-label="Measure" hidden>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Length" title="Length">
+                    <div class="viewer-toolbar__group cbct-annotation-tools" id="intraoralPhotoAnnotationTools" role="group" aria-label="Measure" hidden>
+                        <button type="button" class="icon-btn" data-ygg-tool="Length" title="Length">
                             <i class="fas fa-ruler-horizontal"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Angle" title="Angle">
+                        <button type="button" class="icon-btn" data-ygg-tool="Angle" title="Angle">
                             <i class="fas fa-drafting-compass"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="RectangleROI" title="Rectangle">
+                        <button type="button" class="icon-btn" data-ygg-tool="RectangleROI" title="Rectangle">
                             <i class="far fa-square"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="EllipticalROI" title="Ellipse">
+                        <button type="button" class="icon-btn" data-ygg-tool="EllipticalROI" title="Ellipse">
                             <i class="far fa-circle"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Label" title="Named point">
+                        <button type="button" class="icon-btn" data-ygg-tool="Label" title="Named point">
                             <i class="fas fa-map-pin"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" id="intraoralPhotoClearMeasurements" title="Remove every measurement">
+                        <button type="button" class="icon-btn icon-btn--danger" id="intraoralPhotoClearMeasurements" title="Remove every measurement">
                             <i class="fas fa-trash"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-primary" id="intraoralPhotoSaveMeasurements">
+                        <button type="button" class="icon-btn icon-btn--text icon-btn--primary" id="intraoralPhotoSaveMeasurements">
                             <i class="fas fa-floppy-disk"></i> Save
                         </button>
                     </div>
@@ -415,23 +415,23 @@
                 {{ photo_stack_data|json_script:"photoStackData" }}
                 {% csrf_token %}
 
-                <div class="photo-toolbar" role="toolbar" aria-label="Teleradiography tools">
-                    <div class="photo-toolbar-group" role="group" aria-label="View">
-                        <span class="photo-toolbar-label">View</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoPrev" title="Previous image">
+                <div class="viewer-toolbar" role="toolbar" aria-label="Teleradiography tools">
+                    <div class="viewer-toolbar__group" role="group" aria-label="View">
+                        <span class="viewer-toolbar__label">View</span>
+                        <button type="button" class="icon-btn" id="photoPrev" title="Previous image">
                             <i class="fas fa-chevron-left"></i>
                         </button>
                         <span class="photo-counter" id="photoCounter"></span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoNext" title="Next image">
+                        <button type="button" class="icon-btn" id="photoNext" title="Next image">
                             <i class="fas fa-chevron-right"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoEditImage" title="Crop, mirror or rotate this image">
+                        <button type="button" class="icon-btn icon-btn--text" id="photoEditImage" title="Crop, mirror or rotate this image">
                             <i class="fas fa-crop"></i> Edit
                         </button>
                     </div>
 
-                    <div class="photo-toolbar-group" role="group" aria-label="Calibration" id="photoCalibrationGroup" hidden>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="photoCalibrate"
+                    <div class="viewer-toolbar__group" role="group" aria-label="Calibration" id="photoCalibrationGroup" hidden>
+                        <button type="button" class="icon-btn icon-btn--text" id="photoCalibrate"
                                 title="Draw a Length line over something of known size, then press this and enter its real length">
                             <i class="fas fa-ruler"></i> Calibrate
                         </button>
@@ -447,30 +447,30 @@
                         <span class="cbct-mode-toggle__state" data-mode-state>off</span>
                     </button>
 
-                    <div class="photo-toolbar-group cbct-annotation-tools" id="photoAnnotationTools" role="group" aria-label="Measure" hidden>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Length" title="Length">
+                    <div class="viewer-toolbar__group cbct-annotation-tools" id="photoAnnotationTools" role="group" aria-label="Measure" hidden>
+                        <button type="button" class="icon-btn" data-ygg-tool="Length" title="Length">
                             <i class="fas fa-ruler-horizontal"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Angle" title="Angle">
+                        <button type="button" class="icon-btn" data-ygg-tool="Angle" title="Angle">
                             <i class="fas fa-drafting-compass"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="CobbAngle" title="Cobb angle">
+                        <button type="button" class="icon-btn" data-ygg-tool="CobbAngle" title="Cobb angle">
                             <i class="fas fa-project-diagram"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="RectangleROI" title="Rectangle">
+                        <button type="button" class="icon-btn" data-ygg-tool="RectangleROI" title="Rectangle">
                             <i class="far fa-square"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="EllipticalROI" title="Ellipse">
+                        <button type="button" class="icon-btn" data-ygg-tool="EllipticalROI" title="Ellipse">
                             <i class="far fa-circle"></i>
                         </button>
                         {# A named point, not an arrow: an arrow says where and not what. #}
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-ygg-tool="Label" title="Named point">
+                        <button type="button" class="icon-btn" data-ygg-tool="Label" title="Named point">
                             <i class="fas fa-map-pin"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" id="photoClearMeasurements" title="Remove every measurement">
+                        <button type="button" class="icon-btn icon-btn--danger" id="photoClearMeasurements" title="Remove every measurement">
                             <i class="fas fa-trash"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-primary" id="photoSaveMeasurements">
+                        <button type="button" class="icon-btn icon-btn--text icon-btn--primary" id="photoSaveMeasurements">
                             <i class="fas fa-floppy-disk"></i> Save
                         </button>
                     </div>

@@ -259,11 +259,10 @@ class Patient(models.Model):
         )
     
     def get_cbct_raw_file(self):
-        """Get CBCT raw file from FileRegistry"""
-        try:
-            return self.files.get(file_type='cbct_raw')
-        except FileRegistry.DoesNotExist:
-            return None
+        """Get CBCT raw file from FileRegistry (newest wins)."""
+        return self.files.filter(file_type='cbct_raw').order_by(
+            '-created_at', '-id'
+        ).first()
     
     def get_cbct_processed_file(self):
         """Get CBCT processed file from FileRegistry"""
@@ -272,18 +271,23 @@ class Patient(models.Model):
         ).first()
     
     def get_ios_raw_files(self):
-        """Get IOS raw files from FileRegistry"""
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_raw_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_raw_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
+        """Get IOS raw files from FileRegistry, newest per arch.
+
+        Newest-wins rather than exactly-one: nothing constrains a patient to a
+        single raw upload per arch, and re-uploading an arch is ordinary (a bad
+        scan, a corrected one). Asking for exactly one raised
+        ``MultipleObjectsReturned`` on 1007 of this instance's patients, and
+        every caller of the IOS pair swallows exceptions -- so a second upper
+        did not surface as an error, it read as "this patient has no IOS scans"
+        and 404'd the viewer's ``/data/`` endpoint. Matches
+        ``get_ios_processed_files`` and ``get_cbct_processed_file`` beside it.
+        """
+        return {
+            arch: self.files.filter(file_type=f'ios_raw_{arch}').order_by(
+                '-created_at', '-id'
+            ).first()
+            for arch in ('upper', 'lower')
+        }
     
     def get_ios_processed_files(self):
         """Get IOS processed files from FileRegistry.

@@ -353,19 +353,18 @@ class VoiceCaptionBase(models.Model):
 
     # --- FileRegistry / job lookups ---
 
+    # Newest-wins, not exactly-one: a re-recorded caption leaves a second row,
+    # and `.get()` would raise MultipleObjectsReturned instead of returning it.
+    def _latest_file(self, file_type):
+        return self.files.filter(file_type=file_type).order_by(
+            '-created_at', '-id'
+        ).first()
+
     def get_audio_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='audio_raw')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self._latest_file('audio_raw')
 
     def get_processed_text_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='audio_processed')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self._latest_file('audio_processed')
 
     def get_pending_jobs(self):
         return self.processing_jobs.filter(status__in=['pending', 'processing', 'retrying'])

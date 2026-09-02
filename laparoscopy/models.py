@@ -268,47 +268,28 @@ class Patient(models.Model):
     def get_processed_files(self):
         return self.files.filter(file_type__in=['video_processed', 'audio_processed'])
 
+    # Newest-wins, not exactly-one: a re-uploaded arch or scan is ordinary, and
+    # `.get()` raised MultipleObjectsReturned past callers that swallow it, which
+    # reads as "no scan" rather than as an error. See maxillo's get_ios_raw_files.
+    def _latest_file(self, file_type):
+        return self.files.filter(file_type=file_type).order_by(
+            '-created_at', '-id'
+        ).first()
+
     def get_cbct_raw_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='cbct_raw')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self._latest_file('cbct_raw')
 
     def get_cbct_processed_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='cbct_processed')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self._latest_file('cbct_processed')
 
     def get_ios_raw_files(self):
-        from common.models import FileRegistry
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_raw_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_raw_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
+        return {arch: self._latest_file(f'ios_raw_{arch}') for arch in ('upper', 'lower')}
 
     def get_ios_processed_files(self):
-        from common.models import FileRegistry
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_processed_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_processed_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
+        return {
+            arch: self._latest_file(f'ios_processed_{arch}')
+            for arch in ('upper', 'lower')
+        }
 
 
 class Classification(ClassificationBase):

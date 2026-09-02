@@ -436,6 +436,16 @@ def patient_detail(request, patient_id):
                 messages.warning(request, 'No files were selected for upload.')
                 return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
     
+    # One fetch of the patient's registry rows, shared by the modality presence
+    # filter below and the file-management section further down.
+    try:
+        patient_file_rows = list(
+            patient.files.select_related('modality').order_by('-created_at')
+        )
+    except Exception as e:
+        logger.error(f"Error loading patient files: {e}")
+        patient_file_rows = []
+
     # Build patient's modalities list (slug + name + subtypes) using relations and FileRegistry.modality only
     try:
         from common.models import Modality as _Modality
@@ -509,8 +519,31 @@ def patient_detail(request, patient_id):
         default_tab = 'files'
 
     has_panoramic = has_uploaded_panoramic or has_cbct
-    if not has_panoramic:
-        patient_modalities = [m for m in patient_modalities if m.get('slug') != 'panoramic']
+
+    # Only offer a viewer tab for a modality the patient actually has data for.
+    # `patient.modalities` is a *declaration* -- set at upload from the detected
+    # types, and never pruned -- so on its own it offered tabs onto panes that
+    # could only answer "No IOS Scans". Presence is read from the files, through
+    # the same visibility gate the serve endpoint applies.
+    #
+    # Panoramic keeps its extra allowance: it is derivable from CBCT in the
+    # browser (`cbct_to_panoramic`), so a CBCT-only patient can open the editor
+    # and generate one, and file presence alone would take that away.
+    try:
+        from common.modality_config import present_modality_slugs
+
+        present_slugs = present_modality_slugs(patient_file_rows)
+        if has_panoramic:
+            present_slugs.add('panoramic')
+        patient_modalities = [
+            m for m in patient_modalities if m.get('slug') in present_slugs
+        ]
+    except Exception as e:
+        logger.error(f"Error filtering modalities by presence: {e}")
+        if not has_panoramic:
+            patient_modalities = [
+                m for m in patient_modalities if m.get('slug') != 'panoramic'
+            ]
 
     # Choose default modality: prefer first available (skip modalities marked as non-default)
     default_modality_slug = None
@@ -533,7 +566,7 @@ def patient_detail(request, patient_id):
     # Organize patient files for file management section
     patient_files = {'raw': [], 'processed': [], 'other': []}
     try:
-        all_files = patient.files.all().order_by('-created_at')
+        all_files = patient_file_rows
         
         for file_obj in all_files:
             # Add computed properties for display
@@ -736,7 +769,7 @@ def patient_detail(request, patient_id):
     # Processing steps possible for this patient's rerun ("Rerun" header action).
     try:
         from common.modality_config import rerunnable_steps_for_patient
-        _rerunnable = rerunnable_steps_for_patient(list(patient.files.all()), [], patient=patient)
+        _rerunnable = rerunnable_steps_for_patient(patient_file_rows, [], patient=patient)
         rerunnable_step_slugs = [step['slug'] for step in _rerunnable]
     except Exception:
         logger.warning("Failed to compute rerunnable steps for patient %s", patient.patient_id, exc_info=True)

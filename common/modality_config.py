@@ -159,6 +159,17 @@ def _file_is_raw(file_obj):
     )
 
 
+def _owner_filters(file_obj):
+    """``{owner_fk: id}`` for the first domain FK this row actually carries."""
+    filters = {}
+    for field in ("patient", "brain_patient", "laparoscopy_patient"):
+        owner = getattr(file_obj, f"{field}_id", None)
+        if owner:
+            filters[field] = owner
+            break
+    return filters
+
+
 def _processed_exists_for(file_obj, slug):
     """Whether a ``{slug}_processed`` file exists for the same owning patient.
 
@@ -169,18 +180,34 @@ def _processed_exists_for(file_obj, slug):
     if not slug:
         return False
     from common.models import FileRegistry
-    owner_fields = ("patient", "brain_patient", "laparoscopy_patient")
-    filters = {}
-    for field in owner_fields:
-        owner = getattr(file_obj, f"{field}_id", None)
-        if owner:
-            filters[field] = owner
-            break
+    filters = _owner_filters(file_obj)
     if not filters:
         return False
     try:
         return FileRegistry.objects.filter(
             file_type__startswith=f"{slug}_processed", **filters
+        ).exists()
+    except DatabaseError:
+        return False
+
+
+# A job in one of these states has not finished, so its modality's raw input is
+# still "awaiting processing". Anything else -- completed, failed, or no job at
+# all -- is a settled outcome, and see ``raw_file_hidden`` for why that matters.
+_JOB_IN_FLIGHT_STATUSES = ("pending", "dependency", "processing", "retrying")
+
+
+def _processing_in_flight_for(file_obj, slug):
+    """Whether a ``slug`` job for this file's owner has yet to reach an outcome."""
+    if not slug:
+        return False
+    from common.models import Job
+    filters = _owner_filters(file_obj)
+    if not filters:
+        return False
+    try:
+        return Job.objects.filter(
+            modality_slug=slug, status__in=_JOB_IN_FLIGHT_STATUSES, **filters
         ).exists()
     except DatabaseError:
         return False
@@ -192,9 +219,21 @@ def raw_file_hidden(file_obj):
     Central gate shared by the file listing, the per-modality data endpoints and
     the serve_file backstop. Only raw inputs are affected:
       - ``discard_raw`` on the modality's step  -> always hidden.
-      - ``is_blocking`` on the step AND no ``{slug}_processed`` file yet -> hidden
-        until processing produces a processed output.
+      - ``is_blocking`` on the step AND a job for it is still in flight AND no
+        ``{slug}_processed`` file yet -> hidden until that run settles.
     Non-raw files, and modalities without a step row, are never hidden here.
+
+    The in-flight term is what keeps ``is_blocking`` a *transient* gate, which is
+    the whole of its documented job on the model: "an **in-flight** job for this
+    step gates patient readiness AND its modality's raw input files stay hidden".
+    Judged on the processed file alone it was instead a permanent screen -- a
+    duplicate of ``discard_raw``, and a broken one, because a pipeline that
+    *succeeds* without writing a ``{slug}_processed`` row hid its own inputs
+    forever. That is not hypothetical: ``intraoral-photo`` completes into
+    ``bite_classification`` and segmentation-mask rows, so 11.8k raw photographs
+    with completed jobs served 404 to the viewer, as did every brain MRI input.
+    A settled outcome -- completed, failed, or never started -- means the raw
+    file is the only thing there is to show, and hiding it serves nobody.
     """
     if not _file_is_raw(file_obj):
         return False
@@ -204,9 +243,55 @@ def raw_file_hidden(file_obj):
         return False
     if step.discard_raw:
         return True
-    if step.is_blocking and not _processed_exists_for(file_obj, slug):
+    if (
+        step.is_blocking
+        and not _processed_exists_for(file_obj, slug)
+        and _processing_in_flight_for(file_obj, slug)
+    ):
         return True
     return False
+
+
+def _presence_slug_for_file(file_obj):
+    """Modality slug a row counts *towards*, raw or processed.
+
+    ``_modality_slug_for_file`` answers "which pipeline owns this input", so it
+    only decodes the ``{slug}_raw`` form. Presence is the wider question -- a
+    patient whose raw scan was replaced by its processed output still *has* the
+    modality -- so a ``{slug}_processed`` file_type resolves here too. Split on
+    the marker rather than stripping a suffix, because the processed types are
+    not all bare (``ios_processed_upper``, ``ios_processed_lower``).
+    """
+    slug = _modality_slug_for_file(file_obj)
+    if slug:
+        return slug
+    file_type = str(getattr(file_obj, "file_type", "") or "")
+    if "_processed" in file_type:
+        return file_type.split("_processed")[0]
+    return ""
+
+
+def present_modality_slugs(patient_files):
+    """Modality slugs the patient has at least one *viewable* file for.
+
+    The presence test behind "does this patient actually have this modality",
+    which is what decides whether its viewer tab is offered at all. Offering a
+    tab for an absent modality is not a cosmetic slip: the pane behind it can
+    only render its own empty state ("No IOS Scans"), so the page advertises
+    data it then denies having.
+
+    Rows screened by :func:`raw_file_hidden` do not count, for the same reason --
+    a tab whose files the serve endpoint would refuse is a tab onto 404s.
+    """
+    slugs = set()
+    for file_obj in patient_files or ():
+        slug = _presence_slug_for_file(file_obj)
+        if not slug or slug in slugs:
+            continue
+        if raw_file_hidden(file_obj):
+            continue
+        slugs.add(slug)
+    return slugs
 
 
 def _available_steps_for_files(patient_files, patient=None):

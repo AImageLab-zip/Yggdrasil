@@ -44,6 +44,33 @@ def _brain_patient(**kwargs):
     return Patient.objects.create(project=_project("brain"), **kwargs)
 
 
+def _job(patient, modality_slug, status):
+    """A Job row in ``status``, without waking the dispatch signal.
+
+    ``common.signals._job_post_save`` enqueues a Celery task for a job saved as
+    'pending' or 'retrying'. These tests are about how a status *reads*, not
+    about dispatch, so the status is written with ``update()`` -- which does not
+    emit post_save -- rather than mocking the broker away.
+    """
+    from common.models import Job
+
+    job = Job.objects.create(
+        modality_slug=modality_slug, status="processing", domain="maxillo",
+        patient=patient,
+    )
+    if status != "processing":
+        Job.objects.filter(pk=job.pk).update(status=status)
+        job.refresh_from_db()
+    return job
+
+
+def _set_job_status(job, status):
+    from common.models import Job
+
+    Job.objects.filter(pk=job.pk).update(status=status)
+    job.refresh_from_db()
+
+
 class ModalityConfigAccessorTests(TestCase):
     def test_a_modality_with_no_step_declares_no_processing(self):
         # The reported defect. An admin-added modality (here an intraoral photo
@@ -185,16 +212,51 @@ class RawFileHiddenTests(TestCase):
         self._processed(patient)
         self.assertTrue(mc.raw_file_hidden(self._raw(patient)))
 
-    def test_blocking_hides_raw_until_processed_exists(self):
+    def test_blocking_hides_raw_while_a_job_is_in_flight(self):
         m = _modality("panoramic")
         _step(m, is_blocking=True, discard_raw=False)
         patient = _patient()
         raw = self._raw(patient)
-        # No processed output yet -> blocked/hidden.
+        job = _job(patient, "panoramic", "processing")
+        # Processing under way and no output yet -> blocked/hidden.
         self.assertTrue(mc.raw_file_hidden(raw))
-        # Processed output present -> gate lifts.
-        self._processed(patient)
+        # Processed output present -> gate lifts even mid-run.
+        processed = self._processed(patient)
         self.assertFalse(mc.raw_file_hidden(raw))
+
+        processed.delete()
+        for status in ("pending", "dependency", "retrying"):
+            _set_job_status(job, status)
+            self.assertTrue(mc.raw_file_hidden(raw), status)
+
+    def test_blocking_shows_raw_once_the_run_settles(self):
+        # The reported defect. `intraoral-photo` completes into
+        # bite_classification and mask rows, never a `{slug}_processed` one, so
+        # judged on the processed file alone a *successful* run hid its own
+        # inputs forever -- 11.8k photographs serving 404 to the viewer.
+        m = _modality("panoramic")
+        _step(m, is_blocking=True, discard_raw=False)
+        patient = _patient()
+        raw = self._raw(patient)
+        for status in ("completed", "failed"):
+            _job(patient, "panoramic", status)
+            self.assertFalse(mc.raw_file_hidden(raw), status)
+
+    def test_blocking_shows_raw_when_no_job_was_ever_created(self):
+        # Nothing is in flight and nothing ever will be: the raw file is the
+        # only thing there is to show.
+        m = _modality("panoramic")
+        _step(m, is_blocking=True, discard_raw=False)
+        patient = _patient()
+        self.assertFalse(mc.raw_file_hidden(self._raw(patient)))
+
+    def test_discard_raw_still_hides_with_no_job(self):
+        # discard_raw is the *permanent* screen; adding the in-flight term to
+        # is_blocking must not weaken it.
+        m = _modality("panoramic")
+        _step(m, is_blocking=False, discard_raw=True)
+        patient = _patient()
+        self.assertTrue(mc.raw_file_hidden(self._raw(patient)))
 
     def test_nonblocking_non_discard_shows_raw(self):
         m = _modality("panoramic")
@@ -212,6 +274,58 @@ class RawFileHiddenTests(TestCase):
 
         self.assertTrue(mc.raw_file_hidden(upper))
         self.assertTrue(mc.raw_file_hidden(lower))
+
+
+@override_settings(RUNNER_QUEUE_BY_MODALITY=None)
+class PresentModalitySlugsTests(TestCase):
+    """present_modality_slugs decides which viewer tabs a patient is offered."""
+
+    def _file(self, patient, file_type, **kwargs):
+        from common.models import FileRegistry
+        return FileRegistry.objects.create(
+            file_type=file_type, file_path=f"p/{file_type}", file_size=1,
+            file_hash="h", patient=patient, **kwargs
+        )
+
+    def test_raw_and_processed_both_count_as_present(self):
+        patient = _patient()
+        rows = [
+            self._file(patient, "cbct_raw"),
+            self._file(patient, "panoramic_processed"),
+            self._file(patient, "ios_processed_upper"),
+        ]
+        self.assertEqual(
+            mc.present_modality_slugs(rows), {"cbct", "panoramic", "ios"}
+        )
+
+    def test_a_modality_with_no_file_is_absent(self):
+        # The reported defect: the patient declared IOS and CBCT but only ever
+        # uploaded CBCT, so the IOS tab opened a pane that could only say
+        # "No IOS Scans".
+        patient = _patient()
+        self.assertEqual(
+            mc.present_modality_slugs([self._file(patient, "cbct_raw")]), {"cbct"}
+        )
+
+    def test_the_modality_fk_resolves_a_slug_the_file_type_does_not(self):
+        # `intraoral_raw` files belong to the `intraoral-photo` modality: the
+        # file_type prefix and the slug are different spellings.
+        m = _modality("intraoral-photo")
+        patient = _patient()
+        row = self._file(patient, "intraoral_raw", modality=m)
+        self.assertEqual(mc.present_modality_slugs([row]), {"intraoral-photo"})
+
+    def test_a_hidden_raw_file_does_not_make_its_modality_present(self):
+        m = _modality("panoramic")
+        _step(m, discard_raw=True)
+        patient = _patient()
+        self.assertEqual(
+            mc.present_modality_slugs([self._file(patient, "panoramic_raw")]), set()
+        )
+
+    def test_no_files_is_no_modalities(self):
+        self.assertEqual(mc.present_modality_slugs([]), set())
+        self.assertEqual(mc.present_modality_slugs(None), set())
 
 
 @override_settings(RUNNER_QUEUE_BY_MODALITY=None)

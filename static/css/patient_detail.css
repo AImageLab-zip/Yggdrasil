@@ -1555,6 +1555,9 @@
     margin-bottom: 10px;
 }
 .viewer-toolbar__group { display: flex; align-items: center; gap: 4px; }
+/* `hidden` must beat the flex above, or a collapsed group (calibration, the
+   measurement tools) stays on screen with its mode switched off. */
+.viewer-toolbar__group[hidden] { display: none; }
 .viewer-toolbar__label {
     font-size: 10px;
     font-weight: 700;
@@ -1564,10 +1567,18 @@
     margin-right: 4px;
 }
 .viewer-toolbar__divider { width: 1px; height: 22px; background: var(--ygg-border); }
+/* Selected tool / engaged mode. Scoped to the toolbar so the shared .icon-btn
+   keeps its plain look everywhere else. `photos/controls.js` toggles `.active`
+   on the measurement buttons, which is why this cannot stay id-specific. */
+.viewer-toolbar .icon-btn.active,
 #toggleLandmarkMode.active {
     border-color: var(--ygg-primary);
     background: var(--ygg-accent-soft);
     color: var(--ygg-primary);
+}
+.viewer-toolbar .icon-btn--primary.active {
+    background: var(--ygg-primary);
+    color: var(--ygg-on-primary);
 }
 .ios-landmark-workbench {
     position: relative;

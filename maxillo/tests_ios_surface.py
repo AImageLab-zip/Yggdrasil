@@ -66,6 +66,38 @@ class IosSurfaceRenderTests(TestCase):
                 modality=self.modality,
             )
 
+    def test_a_second_raw_upper_still_resolves_a_pair(self):
+        """The reported defect: a re-uploaded arch made the patient look scan-less.
+
+        `get_ios_raw_files` asked for exactly one row per arch, so a second
+        `ios_raw_upper` raised `MultipleObjectsReturned` -- and every caller of the
+        pair swallows exceptions, so it surfaced not as an error but as "no IOS
+        scans": `/data/` 404'd and the viewer refused to mount. 1007 of the
+        restored instance's patients had a second upper.
+        """
+        from maxillo.ios_meshes import current_ios_pair
+
+        newer = FileRegistry.objects.create(
+            patient=self.patient,
+            domain="maxillo",
+            file_type="ios_raw_upper",
+            file_path="maxillo/ios_raw/upper_v2.stl",
+            file_size=4,
+            file_hash="9" * 64,
+            modality=self.modality,
+        )
+
+        self.assertTrue(self.patient.has_ios_scans())
+        pair = current_ios_pair(self.patient)
+        self.assertIsNotNone(pair)
+        # Newest wins, so landmarks anchor against the scan the viewer shows.
+        self.assertEqual(pair["upper"].pk, newer.pk)
+
+        response = self.client.get(
+            reverse("maxillo:patient_viewer_data", kwargs={"patient_id": self.patient.patient_id})
+        )
+        self.assertEqual(response.status_code, 200)
+
     def _page(self):
         response = self.client.get(
             reverse("maxillo:patient_detail", kwargs={"patient_id": self.patient.patient_id})

@@ -1126,33 +1126,11 @@
    conclusion that they behave differently.
    --------------------------------------------------------------------------- */
 
-.photo-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.25rem;
-}
-
-.photo-toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-/* `hidden` must win over the flex above, or the tool group stays visible with
-   annotation mode off -- the same override .cbct-annotation-tools needs. */
-.photo-toolbar-group[hidden] {
-  display: none;
-}
-
-.photo-toolbar-label {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.65;
-  margin-right: 0.15rem;
-}
+/* The photo surfaces use the page's own `.viewer-toolbar` component (chrome,
+   groups, labels and .icon-btn, in patient_detail.css) rather than a second
+   toolbar of their own: the IOS bar sits directly above them on this page, and
+   two toolbars styled almost alike read as two different kinds of control. Only
+   the readouts below are specific to a photo stack. */
 
 .photo-counter,
 .photo-calibration {
