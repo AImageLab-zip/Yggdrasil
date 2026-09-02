@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.0.0] - 2026-09-02
 
 ### Added
+- **`migrate_dataset_to_object_storage --trust-storage`, for finishing its own
+  interrupted run.** The command decides whether a legacy `/dataset` reference can be
+  rewritten by asking the local filesystem, which is right when it is migrating a live
+  dataset and useless afterwards: once the blobs are uploaded and the machine they came
+  from is gone, every path reads as missing and nothing is rewritten. `--trust-storage`
+  asks the object store instead -- an exact key, or a prefix for folder and DICOM
+  bundles -- and never uploads. The check runs in dry-run too, because the point of the
+  dry run is to prove every reference resolves before a row is touched.
+  Run against the 1.9 production database it establishes that the `/dataset` migration
+  had in fact completed: **no** `FileRegistry.file_path` still names one, and
+  `metadata['files'][*]['path']` holds object keys. What remains is residue -- 810 rows
+  whose `metadata['logs']` quotes old paths in job output, one row whose
+  `metadata['files']` names a panoramic PNG that is genuinely absent from the store, and
+  11 `Job` rows whose `input_files`/`output_files` name 14 objects that are likewise
+  absent. None of it is on a serving path except that single panoramic, which already
+  404s wherever it is read from, since every instance reads the same bucket.
 - **A bucket-to-bucket clone, for moving the instance without moving the store.**
   `scripts/mirror_bucket.py` copies one S3/Garage bucket into another key for key, so a
   new deployment can be given its own bucket while the old instance keeps serving from

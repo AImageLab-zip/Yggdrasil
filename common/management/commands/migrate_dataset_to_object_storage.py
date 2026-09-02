@@ -42,6 +42,19 @@ def _local_path_to_key(local_path: str, *, dataset_root: str) -> str:
     return key
 
 
+def _storage_has(storage, key: str) -> bool:
+    """Whether ``key`` names something stored -- an object, or a bundle's prefix."""
+    if storage.exists(key):
+        return True
+    try:
+        next(iter(storage.list_keys(key.rstrip("/") + "/")))
+    except StopIteration:
+        return False
+    except ObjectStorageError:
+        return False
+    return True
+
+
 def _should_rewrite_path(value: str, *, dataset_root: str) -> bool:
     if not value or not isinstance(value, str):
         return False
@@ -130,6 +143,15 @@ class Command(BaseCommand):
             help="Limit number of records per model (0 = no limit).",
         )
         parser.add_argument(
+            "--trust-storage",
+            action="store_true",
+            help=(
+                "Decide by what is in object storage rather than what is on local disk, "
+                "and never upload. For finishing an interrupted run: the blobs went up, "
+                "the DB references did not, and the filesystem they came from is gone."
+            ),
+        )
+        parser.add_argument(
             "--fail-missing",
             action="store_true",
             help=(
@@ -140,11 +162,16 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dataset_root = _norm_dataset_root(options["dataset_root"])
         do_apply = bool(options["apply"])
+        trust_storage = bool(options.get("trust_storage"))
         limit = int(options["limit"] or 0)
         fail_missing = bool(options.get("fail_missing"))
 
         self.stdout.write(f"Dataset root: {dataset_root}")
         self.stdout.write("Mode: APPLY" if do_apply else "Mode: DRY-RUN")
+        if trust_storage:
+            self.stdout.write(
+                "Source of truth: OBJECT STORAGE (no uploads; local filesystem ignored)"
+            )
 
         storage = get_object_storage()
         uploaded: Dict[str, Any] = {}
@@ -269,6 +296,20 @@ class Command(BaseCommand):
                 return uploaded[local_path]
 
             key = _local_path_to_key(local_path, dataset_root=dataset_root)
+
+            if trust_storage:
+                # A rewrite is only safe if the object is actually there, so this is
+                # checked in dry-run too -- the point of the dry run is to prove every
+                # path resolves before any row is touched. A row may name a single
+                # object or, for folder/DICOM bundles, a prefix.
+                if _storage_has(storage, key):
+                    uploaded[local_path] = key
+                    return key
+                if fail_missing:
+                    raise CommandError(f"Not in object storage: {key}")
+                _record_missing(local_path)
+                uploaded[local_path] = MISSING
+                return MISSING
 
             if not do_apply:
                 uploaded[local_path] = key
