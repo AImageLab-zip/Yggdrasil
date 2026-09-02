@@ -113,6 +113,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_or_create` only ever applied the seeder's defaults at creation.
 
 ### Fixed
+- **Turning on SSL discarded the configured CORS origins.** `ENABLE_SSL` did not adjust
+  `CORS_ALLOWED_ORIGINS`, it *replaced* it with a hardcoded list naming one hostname, so
+  any deployment served under a different name was silently absent from its own CORS
+  policy and no setting could put it back -- `CORS_ALLOWED_ORIGINS` in the environment
+  was read only when SSL was off, which is when it matters least. SSL now selects the
+  *default* and configuration wins, so an instance answering on two hostnames can say so.
 - **One classification per patient per classifier, which production already enforced.**
   A `UniqueConstraint(patient, classifier)` reached production out of band, ahead of this
   line, together with a pass that collapsed existing duplicates. The invariant is the

@@ -225,18 +225,19 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB
 DATA_UPLOAD_MAX_NUMBER_FILES = 1500  # large DICOM folder uploads
 
 
-if ENABLE_SSL:
-    CORS_ALLOWED_ORIGINS = [
-        "https://yggdrasil.ing.unimore.it",
-        "https://localhost:8000",
-        "https://127.0.0.1:8000",
-    ]
-else:
-    CORS_ALLOWED_ORIGINS = config(
-        "CORS_ALLOWED_ORIGINS",
-        default="http://localhost:8000,http://127.0.0.1:8000",
-        cast=str,
-    ).split(",")
+# Turning on SSL used to *replace* the configured origins with a hardcoded list, so a
+# deployment served under any other hostname silently had itself missing from its own
+# CORS policy and no setting could fix it. SSL now only changes the default.
+_CORS_DEFAULT = (
+    "https://yggdrasil.ing.unimore.it,https://localhost:8000,https://127.0.0.1:8000"
+    if ENABLE_SSL
+    else "http://localhost:8000,http://127.0.0.1:8000"
+)
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in config("CORS_ALLOWED_ORIGINS", default=_CORS_DEFAULT, cast=str).split(",")
+    if origin.strip()
+]
 
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = config(
