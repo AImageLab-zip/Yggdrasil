@@ -220,9 +220,15 @@ STORAGES = {
 }
 
 # File Upload Settings
+#
+# DATA_UPLOAD_MAX_MEMORY_SIZE caps the whole request body and has to accommodate
+# a large scan upload. FILE_UPLOAD_MAX_MEMORY_SIZE is different: it is the point
+# at which Django stops holding an uploaded file in RAM and spills it to a temp
+# file. Setting it to 5 GB meant every upload was buffered in memory, across
+# four workers. Keep it small; the spill is the desired behaviour.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 1048576000 * 5  # 5GB
-DATA_UPLOAD_MAX_NUMBER_FILES = 1500  # large DICOM folder uploads
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024  # 5MB, then spill to disk
+DATA_UPLOAD_MAX_NUMBER_FILES = 1500  # multi-file folder uploads
 
 
 # Turning on SSL used to *replace* the configured origins with a hardcoded list, so a
@@ -450,6 +456,8 @@ CELERY_TASK_ROUTES = {
 
 # Logging Configuration
 LOG_LEVEL = config("LOG_LEVEL", default="DEBUG" if DEBUG else "INFO")
+LOG_MAX_BYTES = config("LOG_MAX_BYTES", default=20 * 1024 * 1024, cast=int)
+LOG_BACKUP_COUNT = config("LOG_BACKUP_COUNT", default=5, cast=int)
 
 LOGGING = {
     "version": 1,
@@ -475,8 +483,13 @@ LOGGING = {
             "level": LOG_LEVEL,
         },
         "file": {
-            "class": "logging.FileHandler",
+            # Rotating, not plain FileHandler: this file is long-lived on the
+            # production host and an unbounded one reached 62 MB before anyone
+            # looked at it.
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": BASE_DIR / "logs" / "django.log",
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
             "formatter": "detailed",
             "level": LOG_LEVEL,
         },
@@ -525,14 +538,13 @@ LOGGING = {
     },
 }
 
-# In production, ensure we capture all errors
+# In production, quieten Django's own chatter. The app loggers stay at
+# LOG_LEVEL -- an earlier version pinned them to DEBUG here, which inverted the
+# intent of this block and is what kept request bodies flowing to disk with
+# DEBUG=False.
 if not DEBUG:
     LOGGING["loggers"]["django"]["level"] = "WARNING"
     LOGGING["loggers"]["django.request"]["level"] = "ERROR"
     LOGGING["loggers"]["django.server"]["level"] = "ERROR"
-    # But keep our app logs at DEBUG level
-    LOGGING["loggers"]["maxillo"]["level"] = "DEBUG"
-    LOGGING["loggers"]["yggdrasil"]["level"] = "DEBUG"
-    LOGGING["loggers"]["yggdrasil.middleware"]["level"] = "DEBUG"
 
 os.makedirs(BASE_DIR / "logs", exist_ok=True)
