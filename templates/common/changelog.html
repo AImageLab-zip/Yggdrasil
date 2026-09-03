@@ -1,11 +1,13 @@
-{% extends 'base.html' %}
+{% extends 'common/base_app.html' %}
 {% load icons %}
 
 {% comment %}
-Extends base.html, NOT common/base_app.html: this page is public -- the version
-link in the footer renders on /login/, on the landing page and on the anonymous
-demo -- while base_app.html is the shell for authenticated working pages and
-forces the icon rail and breadcrumb topbar.
+Extends common/base_app.html, the rail + breadcrumb-topbar shell shared with
+the other working pages (e.g. the control panel). This page stays public --
+the version link in the footer renders on /login/, on the landing page and on
+the anonymous demo -- so no login gate here: for anonymous visitors the rail
+renders logo-only (its links gate on user.is_authenticated) and the topbar
+shows no user menu.
 
 The release list is parsed out of CHANGELOG.md by common.views._parse_changelog,
 so this page and the GitHub release notes read the same source.
@@ -19,6 +21,12 @@ existing utilities is written out here instead of being invented as a utility.
 {% endcomment %}
 
 {% block title %}Changelog - Yggdrasil{% endblock %}
+
+{% block breadcrumb %}
+    <span class="capitalize">Yggdrasil</span>
+    {% icon 'chevron-right' 'ygg-icon-sm' %}
+    <span class="crumb-current">What's new</span>
+{% endblock %}
 
 {% block extra_css %}
 <style>

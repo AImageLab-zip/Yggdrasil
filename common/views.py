@@ -516,6 +516,12 @@ def _parse_changelog(path):
     ``sections`` (``{"heading", "items"}``). The contract with the release
     workflow is that a release starts with ``## [`` at column 0; this parser
     reads exactly that boundary, so the two cannot drift apart.
+
+    An ``Unreleased`` section with no content is skipped: at release time the
+    placeholder carries no information, and the page should open on the latest
+    numbered release. A non-empty ``Unreleased`` still renders, so mid-cycle
+    work keeps its usual staging spot (only the stock "Nothing yet..."
+    placeholder counts as empty).
     """
     import re
 
@@ -572,7 +578,25 @@ def _parse_changelog(path):
         buffer.append(line)
 
     flush_paragraph()
-    return releases
+    # An ``Unreleased`` section with no content is skipped: at release time the
+    # placeholder carries no information, and the page should open on the
+    # latest numbered release. "No content" means no ``###`` sections and no
+    # intro beyond the stock "Nothing yet..." placeholder; a non-empty
+    # ``Unreleased`` still renders, so mid-cycle work keeps its staging spot.
+    return [
+        r
+        for r in releases
+        if r["version"] != "Unreleased" or r["sections"] or _has_real_intro(r)
+    ]
+
+
+def _has_real_intro(release):
+    """True when an ``Unreleased`` entry carries prose beyond the stock
+    "Nothing yet..." placeholder that ships in the file template."""
+    return any(
+        not str(paragraph).startswith("Nothing yet")
+        for paragraph in release["intro"]
+    )
 
 
 def _load_changelog():

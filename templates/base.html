@@ -69,81 +69,17 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}{% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message and not hide_maintenance_banner %} has-maintenance-banner{% endif %}">
-    {% firstof request.resolver_match.namespace 'maxillo' as ns %}
     {% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message and not hide_maintenance_banner %}
     <div class="maintenance-banner" role="status" title="{{ site_maintenance.planned_message }}">
         <span>{{ site_maintenance.planned_message }}</span>
     </div>
     {% endif %}
 
-    {% block chrome %}
-    {% block navbar %}
-    <nav class="ygg-nav">
-        <div class="ygg-nav-inner">
-            <!-- Brand (tree + wordmark) + project switcher -->
-            <div class="flex items-center gap-2 shrink-0">
-                <a class="ygg-brand shrink-0" href="/">
-                    <img class="ygg-brand-logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
-                    {% include 'common/partials/wordmark.html' %}
-                </a>
-                {% if is_demo_guest %}
-                    <span class="badge-ygg badge-neutral">Public demo — read-only</span>
-                {% endif %}
-            </div>
-
-            <!-- Desktop nav -->
-            <div class="hidden lg:flex items-center gap-1 ml-2">
-                {% include 'common/partials/nav_links.html' %}
-            </div>
-
-            <!-- Right: user menu / login -->
-            <div class="ml-auto flex items-center gap-1">
-                <button type="button" class="ygg-nav-link" data-theme-toggle aria-label="Switch theme">
-                    <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
-                    <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
-                </button>
-                {% if is_demo_guest %}
-                    <form method="post" action="{% url 'logout' %}">
-                        {% csrf_token %}
-                        <button type="submit" class="ygg-nav-link">{% icon 'sign-in-alt' %}<span>Exit demo / Log in</span></button>
-                    </form>
-                {% elif user.is_authenticated %}
-                    <div class="relative" data-dropdown>
-                        <button type="button" class="ygg-nav-link" data-dropdown-toggle aria-expanded="false">
-                            {% icon 'user' %}<span class="hidden sm:inline">{{ user.username }}</span>
-                            {% icon 'chevron-down' 'ygg-icon-sm opacity-60' %}
-                        </button>
-                        <div class="ygg-menu" data-dropdown-menu hidden>
-                            <a class="ygg-menu-item" href="{% url ns|add:':user_profile' %}">{% icon 'user' %}<span>Profile</span></a>
-                            {% if user.is_staff %}
-                                <a class="ygg-menu-item" href="{% url 'admin_control_panel' %}">{% icon 'layout-dashboard' %}<span>Control Panel</span></a>
-                                <a class="ygg-menu-item" href="{% url 'invitation_list' %}">{% icon 'envelope' %}<span>Manage Invitations</span></a>
-                            {% endif %}
-                            <div class="border-t border-line my-1"></div>
-                            <form method="post" action="{% url 'logout' %}">
-                                {% csrf_token %}
-                                <button type="submit" class="ygg-menu-item w-full text-danger">{% icon 'sign-out-alt' %}<span>Logout</span></button>
-                            </form>
-                        </div>
-                    </div>
-                {% else %}
-                    <a class="ygg-nav-link" href="{% url 'login' %}">{% icon 'sign-in-alt' %}<span>Login</span></a>
-                {% endif %}
-
-                <!-- Mobile toggle -->
-                {% if user.is_authenticated %}
-                    <button type="button" class="ygg-nav-link lg:hidden" data-mobile-toggle aria-expanded="false" aria-label="Menu">{% icon 'menu' 'ygg-icon-lg' %}</button>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Mobile nav panel -->
-        <div class="lg:hidden border-t border-white/5 px-3 py-2 flex flex-col gap-1" data-mobile-nav hidden>
-            {% include 'common/partials/nav_links.html' %}
-        </div>
-    </nav>
-    {% endblock %}
-    {% endblock %}{# chrome #}
+    {% comment %} base.html carries no nav of its own: authenticated working
+       pages get the rail + breadcrumb topbar via common/base_app.html, while
+       landing/auth/error pages either bring their own chrome or blank it.
+       The old ygg-nav top bar was removed with the 3.0 release. {% endcomment %}
+    {% block chrome %}{% endblock %}{# chrome #}
 
     {% block messages %}
     {% if messages %}
