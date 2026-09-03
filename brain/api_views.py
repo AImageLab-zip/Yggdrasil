@@ -48,12 +48,6 @@ def _job_list(request):
     })
 
 
-class ProcessingJobListView:
-    @classmethod
-    def as_view(cls):
-        return _job_list
-
-
 @login_required
 @_staff_required
 def get_job_status(request, job_id):

@@ -140,7 +140,6 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "yggdrasil.wsgi.application"
 ASGI_APPLICATION = "yggdrasil.asgi.application"
 
 # Database

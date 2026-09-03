@@ -175,7 +175,7 @@ urlpatterns = [
     path("api/processing/health/", api_views.health_check, name="api_health_check"),
     path(
         "api/processing/jobs/",
-        api_views.ProcessingJobListView.as_view(),
+        api_views._job_list,
         name="api_processing_jobs",
     ),
     path(
