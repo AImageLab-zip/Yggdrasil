@@ -81,5 +81,5 @@ else
 fi
 
 echo "Backup completed: $OUTPUT_FILE"
-echo "Next step (restore into a fresh 2.0 stack — see docs/upgrade-1.9-to-2.0.md):"
+echo "Next step (restore into a fresh stack — see docs/admin-tasks.md):"
 echo "  ./scripts/restore_prod.sh $OUTPUT_FILE"

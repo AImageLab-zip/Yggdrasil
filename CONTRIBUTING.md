@@ -19,14 +19,31 @@ Stop the stack with `docker compose -f docker-compose.dev.yml down`
 
 ## Running tests
 
-With the dev stack up:
+The normal command, with or without the dev stack running:
 
 ```bash
-docker compose -f docker-compose.dev.yml run --rm web python manage.py test
+docker compose -f docker-compose.dev.yml run --rm --no-deps -T web python manage.py test
 ```
 
-Or without the dev stack, the raw-docker recipe in
-`docs/modernization-roadmap.md` (MySQL 8 + Redis 7 containers on a scratch network).
+`--no-deps` keeps it from starting the other services; drop it if you want the suite to
+run against a live MySQL and Garage.
+
+**Without a MySQL server at all**, use the SQLite settings module:
+
+```bash
+python manage.py test --settings=yggdrasil.settings_sqlite_test
+```
+
+`yggdrasil/settings_sqlite_test.py` exists because `yggdrasil/settings.py` hard-wires
+MySQL and validates its credentials at import, so a suite that only ever touches a
+`test_` database would otherwise need a database server. It imports the real settings
+and swaps in an in-memory SQLite database, disables the SSL redirect and uses a fast
+password hasher. It is not used by any deployment.
+
+It is a convenience, not the reference environment. **CI runs against MySQL 8**, and it
+has to: several rules in this codebase are green on SQLite and absent on MySQL (see
+[Schema rules](#schema-rules)). A change to models or constraints must be run against
+MySQL before it is trusted.
 
 **After a change to `requirements.txt`, rebuild the image before running tests** — the
 dependencies are baked in at build time, and a stale image fails with an import error
@@ -36,10 +53,13 @@ that looks like a broken branch rather than a stale container:
 docker compose -f docker-compose.dev.yml build web
 ```
 
+The frontend has its own suite (`npm test`), described under
+[The frontend bundle](#the-frontend-bundle).
+
 ## CI
 
 `.github/workflows/ci.yml` runs on self-hosted runners for pushes to
-`release/3.0`/`release/2.0`/`main` and all PRs:
+`release/3.0`/`main` and all PRs:
 
 - **lint** — `ruff check .` with a deliberately minimal ruleset
   (`E9`, `F63`, `F7`, `F82`: syntax errors and undefined names only).
@@ -70,22 +90,6 @@ byte-reproducible artefact CI re-derives and compares, and the viewer's web work
 wasm blobs have to sit at paths the emitting file can reach (see the `import.meta.url`
 note below).
 
-Third-party CDNs are fine, and `templates/base.html` uses three. An earlier rule
-forbade them; it is gone. Two things it is worth keeping in mind rather than a policy:
-
-- **Webfonts stay self-hosted.** A font CDN sees every page view of every visitor,
-  which is a GDPR question a JavaScript library does not raise. IBM Plex and Font
-  Awesome are served from `static/`.
-- **Pin what you load.** A version-less CDN URL changes the viewer under you with no
-  commit to bisect.
-- **SRI what you pin.** Every third-party `<script>` carries
-  `integrity="sha384-…" crossorigin="anonymous"`. These pages render patient data, and
-  without it a CDN compromise executes arbitrary JavaScript in a clinical app; with it
-  the script simply fails to load. Safe precisely *because* the URLs are exact pins —
-  jsdelivr's caveat about SRI applies to dynamically generated files, which these are
-  not. Compute one with
-  `curl -sfL <url> | openssl dgst -sha384 -binary | openssl base64 -A`.
-
 ```bash
 npm ci               # exact versions from package-lock.json; needs registry egress
 npm run build        # -> static/vendor/cornerstone/<build>/ + manifest.json
@@ -99,7 +103,7 @@ pinned exactly, the lockfile is committed, and sourcemaps are off.
 
 Two constraints that look like style but are not:
 
-- The **root `package.json` must not have a `"type"` field.** The seven test files in
+- The **root `package.json` must not have a `"type"` field.** The test files in
   `static/js/tests/` are CommonJS and stop resolving if the root scope becomes ESM.
   `frontend/package.json` carries `"type": "module"` for the new source instead.
 - The bundle is **ESM, and script tags must be `type="module"`.** Three vendored
@@ -114,66 +118,94 @@ Templates load a surface with:
 {% cornerstone_entry 'volume-grid' %}
 ```
 
-Details and rationale: [docs/cornerstone-roadmap.md](docs/cornerstone-roadmap.md).
+Where the bundle fits in the system as a whole: [docs/architecture.md](docs/architecture.md).
 
-## `reorient.js` is load-bearing, and the panoramic is why
+### Third-party CDNs
 
-The panoramic baker consumes **RAS-ordered voxels**, because NiiVue reoriented every
-volume on load and every existing exported strip was produced from that array.
-`frontend/imaging/geometry/reorient.js` does the reorientation, and
-`frontend/imaging/panoramic/volumeSupply.js` is its one caller.
+CDNs are allowed. Today exactly one template uses one:
+`templates/common/user_activity_stats.html` loads two pinned Chart.js scripts from
+jsDelivr, both with SRI. `templates/base.html` loads **no** CDN scripts at all. Three
+rules apply to anything new:
 
-Do not "simplify" the reorientation away. The panoramic was tuned against NiiVue's
-output, `export_catalog.py` ships the baked PNGs, and a different-but-defensible
-convention is still a change to an exported clinical artifact that nothing in the build
-would notice — every test would stay green while every panoramic came out transposed.
+- **Webfonts stay self-hosted.** A font CDN sees every page view of every visitor,
+  which is a GDPR question a JavaScript library does not raise. IBM Plex and Font
+  Awesome are served from `static/`.
+- **Pin what you load.** A version-less CDN URL changes the viewer under you with no
+  commit to bisect.
+- **SRI what you pin.** Every third-party `<script>` must carry
+  `integrity="sha384-…" crossorigin="anonymous"`. These pages render patient data, and
+  without it a CDN compromise executes arbitrary JavaScript in a clinical app; with it
+  the script simply fails to load. Safe precisely *because* the URLs are exact pins —
+  jsDelivr's caveat about SRI applies to dynamically generated files, which these are
+  not. Compute one with
+  `curl -sfL <url> | openssl dgst -sha384 -binary | openssl base64 -A`.
 
-`panoramicSource.js`, the shim that kept the old Konva editor reading through
-`window.ViewerGrid` after NiiVue went, is **gone** with Phase 7. The panoramic now reads
-the CBCT out of the Cornerstone cache the volume grid already filled: every bundle entry
-imports the same shared chunk, so the cache is one instance per page.
+## Imaging invariants
 
-## `seg2pano_core.js` is not migrated code, and must not become it
+### `reorient.js` is load-bearing, and the panoramic is why
+
+The panoramic baker consumes **RAS-ordered voxels**. `frontend/imaging/geometry/reorient.js`
+does the reorientation and `frontend/imaging/panoramic/volumeSupply.js` is its one
+caller.
+
+**The flip must use the *source* axis length, not the output axis's.** The two agree on
+a cube and differ on every real CBCT, so a test corpus of cubes will not catch it.
+`frontend/tests/reorient.test.js` guards this.
+
+Do not "simplify" the reorientation away. `common/export_catalog.py` ships the baked
+PNGs, so a different-but-defensible convention is still a change to an exported clinical
+artifact that nothing in the build would notice — every test would stay green while every
+panoramic came out transposed.
+
+### `seg2pano_core.js` is not migrated code, and must not become it
 
 `static/js/seg2pano_core.js` and `static/js/worker/seg2pano_worker.js` are the panoramic's
-reconstruction: the arch fit, the slab and the projection. Decision #8 requires the strips
-they bake to keep their exact bytes, so Phase 7 rewrote the *viewer* around them and left
-them untouched.
+reconstruction: the arch fit, the slab and the projection. The strips they bake must keep
+their exact bytes, so the *viewer* was rewritten around them and they were left untouched.
 
-The bundle reaches the core through the `Seg2PanoCore` **global**, deliberately. Importing
-or vendoring a copy would create a second implementation of the arch mathematics, and the
-two would diverge silently — the drawn curve would stop being the curve the projection
-follows, and nothing would say so.
+The bundle reaches the core through the `Seg2PanoCore` **global**, deliberately.
+**Importing or vendoring a copy is forbidden**: it would create a second implementation of
+the arch mathematics, and the two would diverge silently — the drawn curve would stop
+being the curve the projection follows, and nothing would say so.
 
-## The Phase 3 validation harness is gone
+### `modalityLutModule` is derived from the raw NIfTI header
 
-It was deleted once Phase 3 closed, and the note is kept only so nobody goes looking
-for it. `frontend/imaging/validation/`, `frontend/entries/volume-validation.js`,
-`common/imaging_validation.py`, `templates/common/imaging_validation.html`, the
-`/imaging-validation/` route and the `@niivue/niivue` devDependency existed to clear
-one gate: the volume grid could not be replaced until Tier 1 (geometry) and Tier 2
-(intensity) were green across the corpus. They were, F7's `amip` sign-off was recorded,
-and a scaffold that outlives its gate becomes architecture nobody chose.
+Never take it from the upstream helper. Upstream combines the rescale factors with `&&`
+where it needs `||`, so rescale is skipped whenever *either* factor is neutral — the
+`scl_slope=1, scl_inter=-1024` encoding is exactly that case, and it is a real CBCT
+encoding. Derive slope and intercept from the header
+(`frontend/imaging/metadata/modalityLutModule.js`, guarded by
+`frontend/tests/modalityLutModule.test.js`).
 
-**NiiVue went with it, so there is no longer a reference implementation in the tree.**
-Re-running either tier means reverting that commit. If a corpus turns up that is worth
-checking — the brain studies the staging box could not read, or any volume actually
-using the `scl_slope=1, scl_inter=-1024` encoding F1 is about — check it before
-assuming the history is still convenient to reach.
+### NIfTI loader URL rules
 
-Two rules the harness encoded are worth carrying into anything that replaces it:
+The loader calls `new URL(url)` with one argument, so it **throws on a relative path** —
+make URLs absolute before handing them over (`frontend/imaging/ids/imageIds.js`). It then
+tests `pathname.endsWith('.gz')` to decide whether to decompress, so:
 
-- **Compare each viewer against the file's own affine, never against the other one.**
+- the `.gz` suffix must be on the **last path segment**, not behind a query string;
+- `file_key` must stay a **query parameter**, never a path segment.
+
+### Cornerstone runtime identifiers are session-scoped
+
+`annotationUID`, `imageId`, `volumeId`, `segmentationId` and `cachedStats` exist only for
+the lifetime of a page. **They must never be persisted** — not in a payload, not in a
+canonical document, not in an identity key. A record carrying one looks durable while not
+being.
+
+### Validating a viewer
+
+Two rules worth keeping whatever the harness of the day is:
+
+- **Compare each viewer against the file's own affine, never against another viewer.**
   A pairwise diff reports agreement when both stacks are wrong the same way, which is
   exactly the population whose header declares no orientation.
-- **Seed the sampling.** A gate whose samples cannot be reproduced means "green once,
-  on voxels nobody can name".
+- **Seed the sampling.** A gate whose samples cannot be reproduced means "green once, on
+  voxels nobody can name".
 
-And one lesson that cost two defects: **a green harness is not evidence that a viewer
-works.** It validates the data path — does a voxel land where the affine says, does it
-hold the value the header says — and says nothing about whether tools bind or
-annotations draw. Both bugs Phase 3 shipped with were in that gap, and both were found
-by a person using the viewer.
+And: a green data-path check is not evidence that a viewer works. It says a voxel lands
+where the affine says and holds the value the header says; it says nothing about whether
+tools bind or annotations draw.
 
 ## The `annotations` app: layering is enforced by review
 
@@ -192,42 +224,52 @@ are the point:
   `ever_annotated` flag, fingerprints the targets and validates the items in
   one transaction; a caller free to skip a step will eventually skip the flag,
   and then a scan with landmarks on it becomes replaceable.
-- **`serializers/`** builds the canonical JSON document. No Cornerstone runtime
-  identifier may appear in it — `annotationUID`, `imageId`, `volumeId`,
-  `segmentationId`, `cachedStats` are session-scoped, and a document carrying
-  one looks durable while not being.
+- **`serializers/`** builds the canonical JSON document.
 
-Concurrency is `UniqueConstraint(annotation_set, revision_number)`. Pass the
-revision you loaded to `record_revision`; do **not** compute the next number
-from a `SELECT MAX(...)`, which reopens the race the constraint exists to close.
+### Revision concurrency
 
-Two schema rules look like style and are not. Conditional constraints
-(`UniqueConstraint(condition=...)`) compile to **nothing** on MySQL — no partial
-index, no error — so "exactly one" rules use a nullable slot column instead. And
-a millimetre measurement requires `is_calibrated`, enforced by a `CHECK`: an
-uncalibrated length is reported in pixels, never dressed up as a physical size.
+`UniqueConstraint(annotation_set, revision_number)` is the primitive.
+**Pass the revision you loaded to `record_revision`.** Do **not** compute the next number
+from a `SELECT MAX(...)+1`, which reopens the race the constraint exists to close. A
+losing writer gets a conflict and rebases; there is deliberately no automatic merge.
+
+### Schema rules
+
+- **Conditional constraints compile to nothing on MySQL.**
+  `UniqueConstraint(condition=...)` produces no partial index and no error on MySQL — it
+  is simply absent in production while passing on SQLite. "Exactly one" rules therefore
+  use a **nullable slot column** with a plain unique constraint instead
+  (`primary_slot`, `canonical_slot`: `1` or `NULL`).
+- **A millimetre measurement requires `is_calibrated`, enforced by a `CHECK`.** An
+  uncalibrated length is reported in pixels, never dressed up as a physical size.
+- **Identity keys cap at 255 characters** (`SourceResource.identity_key` is
+  `varchar(255)`; `annotations/identity.py` holds `MAX_IDENTITY_KEY_LENGTH`). Building a
+  longer key is an **error**, never a truncation: MySQL in non-strict mode would truncate
+  silently and collide two different resources onto one row.
 
 ## Object-storage work is a management command, never a migration or a request
 
-Anything that reads bytes out of Garage lives in `annotations/management/commands/`.
-Not a `RunPython`: row counts are unbounded, a migration doing it blocks the deploy
-and cannot resume after failing halfway, and object storage is unreachable in CI.
-Not a request path either — `annotations_compute_roi_stats` downloads whole volumes.
+Anything that reads bytes out of object storage lives in a management command. Not a
+`RunPython`: row counts are unbounded, a migration doing it blocks the deploy and cannot
+resume after failing halfway, and object storage is unreachable in CI. Not a request path
+either — a stats sweep downloads whole volumes.
 
 `annotations_normalize_coordinates`, `annotations_materialize_landmarks`,
 `annotations_crosscheck` and `annotations_compute_roi_stats` all follow the same
-shape, and it is worth copying: idempotent, `--dry-run`, `--limit`, and **one bad
-object costs its own rows and not the sweep**. A corpus pass that dies on the first
-unreadable file is a pass nobody can finish.
+shape, and it is worth copying:
 
-Group by resource before downloading. A volume shared by twenty annotations must be
-fetched once; the naive loop is O(annotations) round trips, which on a real corpus is
-hours rather than minutes.
+- idempotent;
+- `--dry-run` and `--limit`;
+- **one bad object costs its own rows and not the sweep** — a corpus pass that dies on
+  the first unreadable file is a pass nobody can finish;
+- **group by resource before downloading.** A volume shared by twenty annotations must be
+  fetched once; the naive loop is O(annotations) round trips, which on a real corpus is
+  hours rather than minutes.
 
 ## The runner HTTP API is frozen
 
 External processing runners speak the claim/complete/fail HTTP API
-(`maxillo/api_views/runner.py`, `maxillo/runner_api_service.py`). Its behavior
+(`maxillo/api_views/runner.py`, `maxillo/runner_api_service.py`). Its behaviour
 is pinned by the contract tests in `maxillo/tests_runner_api.py`. If your
 change makes one of those tests fail, you are breaking deployed runners:
 **do not adjust the test without explicit maintainer sign-off.**
@@ -238,23 +280,29 @@ change makes one of those tests fail, you are breaking deployed runners:
 - Bump `VERSION` and add a `CHANGELOG.md` section in the same PR.
 - Pushing a tag `vX.Y.Z` (must equal `VERSION`) triggers `.github/workflows/release.yml`,
   which creates a GitHub release with that changelog section as notes.
-- Tag `v1.9.0` marks the last pre-2.0 production state (rollback reference).
 
-## Database migrations — additive only
+## Database migrations
 
-Production upgrades restore a v1.9 mysqldump onto a fresh VM and run 2.0 on
-top of it (`migrate` runs automatically on container start). Therefore:
+**The 3.0 baseline is the anchor.** The live 3.0 schema is the reference state: the
+migration history has been collapsed into a fresh baseline, and there is no supported
+rollback path to a 1.9 or 2.0 database. Restoring an old dump and migrating forward is
+not a scenario this repository supports any more.
 
-- **Never edit or squash migrations that exist at tag `v1.9.0`.**
-- All new migrations must be additive: no table renames, no destructive
-  schema changes, and they must apply cleanly on a database restored from a
-  v1.9 dump.
-- CI's `makemigrations --check` gate ensures model changes always ship with
-  their migrations.
+Consequently:
+
+- **Migrations after the baseline are normal migrations.** The additive-only rule that
+  applied while 1.9 dumps had to restore onto a 2.0 database no longer applies —
+  renames, drops and data migrations are all fair game, judged on their own merits.
+- **Do not edit or squash the baseline migrations.** They are what a fresh database is
+  built from, and production is already past them.
+- **Object-storage work still never belongs in a `RunPython`** (see above). That rule is
+  independent of the baseline.
+- CI's `makemigrations --check` gate ensures model changes always ship with their
+  migrations.
+- Run anything touching constraints against **MySQL**, not the SQLite test settings.
 
 ## Branch conventions
 
-- Development targets `release/2.0` (see `docs/modernization-roadmap.md` for
-  the phased plan). `main` reflects the currently deployed 1.x state.
+- Development targets `release/3.0`. Open issues and pull requests against it.
 - Dependency pins: `requirements.txt` is fully pinned; a pip-tools lockfile is
   possible future work.

@@ -39,7 +39,7 @@ curl -X POST http://localhost:$WEB_EXTERNAL_PORT/api/runner/jobs/123/claim/ \
 
 Worker nodes run the Yggdrasil Celery app (`python -m celery -A yggdrasil worker`) pointed at this app's public/host-published Redis endpoint (`REDIS_PASSWORD`, `REDIS_EXTERNAL_PORT`) and using matching queue names / `RUNNER_TASK_NAME`.
 
-The compose `runner-worker` is intentionally not attached to `app-net-$DOCKER_SUFFIX`; it uses Docker's default bridge network and must reach both Redis and the web API through externally routable URLs from `.env.worker`. Set `RUNNER_API_BASE_URL` to the public HTTPS API URL in production. Gunicorn does not force HTTPS by itself; redirects come from Django settings or the reverse proxy.
+The compose `runner-worker` is intentionally not attached to `app-net-$DOCKER_SUFFIX`; it uses Docker's default bridge network and must reach both Redis and the web API through externally routable URLs from `.env.worker`. Set `RUNNER_API_BASE_URL` to the public HTTPS API URL in production. uvicorn does not force HTTPS by itself; redirects come from Django settings or the reverse proxy.
 
 Do not put inline comments after values in `.env.worker`: `python-decouple` treats the comment text as part of the value.
 

@@ -21,7 +21,7 @@ def set_brain(request):
 
 # NOTE: report-language persistence moved to the cross-app endpoint
 # `set_report_language` in common.views (URL name unchanged), so all three
-# domains share one preference (common.UserPreference). See toothfairy/urls.py.
+# domains share one preference (common.UserPreference). See yggdrasil/urls.py.
 
 
 urlpatterns = [

@@ -4,10 +4,8 @@ set -euo pipefail
 # Restore a full MySQL dump (as produced by scripts/backup_prod.sh) into the
 # running Docker db service.
 #
-# Use this for the v1.9 -> 2.0 server migration: restore the 1.9 dump into a
-# fresh, EMPTY 2.0 database, THEN run `manage.py migrate` so the additive 2.0
-# migrations apply on top of the restored 1.9 schema. See
-# docs/upgrade-1.9-to-2.0.md.
+# Also used to move an instance to a new host: restore the dump into a fresh,
+# EMPTY database, THEN run `manage.py migrate`. See docs/admin-tasks.md.
 #
 # Usage:
 #   scripts/restore_prod.sh <dump.sql.gz | dump.sql>

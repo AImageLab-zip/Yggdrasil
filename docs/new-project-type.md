@@ -2,7 +2,7 @@
 
 A "project type" is a Django app like `maxillo/`, `brain/`, or `laparoscopy/` — each is a separate imaging workflow (its own patients, modalities, folders) mounted under its own URL prefix. There's no generator for this: the current practice is to copy an existing app and then touch a handful of shared files in `common/` to wire in the new domain.
 
-Since Phase 5 (`common/` consolidation) most of the per-domain wiring is driven by a single registry (`common/domains.py`) and a set of abstract base models (`common/base_models.py`), so there is far less hardcoded branching than there used to be. The remaining hardcoded piece is the per-app FK columns on the shared `Job`/`ProcessingJob`/`FileRegistry` tables (see step 4).
+Most of the per-domain wiring is driven by a single registry (`common/domains.py`) and a set of abstract base models (`common/base_models.py`), so there is far less hardcoded branching than there used to be. The remaining hardcoded piece is the per-app FK columns on the shared `Job`/`ProcessingJob`/`FileRegistry` tables (see step 4).
 
 Use `laparoscopy/` as your template if your app can reuse generic patient/folder/export views (lighter weight). Use `brain/` as your template if you need your own `app_urls.py`/`api_views.py`.
 
@@ -74,11 +74,11 @@ Run it after migrating (see [docs/setup.md](setup.md)):
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_endo_modalities
 ```
 
-Optionally add a `ModalityProcessingConfig` row per modality (Phase 4) if you need non-default worker/queue/blocking behavior; absent rows fall back to legacy defaults.
+Optionally add a `ModalityProcessingConfig` row per modality if you need non-default worker/queue/blocking behavior; absent rows fall back to legacy defaults.
 
 ## 6. Permissions & job routing — nothing to branch
 
-Since Phase 5.2 both `common/permissions.py` and `common/job_routing.py` are **registry-driven** and need no per-domain edits:
+Both `common/permissions.py` and `common/job_routing.py` are **registry-driven** and need no per-domain edits:
 
 - `_namespace()` uses `normalize_domain()`, so any slug in `DOMAINS` is accepted; `_folder_access_model()` resolves `apps.get_model(<domain>, "FolderAccess")` dynamically. Just make sure your app **has its own `FolderAccess` model** (recommended — you get it by subclassing `FolderAccessBase`), otherwise its folder ACLs have no backing table.
 - `_project_slug_for_job()` resolves the job's patient via `fk_fields_for(domain)` — the FK columns you added in step 4 are all it needs.

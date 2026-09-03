@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["release/3.0", "release/2.0", "main"]
+    branches: ["release/3.0", "main"]
   pull_request:
 
 jobs:
@@ -79,7 +79,7 @@ jobs:
   frontend:
     # Builds the Cornerstone3D bundle from source and requires the result to be
     # byte-identical to what is committed under static/vendor/cornerstone/.
-    # See docs/cornerstone-roadmap.md Phase 1 and CONTRIBUTING.md.
+    # See CONTRIBUTING.md, "The frontend bundle".
     #
     # NOTE: this job needs npm-registry egress on the self-hosted runner, the same
     # way the release workflow needs `gh`.
