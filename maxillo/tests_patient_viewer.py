@@ -8,8 +8,8 @@ from maxillo.models import Patient
 
 class IOSViewerFilePreferenceTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(
-            name="maxillo", defaults={"slug": "maxillo"}
+        self.project = Project.objects.create(
+            name="Maxillo viewer", slug="maxillo-viewer", domain="maxillo"
         )
         self.user = User.objects.create_user(username="viewer-admin", password="x")
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")

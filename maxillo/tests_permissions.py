@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from common.models import Job, Project, ProjectAccess
+from common.models import AnnotationMethod, Job, Project, ProjectAccess
 from common.permissions import (
     filter_patients_for_user,
     user_can_delete_caption,
@@ -22,8 +22,14 @@ from maxillo.models import Folder, Patient, VoiceCaption
 
 class MaxilloProjectAclTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(
-            name="maxillo", defaults={"slug": "maxillo", "domain": "maxillo"}
+        self.project = Project.objects.create(
+            name="Maxillo ACL", slug="maxillo-acl", domain="maxillo"
+        )
+        # ``common.0043`` seeds the AnnotationMethod registry and wires it to the
+        # projects that existed then; a project created here starts with an empty
+        # set, and ``project_allows_annotation`` refuses on an empty set.
+        self.project.annotation_methods.set(
+            AnnotationMethod.objects.filter(slug="voice_caption")
         )
         self.admin = User.objects.create_user(username="admin", password="x")
         self.viewer = User.objects.create_user(username="viewer", password="x")
@@ -168,8 +174,8 @@ class MaxilloProjectAclTests(TestCase):
 
 class MaxilloJobApiAclTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(
-            name="maxillo", defaults={"slug": "maxillo", "domain": "maxillo"}
+        self.project = Project.objects.create(
+            name="Maxillo job ACL", slug="maxillo-job-acl", domain="maxillo"
         )
         self.admin = User.objects.create_user(username="job_admin", password="x")
         self.user = User.objects.create_user(username="job_user", password="x")

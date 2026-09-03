@@ -13,8 +13,8 @@ from common.permissions import (
 
 class BrainProjectAclTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(
-            name="brain", defaults={"slug": "brain", "domain": "brain"}
+        self.project = Project.objects.create(
+            name="Brain ACL", slug="brain-acl", domain="brain"
         )
         self.admin = User.objects.create_user(username="admin_b", password="x")
         self.viewer = User.objects.create_user(username="viewer_b", password="x")

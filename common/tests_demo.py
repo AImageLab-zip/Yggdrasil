@@ -29,8 +29,8 @@ class DemoIsolationTests(TestCase):
         cls.Folder = Folder
         cls.Patient = Patient
         # Folders always belong to a project, so the project is created first.
-        cls.project, _ = Project.objects.get_or_create(
-            name="maxillo", defaults={"slug": "maxillo", "is_active": True}
+        cls.project = Project.objects.create(
+            name="Maxillo demo", slug="maxillo-demo", domain="maxillo", is_active=True
         )
         cls.demo_folder = Folder.objects.create(
             name="Demo", is_demo=True, project=cls.project
