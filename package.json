@@ -1,0 +1,31 @@
+{
+  "name": "yggdrasil-frontend",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Dev-only build toolchain for the Yggdrasil imaging frontend. Nothing here is needed at deploy time: the emitted bundle under static/vendor/cornerstone/ is committed. See CONTRIBUTING.md, \"The frontend bundle\".",
+  "license": "SEE LICENSE IN LICENSE",
+  "scripts": {
+    "build": "bash scripts/build_frontend.sh",
+    "verify": "node scripts/check_bundle_assets.mjs",
+    "test": "node --test frontend/tests/*.test.js static/js/tests/*.test.js"
+  },
+  "devDependencies": {
+    "@cornerstonejs/core": "5.8.2",
+    "@cornerstonejs/labelmap-interpolation": "5.8.2",
+    "@cornerstonejs/metadata": "5.8.2",
+    "@cornerstonejs/nifti-volume-loader": "5.8.2",
+    "@cornerstonejs/polymorphic-segmentation": "5.8.2",
+    "@cornerstonejs/tools": "5.8.2",
+    "@cornerstonejs/utils": "5.8.2",
+    "@kitware/vtk.js": "36.4.1",
+    "d3-array": "3.2.4",
+    "d3-interpolate": "3.0.1",
+    "esbuild": "0.28.2",
+    "events": "3.3.0",
+    "gl-matrix": "3.4.3",
+    "url": "0.11.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

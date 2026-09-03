@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 from functools import wraps
@@ -9,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from common.models import Job
 from maxillo.runner_api_service import (
+    attach_slurm_job_for_runner,
     claim_job_for_runner,
     complete_job_from_runner,
     fail_job_from_runner,
@@ -39,7 +41,7 @@ def _runner_auth_required(view_func):
             return JsonResponse(
                 {"error": "Runner API tokens are not configured"}, status=503
             )
-        if not token or token not in allowed:
+        if not token or not any(hmac.compare_digest(token, t) for t in allowed):
             return JsonResponse({"error": "Unauthorized"}, status=401)
         return view_func(request, *args, **kwargs)
 
@@ -78,6 +80,38 @@ def runner_claim_job(request, job_id: int):
         logger.exception("Runner claim API failed for job %s", job_id)
         return JsonResponse({"error": f"Runner API internal error: {e}"}, status=500)
     status = 200 if result.get("claimed") else 409
+    return JsonResponse(result, status=status)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@_runner_auth_required
+def runner_attach_job(request, job_id: int):
+    """Stamp the SLURM allocation id a worker just submitted for a claimed job."""
+    try:
+        Job.objects.get(id=job_id)
+    except Job.DoesNotExist:
+        return JsonResponse({"error": "Job not found"}, status=404)
+
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    slurm_job_id = payload.get("slurm_job_id")
+    if not isinstance(slurm_job_id, str) or not slurm_job_id.strip():
+        return JsonResponse(
+            {"error": "slurm_job_id must be a non-empty string"}, status=400
+        )
+
+    worker_id = _worker_id_from_request(request)
+    try:
+        result = attach_slurm_job_for_runner(
+            job_id=job_id, worker_id=worker_id, slurm_job_id=slurm_job_id
+        )
+    except Exception as e:
+        logger.exception("Runner attach API failed for job %s", job_id)
+        return JsonResponse({"error": f"Runner API internal error: {e}"}, status=500)
+    status = 200 if result.get("attached") else 409
     return JsonResponse(result, status=status)
 
 

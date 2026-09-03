@@ -31,12 +31,14 @@ class Command(BaseCommand):
             {
                 "name": "CBCT",
                 "slug": "cbct",
+                "domain": "maxillo",
                 "description": "Cone Beam Computed Tomography volume",
                 "icon": "fas fa-cube",
                 "label": "CBCT",
+                # The platform stores .nii.gz only (maxillo.file_utils
+                # .save_cbct_to_dataset refuses anything else), and this list is
+                # what the bulk upload screen advertises as acceptable.
                 "supported_extensions": [
-                    ".dcm",
-                    ".dicom",
                     ".nii",
                     ".nii.gz",
                     ".mha",
@@ -54,6 +56,7 @@ class Command(BaseCommand):
             {
                 "name": "IOS",
                 "slug": "ios",
+                "domain": "maxillo",
                 "description": "Intraoral scans (upper and lower arches)",
                 "icon": "fas fa-tooth",
                 "label": "IOS",
@@ -64,9 +67,10 @@ class Command(BaseCommand):
             {
                 "name": "Intraoral Photographs",
                 "slug": "intraoral-photo",
+                "domain": "maxillo",
                 "description": "Multiple intraoral photographs (1-10 images)",
                 "icon": "fas fa-camera",
-                "label": "intraoral-photo",
+                "label": "IOP",
                 "supported_extensions": [".jpg", ".jpeg", ".png"],
                 "requires_multiple_files": True,
                 "is_active": True,
@@ -74,8 +78,10 @@ class Command(BaseCommand):
             {
                 "name": "Teleradiography",
                 "slug": "teleradiography",
+                "domain": "maxillo",
                 "description": "Single teleradiography image",
                 "icon": "fas fa-x-ray",
+                "label": "TR",
                 "supported_extensions": [".jpg", ".jpeg", ".png"],
                 "requires_multiple_files": False,
                 "is_active": True,
@@ -83,6 +89,7 @@ class Command(BaseCommand):
             {
                 "name": "Panoramic",
                 "slug": "panoramic",
+                "domain": "maxillo",
                 "description": "Panoramic image (uploaded orthopantomogram or generated from CBCT)",
                 "icon": "fas fa-panorama",
                 "label": "OPT",
@@ -93,6 +100,7 @@ class Command(BaseCommand):
             {
                 "name": "RawZip",
                 "slug": "rawzip",
+                "domain": "maxillo",
                 "description": "Archive with raw files attached to a patient",
                 "icon": "fas fa-file-archive",
                 "label": "RAW",

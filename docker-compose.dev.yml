@@ -1,0 +1,125 @@
+# Standalone local development stack - NOT an override of docker-compose.yml
+# (the base file needs pre-created external networks and a fully populated
+# .env; this one works from a fresh clone).
+#
+# Quickstart: ./scripts/dev_bootstrap.sh
+# Storage runs on a local single-node Garage (same software as prod).
+
+name: yggdrasil-dev
+
+services:
+    web:
+        build: .
+        command: /app/entrypoint.sh
+        volumes:
+            - .:/app
+        ports:
+            - "8000:8000"
+        env_file:
+            - .env
+        environment:
+            DEBUG: "true"
+            RUN_DEV_SERVER: "1"
+            DB_HOST: db
+            REDIS_HOST: redis
+            OBJECT_STORAGE_ENDPOINT_URL: http://garage:3900
+            OBJECT_STORAGE_REGION: garage
+            OBJECT_STORAGE_ACCESS_KEY_ID: GK31c2f218a2e44f485b94239e
+            OBJECT_STORAGE_SECRET_ACCESS_KEY: 7f2e4d8c1ba9463f5e0d2c8a7b6e9f1d3c5a8e0b4d7f2a6c9e1b3d5f7a0c2e4d
+            OBJECT_STORAGE_BUCKET: yggdrasil
+        user: "${UID:-1000}:${GID:-1000}"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+            garage:
+                condition: service_started
+
+    beat:
+        build: .
+        command: celery -A yggdrasil beat --loglevel=info --schedule /tmp/celerybeat-schedule
+        volumes:
+            - .:/app
+        env_file:
+            - .env
+        environment:
+            DEBUG: "true"
+            DB_HOST: db
+            REDIS_HOST: redis
+        user: "${UID:-1000}:${GID:-1000}"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+
+    maintenance-worker:
+        build: .
+        command: celery -A yggdrasil worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
+        volumes:
+            - .:/app
+        env_file:
+            - .env
+        environment:
+            DEBUG: "true"
+            DB_HOST: db
+            REDIS_HOST: redis
+            OBJECT_STORAGE_ENDPOINT_URL: http://garage:3900
+            OBJECT_STORAGE_REGION: garage
+            OBJECT_STORAGE_ACCESS_KEY_ID: GK31c2f218a2e44f485b94239e
+            OBJECT_STORAGE_SECRET_ACCESS_KEY: 7f2e4d8c1ba9463f5e0d2c8a7b6e9f1d3c5a8e0b4d7f2a6c9e1b3d5f7a0c2e4d
+            OBJECT_STORAGE_BUCKET: yggdrasil
+        user: "${UID:-1000}:${GID:-1000}"
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+            garage:
+                condition: service_started
+
+    db:
+        image: mysql:8.0
+        environment:
+            MYSQL_DATABASE: ${MYSQL_DATABASE:-yggdrasil}
+            MYSQL_USER: ${MYSQL_USER:-yggdrasil}
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD:-yggdrasil_pass}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_pass_change_me}
+        volumes:
+            - dev_mysql_data:/var/lib/mysql
+        healthcheck:
+            # 127.0.0.1 (TCP) on purpose: during first-boot init MySQL runs a
+            # socket-only temporary server that would answer "-h localhost"
+            # and mark the container healthy too early.
+            test:
+                [
+                    "CMD",
+                    "mysqladmin",
+                    "ping",
+                    "-h",
+                    "127.0.0.1",
+                    "-u",
+                    "root",
+                    "-p${MYSQL_ROOT_PASSWORD:-root_pass_change_me}",
+                ]
+            timeout: 20s
+            retries: 10
+            interval: 5s
+            start_period: 30s
+
+    redis:
+        image: redis:7-alpine
+        command: redis-server --requirepass ${REDIS_PASSWORD:-change-me-redis-password}
+
+    garage:
+        image: dxflrs/garage:v1.1.0
+        volumes:
+            - ./dev/garage.toml:/etc/garage.toml:ro
+            - dev_garage_meta:/var/lib/garage/meta
+            - dev_garage_data:/var/lib/garage/data
+
+volumes:
+    dev_mysql_data:
+    dev_garage_meta:
+    dev_garage_data:

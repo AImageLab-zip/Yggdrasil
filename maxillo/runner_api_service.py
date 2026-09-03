@@ -29,6 +29,21 @@ def _patient_public_id_for_job(job: Job) -> Optional[int]:
     return getattr(patient, "patient_id", None) or getattr(patient, "id", None)
 
 
+def _step_dispatch_config(job: Job) -> Dict[str, Any]:
+    """Resolve the runner worker's execution knob from the job's ProcessingStep.
+
+    The worker learns which algo dir to sbatch (ALGO_BASE_DIR/<algo_name>/run.sbatch)
+    purely from the claim response, so it needs no ORM/Job.step access. Resolved by
+    step slug (== modality_slug); empty when the modality has no step.
+    """
+    from common.modality_config import get_step
+
+    step = get_step(job.modality_slug)
+    return {
+        "algo_name": getattr(step, "algo_name", "") if step else "",
+    }
+
+
 def _serialize_job_for_runner(job: Job) -> Dict[str, Any]:
     return {
         "id": job.id,
@@ -40,6 +55,10 @@ def _serialize_job_for_runner(job: Job) -> Dict[str, Any]:
         "project_slug": _project_slug_for_job(job),
         "patient_id": _patient_public_id_for_job(job),
         "created_at": job.created_at.isoformat() if job.created_at else None,
+        # The allocation a previous attempt submitted, or "". A worker that finds
+        # this set on claim reattaches to it rather than sbatching a duplicate.
+        "slurm_job_id": job.slurm_job_id or "",
+        **_step_dispatch_config(job),
     }
 
 
@@ -75,6 +94,52 @@ def claim_job_for_runner(*, job_id: int, worker_id: str) -> Dict[str, Any]:
             "reason": f"job_not_claimable_status_{job.status}",
             "status": job.status,
             "worker_id": job.worker_id,
+        }
+
+
+def attach_slurm_job_for_runner(
+    *, job_id: int, worker_id: str, slurm_job_id: str
+) -> Dict[str, Any]:
+    """Record the allocation the worker just submitted for a job it holds.
+
+    This is the durability hinge of the runner protocol. ``run_job`` spends the whole
+    allocation blocked in ``SlurmSSH.poll``; if that worker dies, the only thing that
+    lets a later attempt find the still-running (or already-finished) allocation is
+    this id. Without it a redelivered task can only submit a second sbatch, and a
+    worker lost between submit and completion strands the job in ``processing``
+    forever.
+
+    Stamped immediately after ``sbatch`` returns, and cleared on re-dispatch by
+    :func:`common.signals._job_pre_save`.
+    """
+    slurm_job_id = (slurm_job_id or "").strip()
+    if not slurm_job_id:
+        return {"attached": False, "reason": "empty_slurm_job_id"}
+
+    with transaction.atomic():
+        job = Job.objects.select_for_update().get(id=job_id)
+
+        if job.status != "processing":
+            return {
+                "attached": False,
+                "reason": f"job_not_in_processing_status_{job.status}",
+                "status": job.status,
+            }
+
+        if job.worker_id and job.worker_id != worker_id:
+            return {
+                "attached": False,
+                "reason": "worker_mismatch",
+                "status": job.status,
+                "worker_id": job.worker_id,
+            }
+
+        job.slurm_job_id = slurm_job_id
+        job.save(update_fields=["slurm_job_id"])
+        return {
+            "attached": True,
+            "reason": "attached",
+            "slurm_job_id": job.slurm_job_id,
         }
 
 

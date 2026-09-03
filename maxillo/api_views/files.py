@@ -11,14 +11,16 @@ import re
 import logging
 import traceback
 import mimetypes
-from common.models import FileRegistry, ProjectAccess
+from common.models import FileRegistry
 from common.permissions import (
     filter_patients_for_user,
-    user_can_read_folder,
-    user_can_view_caption_content,
     user_is_project_admin,
 )
-from common.file_access import exists as artifact_exists, streaming_response
+from common.file_access import (
+    authorize_file_read,
+    exists as artifact_exists,
+    streaming_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +28,61 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @login_required
 @require_http_methods(["GET"])
-def serve_file(request, file_id):
+def serve_file(request, file_id, filename=None, bundle_key=None):
     """
     Serve files from FileRegistry by ID with authentication
+
     URL: /api/processing/files/serve/<file_id>/
+         /api/processing/files/serve/<file_id>/<filename>
+         /api/processing/files/serve/<file_id>/key/<bundle_key>/<filename>
+
+    The second, filename-suffixed form exists for Cornerstone3D's NIfTI loader,
+    which decides whether to gunzip by testing ``new URL(url).pathname`` for a
+    ``.gz`` suffix -- a query parameter cannot carry that (finding F3 of
+    docs/cornerstone-roadmap.md).
+
+    ``filename`` is **decorative and deliberately unused**: the bytes served are
+    always ``FileRegistry.file_path`` (or the requested bundle member), and the
+    Content-Disposition name is still derived from the registry row below. Django's
+    ``str`` converter already excludes ``/``, but not reading the segment at all is
+    what makes that irrelevant rather than merely survivable.
+
+    The third form carries the bundle key **in the path**, and exists because
+    ``?file_key=`` is unusable from the viewer (finding F14).
+    ``createNiftiImageIdsAndCacheMetadata.js:174`` builds each slice id as
+    ``nifti:${niftiURL}?frame=${i}`` with a literal ``?``, unconditionally, so a URL
+    that already has a query string yields ``...?file_key=volume_nifti?frame=0`` --
+    two ``?``, so ``frame`` parses as part of the ``file_key`` value and **every
+    slice resolves to frame 0**. That is not a hypothetical: a ``cbct_processed`` row
+    with ``file_hash == 'multi-file'`` is how the maxillo CBCT display volume is
+    stored (``maxillo/views/patient_detail.py:_resolved_cbct_viewer_source``), so
+    without a query-free form the volume grid cannot address the volume it exists to
+    show.
+
+    ``?file_key=`` is kept, unchanged, for the existing non-Cornerstone callers. When
+    both are present they must agree; a mismatch is refused rather than resolved by
+    precedence, because the two names would be pointing at different volumes and
+    guessing which the caller meant is how the wrong anatomy gets rendered.
     """
+    del filename  # see the docstring: URL decoration only, never used to resolve.
     try:
         file_obj = FileRegistry.objects.select_related("patient").get(id=file_id)
         resolved_file_path = file_obj.file_path
-        requested_file_key = (request.GET.get('file_key') or '').strip()
+        query_file_key = (request.GET.get('file_key') or '').strip()
+        path_file_key = (bundle_key or '').strip()
+        if path_file_key and query_file_key and path_file_key != query_file_key:
+            return JsonResponse(
+                {
+                    "error": (
+                        "Conflicting bundle keys: the path names "
+                        f"'{path_file_key}' and file_key names '{query_file_key}'."
+                    )
+                },
+                status=400,
+            )
+        requested_file_key = path_file_key or query_file_key
         bundle_filename = ""
+        bundle_not_found = False
 
         # CBCT processed files may be stored as a multi-file bundle. Allow a
         # specific metadata.files key, defaulting to the segmentation.
@@ -58,76 +105,28 @@ def serve_file(request, file_id):
                 if bundle_path and artifact_exists(bundle_path):
                     resolved_file_path = bundle_path
                     bundle_filename = str(bundle_path).split("/")[-1]
+                elif requested_file_key and requested_file_key != "primary":
+                    bundle_not_found = True
 
         request_namespace = (
             getattr(request, "resolver_match", None)
             and request.resolver_match.namespace
         ) or "maxillo"
-        file_domain = file_obj.domain or request_namespace
-        if file_domain not in ["maxillo", "brain", "laparoscopy"]:
-            file_domain = request_namespace
 
-
-        # Authentication: Check if user has access to the patient associated with this file
-        if file_domain == "laparoscopy":
-            patient = file_obj.laparoscopy_patient
-        else:
-            patient = file_obj.patient
-        if not patient:
-            patient = file_obj.patient or file_obj.brain_patient or file_obj.laparoscopy_patient
-        if patient:
-            if getattr(patient, "deleted", False):
-                return JsonResponse({"error": "Patient not found"}, status=404)
-
-            from common.models import Project
-
-            project = Project.objects.filter(slug='maxillo').first()
-
-            can_view = user_is_project_admin(request.user, 'maxillo') or (
-                patient.folder and user_can_read_folder(request.user, patient.folder, 'maxillo')
+        allowed, error, status = authorize_file_read(
+            request.user, file_obj, request_namespace
+        )
+        if not allowed:
+            logger.warning(
+                "User %s denied access to file %s (%s)",
+                request.user.id,
+                file_id,
+                error,
             )
+            return JsonResponse({"error": error}, status=status)
 
-            if not can_view:
-                logger.warning(
-                    f"User {request.user.id} denied access to file {file_id} for patient {patient.patient_id}"
-                )
-                return JsonResponse({"error": "Permission denied"}, status=403)
-
-            # Check project access if patient belongs to a project
-            if project and not user_is_project_admin(request.user, project):
-                has_project_access = ProjectAccess.objects.filter(
-                    user=request.user, project=project
-                ).exists()
-                if not has_project_access:
-                    logger.warning(
-                        f"User {request.user.id} denied project access for file {file_id}"
-                    )
-                    return JsonResponse({"error": "Project access denied"}, status=403)
-
-            voice_caption = (
-                file_obj.brain_voice_caption
-                if file_domain == "brain"
-                else file_obj.voice_caption
-            )
-            if not voice_caption:
-                voice_caption = file_obj.voice_caption or file_obj.brain_voice_caption
-            if voice_caption and not user_can_view_caption_content(
-                request.user, voice_caption, file_domain
-            ):
-                logger.warning(
-                    f"User {request.user.id} denied access to voice caption file {file_id}"
-                )
-                return JsonResponse({"error": "Permission denied"}, status=403)
-        else:
-            # If file is not associated with a patient, check any project access
-            has_any_admin_access = ProjectAccess.objects.filter(
-                user=request.user, role="admin"
-            ).exists()
-            if not has_any_admin_access:
-                logger.warning(
-                    f"User {request.user.id} denied access to orphaned file {file_id}"
-                )
-                return JsonResponse({"error": "Permission denied"}, status=403)
+        if bundle_not_found:
+            raise Http404("Requested bundle file not found")
 
         # Determine content type
         content_type, _ = mimetypes.guess_type(resolved_file_path)
@@ -209,6 +208,8 @@ def serve_file(request, file_id):
     except FileRegistry.DoesNotExist:
         logger.error(f"File with ID {file_id} not found in registry.")
         raise Http404("File not found in registry")
+    except Http404:
+        raise
     except Exception as e:
         logger.error(f"Error serving file {file_id}: {e}")
         logger.error(f"Full traceback: {traceback.format_exc()}")

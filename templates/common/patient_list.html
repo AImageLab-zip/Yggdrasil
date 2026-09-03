@@ -1,10 +1,11 @@
-{% extends 'base.html' %}
+{% extends 'common/base_app.html' %}
 {% load static %}
 
 {% block title %}Scans - Yggdrasil{% endblock %}
 
+{% block main_class %}container-fluid mt-4{% endblock %}
+
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/style.css' %}">
 <link rel="stylesheet" href="{% static 'css/patient_list.css' %}">
 {% endblock %}
 

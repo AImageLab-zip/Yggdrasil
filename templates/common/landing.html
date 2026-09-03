@@ -1,143 +1,170 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load icons %}
+{% load activity_tags %}
 
-{% block title %}Choose App - Yggdrasil{% endblock %}
+{% block title %}Yggdrasil — medical imaging platform{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/landing.css' %}">
 {% endblock %}
 
-{% block navbar %}{% endblock %}
-{% block footer %}{% endblock %}
+{% comment %} Landing brings its own chrome (top bar); the shared app footer (base.html)
+   is used verbatim so the landing footer matches the rest of the platform. {% endcomment %}
+{% block chrome %}{% endblock %}
+{% block main_class %}landing{% endblock %}
+{% block theme_default_dark %}true{% endblock %}
 
 {% block content %}
-<section class="landing-wrapper">
-    <div class="user-fab">
+<!-- Top bar: lockup + version, theme toggle, user menu -->
+<header class="landing-bar">
+    <div class="landing-bar__brand">
+        <img class="landing-bar__logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+        <span class="landing-bar__word">Yggdrasil</span>
+        <a class="landing-bar__ver mono" href="{% url 'changelog_page' %}" title="What's new in this release">v{{ app_version }}</a>
+    </div>
+
+    <div class="landing-bar__actions">
+        <button type="button" class="landing-icon-btn" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">
+            <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
+            <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>
+        </button>
+
         {% if user.is_authenticated %}
-            <div class="user-chip dropdown">
-                <a class="btn btn-light btn-sm dropdown-toggle shadow-sm" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="fas fa-user-circle me-1"></i>{{ user.username }}
-                </a>
-                <ul class="dropdown-menu dropdown-menu-end">
-                    <li class="px-3 py-2 text-muted small">Signed in as <strong>{{ user.username }}</strong></li>
+            <div class="ygg-dropdown">
+                <button type="button" class="landing-user" data-ygg-toggle="dropdown" aria-expanded="false">
+                    <span class="landing-user__avatar">{{ user.username|slice:':2' }}</span>
+                    <span class="landing-user__name">{{ user.username }}</span>
+                    <i class="fas fa-chevron-down landing-user__caret" aria-hidden="true"></i>
+                </button>
+                <div class="ygg-dropdown-menu">
+                    <div class="landing-menu__who">Signed in as <strong>{{ user.username }}</strong></div>
+                    <div class="ygg-dropdown-divider"></div>
                     {% if user.is_staff %}
-                        <li><hr class="dropdown-divider"></li>
-                        <li>
-                            <a class="dropdown-item" href="{% url 'online_users_dashboard' %}">
-                                <i class="fas fa-circle-dot me-1"></i>Live Users
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{% url 'admin_control_panel' %}">
-                                <i class="fas fa-tachometer-alt me-1"></i>Admin Control Panel
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{% url 'user_activity_stats' %}">
-                                <i class="fas fa-chart-line me-1"></i>User Activity
-                            </a>
-                        </li>
+                        <a class="ygg-dropdown-item" href="{% url 'online_users_dashboard' %}">{% icon 'circle-dot' 'ygg-icon' %}<span>Live Users</span></a>
+                        <a class="ygg-dropdown-item" href="{% url 'admin_control_panel' %}">{% icon 'gauge-high' 'ygg-icon' %}<span>Admin Panel</span></a>
+                        <a class="ygg-dropdown-item" href="{% url 'user_activity_stats' %}">{% icon 'chart-line' 'ygg-icon' %}<span>Activity Stats</span></a>
+                        <div class="ygg-dropdown-divider"></div>
                     {% endif %}
-                    <li><hr class="dropdown-divider"></li>
-                    <li>
-                        <form method="post" action="{% url 'logout' %}" class="px-3 py-1 m-0">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-outline-danger btn-sm w-100">
-                                <i class="fas fa-sign-out-alt me-1"></i>Logout
-                            </button>
-                        </form>
-                    </li>
-                </ul>
-            </div>
-        {% else %}
-            <div class="auth-actions">
-                <a href="{% url 'login' %}" class="btn btn-primary btn-sm shadow-sm me-2">
-                    <i class="fas fa-sign-in-alt me-1"></i>Login
-                </a>
-                <a href="{% url 'register' %}" class="btn btn-outline-light btn-sm shadow-sm">
-                    <i class="fas fa-user-plus me-1"></i>Register
-                </a>
-            </div>
-        {% endif %}
-    </div>
-
-    <div class="brand text-center">
-        <div class="logo-wrap">
-            <i class="fas fa-tooth"></i>
-        </div>
-        <h1 class="title" id="landing-title" data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ">Yggdrasil</h1>
-        <p class="subtitle">Choose your workspace</p>
-    </div>
-
-    {% if user.is_authenticated and projects %}
-        <div class="split-grid container">
-            {% for project in projects %}
-                <a class="app-card app-card--{{ project.slug|default:'default' }}" href="/{{ project.slug }}/">
-                    <div class="card-inner">
-                        <div class="icon-wrap">
-                            {% if project.slug == 'maxillo' %}
-                                <i class="fas fa-tooth"></i>
-                            {% elif project.slug == 'brain' %}
-                                <i class="fas fa-brain"></i>
-                            {% else %}
-                                <i class="fas {{ project.icon|default:'fa-folder' }}"></i>
-                            {% endif %}
-                        </div>
-                        <h2 class="app-title">{{ project.name }}</h2>
-                        <p class="app-desc">{{ project.description|default:"Access your project data and workflows." }}</p>
-                        <span class="action-btn">Enter<i class="fas fa-arrow-right ms-2"></i></span>
-                    </div>
-                </a>
-            {% endfor %}
-        </div>
-
-        {% if continue_url and current_project_name %}
-        <div class="continue-cta text-center">
-            <a href="{{ continue_url }}" class="btn btn-link text-light text-decoration-none">
-                Continue to {{ current_project_name }} <i class="fas fa-arrow-right ms-1"></i>
-            </a>
-        </div>
-        {% endif %}
-    {% elif user.is_authenticated %}
-        <div class="container text-center py-5">
-            <div class="alert alert-warning d-inline-block shadow-lg" role="alert">
-                <i class="fas fa-exclamation-triangle me-2"></i>
-                <strong>You are not allowed in any project of Yggdrasil, contact the administrator if you think this is an error</strong>
-            </div>
-        </div>
-    {% else %}
-        <div class="container text-center py-5">
-            <div class="card shadow-lg" style="max-width: 500px; margin: 0 auto; background: rgba(255, 255, 255, 0.95);">
-                <div class="card-body p-5">
-                    <i class="fas fa-lock fa-3x text-primary mb-3"></i>
-                    <h3 class="mb-3">Authentication Required</h3>
-                    <p class="text-muted mb-4">Please log in to access Yggdrasil projects.</p>
-                    <div class="d-grid gap-2">
-                        <a href="{% url 'login' %}" class="btn btn-primary btn-lg">
-                            <i class="fas fa-sign-in-alt me-2"></i>Login
-                        </a>
-                        <a href="{% url 'register' %}" class="btn btn-outline-primary">
-                            <i class="fas fa-user-plus me-2"></i>Register
-                        </a>
-                    </div>
+                    <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+                        <button type="submit" class="ygg-dropdown-item is-danger">{% icon 'sign-out-alt' 'ygg-icon' %}<span>Logout</span></button>
+                    </form>
                 </div>
             </div>
+        {% else %}
+            <a href="{% url 'login' %}" class="landing-btn landing-btn--primary">Login</a>
+            <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost">Register</a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="landing-stage">
+    <!-- Hero: glow + logo + wordmark -->
+    <div class="landing-hero">
+        <div class="landing-lockup">
+            <span class="landing-glow" aria-hidden="true"></span>
+            <img class="landing-tree" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+        </div>
+        <h1 class="landing-title" id="landing-title"
+            data-title="Yggdrasil" data-runes="ᚢᚴᛏᚱᛅᛋᛁᛚ"
+            title="Click for the old tongue" role="button" tabindex="0"
+            aria-label="Yggdrasil — click to toggle the runic wordmark"><span class="landing-title__latin"><span>Ygg</span><span class="accent">drasil</span></span></h1>
+    </div>
+
+    {% if user.is_authenticated %}
+        {% if landing_cards %}
+            <!-- Domain chooser -->
+            <div class="domains">
+                {% for c in landing_cards %}
+                <a class="domain domain--{{ c.slug }}" href="/{{ c.slug }}/">
+                    <span class="domain__bar" aria-hidden="true"></span>
+                    <i class="{{ c.icon }} domain__watermark" aria-hidden="true"></i>
+                    <span class="domain__tile">{% icon c.icon %}</span>
+                    <h2 class="domain__title">{{ c.name }}</h2>
+                    <p class="domain__desc">{{ c.blurb }}</p>
+                    <span class="domain__spacer"></span>
+                    <span class="domain__foot">
+                        <span class="domain__stat mono">{{ c.stat }}</span>
+                        <span class="domain__cta">Enter <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
+                    </span>
+                </a>
+                {% endfor %}
+            </div>
+
+            {% user_recents user 6 as recents %}
+            {% if recents %}
+            <div class="landing-recents">
+                <div class="landing-recents__label">Continue where you left off</div>
+                <div class="landing-recents__row">
+                    {% for r in recents %}
+                    <a class="landing-recents__item" href="{% url r.domain|add:':patient_detail' patient_id=r.patient_pk %}">
+                        <span class="landing-recents__icon domain--{{ r.domain }}">{% icon 'user' %}</span>
+                        <span class="landing-recents__meta">
+                            <span class="landing-recents__name">{{ r.patient_name|default:r.patient_pk }}</span>
+                            <span class="landing-recents__proj mono">{{ r.project_label }}</span>
+                        </span>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        {% else %}
+            <!-- Authenticated but with no project access -->
+            <div class="landing-warn">
+                <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+                You are not allowed in any project of Yggdrasil. Contact the administrator if you think this is an error.
+            </div>
+        {% endif %}
+    {% else %}
+        <!-- Guest -->
+        <div class="landing-gate">
+            <span class="landing-gate__icon"><i class="fas fa-lock" aria-hidden="true"></i></span>
+            <h3 class="landing-gate__title">Authentication required</h3>
+            <p class="landing-gate__msg">Please log in to access Yggdrasil clinical workspaces.</p>
+            <div class="landing-gate__actions">
+                <a href="{% url 'login' %}" class="landing-btn landing-btn--primary landing-btn--block">Login</a>
+                <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost landing-btn--block">Register</a>
+            </div>
+            {% if demo_url %}
+            <a class="landing-demo-cta" href="{{ demo_url }}">
+                {% icon 'eye' %} Explore the public demo — no account needed <i class="fas fa-arrow-right" aria-hidden="true"></i>
+            </a>
+            {% endif %}
         </div>
     {% endif %}
-</section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// Runic wordmark: click to swap between Latin and the old tongue. It also opens
+// in runes at random, keeping the easter egg from the previous landing page.
 document.addEventListener('DOMContentLoaded', function () {
-    const title = document.getElementById('landing-title');
-    if (!title || Math.random() < 0.5) {
-        return;
+    var title = document.getElementById('landing-title');
+    if (!title) { return; }
+
+    var latin = title.querySelector('.landing-title__latin');
+    var runes = document.createElement('span');
+    runes.className = 'landing-title__runes';
+    runes.textContent = title.dataset.runes;
+    runes.hidden = true;
+    title.appendChild(runes);
+
+    function show(showRunes) {
+        latin.hidden = showRunes;
+        runes.hidden = !showRunes;
+        title.classList.toggle('title--runes', showRunes);
     }
 
-    title.textContent = title.dataset.runes;
-    title.classList.add('title--runes');
-    title.setAttribute('aria-label', title.dataset.title);
+    show(Math.random() < 0.5);
+
+    title.addEventListener('click', function () { show(runes.hidden); });
+    title.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            show(runes.hidden);
+        }
+    });
 });
 </script>
 {% endblock %}

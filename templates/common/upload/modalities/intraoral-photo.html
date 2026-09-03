@@ -1,9 +1,9 @@
-<div class="mb-4">
-	<h6 class="mb-2"><i class="fas fa-camera me-2"></i>Intraoral Photographs</h6>
-	<div class="mb-3">
-		<label for="intraoral-photos" class="form-label">Intraoral Photos (1-10 images)</label>
-		<input type="file" name="intraoral-photos" id="intraoral-photos" class="form-control" 
-			   accept=".jpg,.jpeg,.png" multiple>
-		<div class="form-text">Upload 1 to 10 intraoral photographs (JPG, PNG formats)</div>
-	</div>
-</div>
+<article class="upload-modality">
+    <div class="upload-modality__head"><i class="fas fa-camera" aria-hidden="true"></i><h3>Intraoral photographs</h3></div>
+    <label class="upload-dropzone" for="intraoral-photos">
+        <input type="file" name="intraoral-photos" id="intraoral-photos" accept=".jpg,.jpeg,.png" multiple>
+        <i class="fas fa-images" aria-hidden="true"></i>
+        <strong>Drop 1-10 photos</strong><small>JPG or PNG</small>
+        <span class="upload-file-summary" data-file-summary>No files selected</span>
+    </label>
+</article>

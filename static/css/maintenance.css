@@ -1,0 +1,326 @@
+/* Full-lockdown status page. Isolated from application and landing chrome. */
+body.maintenance-mode {
+    min-height: 100vh;
+    min-height: 100svh;
+    padding-bottom: 0;
+    overflow-x: hidden;
+}
+
+main.maintenance-shell {
+    position: relative;
+    display: flex;
+    min-height: 100vh;
+    min-height: 100svh;
+    flex-direction: column;
+    overflow: hidden;
+    background:
+        radial-gradient(70% 70% at 15% 40%, var(--ygg-accent-soft) 0%, transparent 72%),
+        radial-gradient(55% 65% at 95% 5%, var(--ygg-accent2-soft) 0%, transparent 68%),
+        var(--ygg-surface-alt);
+    color: var(--ygg-text);
+}
+
+main.maintenance-shell::before,
+main.maintenance-shell::after {
+    position: absolute;
+    border: 1px solid var(--ygg-border);
+    border-radius: 50%;
+    content: "";
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+main.maintenance-shell::before {
+    width: 34rem;
+    height: 34rem;
+    top: -25rem;
+    right: -8rem;
+}
+
+main.maintenance-shell::after {
+    width: 24rem;
+    height: 24rem;
+    bottom: -18rem;
+    left: -7rem;
+}
+
+.maintenance-bar {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.5rem clamp(1.25rem, 4vw, 3.5rem);
+}
+
+.maintenance-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--ygg-text);
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.maintenance-brand:hover { color: var(--ygg-text); }
+.maintenance-brand img { width: 1.75rem; height: 1.75rem; object-fit: contain; }
+
+.maintenance-version {
+    margin-left: 0.15rem;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: 999px;
+    color: var(--ygg-text-muted);
+    font-size: 0.65rem;
+    font-weight: 500;
+}
+
+.maintenance-theme {
+    display: inline-flex;
+    width: 2.5rem;
+    height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--ygg-border);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--ygg-surface) 88%, transparent);
+    color: var(--ygg-text-muted);
+    cursor: pointer;
+    transition: border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.maintenance-theme:hover {
+    border-color: var(--ygg-border-strong);
+    color: var(--ygg-text);
+    transform: translateY(-1px);
+}
+
+.maintenance-stage {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 2rem clamp(1rem, 4vw, 3rem) 3rem;
+}
+
+.maintenance-card {
+    display: grid;
+    width: min(100%, 62rem);
+    grid-template-columns: minmax(16rem, 0.8fr) minmax(20rem, 1.2fr);
+    overflow: hidden;
+    border: 1px solid var(--ygg-border);
+    border-radius: 1.5rem;
+    background: color-mix(in srgb, var(--ygg-surface) 94%, transparent);
+    box-shadow: var(--ygg-shadow-pop);
+    backdrop-filter: blur(12px);
+}
+
+.maintenance-visual {
+    position: relative;
+    display: flex;
+    min-height: 30rem;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-right: 1px solid var(--ygg-border);
+    background:
+        linear-gradient(155deg, color-mix(in srgb, var(--ygg-primary-soft) 75%, transparent), transparent 65%),
+        var(--ygg-surface-sunken);
+}
+
+.maintenance-visual img {
+    position: relative;
+    z-index: 2;
+    width: 8rem;
+    height: 8rem;
+    object-fit: contain;
+    filter: drop-shadow(0 1rem 2rem rgba(63, 111, 209, 0.24));
+}
+
+:root[data-theme="dark"] .maintenance-brand img,
+:root[data-theme="dark"] .maintenance-visual img {
+    filter: brightness(1.3) saturate(0.85) drop-shadow(0 1rem 2rem rgba(91, 141, 239, 0.2));
+}
+
+.maintenance-tree-glow {
+    position: absolute;
+    width: 13rem;
+    height: 13rem;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--ygg-accent-soft), transparent 68%);
+    animation: maintenance-breathe 4s ease-in-out infinite;
+}
+
+.maintenance-orbit {
+    position: absolute;
+    border: 1px solid var(--ygg-border-strong);
+    border-radius: 50%;
+    opacity: 0.55;
+}
+
+.maintenance-orbit--outer { width: 21rem; height: 21rem; }
+.maintenance-orbit--inner { width: 15.5rem; height: 15.5rem; border-style: dashed; }
+
+.maintenance-code {
+    position: absolute;
+    right: 1.5rem;
+    bottom: 1.25rem;
+    color: var(--ygg-text-faint);
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+}
+
+.maintenance-copy { padding: clamp(2rem, 5vw, 4rem); }
+
+.maintenance-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 1.5rem;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--ygg-warn) 35%, var(--ygg-border));
+    border-radius: 999px;
+    background: var(--ygg-warn-soft);
+    color: var(--ygg-warn);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.maintenance-status__dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 0.25rem color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.maintenance-kicker {
+    margin: 0 0 0.65rem;
+    color: var(--ygg-primary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+}
+
+.maintenance-copy h1 {
+    max-width: 12ch;
+    margin: 0;
+    font-size: clamp(2rem, 4vw, 3.25rem);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+}
+
+.maintenance-lead {
+    max-width: 35rem;
+    margin: 1.25rem 0 0;
+    color: var(--ygg-text-muted);
+    font-size: 0.95rem;
+    line-height: 1.7;
+}
+
+.maintenance-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--ygg-border);
+    border-radius: 0.75rem;
+    background: var(--ygg-surface-sunken);
+}
+
+.maintenance-message__icon { flex: none; margin-top: 0.1rem; color: var(--ygg-primary); }
+.maintenance-message p { margin: 0; font-size: 0.85rem; line-height: 1.55; }
+
+.maintenance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+}
+
+.maintenance-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid transparent;
+    border-radius: 0.65rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.maintenance-action:hover { transform: translateY(-1px); }
+.maintenance-action--primary { background: var(--ygg-primary); color: var(--ygg-on-primary); }
+.maintenance-action--primary:hover { background: var(--ygg-primary-hover); color: var(--ygg-on-primary); }
+.maintenance-action--secondary { border-color: var(--ygg-border-strong); background: var(--ygg-surface); color: var(--ygg-text); }
+.maintenance-action--secondary:hover { border-color: var(--ygg-primary); color: var(--ygg-text); }
+
+.maintenance-admin-note {
+    margin: 0.8rem 0 0;
+    color: var(--ygg-text-faint);
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
+.maintenance-foot {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    padding: 1rem 1.25rem 1.5rem;
+    color: var(--ygg-text-faint);
+    font-size: 0.7rem;
+}
+
+.maintenance-foot a { color: var(--ygg-text-muted); text-decoration: none; }
+.maintenance-foot a:hover { color: var(--ygg-primary); }
+.maintenance-foot__dot { width: 0.2rem; height: 0.2rem; border-radius: 50%; background: currentColor; }
+
+@keyframes maintenance-breathe {
+    0%, 100% { opacity: 0.55; transform: scale(0.96); }
+    50% { opacity: 1; transform: scale(1.04); }
+}
+
+@media (max-width: 760px) {
+    .maintenance-stage { align-items: flex-start; padding-top: 1rem; }
+    .maintenance-card { grid-template-columns: 1fr; }
+    .maintenance-visual { min-height: 13rem; border-right: 0; border-bottom: 1px solid var(--ygg-border); }
+    .maintenance-visual img { width: 5rem; height: 5rem; }
+    .maintenance-tree-glow { width: 9rem; height: 9rem; }
+    .maintenance-orbit--outer { width: 14rem; height: 14rem; }
+    .maintenance-orbit--inner { width: 10rem; height: 10rem; }
+    .maintenance-copy { padding: 2rem 1.5rem; }
+    .maintenance-copy h1 { max-width: 14ch; }
+}
+
+@media (max-width: 460px) {
+    .maintenance-bar { padding: 1rem; }
+    .maintenance-version { display: none; }
+    .maintenance-stage { padding-inline: 0.75rem; }
+    .maintenance-actions { flex-direction: column; }
+    .maintenance-action { width: 100%; }
+    .maintenance-foot { flex-direction: column; gap: 0.35rem; text-align: center; }
+    .maintenance-foot__dot { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .maintenance-tree-glow { animation: none; }
+    .maintenance-theme,
+    .maintenance-action { transition: none; }
+    .maintenance-theme:hover,
+    .maintenance-action:hover { transform: none; }
+}

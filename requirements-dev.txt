@@ -1,0 +1,5 @@
+-r requirements.txt
+ruff==0.15.20
+# Progress bar for the one-off migrate_dataset_to_object_storage command;
+# imported lazily there and not needed by the running application.
+tqdm==4.66.4

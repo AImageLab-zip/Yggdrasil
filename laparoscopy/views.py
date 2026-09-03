@@ -8,20 +8,28 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from laparoscopy.models import (
     QuadrantClassificationMarker,
     QuadrantType,
     QuadrantTypeUserColor,
-    RegionAnnotation,
     RegionType,
     RegionTypeUserColor,
+    next_palette_color,
 )
+from annotations.services.exceptions import AnnotationConflict, AnnotationNotAllowed
+from annotations.services.video import (
+    region_label_schema,
+    save_quadrant_markers,
+    save_video_regions,
+    video_regions_state,
+)
+from common.permissions import project_allows_annotation
 
 
 logger = logging.getLogger(__name__)
@@ -105,6 +113,39 @@ def _patient_permissions(profile, patient):
     return can_view, can_view
 
 
+def _unprocessed_video_response(patient):
+    """Refuse a write while the annotation track does not exist yet, or ``None``.
+
+    **The same gate the page applies, applied again where it is enforceable.** The
+    surface withholds the annotator until the video job has produced the subsampled
+    track (`maxillo/views/patient_detail.py::_video_state`), because a raw recording runs
+    at 25-30 fps, the record is one labelmap per annotated frame, and
+    `laparoscopy/export_processor.py` reads the subsampled track -- annotating the raw
+    video would file strokes against frames no export can line up with. A hidden editor
+    is a UI courtesy, not a guarantee: these endpoints are reachable directly, and a
+    stale tab from before the job finished is the ordinary way to reach them.
+
+    Anchoring is unchanged: annotations still hang off the ``video_raw`` row, which is
+    the study's identity. What this checks is that the track they will be *drawn on*
+    exists.
+    """
+    subsampled = patient.files.filter(
+        file_type="video_processed", subtype="subsampled"
+    ).exists()
+    if subsampled:
+        return None
+    return JsonResponse(
+        {
+            "error": (
+                "This recording has not finished processing. Annotation opens once its "
+                "sampled track is ready."
+            ),
+            "video_processing": True,
+        },
+        status=409,
+    )
+
+
 def _normalize_float(value, field_name):
     try:
         parsed = float(value)
@@ -136,8 +177,11 @@ def _handle_type_list(request, TypeModel, ColorModel, type_fk, default_color):
             {"types": _types_payload(profile.project, request.user, TypeModel, ColorModel, type_fk)}
         )
 
-    if not profile.is_admin():
-        return JsonResponse({"error": "Administrator access required"}, status=403)
+    # Naming the things a project draws is annotation work, not administration: the
+    # people who place the regions are the ones who find a type missing, misnamed or
+    # redundant. Viewers stay read-only.
+    if not profile.is_annotator():
+        return JsonResponse({"error": "Annotator access required"}, status=403)
 
     try:
         data = _parse_json_body(request)
@@ -148,7 +192,10 @@ def _handle_type_list(request, TypeModel, ColorModel, type_fk, default_color):
     if not name:
         return JsonResponse({"error": "name is required"}, status=400)
 
-    color = data.get("color", default_color)
+    # A colour the caller did not state is the next one the project has not used, not the
+    # model's default -- otherwise every region type a project creates is the same blue
+    # and the masks are told apart only by which was drawn last.
+    color = data.get("color") or next_palette_color(TypeModel, profile.project, default_color)
     if not _is_hex_color(color):
         return JsonResponse({"error": "color must be a hex value like " + default_color}, status=400)
 
@@ -182,8 +229,8 @@ def _handle_type_detail(request, pk, TypeModel, ColorModel, type_fk, conflict_ms
         if not has_name and not has_color:
             return JsonResponse({"error": "At least one of name or color is required"}, status=400)
 
-        if has_name and not profile.is_admin():
-            return JsonResponse({"error": "Administrator access required for rename"}, status=403)
+        if has_name and not profile.is_annotator():
+            return JsonResponse({"error": "Annotator access required for rename"}, status=403)
 
         if has_name:
             name = (data.get("name") or "").strip()
@@ -212,8 +259,8 @@ def _handle_type_detail(request, pk, TypeModel, ColorModel, type_fk, conflict_ms
         return JsonResponse({"id": obj.id, "name": obj.name, "color": effective_color})
 
     # DELETE
-    if not profile.is_admin():
-        return JsonResponse({"error": "Administrator access required"}, status=403)
+    if not profile.is_annotator():
+        return JsonResponse({"error": "Annotator access required"}, status=403)
 
     if before_delete is not None:
         maybe_response = before_delete(request, profile, obj)
@@ -436,6 +483,18 @@ def _normalize_quadrant_marker_items(raw_markers, project):
 
 
 def _replace_patient_quadrant_markers(patient, user, marker_items):
+    """Mirror the markers into the legacy table as well as ``annotations/``.
+
+    The one surface Phase 10 keeps dual-writing, and deliberately. The regions moved
+    outright because their *representation* changed -- a raster is not a stroke, so the
+    old table could not hold the new truth. A quadrant marker is a timeline event and is
+    unchanged, so ``annotations_crosscheck``'s comparison of the two still means
+    something, and decision #6 wants that comparison available for one release before
+    the legacy tables are dropped. It goes with them in the risk-19 release.
+
+    Written second, outside the annotations transaction: if this half fails the
+    annotation record -- the one that is canonical -- is already committed.
+    """
     with transaction.atomic():
         keep_ids = []
         for item in marker_items:
@@ -487,6 +546,11 @@ def patient_quadrant_markers(request, patient_id):
 
     if not can_modify:
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "video_regions"):
+        return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
+    unprocessed = _unprocessed_video_response(patient)
+    if unprocessed is not None:
+        return unprocessed
 
     try:
         data = _parse_json_body(request)
@@ -498,13 +562,47 @@ def patient_quadrant_markers(request, patient_id):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
+    try:
+        save_quadrant_markers(
+            patient,
+            video_file=patient.files.filter(file_type="video_raw").order_by("pk").first(),
+            markers=[
+                {
+                    "timeMs": item["time_ms"],
+                    "quadrantName": item["quadrant_type"].name,
+                }
+                for item in normalized_items
+            ],
+            author=request.user,
+        )
+    except AnnotationConflict as exc:
+        return JsonResponse({"error": str(exc), "conflict": True}, status=409)
+    except AnnotationNotAllowed as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except ValidationError as exc:
+        return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+
     markers = _replace_patient_quadrant_markers(patient=patient, user=request.user, marker_items=normalized_items)
     return JsonResponse({"markers": [_quadrant_marker_payload(m) for m in markers]})
 
 
 @login_required
-@require_http_methods(["GET", "POST"])
-def patient_region_annotations(request, patient_id):
+@require_http_methods(["GET", "PUT"])
+def patient_video_annotations(request, patient_id):
+    """The whole state of one video's region masks, read and written as one thing.
+
+    **This replaces the per-stroke API** (`POST /annotations/`, `PATCH`/`DELETE
+    /annotations/<id>/`), which could not survive decision #14. Once the labelmap is
+    canonical there is no such thing as "the stroke with id 41" to patch or delete --
+    the eraser mutated those pixels and the strokes that made them are not kept. A
+    per-stroke endpoint over a raster would have had to either keep a stroke log the
+    model deliberately does not have, or write one immutable revision per brush dab.
+
+    So the shape is the one every migrated surface uses: the client sends everything it
+    has and quotes the revision it read. A stale quote is a 409 from
+    ``record_revision``'s unique constraint, with no read-then-write window because the
+    check *is* the write.
+    """
     profile = _get_profile(request)
     if not profile:
         return JsonResponse({"error": "No active project"}, status=403)
@@ -516,179 +614,68 @@ def patient_region_annotations(request, patient_id):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
     if request.method == "GET":
-        annotations = (
-            RegionAnnotation.objects.filter(patient=patient)
-            .select_related("region_type", "created_by", "updated_by")
-            .order_by("created_at")
+        state = video_regions_state(patient)
+        # `_types_payload` returns the list itself. Subscripting it with "types" -- the
+        # key `_handle_type_list` wraps it in on the way out -- raised a TypeError on
+        # every GET, for every patient, so the annotator could never read its own state.
+        state["regionTypes"] = _types_payload(
+            profile.project, request.user, RegionType, RegionTypeUserColor, "region_type"
         )
-        return JsonResponse({"annotations": [_annotation_payload(a) for a in annotations]})
+        return JsonResponse(state)
 
     if not can_modify:
         return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "video_regions"):
+        return JsonResponse({"error": "Video region annotation is disabled for this project"}, status=403)
+    unprocessed = _unprocessed_video_response(patient)
+    if unprocessed is not None:
+        return unprocessed
 
     try:
         data = _parse_json_body(request)
     except ValueError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
 
-    region_type_id = data.get("region_type_id")
-    if region_type_id in [None, ""]:
-        return JsonResponse({"error": "region_type_id is required"}, status=400)
-    try:
-        region_type_id = int(region_type_id)
-    except (TypeError, ValueError):
-        return JsonResponse({"error": "region_type_id must be an integer"}, status=400)
-
-    tool = str(data.get("tool") or "").strip().lower()
-    allowed_tools = {value for value, _ in RegionAnnotation.TOOL_CHOICES}
-    if tool not in allowed_tools:
-        return JsonResponse({"error": "tool must be one of brush, eraser, polygon"}, status=400)
-
-    try:
-        frame_time = _normalize_float(data.get("frame_time", 0.0), "frame_time")
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    if frame_time < 0:
-        return JsonResponse({"error": "frame_time must be >= 0"}, status=400)
-
-    try:
-        points = _normalize_points(data.get("points"))
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-
-    try:
-        prompt_points = _normalize_prompt_points(data.get("prompt_points", []))
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-
-    if tool == "polygon" and len(points) < 6:
-        return JsonResponse({"error": "polygon requires at least three vertices"}, status=400)
-
-    try:
-        stroke_width = _normalize_float(data.get("stroke_width", 1.0), "stroke_width")
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    if stroke_width <= 0:
-        return JsonResponse({"error": "stroke_width must be > 0"}, status=400)
-
-    region_type = get_object_or_404(RegionType, id=region_type_id, project=profile.project)
-
-    annotation = RegionAnnotation.objects.create(
-        patient=patient, region_type=region_type, tool=tool,
-        frame_time=frame_time, points=points, prompt_points=prompt_points,
-        stroke_width=stroke_width, created_by=request.user, updated_by=request.user,
-    )
-    annotation = RegionAnnotation.objects.select_related(
-        "region_type", "created_by", "updated_by"
-    ).get(id=annotation.id)
-    return JsonResponse(_annotation_payload(annotation), status=201)
-
-
-@login_required
-@require_http_methods(["PATCH", "DELETE"])
-def region_annotation_detail(request, annotation_id):
-    profile = _get_profile(request)
-    if not profile:
-        return JsonResponse({"error": "No active project"}, status=403)
-
-    annotation = get_object_or_404(
-        RegionAnnotation.objects.select_related("patient", "region_type", "created_by", "updated_by"),
-        id=annotation_id,
-    )
-    patient = annotation.patient
-    can_view, can_modify = _patient_permissions(profile, patient)
-    if not can_view:
-        return JsonResponse({"error": "Permission denied"}, status=403)
-
-    if request.method == "DELETE":
-        if not can_modify:
-            return JsonResponse({"error": "Permission denied"}, status=403)
-        annotation.delete()
-        return HttpResponse(status=204)
-
-    if not can_modify:
-        return JsonResponse({"error": "Permission denied"}, status=403)
-
-    try:
-        data = _parse_json_body(request)
-    except ValueError:
-        return JsonResponse({"error": "Invalid JSON body"}, status=400)
-
-    has_region = "region_type_id" in data
-    has_points = "points" in data
-    has_prompt_points = "prompt_points" in data
-    has_frame_time = "frame_time" in data
-    has_stroke_width = "stroke_width" in data
-
-    if not (has_region or has_points or has_prompt_points or has_frame_time or has_stroke_width):
+    video = patient.files.filter(file_type="video_raw").order_by("pk").first()
+    if video is None:
         return JsonResponse(
-            {"error": "At least one of region_type_id, points, prompt_points, frame_time, stroke_width is required"},
-            status=400,
+            {"error": "This patient has no video for annotations to be anchored to."},
+            status=409,
         )
 
-    changes = {}
+    try:
+        width = int(data.get("width") or 0)
+        height = int(data.get("height") or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "width and height must be integers"}, status=400)
 
-    if has_region:
-        try:
-            region_type_id = int(data.get("region_type_id"))
-        except (TypeError, ValueError):
-            return JsonResponse({"error": "region_type_id must be an integer"}, status=400)
-        region_type = get_object_or_404(RegionType, id=region_type_id, project=profile.project)
-        if region_type.id != annotation.region_type_id:
-            annotation.region_type = region_type
-            changes["region_type_id"] = region_type.id
+    try:
+        revision = save_video_regions(
+            patient,
+            video_file=video,
+            width=width,
+            height=height,
+            frames=data.get("frames") or [],
+            prompts=data.get("prompts") or [],
+            author=request.user,
+            expected_revision=data.get("expectedRevision"),
+            label_schema=region_label_schema(profile.project),
+        )
+    except AnnotationConflict as exc:
+        # Somebody else saved while this editor was open. The client re-reads and
+        # rebases rather than being allowed to overwrite work it never saw.
+        return JsonResponse({"error": str(exc), "conflict": True}, status=409)
+    except AnnotationNotAllowed as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except ValidationError as exc:
+        return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
 
-    if has_points:
-        try:
-            points = _normalize_points(data.get("points"))
-        except ValueError as exc:
-            return JsonResponse({"error": str(exc)}, status=400)
-        if annotation.tool == "polygon" and len(points) < 6:
-            return JsonResponse({"error": "polygon requires at least three vertices"}, status=400)
-        annotation.points = points
-        changes["points"] = points
-
-    if has_prompt_points:
-        try:
-            prompt_points = _normalize_prompt_points(data.get("prompt_points"))
-        except ValueError as exc:
-            return JsonResponse({"error": str(exc)}, status=400)
-        annotation.prompt_points = prompt_points
-        changes["prompt_points"] = prompt_points
-
-    if has_frame_time:
-        try:
-            frame_time = _normalize_float(data.get("frame_time"), "frame_time")
-        except ValueError as exc:
-            return JsonResponse({"error": str(exc)}, status=400)
-        if frame_time < 0:
-            return JsonResponse({"error": "frame_time must be >= 0"}, status=400)
-        annotation.frame_time = frame_time
-        changes["frame_time"] = frame_time
-
-    if has_stroke_width:
-        try:
-            stroke_width = _normalize_float(data.get("stroke_width"), "stroke_width")
-        except ValueError as exc:
-            return JsonResponse({"error": str(exc)}, status=400)
-        if stroke_width <= 0:
-            return JsonResponse({"error": "stroke_width must be > 0"}, status=400)
-        annotation.stroke_width = stroke_width
-        changes["stroke_width"] = stroke_width
-
-    if not changes:
-        return JsonResponse(_annotation_payload(annotation))
-
-    annotation.updated_by = request.user
-    annotation.save()
-    annotation.refresh_from_db()
-    return JsonResponse(_annotation_payload(annotation))
+    return JsonResponse({"revision": revision.revision_number})
 
 
 # ─── Magic Tool worker proxy ──────────────────────────────────────────────────
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def worker_session_ready(request):
     profile = _get_profile(request)
@@ -762,7 +749,6 @@ def worker_session_ready(request):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def worker_session_prompt(request):
     profile = _get_profile(request)

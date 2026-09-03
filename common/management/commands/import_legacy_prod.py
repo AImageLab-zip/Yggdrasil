@@ -139,9 +139,9 @@ class Command(BaseCommand):
                 pa.`user_id`,
                 pa.`project_id`,
                 CASE
-                    WHEN up.`role` IN ('standard', 'annotator', 'project_manager', 'admin', 'student_dev') THEN up.`role`
-                    WHEN up.`role` = 'demo' THEN 'standard'
-                    ELSE 'standard'
+                    WHEN up.`role` = 'admin' OR up.`role` = 'student_dev' THEN 'admin'
+                    WHEN up.`role` = 'annotator' THEN 'annotator'
+                    ELSE 'viewer'
                 END AS `role`,
                 pa.`created_at`
             FROM `{legacy_db}`.`common_projectaccess` pa

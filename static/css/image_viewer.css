@@ -93,8 +93,8 @@
     gap: 4px;
     padding: 4px;
     border-radius: 8px;
-    border: 1px solid #d9dfe6;
-    background: #fff;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
     box-shadow: 0 3px 12px rgba(12, 22, 36, 0.18);
 }
 
@@ -103,12 +103,12 @@
     height: 28px;
     border: 0;
     border-radius: 6px;
-    background: #fff;
-    color: #223148;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
 }
 
 .rgb-edit-toolbar button:hover:not(:disabled) {
-    background: #eef4ff;
+    background: var(--ygg-surface-2);
 }
 
 .rgb-edit-toolbar button:disabled {

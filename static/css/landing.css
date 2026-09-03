@@ -1,199 +1,420 @@
-/* Immersive landing page styles */
-:root {
-    --tf-primary: #0d6efd;
-    --tf-maxillo: linear-gradient(135deg, #0d6efd 0%, #6f9dff 100%);
-    --tf-brain: linear-gradient(135deg, #20c997 0%, #7ae9cb 100%);
-    --tf-bg: radial-gradient(1200px 600px at 10% -10%, rgba(13, 110, 253, 0.08), transparent),
-             radial-gradient(1000px 500px at 110% 110%, rgba(32, 201, 151, 0.08), transparent),
-             linear-gradient(180deg, #0b1324 0%, #0a0f1f 100%);
+/*
+ * Yggdrasil landing page — rebuilt to the design handoff ("Yggdrasil Landing").
+ *
+ * The landing carries its own top bar (the shared app footer comes from
+ * base.html), and defaults to dark. Everything resolves --ygg-* tokens, so the
+ * theme toggle flips it with no extra rules.
+ *
+ * Per-domain accents come from --ygg-{maxillo,brain,laparoscopy}(-grad) in
+ * tokens.css. The runic wordmark is the ONE place gold is allowed.
+ *
+ * Landing-only: never reaches app pages or viewers.
+ */
+
+/* ---- Shell ------------------------------------------------------------- */
+main.landing {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    color: var(--ygg-text);
+    /* Halo behind the hero (the mockup's bgLayer). */
+    background: radial-gradient(120% 90% at 50% -10%, var(--ygg-accent-soft) 0%, var(--ygg-surface-alt) 55%);
+    position: relative;
+    overflow-x: hidden;
+    transition: background 0.3s, color 0.3s;
 }
 
-html, body {
-    height: 100%;
+/* ---- Top bar ----------------------------------------------------------- */
+.landing-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 20px 28px;
+    z-index: 20;
 }
+.landing-bar__brand { display: flex; align-items: center; gap: 11px; }
+.landing-bar__logo { width: 26px; height: 26px; object-fit: contain; }
 
-.landing-wrapper {
-    min-height: calc(100vh - 3rem);
-    background: var(--tf-bg);
+/* ---- Theme-locked accents ------------------------------------------------
+ * The landing keeps its light-mode brand colors (blue / green / orange) and the
+ * "drasil" green in BOTH themes: dark mode must not recolor them. Scoped to the
+ * landing stage so app pages still get their dark-mode accent variants. */
+:root[data-theme="dark"] main.landing {
+    --ygg-maxillo: #5b8def;
+    --ygg-brain: #14a38b;
+    --ygg-laparoscopy: #e0785f;
+    --ygg-accent2: var(--ygg-green-600);
+}
+.landing-bar__word { font-weight: 700; font-size: 15px; letter-spacing: 0.01em; }
+.landing-bar__ver {
+    font-size: 11px;
+    color: var(--ygg-text-muted);
+    border: 1px solid var(--ygg-border);
+    border-radius: 999px;
+    padding: 2px 9px;
+    margin-left: 2px;
+}
+.landing-bar__actions { display: flex; align-items: center; gap: 10px; }
+
+.landing-icon-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    color: var(--ygg-text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    transition: color 0.15s, border-color 0.15s;
+}
+.landing-icon-btn:hover { color: var(--ygg-text); border-color: var(--ygg-border-strong); }
+
+.landing-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 13px 7px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+.landing-user__avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    background: var(--ygg-accent-soft);
+    color: var(--ygg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.landing-user__caret { font-size: 9px; color: var(--ygg-text-muted); }
+.landing-menu__who { padding: 8px 10px; color: var(--ygg-text-muted); font-size: 12px; }
+.landing-menu__who strong { color: var(--ygg-text); }
+
+/* ---- Buttons ----------------------------------------------------------- */
+.landing-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+}
+.landing-btn--primary {
+    background: var(--ygg-primary);
+    color: var(--ygg-on-primary);
+    font-weight: 700;
+}
+.landing-btn--primary:hover { background: var(--ygg-primary-hover); color: var(--ygg-on-primary); }
+.landing-btn--ghost { border: 1px solid var(--ygg-border); color: var(--ygg-text); }
+.landing-btn--ghost:hover { border-color: var(--ygg-border-strong); color: var(--ygg-text); }
+.landing-btn--block { width: 100%; padding: 11px; border-radius: 10px; }
+
+/* ---- Stage ------------------------------------------------------------- */
+.landing-stage {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 40px 24px;
+}
+
+/* ---- Hero -------------------------------------------------------------- */
+.landing-hero {
+    text-align: center;
+    margin-bottom: 34px;
+    animation: yg-rise 0.5s ease both;
+}
+@keyframes yg-rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.landing-lockup {
     position: relative;
-    overflow: hidden;
-    color: #eef2f8;
-    padding: 48px 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
 }
-
-.user-fab {
+.landing-glow {
     position: absolute;
-    top: 20px;
-    right: 20px;
-}
-
-.brand {
-    margin-bottom: 24px;
-}
-
-.logo-wrap {
-    width: 84px;
-    height: 84px;
+    width: 118px;
+    height: 118px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(4px);
+    background: radial-gradient(circle, var(--ygg-accent-soft) 0%, transparent 70%);
+    animation: yg-glow 4s ease-in-out infinite;
 }
-
-.logo-wrap i {
-    font-size: 36px;
-    color: #8fb8ff;
+@keyframes yg-glow {
+    0%, 100% { opacity: 0.5; }
+    50%      { opacity: 0.9; }
 }
-
-.title {
-    margin: 16px 0 4px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
-
-.title--runes {
+.landing-tree {
     position: relative;
-    display: block;
-    width: fit-content;
-    margin: 16px auto 4px;
-    padding: 4px 10px;
-    color: #dff8ff;
-    letter-spacing: 0.18em;
-    text-shadow: none;
-    animation: rune-flicker 3.8s infinite steps(1, end);
+    width: 82px;
+    height: 82px;
+    object-fit: contain;
 }
 
-.title--runes::before {
-    content: "";
-    position: absolute;
-    inset: -18px;
-    pointer-events: none;
-    background:
-        radial-gradient(circle at 12% 38%, rgba(226, 252, 255, 0.9) 0 1px, transparent 2px),
-        radial-gradient(circle at 24% 76%, rgba(204, 242, 255, 0.72) 0 1px, transparent 2px),
-        radial-gradient(circle at 66% 22%, rgba(176, 223, 255, 0.78) 0 1px, transparent 2px),
-        radial-gradient(circle at 84% 64%, rgba(244, 255, 255, 0.74) 0 1px, transparent 2px),
-        radial-gradient(circle at 46% 88%, rgba(190, 232, 255, 0.64) 0 1px, transparent 2px);
-    filter: blur(0.4px);
-    opacity: 0.72;
-    animation: rune-sparks 2.2s infinite linear;
-}
-
-@keyframes rune-flicker {
-    0%, 9%, 13%, 47%, 51%, 77%, 100% { opacity: 1; }
-    10%, 50% { opacity: 0.84; }
-    12%, 78% { opacity: 0.94; }
-}
-
-@keyframes rune-sparks {
-    0% { opacity: 0.24; transform: translate3d(-6px, 8px, 0) scale(0.98); }
-    35% { opacity: 0.86; transform: translate3d(5px, -5px, 0) scale(1.02); }
-    70% { opacity: 0.46; transform: translate3d(10px, -12px, 0) scale(1); }
-    100% { opacity: 0.2; transform: translate3d(16px, -20px, 0) scale(0.96); }
-}
-
-.subtitle {
-    color: #a7b4cc;
+.landing-title {
     margin: 0;
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    cursor: pointer;
+    user-select: none;
+}
+.landing-title .accent { color: var(--ygg-accent2); }
+.landing-title__runes { color: var(--ygg-accent2); }
+.landing-title.title--runes { letter-spacing: 0.14em; }
+
+.landing-tagline {
+    color: var(--ygg-text-muted);
+    font-size: 15px;
+    margin: 14px auto 0;
+    max-width: 440px;
 }
 
-.split-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    max-width: 1200px;
-    margin: 24px auto 12px;
-    justify-content: center;
-    align-items: stretch;
+/* ---- Domain cards ------------------------------------------------------ */
+.domains {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    width: 100%;
+}
+@media (max-width: 900px) {
+    .domains { grid-template-columns: 1fr; }
 }
 
-.app-card {
+.domain {
     position: relative;
-    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 340px;
+    padding: 26px;
+    border-radius: 18px;
     overflow: hidden;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text);
     text-decoration: none;
-    transition: transform 200ms ease, box-shadow 200ms ease;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-    flex: 1 1 300px;
-    min-width: 280px;
-    max-width: 400px;
+    box-shadow: var(--ygg-shadow-card-light);
+    transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+    /* Cards set --accent/--soft/--grad; these defaults keep new domains sane. */
+    --accent: var(--ygg-primary);
+    --soft: var(--ygg-accent-soft);
+    --grad: linear-gradient(135deg, var(--ygg-primary-hover), var(--ygg-primary));
+}
+.domain:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--ygg-shadow-pop);
+    border-color: var(--accent);
+    color: var(--ygg-text);
 }
 
-.app-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+.domain--maxillo {
+    --accent: var(--ygg-maxillo);
+    --grad: var(--ygg-maxillo-grad);
+    --soft: var(--ygg-accent-soft);
+}
+.domain--brain {
+    --accent: var(--ygg-brain);
+    --grad: var(--ygg-brain-grad);
+    --soft: var(--ygg-accent2-soft);
+}
+.domain--laparoscopy {
+    --accent: var(--ygg-laparoscopy);
+    --grad: var(--ygg-laparoscopy-grad);
+    --soft: var(--ygg-danger-soft);
 }
 
-.app-card .card-inner {
-    padding: 36px 28px;
-    color: #eef2f8;
-}
-
-.app-card--maxillo::before,
-.app-card--brain::before {
-    content: "";
+.domain__bar {
     position: absolute;
-    inset: 0;
-    opacity: 0.85;
-    z-index: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--grad);
 }
+.domain__watermark {
+    position: absolute;
+    right: -14px;
+    bottom: -18px;
+    font-size: 150px;
+    color: var(--accent);
+    opacity: 0.07;
+    pointer-events: none;
+}
+/* The brain glyph's ink sits lower in its em-box than the tooth/video
+   glyphs (almost no padding below it), so the shared -18px bottom offset
+   crops into the actual silhouette instead of just trimming empty space.
+   Nudge it up just enough to clear the ink; keep the same size/corner
+   anchor as the other watermarks so it reads with the same visual weight. */
+.domain--brain .domain__watermark {
+    bottom: -3px;
+}
+.domain__tile {
+    width: 52px;
+    height: 52px;
+    border-radius: 13px;
+    background: var(--soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin-bottom: 18px;
+}
+.domain__title { font-size: 21px; font-weight: 700; margin: 0 0 8px; }
+.domain__desc {
+    font-size: 13px;
+    color: var(--ygg-text-muted);
+    line-height: 1.55;
+    margin: 0;
+    position: relative;
+}
+.domain__spacer { flex: 1; }
+.domain__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+}
+.domain__stat { font-size: 11px; color: var(--ygg-text-faint); }
+.domain__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+}
+.domain__cta i { font-size: 11px; }
 
-.app-card--maxillo::before { background: var(--tf-maxillo); }
-.app-card--brain::before { background: var(--tf-brain); }
-
-.app-card .card-inner { position: relative; z-index: 1; }
-
-.icon-wrap {
-    width: 56px;
-    height: 56px;
+/* ---- Recents ----------------------------------------------------------- */
+.landing-recents { margin-top: 28px; width: 100%; }
+.landing-recents__label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ygg-text-faint);
+    margin-bottom: 11px;
+}
+.landing-recents__row { display: flex; gap: 10px; flex-wrap: wrap; }
+.landing-recents__item {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 15px 10px 10px;
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text);
+    text-decoration: none;
+    /* Reuse the per-domain accents via .domain--<slug> on the icon. */
+    --accent: var(--ygg-primary);
+    --soft: var(--ygg-accent-soft);
+}
+.landing-recents__item:hover { border-color: var(--ygg-border-strong); color: var(--ygg-text); }
+.landing-recents__icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    background: var(--soft);
+    color: var(--accent);
+}
+.landing-recents__meta { display: block; }
+.landing-recents__name { display: block; font-size: 13px; font-weight: 600; }
+.landing-recents__proj { display: block; font-size: 11px; color: var(--ygg-text-muted); }
+
+/* ---- Guest gate -------------------------------------------------------- */
+.landing-gate {
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: 18px;
+    padding: 38px 42px;
+    max-width: 400px;
+    width: 100%;
+    text-align: center;
+    box-shadow: var(--ygg-shadow-card-light);
+}
+.landing-gate__icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: var(--ygg-accent-soft);
+    color: var(--ygg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin: 0 auto 16px;
+}
+.landing-gate__title { margin: 0 0 8px; font-size: 19px; font-weight: 700; }
+.landing-gate__msg {
+    color: var(--ygg-text-muted);
+    font-size: 13px;
+    margin: 0 0 22px;
+    line-height: 1.5;
+}
+.landing-gate__actions { display: flex; flex-direction: column; gap: 9px; }
+.landing-demo-cta {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 12px;
+    gap: 8px;
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--ygg-text-muted);
+    text-decoration: none;
 }
+.landing-demo-cta:hover { color: var(--ygg-primary); }
 
-.icon-wrap i { font-size: 24px; }
-
-.app-title {
-    margin: 0 0 6px;
+/* ---- No-access banner -------------------------------------------------- */
+.landing-warn {
+    background: var(--ygg-warn-soft);
+    border: 1px solid var(--ygg-warn);
+    color: var(--ygg-warn);
+    padding: 18px 24px;
+    border-radius: 14px;
+    max-width: 500px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.5;
 }
+.landing-warn i { margin-right: 8px; }
 
-.app-desc {
-    margin: 0 0 18px;
-    color: rgba(255, 255, 255, 0.9);
-}
-
-.action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    color: #0b0e18;
-    background: rgba(255, 255, 255, 0.9);
-    padding: 8px 14px;
-    border-radius: 999px;
-}
-
-.continue-cta { margin-top: 12px; }
-
-@media (max-width: 768px) {
-    .split-grid {
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    .app-card {
-        max-width: 100%;
-        width: 100%;
-    }
+@media (prefers-reduced-motion: reduce) {
+    .landing-hero { animation: none; }
+    .landing-glow { animation: none; }
+    .domain { transition: none; }
+    .domain:hover { transform: none; }
 }

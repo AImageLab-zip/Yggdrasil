@@ -1,13 +1,5 @@
 {% load file_utils %}
-<!-- File Management Section -->
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#fileManagementCollapse" aria-expanded="false" aria-controls="fileManagementCollapse" style="cursor: pointer;">
-        <h6 class="mb-0"><i class="fas fa-folder me-2"></i>File Management</h6>
-        <i class="fas fa-chevron-right collapse-indicator"></i>
-    </div>
-    
-    <div class="collapse" id="fileManagementCollapse">
-        <div class="scan-management-box">
+<div class="scan-management-box">
             {% if patient_files %}
                 <div class="mb-3">
                     <small class="text-muted d-block mb-2">
@@ -21,7 +13,12 @@
                         <h6 class="text-primary mb-2 small">
                             <i class="fas fa-file-import me-1"></i>Raw Files
                         </h6>
-                        {% if can_modify_segmentation %}
+                        {% if raw_data_locked %}
+                        <div class="alert alert-secondary py-2 px-2 mb-2 small d-flex align-items-start" role="status">
+                            <i class="fas fa-lock me-2 mt-1"></i>
+                            <div>{{ raw_lock_message }}</div>
+                        </div>
+                        {% elif can_modify_segmentation %}
                         <div class="card border-0 bg-light mb-2">
                             <div class="card-body py-2 px-2">
                                 <div class="row g-2 align-items-end">
@@ -69,7 +66,7 @@
                                        download>
                                         <i class="fas fa-download"></i>
                                     </a>
-                                    {% if can_modify_segmentation %}
+                                    {% if can_modify_segmentation and not raw_data_locked %}
                                     <button
                                         type="button"
                                         class="btn btn-outline-danger btn-sm btn-delete-raw-file"
@@ -103,6 +100,8 @@
                                         {% elif file.file_type == 'ios_processed_upper' %}
                                             <i class="fas fa-cube text-success"></i>
                                         {% elif file.file_type == 'ios_processed_lower' %}
+                                            <i class="fas fa-cube text-success"></i>
+                                        {% elif file.file_type == 'ios_processed' %}
                                             <i class="fas fa-cube text-success"></i>
                                         {% elif file.file_type == 'audio_processed' %}
                                             <i class="fas fa-file-text text-success"></i>
@@ -187,6 +186,4 @@
                     <p class="text-muted small mb-0">No files found for this patient</p>
                 </div>
             {% endif %}
-        </div>
-    </div>
 </div>

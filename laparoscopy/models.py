@@ -6,7 +6,17 @@ from django.utils import timezone
 
 import logging
 
-from common.models import Modality
+from common.models import Modality, Project
+from common.base_models import (
+    ActivePatientManager,
+    DatasetBase,
+    FolderAccessBase,
+    FolderBase,
+    TagBase,
+    ClassificationBase,
+    ExportBase,
+    VoiceCaptionBase,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,17 +34,7 @@ def laparoscopy_cbct_upload_path(instance, filename):
     return f"laparoscopy/patient_{instance.patient_id}/cbct/{filename}"
 
 
-class ActivePatientManager(models.Manager):
-    """Default manager that hides soft-deleted patients."""
-
-    def get_queryset(self):
-        return super().get_queryset().filter(deleted=False)
-
-
-class Dataset(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+class Dataset(DatasetBase):
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -46,14 +46,17 @@ class Dataset(models.Model):
         db_table = 'laparoscopy_dataset'
         ordering = ['name']
 
-    def __str__(self):
-        return self.name
+
+class LaparoscopyProject(Project):
+    """Project proxy bound to the laparoscopy domain (admin section + forced domain)."""
+
+    class Meta:
+        proxy = True
+        verbose_name = 'Laparoscopy project'
+        verbose_name_plural = 'Laparoscopy projects'
 
 
-class Folder(models.Model):
-    name = models.CharField(max_length=100)
-    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
-    created_at = models.DateTimeField(auto_now_add=True)
+class Folder(FolderBase):
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -61,41 +64,45 @@ class Folder(models.Model):
         blank=True,
         related_name='laparoscopy_folders_created',
     )
+    # Mandatory project scope (see maxillo.Folder).
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE,
+        related_name='laparoscopy_folders',
+    )
 
     class Meta:
         db_table = 'laparoscopy_folder'
-        unique_together = ('name', 'parent')
+        unique_together = ('project', 'name', 'parent')
         ordering = ['name']
         indexes = [
+            models.Index(fields=['project']),
             models.Index(fields=['parent']),
             models.Index(fields=['name']),
         ]
 
-    def __str__(self):
-        return self.get_full_path()
 
-    def get_full_path(self):
-        parts = []
-        node = self
-        while node:
-            parts.append(node.name)
-            node = node.parent
-        return '/'.join(reversed(parts))
+class FolderAccess(FolderAccessBase):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='laparoscopy_folder_access')
+
+    class Meta:
+        db_table = 'laparoscopy_folder_access'
+        unique_together = ('user', 'folder')
+        indexes = [
+            models.Index(fields=['folder']),
+            models.Index(fields=['user']),
+            models.Index(fields=['role']),
+            models.Index(fields=['folder', 'role']),
+            models.Index(fields=['user', 'role']),
+        ]
 
 
-class Tag(models.Model):
-    name = models.CharField(max_length=50, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
+class Tag(TagBase):
     class Meta:
         db_table = 'laparoscopy_tag'
         ordering = ['name']
         indexes = [
             models.Index(fields=['name']),
         ]
-
-    def __str__(self):
-        return self.name
 
 
 class Patient(models.Model):
@@ -122,6 +129,11 @@ class Patient(models.Model):
         help_text='Modalities available for this patient',
     )
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
+    # Mandatory project scope (see maxillo.Patient).
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE,
+        related_name='laparoscopy_patients',
+    )
     tags = models.ManyToManyField('Tag', blank=True, related_name='patients')
 
     upper_scan_raw = models.FileField(upload_to=laparoscopy_scan_upload_path, blank=True, null=True)
@@ -163,6 +175,7 @@ class Patient(models.Model):
             models.Index(fields=['visibility']),
             models.Index(fields=['uploaded_at']),
             models.Index(fields=['folder']),
+            models.Index(fields=['project']),
             models.Index(fields=['name']),
             models.Index(fields=['visibility', 'uploaded_at']),
             models.Index(fields=['folder', 'visibility']),
@@ -170,11 +183,6 @@ class Patient(models.Model):
 
     def __str__(self):
         return f"Patient {self.patient_id} - {self.name}"
-
-    @property
-    def project(self):
-        from common.models import Project
-        return Project.objects.filter(slug='laparoscopy').first()
 
     @property
     def project_id(self):
@@ -260,57 +268,32 @@ class Patient(models.Model):
     def get_processed_files(self):
         return self.files.filter(file_type__in=['video_processed', 'audio_processed'])
 
+    # Newest-wins, not exactly-one: a re-uploaded arch or scan is ordinary, and
+    # `.get()` raised MultipleObjectsReturned past callers that swallow it, which
+    # reads as "no scan" rather than as an error. See maxillo's get_ios_raw_files.
+    def _latest_file(self, file_type):
+        return self.files.filter(file_type=file_type).order_by(
+            '-created_at', '-id'
+        ).first()
+
     def get_cbct_raw_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='cbct_raw')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self._latest_file('cbct_raw')
 
     def get_cbct_processed_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='cbct_processed')
-        except FileRegistry.DoesNotExist:
-            return None
+        return self._latest_file('cbct_processed')
 
     def get_ios_raw_files(self):
-        from common.models import FileRegistry
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_raw_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_raw_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
+        return {arch: self._latest_file(f'ios_raw_{arch}') for arch in ('upper', 'lower')}
 
     def get_ios_processed_files(self):
-        from common.models import FileRegistry
-        upper = None
-        lower = None
-        try:
-            upper = self.files.get(file_type='ios_processed_upper')
-        except FileRegistry.DoesNotExist:
-            pass
-        try:
-            lower = self.files.get(file_type='ios_processed_lower')
-        except FileRegistry.DoesNotExist:
-            pass
-        return {'upper': upper, 'lower': lower}
+        return {
+            arch: self._latest_file(f'ios_processed_{arch}')
+            for arch in ('upper', 'lower')
+        }
 
 
-class Classification(models.Model):
-    CLASSIFIER_CHOICES = [
-        ('manual', 'Manual'),
-        ('pipeline', 'Pipeline'),
-    ]
-
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='classifications', null=True, blank=True)
-    classifier = models.CharField(max_length=10, choices=CLASSIFIER_CHOICES, default='manual')
+class Classification(ClassificationBase):
+    classifier = models.CharField(max_length=10, choices=ClassificationBase.CLASSIFIER_CHOICES, default='manual')
     notes = models.TextField(blank=True)
     annotator = models.ForeignKey(
         User,
@@ -319,7 +302,6 @@ class Classification(models.Model):
         blank=True,
         related_name='laparoscopy_classifications_authored',
     )
-    timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'laparoscopy_classification'
@@ -331,6 +313,43 @@ class Classification(models.Model):
 
     def __str__(self):
         return f"Classification {self.id} - {self.get_classifier_display()}"
+
+
+#: Distinct default colours for newly created region and quadrant types.
+#:
+#: Every type used to be born in the model field's default, so a project's second region
+#: was the same blue as its first and the masks on screen were told apart only by which
+#: one happened to be drawn last. The list is ordered for contrast between *adjacent*
+#: entries, because that is the order they are handed out in. A per-user override
+#: (``RegionTypeUserColor``) still wins, and once the list is exhausted the model default
+#: takes over -- a repeat is better than a colour picked by arithmetic nobody can predict.
+TYPE_PALETTE = (
+    "#3498db",  # blue
+    "#e74c3c",  # red
+    "#2ecc71",  # green
+    "#f39c12",  # amber
+    "#9b59b6",  # purple
+    "#1abc9c",  # teal
+    "#e67e22",  # orange
+    "#34495e",  # slate
+    "#d81b60",  # magenta
+    "#7f8c8d",  # grey
+)
+
+
+def next_palette_color(model_cls, project, fallback):
+    """The first palette colour this project has not used for ``model_cls`` yet.
+
+    Read off the rows rather than counted off ``order``: a project that deleted its
+    second region type should get that colour back, and counting would skip it forever.
+    """
+    taken = set(
+        model_cls.objects.filter(project=project).values_list("color", flat=True)
+    )
+    for color in TYPE_PALETTE:
+        if color not in taken:
+            return color
+    return fallback
 
 
 class RegionType(models.Model):
@@ -477,25 +496,14 @@ class RegionAnnotation(models.Model):
         return f"Annotation {self.id} ({self.tool}) on patient {self.patient_id}"
 
 
-class VoiceCaption(models.Model):
-    PROCESSING_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('processing', 'Processing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-    ]
-
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='voice_captions', null=True, blank=True)
+class VoiceCaption(VoiceCaptionBase):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='laparoscopy_voice_captions')
     modality = models.CharField(max_length=255, default='', blank=True)
-    duration = models.FloatField(help_text='Duration of audio recording in seconds')
     text_caption = models.TextField(blank=True, null=True)
     original_text_caption = models.TextField(blank=True, null=True)
     is_edited = models.BooleanField(default=False)
     edit_history = models.JSONField(default=list, blank=True)
-    processing_status = models.CharField(max_length=20, choices=PROCESSING_STATUS_CHOICES, default='pending')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    processing_status = models.CharField(max_length=20, choices=VoiceCaptionBase.PROCESSING_STATUS_CHOICES, default='pending')
 
     class Meta:
         db_table = 'laparoscopy_voicecaption'
@@ -506,159 +514,20 @@ class VoiceCaption(models.Model):
             models.Index(fields=['user']),
         ]
 
-    def __str__(self):
-        return f"VoiceCaption {self.id} - {self.patient_id}"
 
-    @property
-    def files(self):
-        from common.models import FileRegistry
-        return FileRegistry.objects.filter(domain='laparoscopy', laparoscopy_voice_caption=self)
-
-    @property
-    def processing_jobs(self):
-        from common.models import ProcessingJob
-        return ProcessingJob.objects.filter(domain='laparoscopy', laparoscopy_voice_caption=self)
-
-    def get_modality_display(self):
-        try:
-            if not self.modality:
-                return 'Undefined'
-            mod = Modality.objects.filter(slug=self.modality).first()
-            if mod:
-                return getattr(mod, 'label', '') or getattr(mod, 'name', '') or self.modality.upper()
-            return self.modality.upper()
-        except Exception:
-            return (self.modality or 'Undefined').upper()
-
-    def get_display_duration(self):
-        if self.duration == 0:
-            return 'Text'
-        minutes = int(self.duration // 60)
-        seconds = int(self.duration % 60)
-        if minutes > 0:
-            return f"{minutes}:{seconds:02d}"
-        return f"{seconds}s"
-
-    def get_quality_status(self):
-        if self.duration == 0:
-            return {'color': 'success', 'message': 'Text'}
-        if self.duration <= 30:
-            return {'color': 'danger', 'message': 'Short'}
-        if self.duration <= 45:
-            return {'color': 'warning', 'message': 'Good'}
-        return {'color': 'success', 'message': 'Perfect'}
-
-    def is_processed(self):
-        if self.duration == 0:
-            return self.processing_status == 'completed' and self.text_caption
-        return self.processing_status == 'completed' and self.text_caption and self.text_caption != '[Audio processed but no transcription available]'
-
-    def get_processing_display_text(self):
-        if self.processing_status == 'completed':
-            if self.text_caption and self.text_caption != '[Audio processed but no transcription available]':
-                return self.text_caption
-            return '[Audio processed but no transcription available]'
-        if self.processing_status == 'processing':
-            return 'Converting speech to text...'
-        if self.processing_status == 'failed':
-            return 'Processing failed'
-        return 'Preprocessing audio...'
-
-    def get_display_text_caption(self):
-        if self.is_processed():
-            text = self.text_caption
-            if self.is_edited:
-                text += ' [edited]'
-            return text
-        return self.get_processing_display_text()
-
-    def save_original_transcription(self):
-        if self.text_caption and not self.original_text_caption:
-            self.original_text_caption = self.text_caption
-
-    def edit_transcription(self, new_text, user):
-        if not self.is_processed():
-            raise ValueError('Cannot edit transcription that is not yet processed')
-        if not self.original_text_caption:
-            self.original_text_caption = self.text_caption
-        edit_record = {
-            'timestamp': timezone.now().isoformat(),
-            'user_id': user.id,
-            'username': user.username,
-            'previous_text': self.text_caption,
-            'new_text': new_text,
-        }
-        if not self.edit_history:
-            self.edit_history = []
-        self.edit_history.append(edit_record)
-        self.text_caption = new_text
-        self.is_edited = True
-        self.save()
-
-    def revert_to_original(self, user):
-        if not self.original_text_caption:
-            raise ValueError('No original transcription to revert to')
-        revert_record = {
-            'timestamp': timezone.now().isoformat(),
-            'user_id': user.id,
-            'username': user.username,
-            'action': 'reverted_to_original',
-            'previous_text': self.text_caption,
-            'reverted_text': self.original_text_caption,
-        }
-        if not self.edit_history:
-            self.edit_history = []
-        self.edit_history.append(revert_record)
-        self.text_caption = self.original_text_caption
-        self.is_edited = False
-        self.save()
-
-    def get_audio_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='audio_raw')
-        except FileRegistry.DoesNotExist:
-            return None
-
-    def get_processed_text_file(self):
-        from common.models import FileRegistry
-        try:
-            return self.files.get(file_type='audio_processed')
-        except FileRegistry.DoesNotExist:
-            return None
-
-    def get_pending_jobs(self):
-        return self.processing_jobs.filter(status__in=['pending', 'processing', 'retrying'])
-
-
-class Export(models.Model):
-    SHARE_MODE_CHOICES = [
-        ('private', 'Private'),
-        ('authenticated', 'Any logged-in user'),
-        ('public', 'Anyone with link'),
-    ]
-
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('processing', 'Processing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-    ]
-
+class Export(ExportBase):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='laparoscopy_exports')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     query_params = models.JSONField(default=dict, help_text='Stores folder_ids, modality_slugs, and filters')
     query_summary = models.CharField(max_length=500, blank=True, help_text='Human-readable query summary')
     file_path = models.CharField(max_length=1000, blank=True, help_text='Path to generated ZIP file')
     file_size = models.BigIntegerField(default=0, help_text='Size of export file in bytes')
     patient_count = models.IntegerField(default=0, help_text='Number of patients in export')
-    created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True, help_text='When processing started')
     completed_at = models.DateTimeField(null=True, blank=True, help_text='When processing completed')
     error_message = models.TextField(blank=True, help_text='Error message if export failed')
     share_mode = models.CharField(
         max_length=20,
-        choices=SHARE_MODE_CHOICES,
+        choices=ExportBase.SHARE_MODE_CHOICES,
         default='private',
         help_text='Controls who can access the share link',
     )
@@ -683,31 +552,3 @@ class Export(models.Model):
 
     def __str__(self):
         return f"Export {self.id} - {self.get_status_display()}"
-
-    def mark_processing(self):
-        self.status = 'processing'
-        self.started_at = timezone.now()
-        self.save()
-
-    def mark_completed(self, file_path=None, file_size=None):
-        self.status = 'completed'
-        self.completed_at = timezone.now()
-        self.progress_message = ''
-        self.progress_percent = None
-        if file_path:
-            self.file_path = file_path
-        if file_size is not None:
-            self.file_size = file_size
-        self.save()
-
-    def mark_failed(self, error_message=''):
-        self.status = 'failed'
-        self.completed_at = timezone.now()
-        self.error_message = error_message
-        self.save()
-
-    def ensure_share_token(self, force_new=False):
-        if force_new or not self.share_token:
-            self.share_token = secrets.token_urlsafe(32)
-            self.save(update_fields=['share_token'])
-        return self.share_token

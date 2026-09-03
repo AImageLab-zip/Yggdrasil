@@ -1,0 +1,13 @@
+{% extends 'common/error_base.html' %}
+{% load icons %}
+{% block title %}Not permitted - Yggdrasil{% endblock %}
+{% block error_code %}403{% endblock %}
+{% block error_title %}You do not have access to this{% endblock %}
+{% block error_lead %}
+This page or file belongs to a project or folder you have not been given access
+to. If you believe you should have it, ask the project administrator to grant it.
+{% endblock %}
+{% block error_actions %}
+<a class="btn btn-primary" href="/">{% icon 'home' %}<span>Back to the home page</span></a>
+<a class="btn btn-secondary" href="{% url 'login' %}">{% icon 'sign-in-alt' %}<span>Sign in as someone else</span></a>
+{% endblock %}

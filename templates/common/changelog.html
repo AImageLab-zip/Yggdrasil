@@ -1,0 +1,130 @@
+{% extends 'common/base_app.html' %}
+{% load icons %}
+
+{% comment %}
+Extends common/base_app.html, the rail + breadcrumb-topbar shell shared with
+the other working pages (e.g. the control panel). This page stays public --
+the version link in the footer renders on /login/, on the landing page and on
+the anonymous demo -- so no login gate here: for anonymous visitors the rail
+renders logo-only (its links gate on user.is_authenticated) and the topbar
+shows no user menu.
+
+The release list is parsed out of CHANGELOG.md by common.views._parse_changelog,
+so this page and the GitHub release notes read the same source.
+
+The layout uses only Tailwind classes that are present in the committed
+static/css/tailwind.css, plus the scoped rules below. That is deliberate: the
+compiled stylesheet predates the current templates and scripts/build_css.sh
+cannot reproduce it byte for byte (see its header), so a class that is not
+already in the build silently does nothing. Anything this page needs beyond the
+existing utilities is written out here instead of being invented as a utility.
+{% endcomment %}
+
+{% block title %}Changelog - Yggdrasil{% endblock %}
+
+{% block breadcrumb %}
+    <span class="capitalize">Yggdrasil</span>
+    {% icon 'chevron-right' 'ygg-icon-sm' %}
+    <span class="crumb-current">What's new</span>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .changelog-lead { max-width: 46rem; }
+    .changelog-release { margin-bottom: 1rem; }
+    .changelog-release__head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+    .changelog-release__version {
+        margin: 0;
+        font-size: 1.25rem;
+        font-family: var(--ygg-font-display);
+        font-weight: 600;
+    }
+    .changelog-section {
+        margin: 1rem 0 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--ygg-text-muted);
+    }
+    .changelog-items {
+        list-style: disc;
+        padding-left: 1.25rem;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        font-size: 0.875rem;
+    }
+    .changelog-items code { font-size: 0.8em; color: var(--ygg-text-muted); }
+    .changelog-credits { margin-top: 2rem; }
+    .changelog-credits h2 { margin: 0 0 0.5rem; font-size: 1.25rem; }
+    .changelog-credit p { margin: 0.25rem 0 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">{% icon 'clock' %}<span>What's new in Yggdrasil</span></h1>
+    <span class="mono text-xs text-content-muted">Running v{{ app_version }}</span>
+</div>
+
+<p class="text-content-muted mb-6 changelog-lead">
+    Every release, most recent first, in plain language: what changed on screen,
+    and what it means for your data.
+</p>
+
+{% for release in releases %}
+<section class="card-ygg card-ygg-body changelog-release">
+    <div class="changelog-release__head">
+        <h2 class="changelog-release__version">
+            {% if release.version == 'Unreleased' %}Unreleased{% else %}Version {{ release.version }}{% endif %}
+        </h2>
+        <span class="mono text-xs text-content-muted">{% if release.date %}{{ release.date }}{% else %}&mdash;{% endif %}</span>
+    </div>
+
+    {% for paragraph in release.intro %}
+    <p class="text-sm text-content-muted mb-3">{{ paragraph }}</p>
+    {% endfor %}
+
+    {% for section in release.sections %}
+    <h3 class="changelog-section">{{ section.heading }}</h3>
+    <ul class="changelog-items">
+        {% for item in section.items %}<li>{{ item }}</li>{% endfor %}
+    </ul>
+    {% endfor %}
+</section>
+{% empty %}
+<div class="card-ygg card-ygg-body">
+    <p class="text-content-muted mb-0">The release history is not available right now.</p>
+</div>
+{% endfor %}
+
+<section class="card-ygg card-ygg-body changelog-credits">
+    <h2>Who built it</h2>
+    <p class="text-sm text-content-muted mb-4">
+        Yggdrasil stands on an application that was already working before it was
+        renamed. Credit for that groundwork belongs to the people who wrote it.
+    </p>
+    <div class="grid gap-4 sm:grid-cols-2">
+        {% for credit in credits %}
+        <div class="changelog-credit">
+            <div class="stat-label">Versions {{ credit.era }}</div>
+            <p class="text-sm text-content-muted">{{ credit.note }}</p>
+            <p class="text-sm"><strong>{{ credit.lead }}</strong>{% if credit.others %}, with {% for person in credit.others %}{{ person }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="text-xs text-content-muted mt-4 mb-0">
+        Developed at <a href="https://ditto.ing.unimore.it/" target="_blank" rel="noopener">AImageLab</a>,
+        University of Modena and Reggio Emilia.
+    </p>
+</section>
+{% endblock %}

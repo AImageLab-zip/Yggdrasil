@@ -1,0 +1,109 @@
+{% extends 'common/base_app.html' %}
+{% load static %}
+
+{% block title %}Bulk Upload - Yggdrasil{% endblock %}
+{% block main_class %}upload-main{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/upload.css' %}">{% endblock %}
+
+{% block content %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
+<div class="upload-page">
+    <header class="upload-header">
+        <div>
+            <p class="upload-eyebrow">Administrators</p>
+            <h1>Bulk upload</h1>
+            <p>One patient per file, all into the same folder. Each patient is named after its file.</p>
+            {% url ns|add:':bulk_upload_patients' as bulk_upload_url %}
+            {% include 'common/upload/_mode_switch.html' with active='bulk' %}
+        </div>
+        <a href="{% url ns|add:':patient_list' %}" class="upload-close" aria-label="Cancel upload" title="Cancel">
+            <i class="fas fa-xmark" aria-hidden="true"></i>
+        </a>
+    </header>
+
+    <form method="post" enctype="multipart/form-data" class="upload-form" id="bulkUploadForm"
+          action="{% url ns|add:':bulk_upload_patients' %}">
+        {% csrf_token %}
+
+        <aside class="upload-details" aria-labelledby="bulk-details-title">
+            <div>
+                <p class="upload-section-kicker">Destination</p>
+                <h2 id="bulk-details-title">{{ current_project.name }}</h2>
+            </div>
+
+            <label class="upload-field" for="bulkFolder">
+                <span>Folder</span>
+                <select name="folder" id="bulkFolder" class="form-control" required>
+                    {% for folder in folders %}
+                    <option value="{{ folder.id }}">{{ folder.get_full_path }}</option>
+                    {% empty %}
+                    <option value="">No folders in this project</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label class="upload-field" for="bulkModality">
+                <span>Modality</span>
+                <select name="modality" id="bulkModality" class="form-control">
+                    <option value="">Auto-detect from file type</option>
+                    {% for modality in allowed_modalities %}
+                    <option value="{{ modality.slug }}">{{ modality.name }}</option>
+                    {% endfor %}
+                </select>
+                <small>Only needed when a file extension is shared by several of this project's modalities.</small>
+            </label>
+
+            <div class="upload-actions">
+                <a href="{% url ns|add:':upload_patient' %}" class="upload-btn upload-btn--secondary">Single patient</a>
+                <button type="submit" class="upload-btn upload-btn--primary" id="bulkSubmit">
+                    <i class="fas fa-layer-group" aria-hidden="true"></i>
+                    <span>Upload all</span>
+                </button>
+            </div>
+
+            <div class="upload-progress" id="bulkProgress" hidden>
+                <div class="upload-progress__label">
+                    <span id="bulkProgressLabel">Uploading</span>
+                    <span id="bulkProgressCount">0/0</span>
+                </div>
+                <div class="upload-progress__track"><span id="bulkProgressBar"></span></div>
+            </div>
+        </aside>
+
+        <section class="upload-files" aria-labelledby="bulk-files-title">
+            <div class="upload-files__header">
+                <div>
+                    <p class="upload-section-kicker">Clinical data</p>
+                    <h2 id="bulk-files-title">Files</h2>
+                </div>
+                <span>One patient is created per file</span>
+            </div>
+
+            <div class="upload-modality-grid">
+                <article class="upload-modality upload-modality--wide">
+                    <div class="upload-modality__head">
+                        <i class="fas fa-layer-group" aria-hidden="true"></i>
+                        <h3>Select files</h3>
+                    </div>
+                    <label class="upload-dropzone" for="bulkFiles">
+                        <input type="file" name="files" id="bulkFiles" multiple
+                               accept="{{ accept_attribute }}">
+                        <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+                        <strong>Drop files here</strong>
+                        <small>{{ accept_attribute }}</small>
+                        <span class="upload-file-summary" data-file-summary>No files selected</span>
+                    </label>
+                </article>
+            </div>
+
+            <ol class="bulk-results" id="bulkResults" hidden aria-live="polite"></ol>
+        </section>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/cbct_convert.js' %}"></script>
+<script src="{% static 'js/cbct_upload.js' %}"></script>
+<script src="{% static 'js/bulk_upload.js' %}"></script>
+{% endblock %}

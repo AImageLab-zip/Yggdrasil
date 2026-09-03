@@ -1,112 +1,103 @@
 {% load static %}
+{% load cornerstone %}
 <link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
 
 <!-- Django data for JavaScript -->
-<script id="viewerGridData" type="application/json">
-{
-    "scanId": {{ patient.patient_id }},
-    "projectNamespace": "{% firstof request.resolver_match.namespace 'brain' %}",
-    "modalityFiles": {{ modality_files_json|safe }},
-    "segmentationFile": {{ segmentation_file_json|safe }}
-}
-</script>
+{{ viewer_grid_data|json_script:"viewerGridData" }}
+{% include 'common/sections/patient_header_section.html' %}
 
-<div class="container-fluid">
-
-    <div class="row">
-        <!-- Viewer Grid Column -->
-        <div class="col-lg-8">
-            <!-- Patient Info and Modality Chips -->
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <div class="d-flex align-items-center">
-                    <h4 class="me-3"><i class="fas fa-brain me-2"></i>{{ patient.name }}</h4>
-                </div>
-            </div>
-
-            <!-- Modality Chips (Draggable) -->
-            <div class="mb-3">
-                <div class="d-flex align-items-center">
-                    <label class="me-2 fw-bold">Available Modalities:</label>
-                    <div id="modalityChipsContainer">
-                        {% if patient_modalities %}
-                            {% for m in patient_modalities %}
-                                {% if m.slug != 'rawzip' and m.slug != 'braintumor-mri-seg' %}
-                                    <div class="modality-chip"
-                                         data-modality="{{ m.slug }}"
-                                         draggable="true">
-                                        {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %}
-                                    </div>
-                                {% endif %}
-                            {% endfor %}
-                        {% else %}
-                            <span class="text-muted small">No modalities configured for this patient</span>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-
-            <!-- Viewer Help Button -->
-            <div class="d-flex justify-content-end mb-3">
-                <button type="button" class="btn btn-outline-info btn-sm" id="viewerHelpBtn" data-bs-toggle="modal" data-bs-target="#viewerHelpModal">
-                    <i class="fas fa-question-circle me-1"></i>How to use the Viewer
-                </button>
-            </div>
-
-            <!-- 2x2 Viewer Grid -->
-            <div class="viewer-grid">
-                <!-- Window 0: Top-Left -->
-                <div class="viewer-window" data-window-index="0">
-                    <div class="drop-hint">
-                        <i class="fas fa-arrow-down"></i>
-                        <p>Drop modality here</p>
-                    </div>
-                </div>
-
-                <!-- Window 1: Top-Right -->
-                <div class="viewer-window" data-window-index="1">
-                    <div class="drop-hint">
-                        <i class="fas fa-arrow-down"></i>
-                        <p>Drop modality here</p>
-                    </div>
-                </div>
-
-                <!-- Window 2: Bottom-Left -->
-                <div class="viewer-window" data-window-index="2">
-                    <div class="drop-hint">
-                        <i class="fas fa-arrow-down"></i>
-                        <p>Drop modality here</p>
-                    </div>
-                </div>
-
-                <!-- Window 3: Bottom-Right -->
-                <div class="viewer-window" data-window-index="3">
-                    <div class="drop-hint">
-                        <i class="fas fa-arrow-down"></i>
-                        <p>Drop modality here</p>
-                    </div>
+<div class="patient-view-grid">
+    <!-- Viewer Grid Column -->
+    <div class="patient-view-viewer">
+        <!-- Modality Chips (Draggable) -->
+        <div class="mb-3">
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                <span class="viewer-toolbar__label">Drag onto a window:</span>
+                <div id="modalityChipsContainer" class="d-flex flex-wrap gap-2">
+                    {% if patient_modalities %}
+                        {% for m in patient_modalities %}
+                            {% if m.slug != 'rawzip' and m.slug != 'braintumor-mri-seg' %}
+                                <div class="modality-chip" data-modality="{{ m.slug }}" draggable="true">
+                                    {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted small">No modalities configured for this patient</span>
+                    {% endif %}
                 </div>
             </div>
         </div>
 
-        <!-- Classification Column -->
-        <div class="col-lg-4">
-            {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
-            {% include 'brain/sections/report_template_section.html' %}
-            {% include 'common/sections/scan_settings_section.html' %}
-            {% include 'common/sections/nifti_metadata_section.html' %}
-            {% include 'common/sections/file_management_section.html' %}
+        {% comment %}
+            The same toolbar the CBCT grid has, on the same grid. It was missing here
+            entirely -- no crosshair, no measurement tools, no save -- although the grid
+            builds both tool groups for every surface and `bindControls` binds whatever
+            it finds. `grid_has_3d` is false: the brain layout is four freely-assigned
+            windows and pins no volume render, so there is nothing to expand.
+
+            The chips above deliberately exclude `braintumor-mri-seg`. It is not a series
+            to put in a window; it is a labelmap over whichever series is there, which is
+            what the Segmentation switch in this toolbar applies.
+        {% endcomment %}
+        <div class="viewer-toolbar">
+            <div class="viewer-toolbar__group" id="cbctControls">
+                {% include 'common/sections/volume_grid_toolbar.html' with grid_has_3d=False grid_has_crosshairs=False grid_can_annotate=can_modify_segmentation %}
+            </div>
+            <button type="button" class="icon-btn ms-auto" id="viewerHelpBtn" data-ygg-toggle="modal" data-ygg-target="#viewerHelpModal" title="How to use the viewer">
+                <i class="fas fa-circle-question" aria-hidden="true"></i>
+            </button>
+        </div>
+
+        <!-- 2x2 Viewer Grid -->
+        <div class="viewer-grid">
+            <div class="viewer-window" data-window-index="0"><div class="drop-hint"><i class="fas fa-arrow-down"></i><p>Drop modality here</p></div></div>
+            <div class="viewer-window" data-window-index="1"><div class="drop-hint"><i class="fas fa-arrow-down"></i><p>Drop modality here</p></div></div>
+            <div class="viewer-window" data-window-index="2"><div class="drop-hint"><i class="fas fa-arrow-down"></i><p>Drop modality here</p></div></div>
+            <div class="viewer-window" data-window-index="3"><div class="drop-hint"><i class="fas fa-arrow-down"></i><p>Drop modality here</p></div></div>
         </div>
     </div>
 
-    <!-- Back Button -->
-    <div class="row mt-3">
-        <div class="col-12">
-            {% firstof request.resolver_match.namespace 'brain' as ns %}
-            <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
-                <i class="fas fa-arrow-left me-2"></i>Back to Scan List
-            </a>
+    <!-- Tabbed sidebar -->
+    <div class="side-panel">
+        <div class="side-panel__tabs" role="tablist">
+            <button type="button" class="side-tab {% if captions_enabled %}is-active{% endif %}" data-tab-target="captions">Captions</button>
+            <button type="button" class="side-tab {% if not captions_enabled %}is-active{% endif %}" data-tab-target="files">Files</button>
+            {% if patient.has_cbct_scan %}
+            <button type="button" class="side-tab" data-tab-target="metadata">Metadata</button>
+            {% endif %}
+            <button type="button" class="side-tab" data-tab-target="settings">Settings</button>
+            <button type="button" class="side-tab" data-tab-target="activity">Activity</button>
+        </div>
+        <div class="side-panel__body">
+            <div class="side-tab-pane {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-pane="captions">
+                {# Report Template renders inside the voice-caption panel (shared partial) #}
+                {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
+            </div>
+            <div class="side-tab-pane {% if default_tab == 'files' %}is-active{% endif %}" data-tab-pane="files">
+                {% include 'common/sections/file_management_section.html' %}
+            </div>
+            {% if patient.has_cbct_scan %}
+            <div class="side-tab-pane" data-tab-pane="metadata">
+                {% include 'common/sections/nifti_metadata_section.html' %}
+            </div>
+            {% endif %}
+            <div class="side-tab-pane" data-tab-pane="settings">
+                {% include 'common/sections/scan_settings_section.html' %}
+            </div>
+            <div class="side-tab-pane" data-tab-pane="activity">
+                {% include 'common/sections/activity_section.html' %}
+            </div>
         </div>
     </div>
+</div>
+
+<!-- Back Button -->
+<div class="mt-3">
+    {% firstof request.resolver_match.namespace 'brain' as ns %}
+    <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Scan List
+    </a>
 </div>
 
 <!-- Saving Indicator -->
@@ -115,83 +106,65 @@
 </div>
 
 <!-- Viewer Help Modal -->
-<div class="modal fade" id="viewerHelpModal" tabindex="-1" aria-labelledby="viewerHelpModalLabel" aria-hidden="true">
+<div class="modal" id="viewerHelpModal" tabindex="-1" aria-labelledby="viewerHelpModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="viewerHelpModalLabel">
-                    <i class="fas fa-brain me-2"></i>Brain MRI Viewer Instructions
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h5 class="modal-title" id="viewerHelpModalLabel"><i class="fas fa-brain me-2"></i>Brain MRI Viewer Instructions</h5>
+                <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div class="row">
-                    <!-- Grid Viewer Instructions -->
-                    <div class="col-md-12">
-                        <div class="viewer-instructions-card">
-                            <div class="card-header bg-primary text-white">
-                                <h6 class="mb-0">
-                                    <i class="fas fa-th me-2"></i>Multi-Window Grid Viewer
-                                </h6>
-                            </div>
-                            <div class="card-body">
-                                <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-hand-pointer me-1"></i>Loading Modalities
-                                    </h6>
-                                    <ul class="list-unstyled instruction-list">
-                                        <li><strong>Drag and drop:</strong> Drag a modality chip onto any viewer window (it replaces the current modality automatically)</li>
-                                        <li><strong>Multiple views:</strong> Load up to 4 different modalities simultaneously</li>
-                                        <li><strong>Comparison:</strong> View T1, T2, FLAIR, and T1c side-by-side</li>
-                                    </ul>
-                                </div>
-
-                                <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-mouse me-1"></i>Navigation Controls
-                                    </h6>
-                                    <ul class="list-unstyled instruction-list">
-                                        <li><strong>Scroll wheel:</strong> Navigate through slices</li>
-                                        <li><strong>A/S/C buttons:</strong> Switch between Axial, Sagittal, and Coronal views</li>
-                                        <li><strong>Left-click + drag:</strong> Adjust window/level (brightness/contrast)</li>
-                                        <li><strong>Ruler tool:</strong> Click the ruler above the grid, then click two points (can be on different slices/views). Hover a point or line to see the 3D Euclidean distance in mm.</li>
-                                        <li><strong>Free Scroll button (link icon):</strong> Toggle synchronization — By default, windows with the same orientation scroll together. Click to unlink and scroll independently, or click again to re-sync.</li>
-                                    </ul>
-                                </div>
-
-                                <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-layer-group me-1"></i>Segmentation Overlay
-                                    </h6>
-                                    <ul class="list-unstyled instruction-list">
-                                        <li><strong>SEG button:</strong> Toggle the tumor segmentation mask on or off across all loaded windows simultaneously</li>
-                                        <li><strong>Color coding:</strong> The overlay uses three colors — <span style="color:#00cc00;font-weight:600;">green</span> for label 1, <span style="color:#cc0000;font-weight:600;">red</span> for label 2, and <span style="color:#0044ff;font-weight:600;">blue</span> for label 3</li>
-                                        <li><strong>First load:</strong> The segmentation is preloaded in the background when the viewer opens — subsequent toggles are near-instant</li>
-                                    </ul>
-                                </div>
-
-                                <div class="instruction-group">
-                                    <h6 class="text-primary mb-2">
-                                        <i class="fas fa-adjust me-1"></i>Window Management
-                                    </h6>
-                                    <ul class="list-unstyled instruction-list">
-                                        <li><strong>Right-click:</strong> Clear window (remove modality)</li>
-                                        <li><strong>Re-drag:</strong> Replace modality in any window</li>
-                                    </ul>
-                                </div>
-                            </div>
+                <div class="viewer-instructions-card">
+                    <div class="card-header bg-primary text-white">
+                        <h6 class="mb-0"><i class="fas fa-table-cells me-2"></i>Multi-Window Grid Viewer</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="instruction-group">
+                            <h6 class="text-primary mb-2"><i class="fas fa-hand-pointer me-1"></i>Loading Modalities</h6>
+                            <ul class="list-unstyled instruction-list">
+                                <li><strong>Drag and drop:</strong> Drag a modality chip onto any viewer window (it replaces the current modality automatically)</li>
+                                <li><strong>Multiple views:</strong> Load up to 4 different modalities simultaneously</li>
+                                <li><strong>Comparison:</strong> View T1, T2, FLAIR, and T1c side-by-side</li>
+                            </ul>
+                        </div>
+                        <div class="instruction-group">
+                            <h6 class="text-primary mb-2"><i class="fas fa-arrow-pointer me-1"></i>Navigation Controls</h6>
+                            <ul class="list-unstyled instruction-list">
+                                <li><strong>Scroll wheel:</strong> Navigate through slices</li>
+                                <li><strong>A/S/C buttons:</strong> Switch between Axial, Sagittal, and Coronal views</li>
+                                <li><strong>Left-click + drag:</strong> Adjust window/level (brightness/contrast)</li>
+                                <li><strong>Ruler tool:</strong> Click the ruler above the grid, then click two points (can be on different slices/views). Hover a point or line to see the 3D Euclidean distance in mm.</li>
+                                <li><strong>Free Scroll button (link icon):</strong> Toggle synchronization — By default, windows with the same orientation scroll together. Click to unlink and scroll independently, or click again to re-sync.</li>
+                            </ul>
+                        </div>
+                        <div class="instruction-group">
+                            <h6 class="text-primary mb-2"><i class="fas fa-layer-group me-1"></i>Segmentation Overlay</h6>
+                            <ul class="list-unstyled instruction-list">
+                                <li><strong>SEG button:</strong> Toggle the tumor segmentation mask on or off across all loaded windows simultaneously</li>
+                                <li><strong>Color coding:</strong> The overlay uses three colors — <span style="color:#00cc00;font-weight:600;">green</span> for label 1, <span style="color:#cc0000;font-weight:600;">red</span> for label 2, and <span style="color:#0044ff;font-weight:600;">blue</span> for label 3</li>
+                                <li><strong>First load:</strong> The segmentation is preloaded in the background when the viewer opens — subsequent toggles are near-instant</li>
+                            </ul>
+                        </div>
+                        <div class="instruction-group">
+                            <h6 class="text-primary mb-2"><i class="fas fa-sliders me-1"></i>Window Management</h6>
+                            <ul class="list-unstyled instruction-list">
+                                <li><strong>Right-click:</strong> Clear window (remove modality)</li>
+                                <li><strong>Re-drag:</strong> Replace modality in any window</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-secondary" data-ygg-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- NiiVue for medical volume viewing (DISP-01) -->
-<script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.67.0/dist/niivue.umd.min.js"></script>
-<script src="{% static 'js/modality_viewers/niivue_viewer.js' %}"></script>
-<script src="{% static 'js/viewer_grid.js' %}"></script>
+{% comment %}
+Cornerstone3D volume grid (roadmap Phase 3). Replaces the NiiVue 0.67 CDN tag -- note
+brain pinned a *different* NiiVue version from maxillo's 0.69, which is one of the
+reasons the two surfaces drifted.
+{% endcomment %}
+{% cornerstone_entry 'volume-grid' %}

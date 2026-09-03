@@ -1,11 +1,10 @@
-"""Admin control panel and processing management views."""
+"""Processing management views (rerun / bulk rerun)."""
 
-from django.shortcuts import render, get_object_or_404
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.shortcuts import get_object_or_404
+from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse
-from django.db.models import Count, Q
 import json
 import logging
 
@@ -47,11 +46,20 @@ def rerun_processing(request, patient_id):
                 {"success": False, "error": "No jobs selected"}, status=400
             )
 
+        # Ensure jobs exist for the requested steps (and their prerequisite
+        # closure) so newly-registered steps get a job on existing patients.
+        from common.uploads import ensure_step_jobs_for_patient
+        created_jobs = ensure_step_jobs_for_patient(patient, requested_jobs)
+        created = sorted({job.modality_slug for job in created_jobs})
+
         updated = []
         not_found = []
 
         # Process each requested modality dynamically
         for modality_slug in requested_jobs:
+            if modality_slug in {"audio", "voice"}:
+                not_found.append(modality_slug)
+                continue
             # Handle both old-style ProcessingJob and new-style Job
             jobs_found = False
 
@@ -79,41 +87,12 @@ def rerun_processing(request, patient_id):
             except Exception as e:
                 logger.error(f"Error processing job for modality {modality_slug}: {e}")
 
-            # Handle special case for audio/voice captions (check via modality metadata)
-            from ..modality_helpers import get_modality_by_slug
-
-            modality_obj = get_modality_by_slug(modality_slug)
-            is_audio_modality = False
-            if modality_obj:
-                metadata = getattr(modality_obj, "metadata", {}) or {}
-                is_audio_modality = metadata.get(
-                    "is_audio_modality", False
-                ) or modality_slug in ["audio", "voice"]
-
-            if is_audio_modality:
-                # Use 'audio' as the canonical slug for job lookups
-                actual_slug = "audio" if modality_slug == "voice" else modality_slug
-                audio_jobs = Job.objects.filter(modality_slug=actual_slug, **job_filter)
-                if audio_jobs.exists():
-                    for job in audio_jobs:
-                        job.status = "pending"
-                        job.started_at = None
-                        job.completed_at = None
-                        job.worker_id = ""
-                        job.error_logs = ""
-                        job.save()
-                    # Also reset related captions to pending
-                    for vc in patient.voice_captions.all():
-                        vc.processing_status = "pending"
-                        vc.save()
-                    if modality_slug not in updated:
-                        updated.append(modality_slug)
-                    jobs_found = True
-
             if not jobs_found and modality_slug not in updated:
                 not_found.append(modality_slug)
 
         msg_parts = []
+        if created:
+            msg_parts.append(f"Created missing job for: {', '.join(created)}")
         if updated:
             msg_parts.append(f"Updated: {', '.join(updated)}")
         if not_found:
@@ -130,6 +109,7 @@ def rerun_processing(request, patient_id):
                 "success": True,
                 "message": message,
                 "updated": updated,
+                "created": created,
                 "not_found": not_found,
             }
         )
@@ -187,7 +167,8 @@ def bulk_rerun_processing(request):
             s = str(slug or "").strip()
             if not s:
                 continue
-            normalized_jobs.append("audio" if s == "voice" else s)
+            if s not in {"audio", "voice"}:
+                normalized_jobs.append(s)
         normalized_jobs = list(set(normalized_jobs))
 
         if not normalized_jobs:
@@ -197,6 +178,9 @@ def bulk_rerun_processing(request):
         not_found_pairs = 0
         updated_by_modality = {}
         not_found_by_modality = {}
+        created_slugs = set()
+
+        from common.uploads import ensure_step_jobs_for_patient
 
         for patient in patients:
             job_filter_base = (
@@ -206,6 +190,12 @@ def bulk_rerun_processing(request):
             )
 
             for modality_slug in normalized_jobs:
+                # Ensure the step's job exists (and its prerequisites) before
+                # resetting, so newly-registered steps run on existing patients.
+                created_slugs.update(
+                    job.modality_slug
+                    for job in ensure_step_jobs_for_patient(patient, [modality_slug])
+                )
                 job = (
                     Job.objects.filter(modality_slug=modality_slug, **job_filter_base)
                     .order_by("-created_at")
@@ -229,11 +219,6 @@ def bulk_rerun_processing(request):
                 updated_pairs += 1
                 updated_by_modality[modality_slug] = updated_by_modality.get(modality_slug, 0) + 1
 
-                if modality_slug == "audio":
-                    for vc in patient.voice_captions.all():
-                        vc.processing_status = "pending"
-                        vc.save(update_fields=["processing_status"])
-
         message = (
             f"Bulk rerun queued for {updated_pairs} patient-modality pairs "
             f"across {patients.count()} selected scans."
@@ -247,6 +232,7 @@ def bulk_rerun_processing(request):
                 "requested_modalities": normalized_jobs,
                 "updated_pairs": updated_pairs,
                 "not_found_pairs": not_found_pairs,
+                "created_slugs": sorted(created_slugs),
                 "updated_by_modality": updated_by_modality,
                 "not_found_by_modality": not_found_by_modality,
             }
@@ -254,60 +240,3 @@ def bulk_rerun_processing(request):
     except Exception as e:
         logger.error(f"Error in bulk rerun processing: {e}", exc_info=True)
         return JsonResponse({"success": False, "error": str(e)}, status=500)
-
-
-def admin_control_panel(request):
-    """Admin control panel showing job stats."""
-    from common.models import Job
-
-    domain = get_namespace(request)
-
-    # Get job statistics
-    jobs = Job.objects.filter(domain=domain)
-    job_stats = jobs.aggregate(
-        total_jobs=Count("id"),
-        pending_jobs=Count("id", filter=Q(status="pending")),
-        processing_jobs=Count("id", filter=Q(status="processing")),
-        completed_jobs=Count("id", filter=Q(status="completed")),
-        failed_jobs=Count("id", filter=Q(status="failed")),
-    )
-
-    # Get job breakdown by type
-    job_type_stats = (
-        jobs.values("modality_slug")
-        .annotate(
-            total=Count("id"),
-            pending=Count("id", filter=Q(status="pending")),
-            processing=Count("id", filter=Q(status="processing")),
-            completed=Count("id", filter=Q(status="completed")),
-            failed=Count("id", filter=Q(status="failed")),
-        )
-        .order_by("modality_slug")
-    )
-
-    # Get recent failed jobs
-    recent_failed_jobs = (
-        jobs.filter(status="failed")
-        .select_related("patient", "voice_caption")
-        .order_by("-created_at")[:10]
-    )
-
-    # Get processing queue info (dynamic by modality)
-    from django.utils.text import slugify as _slugify
-    from common.models import Modality as _Modality
-
-    processing_queue = {}
-    for _m in _Modality.objects.order_by("name"):
-        _slug = _m.slug or _slugify(_m.name)
-        processing_queue[_slug] = jobs.filter(
-            modality_slug=_slug, status="pending"
-        ).count()
-
-    context = {
-        "job_stats": job_stats,
-        "job_type_stats": job_type_stats,
-        "recent_failed_jobs": recent_failed_jobs,
-        "processing_queue": processing_queue,
-    }
-
-    return render(request, "maxillo/admin_control_panel.html", context)

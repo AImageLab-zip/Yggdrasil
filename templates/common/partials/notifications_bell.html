@@ -1,0 +1,27 @@
+{% load static %}
+{% load icons %}
+{% comment %}
+  Notifications bell + dropdown. Unread count/list fetched by
+  static/js/notifications_feed.js from the `notifications_api` endpoint; click a
+  row or "Mark all read" to clear. Works in both the rail and the topbar.
+{% endcomment %}
+<div class="relative" data-notif-bell>
+    <button type="button"
+            class="{% if rail %}ygg-rail-item{% else %}ygg-icon-btn{% endif %}"
+            data-notif-toggle aria-label="Notifications" title="Notifications">
+        {% icon 'bell' %}
+        <span class="ygg-bell-dot" data-notif-dot hidden></span>
+    </button>
+    <div class="ygg-menu w-80 max-w-[92vw] {% if rail %}left-full ml-2 bottom-0 right-auto{% endif %}"
+         data-notif-menu hidden>
+        <div class="flex items-center justify-between px-3 py-2 border-b border-line">
+            <span class="text-xs font-bold uppercase tracking-wide text-content-muted">Notifications</span>
+            <button type="button" class="text-xs text-primary" data-notif-mark-all>Mark all read</button>
+        </div>
+        <div class="max-h-80 overflow-y-auto" data-notif-list>
+            <div class="px-3 py-6 text-center text-sm text-content-muted" data-notif-empty>
+                {% icon 'bell' 'ygg-icon-lg' %}<div class="mt-1">No notifications</div>
+            </div>
+        </div>
+    </div>
+</div>

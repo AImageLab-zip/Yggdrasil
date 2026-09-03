@@ -1,303 +1,256 @@
-/**
- * Volume Upload UI Logic (modality-agnostic)
- * - Works for any 3D volume modality blocks (DICOM/NIfTI/etc.)
- * - Backwards compatible with legacy CBCT-only markup/IDs
- */
+(function () {
+    'use strict';
 
-document.addEventListener('DOMContentLoaded', function() {
-    // Upload scan page functionality
-    initUploadToggle();
-    
-    // Scan detail page functionality
-    initDetailToggle();
+    function notify(type, message) {
+        if (window.appNotify) window.appNotify(type, message);
+        else window.alert(message);
+    }
 
-    // Ensure only one cbct/cbct_folder_files input is active across blocks
-    initExclusiveSelection();
+    function acceptedByInput(file, input) {
+        if (input.hasAttribute('webkitdirectory')) return true;
+        const accept = (input.getAttribute('accept') || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+        if (!accept.length) return true;
+        const name = file.name.toLowerCase();
+        const type = (file.type || '').toLowerCase();
+        return accept.some(rule => {
+            if (rule.startsWith('.')) return name.endsWith(rule);
+            if (rule.endsWith('/*')) return type.startsWith(rule.slice(0, -1));
+            return type === rule;
+        });
+    }
 
-    // Track which modality the user is actually uploading
-    initModalitySelection();
-});
+    function summarizeFiles(input) {
+        const zone = input.closest('.upload-dropzone');
+        if (!zone) return;
+        const summary = zone.querySelector('[data-file-summary]');
+        const files = Array.from(input.files || []);
+        zone.classList.toggle('has-files', files.length > 0);
+        if (!summary) return;
+        if (!files.length) {
+            summary.textContent = input.multiple ? 'No files selected' : 'No file selected';
+        } else if (files.length === 1) {
+            summary.textContent = files[0].name;
+        } else {
+            summary.textContent = `${files.length} files selected`;
+        }
+    }
 
-function initUploadToggle() {
-    // Multi-instance support: look for all containers first
-    const containers = document.querySelectorAll('.volume-upload-container, .cbct-upload-container');
-    if (containers.length > 0) {
-        containers.forEach(container => {
-            const fileRadio = container.querySelector('input[type="radio"][value="file"]');
-            const folderRadio = container.querySelector('input[type="radio"][value="folder"]');
-            const fileSection = container.querySelector('.volume-file-section') || container.querySelector('.cbct-file-section') || container.querySelector('[id$="_file_section"]');
-            const folderSection = container.querySelector('.volume-folder-section') || container.querySelector('.cbct-folder-section') || container.querySelector('[id$="_folder_section"]');
-            const groupName = container.getAttribute('data-group') || '';
+    function assignDroppedFiles(input, files) {
+        const selected = Array.from(files || []);
+        if (!selected.length) return;
+        if (selected.some(file => !acceptedByInput(file, input))) {
+            notify('warning', 'One or more files are not supported by this modality.');
+            return;
+        }
+        if (!input.multiple && selected.length > 1) {
+            notify('warning', 'This modality accepts one file.');
+            return;
+        }
+        const transfer = new DataTransfer();
+        selected.forEach(file => transfer.items.add(file));
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
-            if (!fileRadio || !folderRadio || !fileSection || !folderSection) {
+    function initDropZones() {
+        document.querySelectorAll('.upload-dropzone').forEach(zone => {
+            const input = zone.querySelector('input[type="file"]');
+            if (!input) return;
+            summarizeFiles(input);
+            input.addEventListener('change', () => summarizeFiles(input));
+            ['dragenter', 'dragover'].forEach(type => zone.addEventListener(type, event => {
+                event.preventDefault();
+                zone.classList.add('is-dragging');
+            }));
+            ['dragleave', 'drop'].forEach(type => zone.addEventListener(type, event => {
+                event.preventDefault();
+                zone.classList.remove('is-dragging');
+            }));
+            zone.addEventListener('drop', event => assignDroppedFiles(input, event.dataTransfer.files));
+        });
+    }
+
+    function setSubmitting(form, submitting) {
+        const button = form.querySelector('[type="submit"]');
+        if (!button) return;
+        button.disabled = submitting;
+        const label = button.querySelector('span');
+        if (label) label.textContent = submitting ? 'Uploading...' : 'Upload & process';
+        const icon = button.querySelector('i');
+        if (icon) icon.className = submitting ? 'fas fa-spinner fa-spin' : 'fas fa-arrow-up-from-bracket';
+    }
+
+    function promptOrientationSelection() {
+        return new Promise(resolve => {
+            let overlay = document.getElementById('cbctOrientationModal');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'cbctOrientationModal';
+                overlay.className = 'cbct-orientation-modal';
+                overlay.innerHTML = `
+                    <div class="cbct-orientation-dialog">
+                        <i class="fas fa-compass text-primary text-xl mb-2" style="font-size: 1.5rem; color: var(--ygg-primary, #0d6efd);"></i>
+                        <h4 style="margin: 0.5rem 0 0.25rem; font-weight: 600;">Specify Orientation Metadata</h4>
+                        <p style="font-size: 0.85rem; color: var(--ygg-text-muted, #aaa); margin-bottom: 1rem;">
+                            This CBCT volume contains no orientation metadata (qform/sform codes are 0).
+                            Please select the correct orientation to apply:
+                        </p>
+                        <div style="margin-bottom: 1rem;">
+                            <select id="cbctOrientationSelect" class="form-input" style="width: 100%; padding: 0.5rem; background: var(--ygg-surface, #222); color: #fff; border: 1px solid var(--ygg-border, #444); border-radius: 6px;">
+                                <option value="RAS" selected>RAS (Right-Anterior-Superior)</option>
+                                <option value="LAS">LAS (Left-Anterior-Superior)</option>
+                                <option value="LPS">LPS (Left-Posterior-Superior)</option>
+                                <option value="RPS">RPS (Right-Posterior-Superior)</option>
+                                <option value="RAI">RAI (Right-Anterior-Inferior)</option>
+                                <option value="LAI">LAI (Left-Anterior-Inferior)</option>
+                                <option value="LPI">LPI (Left-Posterior-Inferior)</option>
+                                <option value="RPI">RPI (Right-Posterior-Inferior)</option>
+                            </select>
+                        </div>
+                        <button type="button" id="cbctOrientationConfirm" class="btn btn-primary btn-sm" style="width: 100%; padding: 0.5rem; background: #0d6efd; color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                            Apply & Continue
+                        </button>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+            }
+            overlay.hidden = false;
+            const confirmBtn = overlay.querySelector('#cbctOrientationConfirm');
+            const selectEl = overlay.querySelector('#cbctOrientationSelect');
+
+            function onConfirm(e) {
+                e.preventDefault();
+                confirmBtn.removeEventListener('click', onConfirm);
+                overlay.hidden = true;
+                resolve(selectEl.value || 'RAS');
+            }
+
+            confirmBtn.addEventListener('click', onConfirm);
+        });
+    }
+
+    function uploadFormWithProgress(form) {
+        const progress = document.getElementById('uploadProgress');
+        const bar = document.getElementById('uploadProgressBar');
+        const percent = document.getElementById('uploadProgressPercent');
+        const progressLabel = document.getElementById('uploadProgressLabel');
+        const xhr = new XMLHttpRequest();
+        if (progress) progress.hidden = false;
+        setSubmitting(form, true);
+        if (xhr.upload && bar && percent) {
+            xhr.upload.addEventListener('progress', event => {
+                if (!event.lengthComputable) return;
+                const value = Math.round((event.loaded / event.total) * 100);
+                bar.style.width = `${value}%`;
+                percent.textContent = `${value}%`;
+                if (value === 100 && progressLabel) progressLabel.textContent = 'Finalizing upload';
+            });
+        }
+        xhr.addEventListener('load', () => {
+            let data = null;
+            try { data = JSON.parse(xhr.responseText); } catch (error) { /* non-JSON response */ }
+            if (data && data.ok) {
+                window.location.href = data.redirect;
+                return;
+            }
+            const message = data && data.error ? data.error : `Upload failed (HTTP ${xhr.status}).`;
+            notify('danger', message);
+            if (progress) progress.hidden = true;
+            setSubmitting(form, false);
+        });
+        xhr.addEventListener('error', () => {
+            notify('danger', 'Network error during upload. Please try again.');
+            if (progress) progress.hidden = true;
+            setSubmitting(form, false);
+        });
+        xhr.open('POST', form.action || window.location.href, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        xhr.send(new FormData(form));
+    }
+
+
+    /**
+     * Whether this input's selection has to go through the in-browser converter.
+     *
+     * The two formats the server cannot store natively, plus the .nii.gz orientation
+     * repair the server-side validator demands. DICOM is not among them: the platform
+     * has no DICOM path at all any more, and `_validate_and_extract_nifti_orientation`
+     * in maxillo/file_utils.py refuses anything that is not a .nii.gz.
+     */
+    var BROWSER_CONVERTIBLE = /\.(nii|nii\.gz|mha)$/i;
+
+    function needsBrowserConversion(input) {
+        if (!input || input.dataset.converted === 'true') return false;
+        var files = Array.from(input.files || []);
+        return files.length === 1 && BROWSER_CONVERTIBLE.test(files[0].name);
+    }
+
+    function initForm() {
+        const form = document.getElementById('patientUploadForm');
+        if (!form) return;
+        form.addEventListener('submit', event => {
+            const activeInputs = Array.from(form.querySelectorAll('input[type="file"]:not(:disabled)'));
+            const hasFiles = activeInputs.some(input => input.files && input.files.length);
+            if (!hasFiles) {
+                event.preventDefault();
+                notify('warning', 'Add at least one file before uploading.');
+                return;
+            }
+            const photos = form.querySelector('input[name="intraoral-photos"]');
+            if (photos && photos.files.length > 10) {
+                event.preventDefault();
+                notify('warning', 'Select no more than 10 intraoral photographs.');
                 return;
             }
 
-            function setUploadTypeHidden(value) {
-                // Prefer generic field if present, else legacy
-                const generic = document.querySelector('input[name="volume_upload_type"]');
-                if (generic) generic.value = value;
-                const legacy = document.querySelector('input[name="cbct_upload_type"]');
-                if (legacy) legacy.value = value;
-            }
+            const cbctInput = form.querySelector('input[name="cbct"]');
+            const activeCbctInput = cbctInput && !cbctInput.disabled && cbctInput.files && cbctInput.files.length
+                ? cbctInput : null;
 
-            function toggleSections() {
-                if (fileRadio.checked) {
-                    fileSection.style.display = 'block';
-                    folderSection.style.display = 'none';
-                    // Clear folder input when switching to file mode
-                    const folderInput = (groupName && container.querySelector('#' + groupName + '_folder')) || container.querySelector('input[type="file"][webkitdirectory]');
-                    if (folderInput) {
-                        folderInput.value = '';
+            if (activeCbctInput && needsBrowserConversion(activeCbctInput) && window.CBCTConvert) {
+                event.preventDefault();
+                setSubmitting(form, true);
+
+                const progressLabel = document.getElementById('uploadProgressLabel');
+                const progress = document.getElementById('uploadProgress');
+                if (progress) progress.hidden = false;
+                if (progressLabel) progressLabel.textContent = 'Converting CBCT to NIfTI (.nii.gz)...';
+
+                window.CBCTConvert.convertFiles(activeCbctInput.files, {
+                    onProgress: (pct, msg) => {
+                        if (progressLabel) progressLabel.textContent = msg;
+                    },
+                    onNeedsOrientation: () => promptOrientationSelection()
+                }).then(({ file }) => {
+                    const transfer = new DataTransfer();
+                    transfer.items.add(file);
+                    if (cbctInput) {
+                        cbctInput.files = transfer.files;
+                        cbctInput.disabled = false;
+                        cbctInput.dataset.converted = 'true';
                     }
-                    // Set upload type to file (hidden field)
-                    setUploadTypeHidden('file');
-                } else if (folderRadio.checked) {
-                    fileSection.style.display = 'none';
-                    folderSection.style.display = 'block';
-                    // Clear file input when switching to folder mode
-                    const fileInput = fileSection.querySelector('input[type="file"]');
-                    if (fileInput) {
-                        fileInput.value = '';
-                    }
-                    // Set upload type to folder (hidden field)
-                    setUploadTypeHidden('folder');
-                }
+                    uploadFormWithProgress(form);
+                }).catch(err => {
+                    notify('danger', 'CBCT Conversion failed: ' + err.message);
+                    if (progress) progress.hidden = true;
+                    setSubmitting(form, false);
+                });
+                return;
             }
 
-            fileRadio.addEventListener('change', toggleSections);
-            folderRadio.addEventListener('change', toggleSections);
-            
-            // Set initial state for this container
-            toggleSections();
+            const video = form.querySelector('input[name="video"]');
+            if (video && video.files.length) {
+                event.preventDefault();
+                uploadFormWithProgress(form);
+            } else {
+                event.preventDefault();
+                uploadFormWithProgress(form);
+            }
         });
-        return;
     }
 
-    // Legacy single-instance support
-    const fileRadio = document.getElementById('cbct_file_upload');
-    const folderRadio = document.getElementById('cbct_folder_upload');
-    const fileSection = document.getElementById('cbct_file_section');
-    const folderSection = document.getElementById('cbct_folder_section');
-    
-    if (!fileRadio || !folderRadio || !fileSection || !folderSection) {
-        return; // Not on upload page
-    }
-    
-    function toggleSections() {
-        if (fileRadio.checked) {
-            fileSection.style.display = 'block';
-            folderSection.style.display = 'none';
-            const folderInput = document.getElementById('cbct_folder');
-            if (folderInput) {
-                folderInput.value = '';
-            }
-            const hiddenField = document.querySelector('input[name="volume_upload_type"]') || document.querySelector('input[name="cbct_upload_type"]');
-            if (hiddenField) {
-                hiddenField.value = 'file';
-            }
-        } else if (folderRadio.checked) {
-            fileSection.style.display = 'none';
-            folderSection.style.display = 'block';
-            const fileInput = fileSection.querySelector('input[type="file"]');
-            if (fileInput) {
-                fileInput.value = '';
-            }
-            const hiddenField = document.querySelector('input[name="volume_upload_type"]') || document.querySelector('input[name="cbct_upload_type"]');
-            if (hiddenField) {
-                hiddenField.value = 'folder';
-            }
-        }
-    }
-    
-    fileRadio.addEventListener('change', toggleSections);
-    folderRadio.addEventListener('change', toggleSections);
-    toggleSections();
-}
-
-function initDetailToggle() {
-    const fileRadio = document.getElementById('cbct_file_upload_detail');
-    const folderRadio = document.getElementById('cbct_folder_upload_detail');
-    const fileSection = document.getElementById('cbct_file_section_detail');
-    const folderSection = document.getElementById('cbct_folder_section_detail');
-    
-    if (!fileRadio || !folderRadio || !fileSection || !folderSection) {
-        return; // Not on detail page
-    }
-    
-    function toggleSections() {
-        if (fileRadio.checked) {
-            fileSection.style.display = 'block';
-            folderSection.style.display = 'none';
-            // Clear folder input when switching to file mode
-            const folderInput = document.getElementById('cbct_folder_detail');
-            if (folderInput) {
-                folderInput.value = '';
-            }
-            // Set upload type to file
-            const hiddenField = document.querySelector('input[name="volume_upload_type"]') || document.querySelector('input[name="cbct_upload_type"]');
-            if (hiddenField) {
-                hiddenField.value = 'file';
-            }
-        } else if (folderRadio.checked) {
-            fileSection.style.display = 'none';
-            folderSection.style.display = 'block';
-            // Clear file input when switching to folder mode
-            const fileInput = fileSection.querySelector('input[type="file"]');
-            if (fileInput) {
-                fileInput.value = '';
-            }
-            // Set upload type to folder
-            const hiddenField = document.querySelector('input[name="volume_upload_type"]') || document.querySelector('input[name="cbct_upload_type"]');
-            if (hiddenField) {
-                hiddenField.value = 'folder';
-            }
-        }
-    }
-    
-    fileRadio.addEventListener('change', toggleSections);
-    folderRadio.addEventListener('change', toggleSections);
-    
-    // Set initial state
-    toggleSections();
-}
-
-/**
- * Handle form submission validation (modality-agnostic)
- */
-function handleFormSubmission() {
-    const forms = document.querySelectorAll('form');
-    
-    forms.forEach(form => {
-        // Only validate forms that contain file upload elements
-        const hasFileInputs = form.querySelector('input[type="file"]') !== null;
-        const hasUploadContainer = form.querySelector('.volume-upload-container, .cbct-upload-container') !== null;
-        
-        // Skip validation for forms that are not file upload forms (e.g., logout, search, etc.)
-        if (!hasFileInputs && !hasUploadContainer) {
-            return;
-        }
-        
-        form.addEventListener('submit', function(e) {
-            // Skip validation for scan management form (which only updates settings)
-            const action = form.querySelector('input[name="action"]')?.value;
-            if (action === 'update_management') {
-                return true; // Allow scan management form to submit without file validation
-            }
-            
-            // Check if at least one file is uploaded
-            let hasAnyFile = false;
-            const allFileInputs = form.querySelectorAll('input[type="file"]');
-            allFileInputs.forEach(input => {
-                if (input.files && input.files.length > 0) {
-                    hasAnyFile = true;
-                }
-            });
-            
-            // If no files are being uploaded at all, show an error message
-            if (!hasAnyFile) {
-                e.preventDefault();
-                if (typeof window.appNotify === 'function') {
-                    window.appNotify('warning', 'Please upload at least one file.');
-                }
-                return false;
-            }
-            
-            // Allow normal form submission
-            return true;
-        });
+    document.addEventListener('DOMContentLoaded', function () {
+        initDropZones();
+        initForm();
     });
-}
-
-// Initialize form submission handling
-document.addEventListener('DOMContentLoaded', handleFormSubmission);
-
-/**
- * Ensure exclusivity across duplicated inputs with the same name
- */
-function initExclusiveSelection() {
-    const forms = document.querySelectorAll('form');
-    forms.forEach(form => {
-        // Per-container exclusivity for generic/modern blocks
-        const containers = form.querySelectorAll('.volume-upload-container, .cbct-upload-container');
-        containers.forEach(container => {
-            const groupName = container.getAttribute('data-group') || '';
-            const fileInput = container.querySelector('input[type="file"]:not([webkitdirectory])');
-            const folderInput = container.querySelector('input[type="file"][webkitdirectory]');
-
-            const setUploadTypeHidden = (value) => {
-                const generic = form.querySelector('input[name="volume_upload_type"]');
-                if (generic) generic.value = value;
-                const legacy = form.querySelector('input[name="cbct_upload_type"]');
-                if (legacy) legacy.value = value;
-            };
-            // Selected modality field deprecated - modalities are now inferred from uploaded files
-
-            if (fileInput) fileInput.addEventListener('change', () => {
-                if (fileInput.files && fileInput.files.length > 0) {
-                    if (folderInput) folderInput.value = '';
-                    setUploadTypeHidden('file');
-                }
-            });
-            if (folderInput) folderInput.addEventListener('change', () => {
-                if (folderInput.files && folderInput.files.length > 0) {
-                    if (fileInput) fileInput.value = '';
-                    setUploadTypeHidden('folder');
-                }
-            });
-        });
-
-        // Legacy CBCT-only blocks (outside containers)
-        const legacyFileInputs = form.querySelectorAll('input[type="file"][name="cbct"]');
-        legacyFileInputs.forEach(input => {
-            input.addEventListener('change', () => {
-                if (input.files && input.files.length > 0) {
-                    form.querySelectorAll('input[type="file"][name="cbct"]').forEach(other => { if (other !== input) other.value = ''; });
-                    form.querySelectorAll('input[type="file"][name="cbct_folder_files"]').forEach(other => { other.value = ''; });
-                    const hiddenField = form.querySelector('input[name="volume_upload_type"]') || form.querySelector('input[name="cbct_upload_type"]');
-                    if (hiddenField) hiddenField.value = 'file';
-                    // Selected modality field deprecated - modalities are now inferred from uploaded files
-                }
-            });
-        });
-        const legacyFolderInputs = form.querySelectorAll('input[type="file"][name="cbct_folder_files"]');
-        legacyFolderInputs.forEach(input => {
-            input.addEventListener('change', () => {
-                if (input.files && input.files.length > 0) {
-                    form.querySelectorAll('input[type="file"][name="cbct_folder_files"]').forEach(other => { if (other !== input) other.value = ''; });
-                    form.querySelectorAll('input[type="file"][name="cbct"]').forEach(other => { other.value = ''; });
-                    const hiddenField = form.querySelector('input[name="volume_upload_type"]') || form.querySelector('input[name="cbct_upload_type"]');
-                    if (hiddenField) hiddenField.value = 'folder';
-                    // Selected modality field deprecated - modalities are now inferred from uploaded files
-                }
-            });
-        });
-    });
-}
-
-/**
- * Track modality selection for IOS and per-modality blocks (agnostic)
- */
-function initModalitySelection() {
-    const forms = document.querySelectorAll('form');
-    forms.forEach(form => {
-        // Selected modality field deprecated - modalities are now inferred from uploaded files on the backend
-
-        // IOS inputs (keeping file validation)
-        const upper = form.querySelector('input[type="file"][name="upper_scan"]');
-        const lower = form.querySelector('input[type="file"][name="lower_scan"]');
-
-        // Per-modality blocks (with data-group); listen to inputs named by slug or slug_folder_files
-        const containers = form.querySelectorAll('.volume-upload-container, .cbct-upload-container');
-        containers.forEach(container => {
-            const groupName = container.getAttribute('data-group');
-            if (!groupName) return;
-            const fileInput = container.querySelector(`input[type="file"][name="${groupName}"]`);
-            const folderInputA = container.querySelector(`input[type="file"][name="${groupName}_folder_files"]`);
-            const folderInputB = container.querySelector(`input[type="file"][name="${groupName}-folder_files"]`);
-            // File input event listeners removed - modality inference handled by backend
-        });
-
-        // Selected modality field deprecated - backend now infers modalities from uploaded files
-    });
-}
+}());

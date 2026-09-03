@@ -1,207 +1,91 @@
 {% load static %}
+{% load icons %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Yggdrasil{% endblock %}</title>
-    
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <!-- Three.js for 3D viewer -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js"></script>
-    
-    <script src="https://unpkg.com/fflate@0.8.2"></script>
-    <script src="{% static 'js/nifti-reader.js' %}"></script>
-    <style>
-        .form-control, .form-select {
-            margin-top: 0.25rem;
-        }
-        
-        /* Logout button styling */
-        .dropdown-item.p-0 .btn-link {
-            color: inherit;
-            font-weight: inherit;
-        }
-        
-        .dropdown-item.p-0 .btn-link:hover {
-            background-color: #f8f9fa;
-            color: inherit;
-        }
-        
-        .dropdown-item.p-0 {
-            overflow: hidden;
-        }
 
-        .navbar-dark .navbar-nav .nav-link,
-        .navbar-dark .navbar-nav .nav-link.dropdown-toggle,
-        .navbar-dark .navbar-nav .nav-link:hover,
-        .navbar-dark .navbar-nav .nav-link:focus,
-        .navbar-dark .navbar-nav .nav-link.active {
-            color: #fff;
-            opacity: 1;
-        }
-    </style>
+    <!-- Theme bootstrap: stamp data-theme on <html> before first paint (no flash).
+         Stored choice wins; else the landing page defaults dark, other pages
+         follow the OS preference. Toggle lives in static/js/nav.js. -->
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem('ygg-theme');
+                var landingDefault = {% block theme_default_dark %}false{% endblock %};
+                var theme = stored
+                    || (landingDefault ? 'dark'
+                        : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+
+    <!-- Favicon (Yggdrasil tree) -->
+    <link rel="icon" href="{% static 'icons/favicon.ico' %}" sizes="any">
+    <link rel="icon" href="{% static 'icons/favicon.svg' %}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
+    <link rel="manifest" href="{% static 'icons/site.webmanifest' %}">
+
+    <!-- Viewer runtime globals (loaded on every page so patient-detail viewers
+         find fflate / nifti already present before their init) -->
+    {% comment %}
+       fflate is served from static/, not a CDN, and that is a consolidation rather than
+       a policy: static/js/vendor/fflate-0.8.2.min.js already has to exist because
+       static/js/worker/cbct_convert_worker.js importScripts() it, and importScripts is
+       all-or-nothing -- a blocked CDN fetch there would take nifti-reader.js and
+       volume_metadata.js down with it. Two sources for one byte-identical file (both are
+       the fflate@0.8.2 UMD build) is one more thing to keep in step for no gain.
+
+       A block comment rather than the {# ... #} form: that one is single-line only, so
+       spreading it over several lines makes it not a comment at all -- it renders as
+       literal text, which maxillo.tests_rerun_steps asserts against.
+    {% endcomment %}
+    <script src="{% static 'js/vendor/fflate-0.8.2.min.js' %}"></script>
+    <script src="{% static 'js/nifti-reader.js' %}"></script>
+
+    <!-- Yggdrasil 2.0 design system: tokens -> Tailwind -> components -> fonts.
+
+         Third-party CDNs are allowed here. The three Three.js r128 tags that used to
+         sit above went with roadmap Phase 6, which moved the IOS meshes onto the
+         committed Cornerstone bundle; nothing on any page loads Three.js now.
+         (The CDN permission replaces an earlier blanket no-CDN rule. That rule was
+         also never true — those script tags predate it.)
+
+         Webfonts stay self-hosted, and that is a *different* rule, not a leftover of
+         the old one. A font CDN sees every page view of every visitor and needs no
+         consent banner to do it; GDPR is why IBM Plex and Font Awesome are served from
+         `static/`, and that reason does not apply to a JavaScript library. -->
+    <link href="{% static 'vendor/fontawesome/css/all.min.css' %}" rel="stylesheet">
+    <link href="{% static 'css/tokens.css' %}" rel="stylesheet">
+    <link href="{% static 'css/tailwind.css' %}" rel="stylesheet">
+    <link href="{% static 'css/ygg-ui.css' %}" rel="stylesheet">
+    <link href="{% static 'css/bs-compat.css' %}" rel="stylesheet">
+    <link href="{% static 'css/theme.css' %}" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
-<body>
-    {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-    {% block navbar %}
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <div class="d-flex align-items-center text-white">
-                {% if user.is_authenticated %}
-                    {% if user.is_staff %}
-                        {% if all_projects %}
-                            <div class="dropdown me-2">
-                                <a class="nav-link p-0 text-white" href="#" id="projectDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Select project">
-                                    <i class="fas {{ current_project_icon|default:'fa-tooth' }}"></i>
-                                </a>
-                                <ul class="dropdown-menu dropdown-menu-start" aria-labelledby="projectDropdown">
-                                    {% for p in all_projects %}
-                                        {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-                                        <li>
-                                            {% if p.slug == 'maxillo' %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url 'maxillo_home' %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% elif p.slug == 'brain' %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url 'brain_home' %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% elif p.slug == 'laparoscopy' %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url 'laparoscopy_home' %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% else %}
-                                                <a class="dropdown-item text-center {% if p.id == current_project_id %}active{% endif %}" href="{% url ns|add:':select_project' p.id %}" title="{{ p.name }}">
-                                                    <i class="fas {{ p.icon|default:'fa-tooth' }}"></i>
-                                                </a>
-                                            {% endif %}
-                                        </li>
-                                    {% endfor %}
-                                </ul>
-                            </div>
-                        {% else %}
-                            <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
-                        {% endif %}
-                    {% else %}
-                        <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
-                    {% endif %}
-                {% else %}
-                    <i class="fas {{ current_project_icon|default:'fa-tooth' }} me-2"></i>
-                {% endif %}
-                <a class="navbar-brand ms-1" href="{% url ns|add:':patient_list' %}">{{ current_project_name|default:'Yggdrasil' }}</a>
-            </div>
-            
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    {% if user.is_authenticated %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{% url ns|add:':patient_list' %}">
-                                <i class="fas fa-list me-1"></i>Scans
-                            </a>
-                        </li>
-                        {% if user.profile.can_upload_scans %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url ns|add:':upload_patient' %}">
-                                    <i class="fas fa-upload me-1"></i>Upload
-                                </a>
-                            </li>
-                        {% endif %}
-                        {% if user.is_staff or user.profile.is_admin %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url ns|add:':export_list' %}">
-                                    <i class="fas fa-download me-1"></i>Export
-                                </a>
-                            </li>
-                        {% endif %}
-                        {% if user.is_staff %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url 'online_users_dashboard' %}">
-                                    <i class="fas fa-circle-dot me-1"></i>Live Users
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url 'user_activity_stats' %}">
-                                    <i class="fas fa-chart-line me-1"></i>User Activity
-                                </a>
-                            </li>
-                        {% endif %}
-                        {% if user.is_staff or user.profile.is_admin %}
-                            <li class="nav-item">
-                                <a class="nav-link" href="{% url 'admin:index' %}">
-                                    <i class="fas fa-cog me-1"></i>Admin
-                                </a>
-                            </li>
-                        {% endif %}
-                    {% endif %}
-                </ul>
-                
-                <ul class="navbar-nav">
-                    {% if user.is_authenticated %}
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
-                                <i class="fas fa-user me-1"></i>{{ user.username }}
-                                {% if current_project_role_display %}
-                                    <span class="badge bg-secondary ms-1">{{ current_project_role_display }}</span>
-                                {% endif %}
-                            </a>
-                            <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" href="{% url ns|add:':user_profile' %}">
-                                        <i class="fas fa-user me-1"></i>Profile
-                                    </a>
-                                </li>
-                                {% if user.is_staff %}
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li>
-                                        <a class="dropdown-item" href="{% url 'invitation_list' %}">
-                                            <i class="fas fa-envelope me-1"></i>Manage Invitations
-                                        </a>
-                                    </li>
-                                {% endif %}
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <form method="post" action="{% url 'logout' %}" class="dropdown-item p-0">
-                                        {% csrf_token %}
-                                        <button type="submit" class="btn btn-link text-decoration-none px-3 py-2 w-100 text-start">
-                                            <i class="fas fa-sign-out-alt me-1"></i>Logout
-                                        </button>
-                                    </form>
-                                </li>
-                            </ul>
-                        </li>
-                    {% else %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="{% url 'login' %}">
-                                <i class="fas fa-sign-in-alt me-1"></i>Login
-                            </a>
-                        </li>
-                    {% endif %}
-                </ul>
-            </div>
-        </div>
-    </nav>
-    {% endblock %}
+<body class="{% block body_class %}{% endblock %}{% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message and not hide_maintenance_banner %} has-maintenance-banner{% endif %}">
+    {% if site_maintenance and site_maintenance.planned_message_enabled and site_maintenance.planned_message and not hide_maintenance_banner %}
+    <div class="maintenance-banner" role="status" title="{{ site_maintenance.planned_message }}">
+        <span>{{ site_maintenance.planned_message }}</span>
+    </div>
+    {% endif %}
+
+    {% comment %} base.html carries no nav of its own: authenticated working
+       pages get the rail + breadcrumb topbar via common/base_app.html, while
+       landing/auth/error pages either bring their own chrome or blank it.
+       The old ygg-nav top bar was removed with the 3.0 release. {% endcomment %}
+    {% block chrome %}{% endblock %}{# chrome #}
 
     {% block messages %}
-    <!-- Messages -->
     {% if messages %}
         <script>
             document.addEventListener('DOMContentLoaded', function () {
-                if (typeof window.appNotify !== 'function') {
-                    return;
-                }
+                if (typeof window.appNotify !== 'function') { return; }
                 {% for message in messages %}
                     window.appNotify(
                         '{% if "error" in message.tags %}danger{% elif "warning" in message.tags %}warning{% elif "success" in message.tags %}success{% else %}info{% endif %}',
@@ -213,41 +97,51 @@
     {% endif %}
     {% endblock %}
 
-    <!-- Main Content -->
-    <main class="container-fluid mt-4">
+    <main class="{% block main_class %}mx-auto max-w-content px-4 mt-6{% endblock %}">
         {% block content %}{% endblock %}
     </main>
 
     {% block footer %}
-    <!-- Footer -->
-    <footer class="bg-light mt-5 py-4">
-        <div class="container text-center">
-            <p class="mb-0">&copy; 2026 Yggdrasil — developed by <a href="https://lucalumetti.it" target="_blank" rel="noopener">Luca Lumetti</a> <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-dark ms-2" aria-label="GitHub repository"><i class="fa-brands fa-github"></i></a></p>
+    <footer class="ygg-footer border-t border-line bg-surface" data-footer>
+        <div class="px-4 py-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-sm text-content-muted">
+            <!-- Left: powered by AImageLab -->
+            <a href="https://ditto.ing.unimore.it/" target="_blank" rel="noopener" class="inline-flex items-center gap-2 text-content-muted hover:text-content" aria-label="Powered by AImageLab">
+                <span>Powered by</span>
+                <img class="footer-aimagelab" src="{% static 'icons/aimagelab-logo.svg' %}" alt="AImageLab">
+            </a>
+            <!-- Right: version / links -->
+            <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                <span>&copy; 2026 Yggdrasil</span>
+                <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-content-muted hover:text-content" aria-label="GitHub repository">{% icon 'github' %}</a>
+                {% comment %}
+                The version is the entry point to the changelog. Keep "v" and the
+                number in one text node: common.tests asserts
+                assertContains(response, "v<version>").
+                {% endcomment %}
+                <a class="mono text-xs text-content-muted hover:text-content" href="{% url 'changelog_page' %}" title="What's new in this release">v{{ app_version }}</a>
+            </div>
         </div>
     </footer>
     {% endblock %}
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {# UI runtime (collapse/modal/dropdown/tooltip). Must load before extra_js: #}
+    {# it publishes the window.bootstrap shim the viewer scripts still call. #}
+    <script src="{% static 'js/ygg-ui.js' %}"></script>
+    <script src="{% static 'js/nav.js' %}"></script>
     <script src="{% static 'js/notifications.js' %}"></script>
-    {% block extra_js %}{% endblock %}
     <script>
-        (function(){
-            try {
-                window.projectNamespace = "{% firstof request.resolver_match.namespace 'maxillo' %}";
-            } catch (e) {
-                window.projectNamespace = 'maxillo';
-            }
+        (function () {
+            try { window.projectNamespace = "{% firstof request.resolver_match.namespace 'maxillo' %}"; }
+            catch (e) { window.projectNamespace = 'maxillo'; }
+            {% if user.is_authenticated and not is_demo_guest %}
+            window.YGG_NOTIF_API = "{% url 'notifications_api' %}";
+            window.YGG_NOTIF_MARK = "{% url 'notifications_mark_read' %}";
+            {% endif %}
         })();
-        // Enable Bootstrap tooltips globally
-        document.addEventListener('DOMContentLoaded', function () {
-            if (window.bootstrap && document.querySelector('[data-bs-toggle="tooltip"]')) {
-                const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-                tooltipTriggerList.forEach(function (tooltipTriggerEl) {
-                    new window.bootstrap.Tooltip(tooltipTriggerEl)
-                })
-            }
-        });
     </script>
+    {% if user.is_authenticated and not is_demo_guest %}
+    <script src="{% static 'js/notifications_feed.js' %}"></script>
+    {% endif %}
+    {% block extra_js %}{% endblock %}
 </body>
-</html> 
+</html>

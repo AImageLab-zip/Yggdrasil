@@ -1,23 +1,18 @@
 {% extends 'base.html' %}
+{% load icons %}
 
 {% block title %}Logged Out - Yggdrasil{% endblock %}
 
 {% block content %}
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-4">
-            <div class="card">
-                <div class="card-header text-center">
-                    <h3><i class="fas fa-sign-out-alt me-2"></i>Logged Out</h3>
-                </div>
-                <div class="card-body text-center">
-                    <p class="mb-4">You have been successfully logged out.</p>
-                    <a href="{% url 'login' %}" class="btn btn-primary">
-                        <i class="fas fa-sign-in-alt me-2"></i>Log In Again
-                    </a>
-                </div>
-            </div>
+<div class="auth-wrap">
+    <div class="auth-card text-center">
+        <div class="flex justify-center mb-1">
+            {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
         </div>
+        <h1 class="text-xl">Signed out</h1>
+        <hr class="auth-rule">
+        <p class="text-content-muted mb-6">You have been successfully logged out.</p>
+        <a href="{% url 'login' %}" class="btn btn-primary">{% icon 'sign-in-alt' %}<span>Log in again</span></a>
     </div>
 </div>
 {% endblock %}

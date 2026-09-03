@@ -1,5 +1,7 @@
 // NIFTI Metadata Management
 let currentMetadata = null;
+let metadataLoaded = false;
+let metadataLoadInFlight = null;
 
 // CSRF token helper function
 function getCookie(name) {
@@ -33,54 +35,62 @@ function getCSRFToken() {
     return token;
 }
 
-// Load NIFTI metadata when section is expanded
+// Load NIFTI metadata on the first activation of the sidebar tab.
 document.addEventListener('DOMContentLoaded', function() {
-    const metadataCollapse = document.getElementById('niftiMetadataCollapse');
-    if (metadataCollapse) {
-        metadataCollapse.addEventListener('shown.bs.collapse', function() {
+    const metadataTab = document.querySelector('.side-tab[data-tab-target="metadata"]');
+    if (metadataTab) {
+        metadataTab.addEventListener('click', function() {
             loadNiftiMetadata();
         });
+        if (metadataTab.classList.contains('is-active')) {
+            loadNiftiMetadata();
+        }
     }
 });
 
 function loadNiftiMetadata() {
+    if (metadataLoaded) {
+        return Promise.resolve(currentMetadata);
+    }
+    if (metadataLoadInFlight) {
+        return metadataLoadInFlight;
+    }
+
     const scanId = JSON.parse(document.getElementById('django-data').textContent).scanId;
     const contentDiv = document.getElementById('niftiMetadataContent');
     const displayDiv = document.getElementById('niftiMetadataDisplay');
     const errorDiv = document.getElementById('niftiMetadataError');
     
-    // Show loading
-    contentDiv.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin"></i> Loading metadata...</div>';
-    displayDiv.style.display = 'none';
-    errorDiv.style.display = 'none';
+    contentDiv.hidden = false;
+    displayDiv.hidden = true;
+    errorDiv.hidden = true;
     
-    fetch(`/${window.projectNamespace}/api/patient/${scanId}/nifti-metadata/`)
-        .then(response => response.json())
-        .then(data => {
-            console.debug('NIFTI metadata response:', data);
-            
-            if (data.error) {
-                showNiftiError(data.error);
-                return;
+    metadataLoadInFlight = fetch(`/${window.projectNamespace}/api/patient/${scanId}/nifti-metadata/`)
+        .then(async response => {
+            const data = await response.json();
+            if (!response.ok || data.error) {
+                throw new Error(data.error || `Request failed (${response.status})`);
             }
-            
-            // Validate data structure
             if (!data || typeof data !== 'object') {
-                showNiftiError('Invalid metadata response format');
-                return;
+                throw new Error('Invalid metadata response format');
             }
-            
             currentMetadata = data;
             displayMetadata(data);
-            
-            // Show display div and hide loading
-            contentDiv.innerHTML = '';
-            displayDiv.style.display = 'block';
+            metadataLoaded = true;
+            contentDiv.hidden = true;
+            displayDiv.hidden = false;
+            return data;
         })
         .catch(error => {
-            console.error('NIFTI metadata fetch error:', error); // Debug logging
+            console.error('NIFTI metadata fetch error:', error);
             showNiftiError('Failed to load NIFTI metadata: ' + error.message);
+            return null;
+        })
+        .finally(() => {
+            metadataLoadInFlight = null;
         });
+
+    return metadataLoadInFlight;
 }
 
 function displayMetadata(metadata) {
@@ -168,17 +178,17 @@ function showNiftiError(message) {
     const errorDiv = document.getElementById('niftiMetadataError');
     const errorMessage = document.getElementById('niftiErrorMessage');
     
-    contentDiv.innerHTML = '';
+    contentDiv.hidden = true;
     errorMessage.textContent = message;
-    errorDiv.style.display = 'block';
+    errorDiv.hidden = false;
 }
 
 // Affine matrix editing functions
 function editAffine() {
     if (!currentMetadata) return;
     
-    document.getElementById('affineDisplay').style.display = 'none';
-    document.getElementById('affineEdit').style.display = 'block';
+    document.getElementById('affineDisplay').hidden = true;
+    document.getElementById('affineEdit').hidden = false;
     
     const editTable = document.getElementById('affineEditTable');
     editTable.innerHTML = '';
@@ -232,8 +242,8 @@ function editAffine() {
 }
 
 function cancelAffineEdit() {
-    document.getElementById('affineDisplay').style.display = 'block';
-    document.getElementById('affineEdit').style.display = 'none';
+    document.getElementById('affineDisplay').hidden = false;
+    document.getElementById('affineEdit').hidden = true;
 }
 
 function saveAffine() {
@@ -256,7 +266,7 @@ function saveAffine() {
     }
     
     // Send update request
-    fetch(`/${window.projectNamespace}/api/patient/${scanId}/nifti-metadata/`, {
+    fetch(`/${window.projectNamespace}/api/patient/${scanId}/nifti-metadata/update/`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -266,24 +276,25 @@ function saveAffine() {
             affine: newAffine
         })
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            showNiftiError(data.error);
-            return;
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok || data.error) {
+            throw new Error(data.error || `Request failed (${response.status})`);
         }
-        
-        // Update current metadata
-        currentMetadata.affine = newAffine;
-        
-        // Refresh display
-        displayMetadata(currentMetadata);
+        return data;
+    })
+    .then(data => {
+        // Use the persisted server representation, including recalculated
+        // orientation and any other header-derived metadata.
+        currentMetadata = data;
+        displayMetadata(data);
         
         // Switch back to display mode
         cancelAffineEdit();
         
         // Show success message
-        showSuccessMessage('Affine matrix updated successfully');
+        showSuccessMessage('Affine matrix updated. Reloading the CBCT viewer...');
+        window.setTimeout(() => window.location.reload(), 600);
     })
     .catch(error => {
         showNiftiError('Failed to update affine matrix: ' + error.message);
@@ -314,22 +325,6 @@ function isValidAffineMatrix(matrix) {
                 matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
     
     return Math.abs(det) > 1e-10; // Small threshold for floating point precision
-}
-
-// Utility functions
-function getCookie(name) {
-    let cookieValue = null;
-    if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                break;
-            }
-        }
-    }
-    return cookieValue;
 }
 
 function showSuccessMessage(message) {

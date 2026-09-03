@@ -1,0 +1,40 @@
+{
+  "_comment": "One IOS landmark document covering every shape the format has: all eight single-point types, both multi-point types, a basePlane, and teeth in all four FDI quadrants. Read by annotations.tests_ios_landmarks (the Python round-trip) and by frontend/tests (the JS document model), so the two cannot drift. Patient id 7 throughout; the key format is <patientId>_<jaw>_FDI_<tooth>. Coordinates are resource_local -- one mesh's own object space, in millimetres -- and are deliberately awkward floats so a round trip that silently reformats them fails.",
+  "document": {
+    "7_upper_FDI_11": {
+      "incisal": [1.5, -2.25, 3.125],
+      "outer": [1.0, -2.0, 3.0],
+      "bracket": [0.5, -1.75, 2.875],
+      "gingival": [0.25, -1.5, 2.5],
+      "mesial": [-0.125, 1.25, 0.0625],
+      "distal": [2.75, -3.5, 4.25],
+      "inner": [1.125, -2.375, 3.0625],
+      "facial": [1.875, -2.125, 3.25],
+      "cusps": [[1.1, -2.1, 3.1], [1.2, -2.2, 3.2], [1.3, -2.3, 3.3]],
+      "planar": [[0.9, -1.9, 2.9], [0.8, -1.8, 2.8]],
+      "basePlane": {
+        "origin": [0.0, 0.0, 0.0],
+        "xAxis": [1.0, 0.0, 0.0],
+        "yAxis": [0.0, 1.0, 0.0],
+        "zAxis": [0.0, 0.0, 1.0]
+      }
+    },
+    "7_upper_FDI_26": {
+      "incisal": [-4.5, 5.25, -6.125],
+      "cusps": [[-4.4, 5.1, -6.1], [-4.3, 5.2, -6.2]]
+    },
+    "7_lower_FDI_31": {
+      "gingival": [7.5, -8.25, 9.125],
+      "planar": [[7.4, -8.1, 9.1]]
+    },
+    "7_lower_FDI_48": {
+      "distal": [-10.5, 11.25, -12.0625],
+      "basePlane": {
+        "origin": [1.5, 2.5, 3.5],
+        "xAxis": [0.0, 1.0, 0.0],
+        "yAxis": [0.0, 0.0, 1.0],
+        "zAxis": [1.0, 0.0, 0.0]
+      }
+    }
+  }
+}

@@ -1,14 +1,12 @@
 class VocalCaptionRecorder {
     constructor() {
-        this.mediaRecorder = null;
-        this.audioChunks = [];
         this.stream = null;
         this.currentAudio = null;
         
         this.isRecording = false;
         this.isPaused = false;
         this.isBrainProject = window.location.pathname.indexOf('/brain/') === 0;
-        
+
         this.recordingStartTime = null;
         this.totalPausedDuration = 0;
         this.currentPauseStart = null;
@@ -17,26 +15,33 @@ class VocalCaptionRecorder {
         this.audioContext = null;
         this.analyserNode = null;
         this.audioSourceNode = null;
+        this.pcmProcessorNode = null;
+        this.mutedOutputNode = null;
         this.visualizerData = null;
         this.visualizerAnimationFrame = null;
 
-        this.brainStt = {
+        this.liveTranscription = {
             enabled: false,
             sessionStartText: '',
-            recognition: null,
-            useSpeechRecognition: false,
-            speechFinalText: '',
-            speechInterimText: '',
-            displayedInterimText: '',
+            socket: null,
+            finalText: '',
+            partialText: '',
+            closing: false,
             language: 'en'
         };
 
-        this.brainSpeechLanguages = {
-            en: { label: 'English', speechRecognition: 'en-US' },
-            it: { label: 'Italian', speechRecognition: 'it-IT' },
-            de: { label: 'German', speechRecognition: 'de-DE' }
+        this.speechLanguages = {
+            en: 'English',
+            it: 'Italian',
+            es: 'Spanish',
+            fr: 'French',
+            de: 'German'
         };
-        this.brainSpeechLanguageStorageKey = 'toothfairy.brainSpeechLanguage';
+        this.speechLanguageStorageKey = 'yggdrasil.speechLanguage';
+        this.legacySpeechLanguageStorageKeys = [
+            'yggdrasil.brainSpeechLanguage',
+            'toothfairy.brainSpeechLanguage'
+        ];
         
         this.initializeElements();
         this.checkBrowserSupport();
@@ -52,6 +57,8 @@ class VocalCaptionRecorder {
         this.recordingTimer = document.getElementById('recordingTimer');
         this.progressBar = document.querySelector('.progress .progress-bar');
         this.audioPlayback = document.querySelector('.audio-playback');
+        this.recordingArea = document.getElementById('recordingArea');
+        this.textControls = document.getElementById('textControls');
         this.modalityIndicator = document.getElementById('modalityIndicator');
         this.audioLevelVisualizer = document.getElementById('audioLevelVisualizer');
         this.audioLevelBars = this.audioLevelVisualizer
@@ -67,7 +74,8 @@ class VocalCaptionRecorder {
         this.textCharCount = document.getElementById('textCharCount');
         this.saveTextBtn = document.getElementById('saveTextCaption');
         this.clearTextBtn = document.getElementById('clearTextCaption');
-        this.brainSpeechLanguageInputs = Array.from(document.querySelectorAll('input[name="brainSpeechLanguage"]'));
+        this.speechLanguageInputs = Array.from(document.querySelectorAll('input[name="speechLanguage"]'));
+        this.captionCard = document.getElementById('captionUnifiedCard');
         
         if (!this.startBtn || !this.recordingTimer || !this.progressBar) {
             console.warn('Some recording UI elements not found');
@@ -75,23 +83,25 @@ class VocalCaptionRecorder {
     }
     
     checkBrowserSupport() {
-        const isSupported = navigator.mediaDevices && 
-                           navigator.mediaDevices.getUserMedia && 
-                           window.MediaRecorder;
+        const isSupported = navigator.mediaDevices?.getUserMedia &&
+                            window.AudioContext &&
+                            window.AudioWorkletNode &&
+                            window.WebSocket;
         
         if (!isSupported) {
             console.warn('Voice recording not supported in this browser');
             if (this.startBtn) {
                 this.startBtn.disabled = true;
-                this.startBtn.title = 'Voice recording not supported, try to change browser.';
+                this.startBtn.title = 'Live transcription is not supported by this browser.';
             }
         }
     }
     
     attachEventListeners() {
-        const isSupported = navigator.mediaDevices && 
-                           navigator.mediaDevices.getUserMedia && 
-                           window.MediaRecorder;
+        const isSupported = navigator.mediaDevices?.getUserMedia &&
+                            window.AudioContext &&
+                            window.AudioWorkletNode &&
+                            window.WebSocket;
         
         if (this.startBtn) {
             if (isSupported) {
@@ -101,7 +111,7 @@ class VocalCaptionRecorder {
                 this.discardBtn?.addEventListener('click', () => this.discardRecording());
             } else {
                 this.startBtn.addEventListener('click', () => {
-                    this.notify('error', 'Voice recording is not supported. Please use a modern browser.');
+                    this.notify('error', 'Live transcription is not supported. Please use a modern browser.');
                 });
             }
         }
@@ -133,61 +143,65 @@ class VocalCaptionRecorder {
         
         // Initialize text input functionality
         this.initializeTextInput();
-        this.initializeBrainSpeechLanguage();
+        this.initializeSpeechLanguage();
     }
 
-    initializeBrainSpeechLanguage() {
-        if (!this.isBrainProject || !this.brainSpeechLanguageInputs.length) return;
+    initializeSpeechLanguage() {
+        if (!this.speechLanguageInputs.length) return;
+        const langToggle = document.getElementById('speechLanguageToggle');
+        if (langToggle) langToggle.hidden = false;
 
-        this.selectBrainSpeechLanguage(this.getStoredBrainSpeechLanguage());
+        this.selectSpeechLanguage(this.getStoredSpeechLanguage());
 
-        this.brainSpeechLanguageInputs.forEach((input) => {
-            input.addEventListener('change', () => {
+        this.speechLanguageInputs.forEach((input) => {
+            input.addEventListener('change', async () => {
                 if (!input.checked) return;
-
-                this.brainStt.language = this.getSelectedBrainSpeechLanguage();
-                this.storeBrainSpeechLanguage(this.brainStt.language);
-                this.restartBrainSpeechRecognitionForLanguage();
+                this.liveTranscription.language = this.getSelectedSpeechLanguage();
+                this.storeSpeechLanguage(this.liveTranscription.language);
+                if (this.liveTranscription.enabled) await this.reconnectTranscription();
             });
         });
     }
 
-    getStoredBrainSpeechLanguage() {
+    getStoredSpeechLanguage() {
         try {
-            const language = window.localStorage.getItem(this.brainSpeechLanguageStorageKey);
-            return this.brainSpeechLanguages[language] ? language : 'en';
+            let language = window.localStorage.getItem(this.speechLanguageStorageKey);
+            for (const legacyKey of this.legacySpeechLanguageStorageKeys) {
+                if (!language) language = window.localStorage.getItem(legacyKey);
+                if (this.speechLanguages[language]) {
+                    window.localStorage.setItem(this.speechLanguageStorageKey, language);
+                    window.localStorage.removeItem(legacyKey);
+                }
+            }
+            return this.speechLanguages[language] ? language : 'en';
         } catch (error) {
             return 'en';
         }
     }
 
-    storeBrainSpeechLanguage(language) {
-        if (!this.brainSpeechLanguages[language]) return;
+    storeSpeechLanguage(language) {
+        if (!this.speechLanguages[language]) return;
 
         try {
-            window.localStorage.setItem(this.brainSpeechLanguageStorageKey, language);
+            window.localStorage.setItem(this.speechLanguageStorageKey, language);
         } catch (error) {
             console.warn('Could not remember speech language:', error);
         }
     }
 
-    getSelectedBrainSpeechLanguage() {
-        const selected = this.brainSpeechLanguageInputs.find((input) => input.checked);
-        const language = selected ? selected.value : this.brainStt.language;
-        return this.brainSpeechLanguages[language] ? language : 'en';
+    getSelectedSpeechLanguage() {
+        const selected = this.speechLanguageInputs.find((input) => input.checked);
+        const language = selected ? selected.value : this.liveTranscription.language;
+        return this.speechLanguages[language] ? language : 'en';
     }
 
-    getBrainSpeechLanguageConfig() {
-        return this.brainSpeechLanguages[this.getSelectedBrainSpeechLanguage()] || this.brainSpeechLanguages.en;
-    }
-
-    selectBrainSpeechLanguage(language) {
-        const nextLanguage = this.brainSpeechLanguages[language] ? language : 'en';
-        const input = this.brainSpeechLanguageInputs.find((item) => item.value === nextLanguage);
+    selectSpeechLanguage(language) {
+        const nextLanguage = this.speechLanguages[language] ? language : 'en';
+        const input = this.speechLanguageInputs.find((item) => item.value === nextLanguage);
         if (input) {
             input.checked = true;
         }
-        this.brainStt.language = nextLanguage;
+        this.liveTranscription.language = nextLanguage;
     }
     
     getCurrentModality() {
@@ -247,25 +261,18 @@ class VocalCaptionRecorder {
     }
     
     async startRecording() {
-        if (this.isBrainProject) {
-            return this.startBrainLocalStt();
-        }
-
+        if (this.liveTranscription.enabled) return;
         try {
+            this.liveTranscription.language = this.getSelectedSpeechLanguage();
+            this.liveTranscription.sessionStartText = this.captionTextArea?.value || '';
+            this.liveTranscription.finalText = '';
+            this.liveTranscription.partialText = '';
+            await this.connectTranscription();
+            this.liveTranscription.enabled = true;
             this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            const options = this.getRecorderOptions();
-            this.mediaRecorder = new MediaRecorder(this.stream, options);
-            
-            this.audioChunks = [];
-            this.mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    this.audioChunks.push(event.data);
-                }
-            };
-            
-            this.mediaRecorder.start(1000);
-            
+            if (this.liveTranscription.socket?.readyState !== WebSocket.OPEN) {
+                throw new Error('The Live Whisper connection closed before recording started.');
+            }
             this.isRecording = true;
             this.isPaused = false;
             this.recordingStartTime = Date.now();
@@ -273,34 +280,45 @@ class VocalCaptionRecorder {
             this.currentPauseStart = null;
 
             this.setupAudioVisualization(this.stream);
-            
+            const workletUrl = this.captionCard?.dataset.pcmWorkletUrl;
+            if (!workletUrl) throw new Error('PCM audio processor is not configured.');
+            await this.audioContext.audioWorklet.addModule(workletUrl);
+            this.pcmProcessorNode = new AudioWorkletNode(this.audioContext, 'pcm16-processor');
+            this.mutedOutputNode = this.audioContext.createGain();
+            this.mutedOutputNode.gain.value = 0;
+            this.analyserNode.connect(this.pcmProcessorNode);
+            this.pcmProcessorNode.connect(this.mutedOutputNode);
+            this.mutedOutputNode.connect(this.audioContext.destination);
+            this.pcmProcessorNode.port.onmessage = (event) => {
+                const socket = this.liveTranscription.socket;
+                if (!this.isPaused && socket?.readyState === WebSocket.OPEN) {
+                    if (socket.bufferedAmount < 1024 * 1024) socket.send(event.data);
+                }
+            };
+
             this.updateUI();
             this.startTimer();
-            
-            // Update modality indicator
             this.modality = this.getCurrentModality();
             if (this.modalityIndicator && this.modality.display) {
                 this.modalityIndicator.textContent = this.modality.display;
             }
-            
+            if (this.captionTextArea) this.captionTextArea.readOnly = true;
+            this.notify('info', 'Connected to Live Whisper. Listening...');
         } catch (error) {
-            console.error('Error starting recording:', error);
-            this.handleRecordingError(error);
-            this.cleanup();
+            console.error('Error starting live transcription:', error);
+            if (['NotAllowedError', 'NotFoundError', 'NotSupportedError', 'NotReadableError'].includes(error.name)) {
+                this.handleRecordingError(error);
+            } else {
+                this.notify('error', error.message || 'Live transcription is unavailable.');
+            }
+            await this.stopLiveTranscription({ discard: true });
         }
     }
     
     togglePause() {
-        if (this.isBrainProject && this.brainStt.enabled) {
-            this.toggleBrainLocalPause();
-            return;
-        }
-
-        if (!this.mediaRecorder || !this.isRecording) return;
+        if (!this.liveTranscription.enabled || !this.isRecording) return;
         
         if (this.isPaused) {
-            // Resume
-            this.mediaRecorder.resume();
             this.isPaused = false;
 
             this.audioLevelVisualizer?.classList.remove('is-paused');
@@ -315,8 +333,6 @@ class VocalCaptionRecorder {
             this.pauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
             this.pauseBtn.title = 'Pause';
         } else {
-            // Pause
-            this.mediaRecorder.pause();
             this.isPaused = true;
             this.currentPauseStart = Date.now();
 
@@ -328,88 +344,17 @@ class VocalCaptionRecorder {
         }
     }
     
-    stopRecording() {
-        if (this.isBrainProject && this.brainStt.enabled) {
-            this.stopBrainLocalStt({ flush: false });
-            return;
-        }
-
-        if (this.mediaRecorder && this.isRecording) {
-            if (this.isPaused) {
-                this.mediaRecorder.resume();
-            }
-            this.mediaRecorder.stop();
-            this.isRecording = false;
-            this.isPaused = true;
-            this.stopTimer();
-            this.stopVisualizer(true);
-        }
-        
-        this.cleanup();
+    async stopRecording() {
+        await this.stopLiveTranscription();
     }
     
     async saveRecording() {
-        if (this.isBrainProject) {
-            if (this.brainStt.enabled) {
-                await this.stopBrainLocalStt({ flush: true });
-            }
-            await this.saveTextCaption();
-            return;
-        }
-
-        // Stop recording if active
-        if (this.isRecording) {
-            this.stopRecording();
-        }
-        
-        if (this.audioChunks.length === 0) {
-            this.notify('warning', 'No audio recorded. Please record something before saving.');
-            return;
-        }
-        
-        try {
-            const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-            const duration = this.getTotalDuration();
-            const modality = this.modality;
-            
-            const formData = new FormData();
-            formData.append('audio_file', audioBlob, 'recording.webm');
-            formData.append('duration', duration.toFixed(2));
-            if (!this.isBrainProject) {
-                formData.append('modality', modality.value);
-            }
-            
-            const response = await fetch(window.location.pathname + 'voice-caption/', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-                },
-                body: formData
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                this.addCaptionToList(result.caption);
-                this.resetUI();
-            } else {
-                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                throw new Error(errorData.error || `Upload failed (${response.status})`);
-            }
-        } catch (error) {
-            console.error('Error saving recording:', error);
-            this.notify('error', `Failed to save recording: ${error.message}`);
-            this.resetUI();
-        }
+        await this.stopLiveTranscription({ commitPartial: true });
+        await this.saveTextCaption();
     }
     
     discardRecording() {
-        if (this.isBrainProject && this.brainStt.enabled) {
-            this.stopBrainLocalStt({ flush: false, discard: true });
-            return;
-        }
-
-        this.stopRecording();
-        this.resetUI();
+        this.stopLiveTranscription({ discard: true });
     }
     
     getTotalDuration() {
@@ -564,7 +509,11 @@ class VocalCaptionRecorder {
         if (this.isRecording) {
             this.startBtn?.classList.add('d-none');
             this.recordingInfo?.classList.remove('d-none');
+            this.recordingArea?.classList.remove('d-none');
+            this.textControls?.classList.add('d-none');
             this.pauseBtn?.classList.remove('d-none');
+            this.saveBtn?.classList.remove('d-none');
+            this.discardBtn?.classList.remove('d-none');
             this.audioLevelVisualizer?.classList.add('is-active');
             this.audioLevelVisualizer?.classList.remove('is-paused');
         } else {
@@ -576,7 +525,11 @@ class VocalCaptionRecorder {
         this.startBtn?.classList.remove('d-none');
         this.recordingInfo?.classList.add('d-none');
         this.audioPlayback?.classList.add('d-none');
+        this.recordingArea?.classList.add('d-none');
+        this.textControls?.classList.remove('d-none');
         this.pauseBtn?.classList.add('d-none');
+        this.saveBtn?.classList.add('d-none');
+        this.discardBtn?.classList.add('d-none');
         
         if (this.recordingTimer) {
             this.recordingTimer.textContent = '00:00';
@@ -596,7 +549,6 @@ class VocalCaptionRecorder {
         this.audioLevelVisualizer?.classList.remove('is-active', 'is-paused');
         
         // Reset state
-        this.audioChunks = [];
         this.recordingStartTime = null;
         this.totalPausedDuration = 0;
         this.currentPauseStart = null;
@@ -612,15 +564,23 @@ class VocalCaptionRecorder {
             this.stream.getTracks().forEach(track => track.stop());
             this.stream = null;
         }
-        this.mediaRecorder = null;
     }
 
     teardownAudioVisualization() {
+        if (this.pcmProcessorNode) {
+            this.pcmProcessorNode.disconnect();
+            this.pcmProcessorNode = null;
+        }
+        if (this.mutedOutputNode) {
+            this.mutedOutputNode.disconnect();
+            this.mutedOutputNode = null;
+        }
         if (this.audioSourceNode) {
             this.audioSourceNode.disconnect();
             this.audioSourceNode = null;
         }
 
+        if (this.analyserNode) this.analyserNode.disconnect();
         this.analyserNode = null;
         this.visualizerData = null;
 
@@ -630,195 +590,104 @@ class VocalCaptionRecorder {
         }
     }
 
-    async startBrainLocalStt() {
-        if (this.brainStt.enabled) return;
+    async connectTranscription() {
+        const domain = this.captionCard?.dataset.domain;
+        const patientId = this.captionCard?.dataset.patientId;
+        if (!domain || !patientId) throw new Error('Patient transcription context is missing.');
+        const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const url = `${scheme}//${window.location.host}/ws/live-transcription/${domain}/${patientId}/?lang=${encodeURIComponent(this.liveTranscription.language)}`;
+        const socket = new WebSocket(url);
+        socket.binaryType = 'arraybuffer';
+        this.liveTranscription.socket = socket;
 
-        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognitionClass) {
-            this.notify('error', 'Live speech recognition is not supported in this browser.');
-            return;
-        }
-
-        if (!navigator.mediaDevices?.getUserMedia) {
-            this.notify('error', 'Live speech recognition needs microphone support.');
-            return;
-        }
-
-        try {
-            this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            this.brainStt.enabled = true;
-            this.brainStt.language = this.getSelectedBrainSpeechLanguage();
-            this.brainStt.sessionStartText = this.captionTextArea ? this.captionTextArea.value : '';
-
-            this.isRecording = true;
-            this.isPaused = false;
-            this.recordingStartTime = Date.now();
-            this.totalPausedDuration = 0;
-            this.currentPauseStart = null;
-
-            this.setupAudioVisualization(this.stream);
-            this.updateUI();
-            this.startTimer();
-
-            if (this.startBrainSpeechRecognition()) {
-                this.notify('info', 'Listening. The caption box will update as you speak.');
-                return;
-            }
-
-            this.notify('error', 'Live speech recognition could not be started in this browser.');
-            await this.stopBrainLocalStt({ flush: false, discard: true });
-        } catch (error) {
-            console.error('Error starting live speech recognition:', error);
-            this.handleRecordingError(error);
-            await this.stopBrainLocalStt({ flush: false, discard: true });
-        }
-    }
-
-    startBrainSpeechRecognition() {
-        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognitionClass || !this.captionTextArea) {
-            return false;
-        }
-
-        const languageConfig = this.getBrainSpeechLanguageConfig();
-        const recognition = new SpeechRecognitionClass();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = languageConfig.speechRecognition;
-
-        this.brainStt.useSpeechRecognition = true;
-        this.brainStt.speechFinalText = '';
-        this.brainStt.speechInterimText = '';
-        this.brainStt.displayedInterimText = '';
-        this.brainStt.recognition = recognition;
-
-        recognition.onresult = (event) => {
-            let finalText = '';
-            let interimText = '';
-
-            for (let i = event.resultIndex; i < event.results.length; i += 1) {
-                const transcript = event.results[i][0]?.transcript || '';
-                if (event.results[i].isFinal) {
-                    finalText += transcript;
-                } else {
-                    interimText += transcript;
+        await new Promise((resolve, reject) => {
+            const timeout = window.setTimeout(() => reject(new Error('Live Whisper connection timed out.')), 10000);
+            socket.onmessage = (event) => {
+                let message;
+                try {
+                    message = JSON.parse(event.data);
+                } catch (error) {
+                    return;
                 }
-            }
+                if (message.type === 'ready') {
+                    window.clearTimeout(timeout);
+                    resolve();
+                }
+            };
+            socket.onerror = () => {
+                window.clearTimeout(timeout);
+                reject(new Error('Could not connect to Live Whisper.'));
+            };
+            socket.onclose = (event) => {
+                window.clearTimeout(timeout);
+                reject(new Error(this.transcriptionCloseMessage(event.code)));
+            };
+        });
 
-            if (finalText.trim()) {
-                this.stripDisplayedBrainInterim();
-                this.brainStt.speechFinalText = this.joinCaptionText(
-                    this.brainStt.speechFinalText,
-                    finalText
-                );
-                this.appendTextToCaption(finalText);
-            }
-            this.brainStt.speechInterimText = interimText;
-            this.renderBrainSpeechText();
-        };
-
-        recognition.onerror = (event) => {
-            if (event.error === 'no-speech' || event.error === 'aborted') {
-                return;
-            }
-            console.warn('Live speech recognition error:', event.error);
-        };
-
-        recognition.onend = () => {
-            if (this.brainStt.recognition !== recognition) {
-                return;
-            }
-            if (!this.brainStt.enabled || this.isPaused || !this.brainStt.useSpeechRecognition) {
-                return;
-            }
-            try {
-                recognition.start();
-            } catch (error) {
-                console.warn('Could not restart live speech recognition:', error);
-            }
-        };
-
-        try {
-            recognition.start();
-            return true;
-        } catch (error) {
-            console.warn('Live speech recognition unavailable:', error);
-            this.brainStt.recognition = null;
-            this.brainStt.useSpeechRecognition = false;
-            return false;
-        }
+        socket.onmessage = (event) => this.handleTranscriptionMessage(event);
+        socket.onclose = (event) => this.handleTranscriptionClose(socket, event);
+        socket.onerror = () => {};
     }
 
-    restartBrainSpeechRecognitionForLanguage() {
-        if (!this.brainStt.enabled || !this.brainStt.useSpeechRecognition || !this.brainStt.recognition) {
+    handleTranscriptionMessage(event) {
+        let message;
+        try {
+            message = JSON.parse(event.data);
+        } catch (error) {
             return;
         }
-
-        this.commitBrainSpeechInterim();
-        try {
-            this.brainStt.recognition.stop();
-        } catch (error) {
-            console.warn('Could not stop live speech recognition before language switch:', error);
+        if (message.type === 'final') {
+            this.liveTranscription.finalText = message.text || '';
+            this.liveTranscription.partialText = '';
+        } else if (message.type === 'partial') {
+            this.liveTranscription.partialText = message.text || '';
+        } else {
+            return;
         }
-
-        this.brainStt.recognition = null;
-        this.brainStt.useSpeechRecognition = false;
-        if (!this.isPaused) {
-            this.startBrainSpeechRecognition();
-        }
+        this.renderTranscription();
     }
 
-    renderBrainSpeechText() {
+    renderTranscription() {
         if (!this.captionTextArea) return;
-
-        this.stripDisplayedBrainInterim();
-        const interimText = (this.brainStt.speechInterimText || '').replace(/\s+/g, ' ').trim();
-        if (interimText) {
-            this.appendTextToCaption(interimText);
-            this.brainStt.displayedInterimText = interimText;
-        }
-        this.updateCharacterCount();
-    }
-
-    commitBrainSpeechInterim() {
-        if (!this.brainStt.speechInterimText.trim()) return;
-
-        this.stripDisplayedBrainInterim();
-        this.brainStt.speechFinalText = this.joinCaptionText(
-            this.brainStt.speechFinalText,
-            this.brainStt.speechInterimText
+        this.captionTextArea.value = this.joinCaptionText(
+            this.liveTranscription.sessionStartText,
+            this.liveTranscription.finalText,
+            this.liveTranscription.partialText
         );
-        this.appendTextToCaption(this.brainStt.speechInterimText);
-        this.brainStt.speechInterimText = '';
-        this.brainStt.displayedInterimText = '';
         this.updateCharacterCount();
     }
 
-    stripDisplayedBrainInterim() {
-        if (!this.captionTextArea) return;
-
-        const interimText = (this.brainStt.displayedInterimText || '').replace(/\s+/g, ' ').trim();
-        if (!interimText) return;
-
-        const current = this.captionTextArea.value;
-        const trimmedEnd = current.replace(/\s+$/, '');
-        const withSeparator = ` ${interimText}`;
-
-        if (trimmedEnd.endsWith(withSeparator)) {
-            this.captionTextArea.value = trimmedEnd.slice(0, -withSeparator.length);
-        } else if (trimmedEnd === interimText) {
-            this.captionTextArea.value = '';
+    async reconnectTranscription() {
+        const previous = this.liveTranscription.socket;
+        this.liveTranscription.socket = null;
+        if (previous) previous.close(1000);
+        this.liveTranscription.closing = false;
+        this.liveTranscription.sessionStartText = this.captionTextArea?.value || '';
+        this.liveTranscription.finalText = '';
+        this.liveTranscription.partialText = '';
+        try {
+            await this.connectTranscription();
+            this.notify('info', `Transcription language changed to ${this.speechLanguages[this.liveTranscription.language]}.`);
+        } catch (error) {
+            this.notify('error', error.message);
+            await this.stopLiveTranscription();
         }
-
-        this.brainStt.displayedInterimText = '';
     }
 
-    appendTextToCaption(text) {
-        const cleaned = (text || '').replace(/\s+/g, ' ').trim();
-        if (!cleaned || !this.captionTextArea) return;
+    handleTranscriptionClose(socket, event) {
+        if (socket !== this.liveTranscription.socket || this.liveTranscription.closing) return;
+        this.liveTranscription.socket = null;
+        if (this.liveTranscription.enabled) {
+            this.notify('error', this.transcriptionCloseMessage(event.code));
+            this.stopLiveTranscription({ commitPartial: true });
+        }
+    }
 
-        this.captionTextArea.value = this.joinCaptionText(this.captionTextArea.value, cleaned);
-        this.updateCharacterCount();
+    transcriptionCloseMessage(code) {
+        if (code === 4401) return 'Your session has expired. Reload the page and sign in again.';
+        if (code === 4403) return 'You do not have permission to transcribe this patient.';
+        if (code === 4503) return 'Live Whisper is not configured.';
+        return 'The Live Whisper connection closed unexpectedly.';
     }
 
     joinCaptionText(...parts) {
@@ -828,99 +697,35 @@ class VocalCaptionRecorder {
             .join(' ');
     }
 
-    toggleBrainLocalPause() {
-        if (!this.brainStt.enabled || !this.isRecording) return;
-
-        if (this.isPaused) {
-            this.isPaused = false;
-            if (this.currentPauseStart) {
-                this.totalPausedDuration += Date.now() - this.currentPauseStart;
-                this.currentPauseStart = null;
-            }
-            this.audioLevelVisualizer?.classList.remove('is-paused');
-            this.startVisualizer();
-            if (this.pauseBtn) {
-                this.pauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
-                this.pauseBtn.title = 'Pause';
-            }
-            if (this.brainStt.useSpeechRecognition && this.brainStt.recognition) {
-                try {
-                    this.brainStt.recognition.start();
-                } catch (error) {
-                    console.warn('Could not resume live speech recognition:', error);
-                }
-            }
-        } else {
-            this.isPaused = true;
-            this.currentPauseStart = Date.now();
-            this.audioLevelVisualizer?.classList.add('is-paused');
-            this.stopVisualizer(false);
-            if (this.brainStt.useSpeechRecognition && this.brainStt.recognition) {
-                this.commitBrainSpeechInterim();
-                try {
-                    this.brainStt.recognition.stop();
-                } catch (error) {
-                    console.warn('Could not pause live speech recognition:', error);
-                }
-            }
-            if (this.pauseBtn) {
-                this.pauseBtn.innerHTML = '<i class="fas fa-play"></i>';
-                this.pauseBtn.title = 'Resume';
-            }
+    async stopLiveTranscription({ commitPartial = false, discard = false } = {}) {
+        if (!this.liveTranscription.enabled && !this.stream && !this.liveTranscription.socket) return;
+        if (commitPartial && this.liveTranscription.partialText) {
+            this.liveTranscription.finalText = this.joinCaptionText(
+                this.liveTranscription.finalText,
+                this.liveTranscription.partialText
+            );
+            this.liveTranscription.partialText = '';
+            this.renderTranscription();
         }
-    }
-
-    async stopBrainLocalStt({ flush = false, discard = false } = {}) {
-        if (!this.brainStt.enabled && !this.stream) return;
-
-        this.brainStt.enabled = false;
+        this.liveTranscription.enabled = false;
         this.isRecording = false;
         this.isPaused = false;
         this.stopTimer();
         this.stopVisualizer(true);
-
-        if (this.brainStt.recognition) {
-            this.commitBrainSpeechInterim();
-            try {
-                this.brainStt.recognition.stop();
-            } catch (error) {
-                console.warn('Error stopping live speech recognition:', error);
-            }
-        }
-
+        if (this.pcmProcessorNode) this.pcmProcessorNode.port.postMessage('flush');
+        this.liveTranscription.closing = true;
+        if (this.liveTranscription.socket) this.liveTranscription.socket.close(1000);
+        this.liveTranscription.socket = null;
         this.cleanup();
-
         if (discard) {
-            if (this.captionTextArea) {
-                this.captionTextArea.value = this.brainStt.sessionStartText || '';
-                this.updateCharacterCount();
-            }
+            if (this.captionTextArea) this.captionTextArea.value = this.liveTranscription.sessionStartText || '';
         }
-
-        this.brainStt.recognition = null;
-        this.brainStt.useSpeechRecognition = false;
-        this.brainStt.speechFinalText = '';
-        this.brainStt.speechInterimText = '';
-        this.brainStt.displayedInterimText = '';
-
+        if (this.captionTextArea) this.captionTextArea.readOnly = false;
+        this.updateCharacterCount();
+        this.liveTranscription.finalText = '';
+        this.liveTranscription.partialText = '';
+        this.liveTranscription.closing = false;
         this.resetUI();
-    }
-    
-    getRecorderOptions() {
-        const options = {
-            audioBitsPerSecond: 128000
-        };
-        
-        // Try preferred formats in order
-        const formats = ['audio/webm', 'audio/mp4', 'audio/ogg'];
-        for (const format of formats) {
-            if (MediaRecorder.isTypeSupported(format)) {
-                options.mimeType = format;
-                break;
-            }
-        }
-        
-        return options;
     }
     
     handleRecordingError(error) {
@@ -1015,7 +820,7 @@ class VocalCaptionRecorder {
         
         // Create the caption HTML matching the existing structure
         const modalityBadge = (!this.isBrainProject && caption.modality_display)
-            ? `<span class="badge bg-secondary me-1">${caption.modality_display}</span>`
+            ? `<span class="badge-ygg badge-neutral me-1">${caption.modality_display}</span>`
             : '';
 
         const captionHtml = `
@@ -1024,7 +829,7 @@ class VocalCaptionRecorder {
                     <div class="caption-info">
                         <small class="text-primary me-2">${caption.user_username}</small>
                         ${modalityBadge}
-                        <span class="badge bg-${caption.is_text_caption ? 'success' : caption.quality_color} me-2">${caption.is_text_caption ? 'Text' : caption.display_duration}</span>
+                        <span class="badge-ygg badge-neutral me-2">${caption.is_text_caption ? 'Text' : caption.display_duration}</span>
                         <small class="text-muted">${caption.created_at}</small>
                     </div>
                     <div class="caption-actions">
@@ -1256,7 +1061,7 @@ class VocalCaptionRecorder {
         }
         
         // Extract text without the [edited] badge
-        const editedBadge = fullTextElement ? fullTextElement.querySelector('.badge') : previewTextElement.querySelector('.badge');
+        const editedBadge = fullTextElement ? fullTextElement.querySelector('.badge-ygg') : previewTextElement.querySelector('.badge-ygg');
         if (editedBadge) {
             currentText = currentText.replace(editedBadge.textContent, '').trim();
         }
@@ -1410,7 +1215,7 @@ class VocalCaptionRecorder {
             }
             
             // Remove existing edited badge if present
-            const existingBadge = previewText.querySelector('.badge');
+            const existingBadge = previewText.querySelector('.badge-ygg');
             if (existingBadge) {
                 existingBadge.remove();
             }
@@ -1420,7 +1225,7 @@ class VocalCaptionRecorder {
             // Add edited badge if needed
             if (isEdited) {
                 const badge = document.createElement('span');
-                badge.className = 'badge bg-warning ms-1';
+                badge.className = 'badge-ygg badge-warn ms-1';
                 badge.title = 'Edited transcription';
                 badge.textContent = 'edited';
                 previewText.appendChild(badge);
@@ -1439,7 +1244,7 @@ class VocalCaptionRecorder {
         
         if (fullText) {
             // Remove existing edited badge if present
-            const existingBadge = fullText.querySelector('.badge');
+            const existingBadge = fullText.querySelector('.badge-ygg');
             if (existingBadge) {
                 existingBadge.remove();
             }
@@ -1449,7 +1254,7 @@ class VocalCaptionRecorder {
             // Add edited badge if needed
             if (isEdited) {
                 const badge = document.createElement('span');
-                badge.className = 'badge bg-warning ms-1';
+                badge.className = 'badge-ygg badge-warn ms-1';
                 badge.title = 'Edited transcription';
                 badge.textContent = 'edited';
                 fullText.appendChild(badge);
@@ -1495,11 +1300,6 @@ class VocalCaptionRecorder {
         if (this.captionTextArea) {
             this.captionTextArea.addEventListener('input', () => {
                 this.updateCharacterCount();
-                // If the user edits manually, the interim text is now part of the
-                // textarea value and no longer needs to be tracked for stripping.
-                if (this.brainStt && this.brainStt.displayedInterimText) {
-                    this.brainStt.displayedInterimText = '';
-                }
             });
             
             // Handle Enter key (Ctrl+Enter to save)

@@ -1,21 +1,19 @@
-<div class="mb-4">
-	<h6 class="mb-2"><i class="fas fa-tooth me-2"></i>Intra-Oral Scans (IOS)</h6>
-	<div class="mb-3">
-		<label for="{{ patient_upload_form.ios_upper.id_for_label }}" class="form-label">{{ patient_upload_form.ios_upper.label }}</label>
-		{{ patient_upload_form.ios_upper }}
-		{% if patient_upload_form.ios_upper.errors %}
-			<div class="text-danger">{{ patient_upload_form.ios_upper.errors }}</div>
-		{% endif %}
-		<div class="form-text">Upload STL file for upper jaw scan</div>
-	</div>
-	<div class="mb-3">
-		<label for="{{ patient_upload_form.ios_lower.id_for_label }}" class="form-label">{{ patient_upload_form.ios_lower.label }}</label>
-		{{ patient_upload_form.ios_lower }}
-		{% if patient_upload_form.ios_lower.errors %}
-			<div class="text-danger">{{ patient_upload_form.ios_lower.errors }}</div>
-		{% endif %}
-		<div class="form-text">Upload STL file for lower jaw scan</div>
-	</div>
-</div>
-
-
+<article class="upload-modality upload-modality--wide">
+    <div class="upload-modality__head"><i class="fas fa-tooth" aria-hidden="true"></i><h3>Intra-oral scans</h3></div>
+    <div class="upload-pair">
+        <label class="upload-dropzone" for="{{ patient_upload_form.ios_upper.id_for_label }}">
+            {{ patient_upload_form.ios_upper }}
+            <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+            <strong>Upper jaw</strong><small>STL</small>
+            <span class="upload-file-summary" data-file-summary>No file selected</span>
+        </label>
+        <label class="upload-dropzone" for="{{ patient_upload_form.ios_lower.id_for_label }}">
+            {{ patient_upload_form.ios_lower }}
+            <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+            <strong>Lower jaw</strong><small>STL</small>
+            <span class="upload-file-summary" data-file-summary>No file selected</span>
+        </label>
+    </div>
+    {% for error in patient_upload_form.ios_upper.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+    {% for error in patient_upload_form.ios_lower.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+</article>

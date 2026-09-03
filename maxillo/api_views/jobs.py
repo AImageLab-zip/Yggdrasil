@@ -11,8 +11,8 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from common.models import Job
-from common.permissions import user_can_read_folder, user_is_project_admin
+from common.models import Job, ProjectAccess
+from common.permissions import user_has_project_access, user_is_project_admin
 
 logger = logging.getLogger(__name__)
 
@@ -58,28 +58,29 @@ def _serialize_job(job):
 
 
 def _user_can_access_job(user, job):
-    if user_is_project_admin(user, job.domain):
-        return True
-
     patient = _job_patient(job)
     if not patient:
         voice_caption = _job_voice_caption(job)
         patient = getattr(voice_caption, "patient", None)
 
-    if not patient or getattr(patient, "deleted", False) or not patient.folder:
+    if not patient or getattr(patient, "deleted", False) or not patient.project:
         return False
 
-    return user_can_read_folder(user, patient.folder, job.domain)
+    if user_is_project_admin(user, patient.project):
+        return True
+    return user_has_project_access(user, patient.project)
 
 
 def _apply_job_acl_filter(jobs_qs, user, domain):
     if user_is_project_admin(user, domain):
         return jobs_qs
 
-    folder_ids = user.maxillo_folder_access.values_list("folder_id", flat=True)
+    project_ids = ProjectAccess.objects.filter(user=user).values_list(
+        "project_id", flat=True
+    )
     return jobs_qs.filter(
-        Q(patient__folder_id__in=folder_ids)
-        | Q(voice_caption__patient__folder_id__in=folder_ids)
+        Q(patient__project_id__in=project_ids)
+        | Q(voice_caption__patient__project_id__in=project_ids)
     )
 
 

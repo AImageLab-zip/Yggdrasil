@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse
 from django.shortcuts import render
@@ -7,10 +8,10 @@ from django.db import connection
 from django.utils.text import slugify
 from django.utils import timezone
 
-import json
 from datetime import timedelta
 
 from . import presence
+from .domains import project_admin_add_targets
 from .models import Job, ProcessingJob, Project, Modality, UserSession
 from .object_storage import get_object_storage
 
@@ -23,6 +24,16 @@ def _database_health():
         return {"status": "up", "message": "Connected"}
     except Exception as exc:
         return {"status": "down", "message": str(exc)}
+
+
+def maintenance_page(request):
+    """Public page used while the site is in full lockdown."""
+    return render(
+        request,
+        "common/maintenance.html",
+        {"hide_maintenance_banner": True},
+        status=503,
+    )
 
 
 def _object_storage_health():
@@ -42,6 +53,8 @@ def _object_storage_health():
         }
 
 
+@login_required
+@user_passes_test(lambda u: u.is_staff)
 def admin_control_panel(request):
     """App-agnostic admin control panel with aggregated metrics."""
     system_health = {
@@ -120,12 +133,49 @@ def admin_control_panel(request):
             }
         )
 
+    # MySQL backup status (reuses the status-page helpers).
+    from .models import SystemCheck
+
+    # Project overview (admin tooling for the Project-first layout).
+    from django.db.models import Count as _Count
+
+    projects = (
+        Project.objects.filter(is_active=True)
+        .annotate(
+            member_count=_Count("access_list"),
+            modality_count=_Count("modalities"),
+            annotation_count=_Count("annotation_methods"),
+        )
+        .order_by("domain", "name")
+    )
+    project_rows = []
+    for project in projects:
+        from .domains import patient_count_for as _patient_count_for
+
+        project_rows.append(
+            {
+                "id": project.id,
+                "name": project.name,
+                "domain": project.domain,
+                "slug": project.slug,
+                "member_count": project.member_count,
+                "modality_count": project.modality_count,
+                "annotation_count": project.annotation_count,
+                "patient_count": _patient_count_for(project) or 0,
+            }
+        )
+
     context = {
         "system_health": system_health,
         "job_counts": job_counts,
         "pending_by_modality": pending_by_modality,
         "user_count": user_count,
         "project_user_list": project_user_list,
+        "projects": project_rows,
+        "project_add_targets": project_admin_add_targets(),
+        "backup": _backup_health(),
+        "backup_inventory": _backup_inventory(),
+        "recent_backups": SystemCheck.objects.filter(name="database_backup")[:8],
     }
     return render(request, "common/admin_control_panel.html", context)
 
@@ -226,6 +276,356 @@ def user_activity_stats(request):
         "project_choices": [(slug, label) for slug, label in _PROJECT_LABELS.items() if slug],
         "view": view,
         "selected_user_id": int(selected_user_id) if selected_user_id else None,
-        "timeline_json": json.dumps(timeline),
+        "timeline": timeline,
     }
     return render(request, "common/user_activity_stats.html", context)
+
+
+BACKUP_FRESHNESS_LIMIT_HOURS = 26
+
+
+def _backup_health():
+    """Latest backup run + freshness assessment for the status page."""
+    from .models import SystemCheck
+
+    latest = SystemCheck.objects.filter(name="database_backup").first()
+    latest_ok = (
+        SystemCheck.objects.filter(name="database_backup", status="ok").first()
+    )
+    if latest_ok is None:
+        return {
+            "status": "warn",
+            "message": "No successful backup recorded yet",
+            "latest": latest,
+        }
+    age = timezone.now() - latest_ok.ran_at
+    if age > timedelta(hours=BACKUP_FRESHNESS_LIMIT_HOURS):
+        hours = int(age.total_seconds() // 3600)
+        return {
+            "status": "warn",
+            "message": f"Last successful backup is {hours}h old "
+            f"(limit {BACKUP_FRESHNESS_LIMIT_HOURS}h)",
+            "latest": latest,
+        }
+    return {
+        "status": "ok" if latest and latest.status == "ok" else "warn",
+        "message": f"Last successful backup at {latest_ok.ran_at:%Y-%m-%d %H:%M} UTC",
+        "latest": latest,
+    }
+
+
+def _backup_inventory():
+    """Count / size / newest of the MySQL backups retained in object storage.
+
+    Mirrors the object-storage health check pattern; enumerates keys under
+    settings.BACKUP_KEY_PREFIX so the admin panel can show how many backups are
+    kept and when the most recent landed.
+    """
+    prefix = getattr(settings, "BACKUP_KEY_PREFIX", "backups/mysql/")
+    inventory = {
+        "available": False,
+        "count": 0,
+        "total_bytes": 0,
+        "latest": None,
+        "prefix": prefix,
+        "keep_daily": getattr(settings, "BACKUP_KEEP_DAILY", None),
+        "keep_weekly": getattr(settings, "BACKUP_KEEP_WEEKLY", None),
+    }
+    try:
+        storage = get_object_storage()
+        paginator = storage._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(
+            Bucket=storage.bucket, Prefix=storage.normalize_key(prefix)
+        ):
+            for obj in page.get("Contents", []) or []:
+                inventory["count"] += 1
+                inventory["total_bytes"] += obj.get("Size", 0) or 0
+                modified = obj.get("LastModified")
+                latest = inventory["latest"]
+                if latest is None or (modified and modified > latest["modified"]):
+                    inventory["latest"] = {
+                        "key": obj.get("Key"),
+                        "modified": modified,
+                        "size": obj.get("Size", 0) or 0,
+                    }
+        inventory["available"] = True
+    except Exception as exc:  # noqa: BLE001
+        inventory["error"] = str(exc)
+    return inventory
+
+
+@login_required
+@user_passes_test(lambda u: u.is_staff)
+def status_page(request):
+    """Staff-only system status dashboard."""
+    from .models import SystemCheck
+
+    return render(request, "common/status.html", {
+        "database": _database_health(),
+        "object_storage": _object_storage_health(),
+        "backup": _backup_health(),
+        "recent_checks": SystemCheck.objects.all()[:20],
+        "checked_at": timezone.now(),
+    })
+
+
+def healthz(request):
+    """Unauthenticated liveness/readiness probe: 200 or 503, no details."""
+    healthy = (
+        _database_health()["status"] == "up"
+        and _object_storage_health()["status"] == "up"
+    )
+    return JsonResponse(
+        {"status": "ok" if healthy else "unavailable"},
+        status=200 if healthy else 503,
+    )
+
+
+@login_required
+def set_report_language(request):
+    """Cross-app AJAX endpoint: persist the user's Report Template language.
+
+    Supersedes the old brain-only endpoint. Stores on the shared
+    ``common.UserPreference`` so all three domains share one preference.
+    """
+    import json
+    from .models import UserPreference
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body)
+        language = (body.get("language") or "it").strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    if language not in ("it", "en", "de"):
+        return JsonResponse({"error": "Invalid language"}, status=400)
+
+    pref, _ = UserPreference.objects.get_or_create(user=request.user)
+    pref.report_language = language
+    pref.save(update_fields=["report_language", "updated_at"])
+    return JsonResponse({"ok": True, "language": language})
+
+
+@login_required
+def notifications_api(request):
+    """Return the current user's unread count + latest notifications (bell)."""
+    from .models import Notification
+
+    qs = Notification.objects.filter(user=request.user)
+    unread = qs.filter(is_read=False).count()
+    items = [
+        {
+            "id": n.id,
+            "level": n.level,
+            "message": n.message,
+            "url": n.url,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%b %d, %H:%M"),
+        }
+        for n in qs[:20]
+    ]
+    return JsonResponse({"unread": unread, "items": items})
+
+
+@login_required
+def notifications_mark_read(request):
+    """Mark one (``id`` in body) or all of the user's notifications read."""
+    import json
+    from .models import Notification
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, AttributeError):
+        body = {}
+
+    qs = Notification.objects.filter(user=request.user, is_read=False)
+    nid = body.get("id")
+    if nid:
+        qs = qs.filter(id=nid)
+    updated = qs.update(is_read=True)
+    return JsonResponse({"ok": True, "marked": updated})
+
+
+# ---------------------------------------------------------------------------
+# Changelog page
+#
+# ``CHANGELOG.md`` is the single source of truth: ``.github/workflows/release.yml``
+# extracts a version's section from it to build the GitHub release notes, and a
+# prior step hard-fails unless ``VERSION`` matches the tag. So this page *parses*
+# that file rather than keeping a second copy of the same text.
+#
+# Read once at import, the pattern of ``common/cornerstone_assets.py`` and
+# ``yggdrasil/settings.py:22-30``, and with the same rule: a missing or
+# unreadable file must degrade to an empty page, never to a 500.
+# ---------------------------------------------------------------------------
+
+#: Authors, by era. Not in CHANGELOG.md -- release notes are about the work, this
+#: is about the people. Counts are from ``git shortlog -sne --all``, summed over
+#: the several identities some contributors committed under.
+CHANGELOG_CREDITS = [
+    {
+        "era": "1.0 - 1.9",
+        "note": "The original application, then named ToothFairy4M.",
+        "lead": "Luca Lumetti",
+        "others": [
+            "Omar Carpentiero",
+            "Lorenzo Borghi",
+            "Kevin Marchesini",
+            "Nicola Morelli",
+            "Matteo Ferrari",
+        ],
+    },
+    {
+        "era": "2.0 - 3.0",
+        "note": "Yggdrasil: the rename, the imaging rebuild and the platform work.",
+        "lead": "Lorenzo Borghi",
+        "others": [],
+    },
+]
+
+
+def _changelog_inline(text):
+    """Render the small subset of Markdown used in CHANGELOG.md bodies.
+
+    ``**bold**`` and ``` `code` ``` only -- everything else is escaped. Escaping
+    happens first, so the source file can never inject markup.
+    """
+    import re
+
+    from django.utils.html import escape
+    from django.utils.safestring import mark_safe
+
+    out = escape(text)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out, flags=re.S)
+    out = re.sub(r"`([^`]+)`", r'<code class="mono text-xs">\1</code>', out)
+    # S308: safe because `escape` above runs *first* -- every `<`, `>`, `&` and
+    # quote in the source is already an entity by the time these two
+    # substitutions add the only markup this function can emit. Keep that order
+    # if you extend the subset.
+    return mark_safe(out)  # noqa: S308
+
+
+def _parse_changelog(path):
+    """Split CHANGELOG.md into the releases the page renders.
+
+    Returns a list of dicts: ``version``, ``date``, ``intro`` (paragraphs) and
+    ``sections`` (``{"heading", "items"}``). The contract with the release
+    workflow is that a release starts with ``## [`` at column 0; this parser
+    reads exactly that boundary, so the two cannot drift apart.
+
+    An ``Unreleased`` section with no content is skipped: at release time the
+    placeholder carries no information, and the page should open on the latest
+    numbered release. A non-empty ``Unreleased`` still renders, so mid-cycle
+    work keeps its usual staging spot (only the stock "Nothing yet..."
+    placeholder counts as empty).
+    """
+    import re
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    releases = []
+    current = None
+    section = None
+    buffer = []
+
+    def flush_paragraph():
+        nonlocal buffer
+        text = " ".join(line.strip() for line in buffer).strip()
+        buffer = []
+        if not text or current is None:
+            return
+        if section is not None:
+            section["items"].append(_changelog_inline(text))
+        else:
+            current["intro"].append(_changelog_inline(text))
+
+    for line in raw.splitlines():
+        heading = re.match(r"^## \[([^\]]+)\](?:\s*-\s*(\S+))?\s*$", line)
+        if heading:
+            flush_paragraph()
+            section = None
+            current = {
+                "version": heading.group(1),
+                "date": heading.group(2) or "",
+                "intro": [],
+                "sections": [],
+            }
+            releases.append(current)
+            continue
+        if current is None:
+            continue
+        sub = re.match(r"^### +(.+?)\s*$", line)
+        if sub:
+            flush_paragraph()
+            section = {"heading": sub.group(1), "items": []}
+            current["sections"].append(section)
+            continue
+        item = re.match(r"^[-*] +(.*)$", line)
+        if item:
+            flush_paragraph()
+            buffer = [item.group(1)]
+            continue
+        if not line.strip():
+            flush_paragraph()
+            continue
+        buffer.append(line)
+
+    flush_paragraph()
+    # An ``Unreleased`` section with no content is skipped: at release time the
+    # placeholder carries no information, and the page should open on the
+    # latest numbered release. "No content" means no ``###`` sections and no
+    # intro beyond the stock "Nothing yet..." placeholder; a non-empty
+    # ``Unreleased`` still renders, so mid-cycle work keeps its staging spot.
+    return [
+        r
+        for r in releases
+        if r["version"] != "Unreleased" or r["sections"] or _has_real_intro(r)
+    ]
+
+
+def _has_real_intro(release):
+    """True when an ``Unreleased`` entry carries prose beyond the stock
+    "Nothing yet..." placeholder that ships in the file template."""
+    return any(
+        not str(paragraph).startswith("Nothing yet")
+        for paragraph in release["intro"]
+    )
+
+
+def _load_changelog():
+    try:
+        return _parse_changelog(settings.BASE_DIR / "CHANGELOG.md")
+    except Exception:  # noqa: BLE001 -- a broken changelog must not break boot
+        import logging
+
+        logging.getLogger(__name__).exception("Could not parse CHANGELOG.md")
+        return []
+
+
+#: Parsed once at import; see the module note above.
+_CHANGELOG_RELEASES = _load_changelog()
+
+
+def changelog_page(request):
+    """Public release history, reached from the version in the footer.
+
+    Deliberately undecorated, like ``maintenance_page`` and ``healthz``: the
+    footer renders on ``/login/``, the landing page and the anonymous demo, so a
+    login gate here would bounce visitors off a link they can see.
+    """
+    return render(
+        request,
+        "common/changelog.html",
+        {
+            "releases": _CHANGELOG_RELEASES,
+            "credits": CHANGELOG_CREDITS,
+            "hide_maintenance_banner": False,
+        },
+    )

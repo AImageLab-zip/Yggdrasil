@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% load icons %}
+
+{% comment %}
+Shared shell for the branded HTTP error pages (404 / 403 / 410 / 500).
+
+Django's default handlers render `<status>.html` from the template search path
+when one exists, so 404.html, 403.html and 500.html are picked up by adding the
+files -- no handler404/handler500 wiring is needed. 410.html has no default
+handler; it is here so a view that answers 410 can render a page that matches
+the others.
+
+**500.html is rendered WITHOUT context processors** (django.views.defaults
+.server_error calls template.render() with no request), so nothing here may
+depend on context. `app_version`, `site_maintenance` and `user` are therefore
+untouched by this shell: it uses only `{% url %}` and `{% static %}`, which are
+tags and need no context. 500.html additionally blanks the nav and the footer,
+because base.html's footer does render `{{ app_version }}`.
+{% endcomment %}
+
+{% comment %} The nav reverses namespaced URLs (`patient_list` and friends), which do not
+   resolve when the error came from the admin or any other non-domain prefix --
+   a NoReverseMatch here fires *while Django is already handling an error*.
+   Error pages are reachable from everywhere, so they carry no nav. {% endcomment %}
+{% block chrome %}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .error-stage {
+        max-width: 34rem;
+        margin: 4rem auto;
+        text-align: center;
+    }
+    .error-code {
+        font-family: var(--ygg-font-mono);
+        font-size: 3.5rem;
+        line-height: 1;
+        font-weight: 600;
+        color: var(--ygg-text-faint);
+        letter-spacing: var(--ygg-tracking-mono);
+    }
+    .error-stage h1 {
+        margin: 1rem 0 0.5rem;
+        font-size: 1.5rem;
+    }
+    .error-lead { color: var(--ygg-text-muted); margin: 0 0 1.5rem; }
+    .error-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="error-stage">
+    <div class="error-code">{% block error_code %}{% endblock %}</div>
+    <h1>{% block error_title %}Something went wrong{% endblock %}</h1>
+    <p class="error-lead">{% block error_lead %}{% endblock %}</p>
+    <div class="error-actions">
+        {% block error_actions %}
+        <a class="btn btn-primary" href="/">{% icon 'home' %}<span>Back to the home page</span></a>
+        {% endblock %}
+    </div>
+</div>
+{% endblock %}

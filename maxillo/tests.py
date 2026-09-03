@@ -4,15 +4,14 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from common.models import Invitation, Modality, Project, ProjectAccess
 from .models import Folder, FolderAccess, Patient
 from .views.auth import _repair_empty_invitation_codes
-from .views.intraoral_segmentation import _normalize_teeth_payload
+from .intraoral_teeth import _normalize_teeth_payload
 
 
 class IntraoralSegmentationNormalizationTests(SimpleTestCase):
@@ -75,6 +74,7 @@ class InvitationCodeTests(TestCase):
         self.assertTrue(invitation.code)
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
 class MaxilloCbctFolderUploadTests(TestCase):
     def setUp(self):
         self.project, _ = Project.objects.get_or_create(
@@ -88,56 +88,72 @@ class MaxilloCbctFolderUploadTests(TestCase):
         self.project.modalities.add(self.cbct)
 
         self.user = User.objects.create_user(username='uploader', password='x')
-        ProjectAccess.objects.create(user=self.user, project=self.project, role='standard')
+        ProjectAccess.objects.create(user=self.user, project=self.project, role='annotator')
 
-        self.folder = Folder.objects.create(name='Cases')
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role='annotator')
+        self.folder = Folder.objects.create(name='Cases', project=self.project)
 
-    def _dicom_upload(self):
+    def _nii_gz_upload(self, name='volume.nii.gz'):
         return SimpleUploadedFile(
-            'slice1.dcm',
-            b'DICM test content',
-            content_type='application/dicom',
+            name,
+            b'fake nii gz content',
+            content_type='application/octet-stream',
         )
 
-    @patch('maxillo.file_utils.save_cbct_folder_to_dataset')
-    def test_web_upload_accepts_cbct_folder(self, save_cbct_folder):
-        save_cbct_folder.return_value = ('maxillo/raw/cbct/folder', SimpleNamespace(id=42))
+    @patch('maxillo.file_utils.save_cbct_to_dataset')
+    def test_web_upload_accepts_cbct_nii_gz(self, save_cbct):
+        save_cbct.return_value = ('maxillo/raw/cbct/volume.nii.gz', SimpleNamespace(id=42))
         self.client.force_login(self.user)
 
         response = self.client.post(
             reverse('maxillo:upload_patient'),
             data={
-                'name': 'Folder CBCT',
+                'name': 'CBCT Patient',
+                'project': str(self.project.id),
                 'folder': str(self.folder.id),
-                'cbct_upload_type': 'folder',
-                'cbct_folder_files': [self._dicom_upload()],
+                'cbct': self._nii_gz_upload(),
             },
         )
 
         self.assertEqual(response.status_code, 302)
-        save_cbct_folder.assert_called_once()
-        patient = Patient.objects.get(name='Folder CBCT')
+        save_cbct.assert_called_once()
+        patient = Patient.objects.get(name='CBCT Patient')
         self.assertEqual(patient.folder, self.folder)
+        self.assertEqual(patient.project, self.project)
         self.assertIn(self.cbct, patient.modalities.all())
 
-    @patch('maxillo.file_utils.save_cbct_folder_to_dataset')
-    def test_project_upload_api_accepts_cbct_folder(self, save_cbct_folder):
-        save_cbct_folder.return_value = ('maxillo/raw/cbct/folder', SimpleNamespace(id=43, status='pending'))
+    @patch('maxillo.file_utils.save_cbct_to_dataset')
+    def test_project_upload_api_accepts_cbct_nii_gz(self, save_cbct):
+        save_cbct.return_value = ('maxillo/raw/cbct/volume.nii.gz', SimpleNamespace(id=43, status='pending'))
         self.client.force_login(self.user)
 
         response = self.client.post(
             reverse('api:api_project_upload', kwargs={'project_slug': 'maxillo'}),
             data={
-                'name': 'API Folder CBCT',
+                'name': 'API CBCT Patient',
+                'project': str(self.project.id),
                 'folder': str(self.folder.id),
-                'cbct_upload_type': 'folder',
-                'cbct_folder_files': [self._dicom_upload()],
+                'cbct': self._nii_gz_upload(),
             },
         )
 
         self.assertEqual(response.status_code, 200)
-        save_cbct_folder.assert_called_once()
+        save_cbct.assert_called_once()
         payload = response.json()
         self.assertTrue(payload['success'])
         self.assertEqual(payload['patient']['upload_results']['jobs'][0]['type'], 'cbct')
+
+    def test_project_upload_api_rejects_non_nii_gz_cbct(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse('api:api_project_upload', kwargs={'project_slug': 'maxillo'}),
+            data={
+                'name': 'Invalid CBCT Patient',
+                'project': str(self.project.id),
+                'folder': str(self.folder.id),
+                'cbct': SimpleUploadedFile('scan.mha', b'not a nifti', content_type='application/octet-stream'),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('error', response.json())

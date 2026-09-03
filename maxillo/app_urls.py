@@ -4,11 +4,17 @@ from django.shortcuts import redirect
 app_name = "maxillo"
 from . import views
 from . import api_views
+from annotations import views as annotations_views
 
 urlpatterns = [
     path("", views.home, name="home"),
     path("patients/", views.patient_list, name="patient_list"),
     path("upload/", views.upload_patient, name="upload_patient"),
+    path(
+        "upload/bulk/",
+        views.bulk_upload_patients,
+        name="bulk_upload_patients",
+    ),
     path(
         "project/<int:project_id>/select/", views.select_project, name="select_project"
     ),
@@ -32,11 +38,6 @@ urlpatterns = [
         "patient/<int:patient_id>/files/raw/<int:file_id>/delete/",
         views.delete_raw_file,
         name="delete_raw_file",
-    ),
-    path(
-        "patient/<int:patient_id>/voice-caption/",
-        views.upload_voice_caption,
-        name="upload_voice_caption",
     ),
     path(
         "patient/<int:patient_id>/text-caption/",
@@ -99,9 +100,7 @@ urlpatterns = [
     path("folders/create/", views.create_folder, name="create_folder"),
     path("folders/<int:folder_id>/stats/", views.folder_stats, name="folder_stats"),
     path("folders/<int:folder_id>/rename/", views.rename_folder, name="rename_folder"),
-    path("folders/<int:folder_id>/permissions/", views.folder_permissions, name="folder_permissions"),
-    path("folders/<int:folder_id>/permissions/upsert/", views.upsert_folder_permission, name="upsert_folder_permission"),
-    path("folders/<int:folder_id>/permissions/<int:user_id>/delete/", views.delete_folder_permission, name="delete_folder_permission"),
+    path("folders/<int:folder_id>/delete/", views.delete_folder, name="delete_folder"),
     path(
         "folders/move-patients/",
         views.move_patients_to_folder,
@@ -151,6 +150,29 @@ urlpatterns = [
         name="patient_panoramic_data",
     ),
     path(
+        "api/patient/<int:patient_id>/panoramic/generated/",
+        views.save_browser_panoramic,
+        name="save_browser_panoramic",
+    ),
+    path(
+        "panoramic/warmup/",
+        views.panoramic_warmup,
+        name="panoramic_warmup",
+    ),
+    path(
+        "api/panoramic/warmup/pending/",
+        views.panoramic_warmup_pending,
+        name="panoramic_warmup_pending",
+    ),
+    # Millimetres per pixel for one 2D image, measured by the user on a known length.
+    # Beside the modality endpoints because a pixel spacing is a property of the image;
+    # it is deliberately not an annotations/ route (see common/imaging_calibration.py).
+    path(
+        "api/patient/<int:patient_id>/images/<int:file_id>/calibration/",
+        views.calibrate_image_pixel_spacing,
+        name="patient_image_calibration",
+    ),
+    path(
         "api/patient/<int:patient_id>/intraoral/",
         views.patient_intraoral_data,
         name="patient_intraoral_data",
@@ -160,16 +182,10 @@ urlpatterns = [
         views.patient_intraoral_data,
         name="patient_intraoral_photo_data",
     ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/",
-        views.patient_intraoral_segmentation_data,
-        name="patient_intraoral_segmentation_data",
-    ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/update/",
-        views.update_patient_intraoral_segmentation,
-        name="update_patient_intraoral_segmentation",
-    ),
+    # The two `intraoral-segmentation/` routes are gone (roadmap Phase 5). The editor
+    # saves through `annotations/`, which is where tooth polygons now live, so the
+    # endpoints that read and wrote `maxillo.IntraoralToothSegmentation` have no caller.
+    # See the `tooth-segmentation/` routes below.
     path(
         "api/patient/<int:patient_id>/teleradiography/",
         views.patient_teleradiography_data,
@@ -213,6 +229,11 @@ urlpatterns = [
         name="api_runner_claim_job",
     ),
     path(
+        "api/runner/jobs/<int:job_id>/attach/",
+        api_views.runner_attach_job,
+        name="api_runner_attach_job",
+    ),
+    path(
         "api/runner/jobs/<int:job_id>/complete/",
         api_views.runner_complete_job,
         name="api_runner_complete_job",
@@ -231,5 +252,68 @@ urlpatterns = [
         "api/processing/files/serve/<int:file_id>/",
         api_views.serve_file,
         name="api_serve_file",
+    ),
+    # Same view, filename-suffixed. Cornerstone's NIfTI loader does `new URL(url)`
+    # (which throws on a relative path) and then tests `pathname.endsWith('.gz')`
+    # (which excludes the query string), so `?ext=.gz` cannot help -- finding F3 of
+    # docs/cornerstone-roadmap.md. The suffix must be the last path segment and must
+    # carry no trailing slash, which is why `file_key` stays a query parameter.
+    # `filename` is decorative: it never takes part in resolving the file.
+    path(
+        "api/processing/files/serve/<int:file_id>/<str:filename>",
+        api_views.serve_file,
+        name="api_serve_file_named",
+    ),
+    # Same view again, with the bundle key in the path. Finding F14: the NIfTI
+    # loader appends `?frame=N` with a literal `?`, so a URL that already carries
+    # `?file_key=` produces two of them and every slice resolves to frame 0. The
+    # maxillo CBCT display volume *is* a bundle member, so the viewer needs a
+    # query-free way to name one. `filename` stays decorative here too.
+    path(
+        "api/processing/files/serve/<int:file_id>/key/<str:bundle_key>/<str:filename>",
+        api_views.serve_file,
+        name="api_serve_file_bundle",
+    ),
+    # Measurements made in the volume grid become durable annotation revisions.
+    # Domain-oriented on purpose (the governing architectural rule): the URL names a
+    # patient and the work, not a viewer. See annotations/views.py.
+    path(
+        "api/patients/<int:patient_id>/measurements/",
+        annotations_views.save_measurements_api,
+        name="api_save_measurements",
+    ),
+    path(
+        "api/patients/<int:patient_id>/measurements/state/",
+        annotations_views.measurements_state_api,
+        name="api_measurements_state",
+    ),
+    # Tooth segmentation, through the same services. Its own set kind rather than its own
+    # machinery: a tooth polygon is not a measurement, but "one revision spanning several
+    # images, carrying forward the ones a save did not name" is the same problem.
+    path(
+        "api/patients/<int:patient_id>/tooth-segmentation/",
+        annotations_views.save_tooth_segmentation_api,
+        name="api_save_tooth_segmentation",
+    ),
+    path(
+        "api/patients/<int:patient_id>/tooth-segmentation/state/",
+        annotations_views.tooth_segmentation_state_api,
+        name="api_tooth_segmentation_state",
+    ),
+    # IOS landmarks, through the same services again. The legacy route at
+    # `api/patient/<id>/ios/landmarks/` wrote a whole JSON document into object storage
+    # with no concurrency check; these replace it (decision #20). Note the URL names the
+    # patient and the work, and carries no mesh id: the arch is in the body and the server
+    # resolves the geometry, because a landmark's coordinates are only meaningful against
+    # one specific mesh.
+    path(
+        "api/patients/<int:patient_id>/ios-landmarks/",
+        annotations_views.save_ios_landmarks_api,
+        name="api_save_ios_landmarks",
+    ),
+    path(
+        "api/patients/<int:patient_id>/ios-landmarks/state/",
+        annotations_views.ios_landmarks_state_api,
+        name="api_ios_landmarks_state",
     ),
 ]

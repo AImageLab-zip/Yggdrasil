@@ -1,80 +1,58 @@
 {% extends 'base.html' %}
+{% load icons %}
 
 {% block title %}Register - Yggdrasil{% endblock %}
 
 {% block content %}
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-4">
-            <div class="card">
-                <div class="card-header text-center">
-                    <h3><i class="fas fa-user-plus me-2"></i>Register</h3>
-                </div>
-                <div class="card-body">
-                    <form method="post">
-                        {% csrf_token %}
-                        
-                        <div class="mb-3">
-                            <label for="{{ form.invitation_code.id_for_label }}" class="form-label">Invitation Code</label>
-                            <input type="text" class="form-control" name="invitation_code" id="{{ form.invitation_code.id_for_label }}" value="{{ form.invitation_code.value|default:'' }}" required>
-                            {% if form.invitation_code.errors %}
-                                <div class="text-danger">{{ form.invitation_code.errors }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="{{ form.username.id_for_label }}" class="form-label">Username</label>
-                            <input type="text" class="form-control" name="username" id="{{ form.username.id_for_label }}" required>
-                            {% if form.username.errors %}
-                                <div class="text-danger">{{ form.username.errors }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="{{ form.email.id_for_label }}" class="form-label">Email</label>
-                            <input type="email" class="form-control" name="email" id="{{ form.email.id_for_label }}" value="{{ form.email.value|default:'' }}" required>
-                            {% if form.email.errors %}
-                                <div class="text-danger">{{ form.email.errors }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="{{ form.password1.id_for_label }}" class="form-label">Password</label>
-                            <input type="password" class="form-control" name="password1" id="{{ form.password1.id_for_label }}" required>
-                            {% if form.password1.errors %}
-                                <div class="text-danger">{{ form.password1.errors }}</div>
-                            {% endif %}
-                            {% if form.password1.help_text %}
-                                <div class="form-text">{{ form.password1.help_text }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="{{ form.password2.id_for_label }}" class="form-label">Confirm Password</label>
-                            <input type="password" class="form-control" name="password2" id="{{ form.password2.id_for_label }}" required>
-                            {% if form.password2.errors %}
-                                <div class="text-danger">{{ form.password2.errors }}</div>
-                            {% endif %}
-                        </div>
-                        
-                        {% if form.non_field_errors %}
-                            <div class="alert alert-danger">
-                                {{ form.non_field_errors }}
-                            </div>
-                        {% endif %}
-                        
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-user-plus me-2"></i>Register
-                            </button>
-                        </div>
-                    </form>
-                </div>
-                <div class="card-footer text-center">
-                    <small>Already have an account? <a href="{% url 'login' %}">Login here</a></small>
-                </div>
-            </div>
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="flex justify-center mb-1">
+            {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
         </div>
+        <h1 class="text-center text-xl">Create your account</h1>
+        <hr class="auth-rule">
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="form-field">
+                <label for="{{ form.invitation_code.id_for_label }}" class="form-label">Invitation code</label>
+                <input type="text" class="form-input" name="invitation_code" id="{{ form.invitation_code.id_for_label }}" value="{{ form.invitation_code.value|default:'' }}" required>
+                {% if form.invitation_code.errors %}<div class="form-error">{{ form.invitation_code.errors }}</div>{% endif %}
+            </div>
+            <div class="form-field">
+                <label for="{{ form.username.id_for_label }}" class="form-label">Username</label>
+                <input type="text" class="form-input" name="username" id="{{ form.username.id_for_label }}" required>
+                {% if form.username.errors %}<div class="form-error">{{ form.username.errors }}</div>{% endif %}
+            </div>
+            <div class="form-field">
+                <label for="{{ form.email.id_for_label }}" class="form-label">Email</label>
+                <input type="email" class="form-input" name="email" id="{{ form.email.id_for_label }}" value="{{ form.email.value|default:'' }}" required>
+                {% if form.email.errors %}<div class="form-error">{{ form.email.errors }}</div>{% endif %}
+            </div>
+            <div class="form-field">
+                <label for="{{ form.password1.id_for_label }}" class="form-label">Password</label>
+                <input type="password" class="form-input" name="password1" id="{{ form.password1.id_for_label }}" required>
+                {% if form.password1.errors %}<div class="form-error">{{ form.password1.errors }}</div>{% endif %}
+                {% if form.password1.help_text %}<div class="form-help">{{ form.password1.help_text|safe }}</div>{% endif %}
+            </div>
+            <div class="form-field">
+                <label for="{{ form.password2.id_for_label }}" class="form-label">Confirm password</label>
+                <input type="password" class="form-input" name="password2" id="{{ form.password2.id_for_label }}" required>
+                {% if form.password2.errors %}<div class="form-error">{{ form.password2.errors }}</div>{% endif %}
+            </div>
+            {% if form.non_field_errors %}
+                <div class="alert-ygg alert-danger mb-4">{% icon 'circle-alert' %}<div>{{ form.non_field_errors }}</div></div>
+            {% endif %}
+            <button type="submit" class="btn btn-primary w-full">{% icon 'user-plus' %}<span>Register</span></button>
+        </form>
+
+        <p class="text-center text-sm text-content-muted mt-5">
+            Already have an account? <a href="{% url 'login' %}" class="font-medium">Login here</a>
+        </p>
+        <p class="text-center text-sm text-content-muted mt-3">
+            No invitation code? If you believe you're entitled to an account, email
+            <a href="mailto:yggdrasil@unimore.it" class="font-medium">yggdrasil@unimore.it</a>.
+        </p>
     </div>
 </div>
 {% endblock %}

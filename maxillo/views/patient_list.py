@@ -7,7 +7,15 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
-from .helpers import render_with_fallback
+from .helpers import bulk_upload_url_for, redirect_with_namespace, render_with_fallback
+from common.demo import landing_demo_url
+from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
+from common.modality_config import (
+    modality_status,
+    rerun_step_labels,
+    rerunnable_steps_for_patient,
+)
+from common.project_filters import presence_filter_specs
 from common.models import Project, ProjectAccess
 from common.permissions import (
     filter_folders_for_user,
@@ -18,6 +26,16 @@ from common.permissions import (
 import logging
 
 logger = logging.getLogger(__name__)
+
+PATIENT_LIST_PAGE_SIZES = {10, 20, 50, 100}
+
+
+def _patient_list_page_size(request):
+    try:
+        value = int(request.GET.get('per_page', 10))
+    except (TypeError, ValueError):
+        return 10
+    return value if value in PATIENT_LIST_PAGE_SIZES else 10
 
 
 def _get_domain_models(request):
@@ -40,12 +58,12 @@ def home(request):
         
         # Admins can see all projects
         if request.user.is_staff:
-            projects = all_projects.order_by('name')
+            projects = order_projects_for_landing(all_projects)
         else:
             accessible_project_ids = ProjectAccess.objects.filter(
                 user=request.user
             ).values_list('project_id', flat=True)
-            projects = all_projects.filter(id__in=accessible_project_ids).order_by('name')
+            projects = order_projects_for_landing(all_projects.filter(id__in=accessible_project_ids))
 
         current_project_id = request.session.get('current_project_id')
         current_project_name = None
@@ -62,11 +80,13 @@ def home(request):
         
         return render(request, 'common/landing.html', {
             'projects': projects,
+            'landing_cards': landing_domain_cards(),
             'current_project_id': current_project_id,
             'current_project_name': current_project_name,
             'continue_url': continue_url,
+            'demo_url': landing_demo_url(),
         })
-    return render(request, 'common/landing.html')
+    return render(request, 'common/landing.html', {'demo_url': landing_demo_url()})
 
 
 @login_required
@@ -84,14 +104,13 @@ def select_project(request, project_id: int):
             return redirect('home')
     
     request.session['current_project_id'] = project.id
-    messages.success(request, f"Project set to {project.name}")
-    return redirect('patient_list')
+    return redirect_with_namespace(request, 'patient_list')
 
 
 @login_required
 def patient_list(request):
     namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-    is_admin = user_is_project_admin(request.user, namespace)
+    is_admin = user_is_project_admin(request.user, request)
     Patient, Folder, Tag = _get_domain_models(request)
     
     # Import Job model early for use in prefetch
@@ -136,13 +155,14 @@ def patient_list(request):
     if current_project_id and any(field.name == 'project' for field in Patient._meta.fields):
         patients = patients.filter(project_id=current_project_id)
 
-    # Get filter parameters
+    # Get filter parameters. (has_ios / has_cbct / has_voice used to be read here
+    # and handed to the template, but no code ever applied them to the queryset;
+    # per-modality status filters replaced them.)
     search_query = request.GET.get('search', '').strip()
-    has_ios_filter = request.GET.get('has_ios', '')
-    has_cbct_filter = request.GET.get('has_cbct', '')
-    has_bite_filter = request.GET.get('has_bite', '')
-    has_voice_filter = request.GET.get('has_voice', '')
     has_reports_filter = request.GET.get('has_reports', '')
+    has_bite_classification_filter = request.GET.get('has_bite_classification', '')
+    has_landmarks_filter = request.GET.get('has_landmarks', '')
+    has_segmentation_filter = request.GET.get('has_segmentation', '')
 
     folder_id = request.GET.get('folder')
     tags_selected = request.GET.getlist('tags')
@@ -150,8 +170,8 @@ def patient_list(request):
         comma = request.GET.get('tags', '')
         if comma:
             tags_selected = [t.strip() for t in comma.split(',') if t.strip()]
-    per_page = int(request.GET.get('per_page', 20))
-    
+    per_page = _patient_list_page_size(request)
+
     # Store base queryset for folder counts BEFORE applying folder filter
     base_patients_for_counts = patients
     
@@ -175,11 +195,31 @@ def patient_list(request):
 
     if has_reports_filter == 'yes':
         patients = patients.filter(voice_captions__isnull=False).distinct()
+
+    if namespace == 'maxillo' and has_bite_classification_filter == 'yes':
+        patients = patients.filter(classifications__isnull=False).distinct()
+
+    if namespace == 'maxillo' and has_landmarks_filter == 'yes':
+        # From `annotations/`, for the same reason the segmentation filter below is:
+        # landmarks are written through `annotations.services.ios_landmarks` now, and the
+        # `ios_landmarks` file row survives as history after the last point on it is
+        # deleted. Shared with the export builder's copy -- see annotations/queries.py.
+        from annotations.queries import with_ios_landmarks
+
+        patients = with_ios_landmarks(patients).distinct()
+
+    if namespace == 'maxillo' and has_segmentation_filter == 'yes':
+        # From `annotations/`: both writers of `IntraoralToothSegmentation` now go through
+        # `annotations.services.segmentation`, so that table stops moving the moment
+        # anybody edits a study. Shared with the export builder's copy of this filter --
+        # see annotations/queries.py for why the two are one function now.
+        from annotations.queries import with_tooth_segmentation
+
+        patients = with_tooth_segmentation(patients)
     
     patients = patients.order_by('-uploaded_at')
     
     # Get filter parameters for optimization decision
-    per_page = int(request.GET.get('per_page', 20))
     page_number = request.GET.get('page')
     
     # Check if we have modality status filters that require processing all patients
@@ -187,9 +227,13 @@ def patient_list(request):
     has_status_filters = False
     allowed_modalities = []
     status_filters = {}
+    current_project = None
     try:
         if current_project_id:
-            proj = Project.objects.prefetch_related('modalities').get(id=current_project_id)
+            proj = Project.objects.prefetch_related(
+                'modalities', 'annotation_methods'
+            ).get(id=current_project_id)
+            current_project = proj
             allowed_modalities = list(proj.modalities.filter(is_active=True))
             for m in allowed_modalities:
                 slug = getattr(m, 'slug', '') or ''
@@ -316,22 +360,20 @@ def patient_list(request):
             if slug == 'rawzip' or slug == 'voice':
                 continue
             
-            status = 'absent'
-            has_any_files = slug in files_by_modality and len(files_by_modality[slug]) > 0
-            
-            # Determine status precedence: failed > processing > pending > processed > absent
-            # Check jobs using prefetched data
-            modality_jobs = jobs_by_modality.get(slug, [])
-            if any(job.status == 'failed' for job in modality_jobs):
-                status = 'failed'
-            elif any(job.status == 'processing' for job in modality_jobs):
-                status = 'processing'
-            elif any(job.status in ['pending', 'retrying'] for job in modality_jobs):
-                status = 'pending'
-            elif has_any_files:
-                status = 'processed'
+            # failed > processing > pending > processed > absent, and jobs only
+            # for a modality that declares a processing step (common.modality_config).
+            status = modality_status(
+                slug,
+                jobs_by_modality.get(slug, []),
+                bool(files_by_modality.get(slug)),
+            )
 
             modality_status_list.append({'slug': slug, 'name': name, 'icon': icon, 'label': label, 'status': status})
+
+        # Processing steps possible for this patient, given its input files and
+        # the admin-declared ProcessingStep DAG (e.g. IOS patients -> IOS
+        # Orientation, IOS Landmarks, IOS Bite Classification).
+        rerunnable_steps = rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient)
 
         patient_data = {
             'patient': patient,
@@ -350,6 +392,7 @@ def patient_list(request):
             'available_modalities': [m.slug for m in available_modality_objs],
             'modality_statuses': {ms['slug']: ms['status'] for ms in modality_status_list},
             'modality_status_list': modality_status_list,
+            'rerunnable_steps': rerunnable_steps,
             'can_delete': bool(
                 is_admin
                 or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
@@ -357,7 +400,7 @@ def patient_list(request):
         }
         patients_with_status.append(patient_data)
     
-    folders = Folder.objects.filter(parent__isnull=True).order_by('name')
+    folders = Folder.objects.filter(parent__isnull=True, project_id=current_project_id).order_by('name')
     folders = filter_folders_for_user(request.user, folders, namespace)
     
     # Add patient counts for each folder
@@ -390,6 +433,19 @@ def patient_list(request):
             'label': label,
             'value': status_filters.get(slug, ''),
         })
+
+    # Annotation-presence filters the project actually collects (see
+    # PRESENCE_FILTERS): an annotator on a CBCT-only project is not asked about
+    # IOS landmarks or bite classification.
+    presence_filters = presence_filter_specs(
+        request,
+        current_project,
+        {getattr(m, 'slug', '') for m in allowed_modalities},
+    )
+
+    # Step slug -> ProcessingStep.name map for the rerun modal checkboxes
+    # (falls back to modality labels when the domain declares no steps).
+    rerun_step_labels_map = rerun_step_labels(None, modality_filter_specs)
 
     # Apply dynamic status filters if active (slow path only)
     if has_status_filters:
@@ -440,15 +496,29 @@ def patient_list(request):
         paginator = Paginator(patients_with_status, per_page)
         page_obj = paginator.get_page(page_number)
     
+    # Projects of this domain the user can access (sidebar project switcher).
+    projects_for_sidebar = Project.objects.filter(domain=namespace, is_active=True)
+    if not request.user.is_staff:
+        accessible_project_ids = ProjectAccess.objects.filter(
+            user=request.user
+        ).values_list('project_id', flat=True)
+        projects_for_sidebar = projects_for_sidebar.filter(id__in=accessible_project_ids)
+
+    # Administrator-only, project-scoped, and absent in some domains - the
+    # helper keeps the shared template from reversing a URL that does not exist.
+    bulk_upload_url = bulk_upload_url_for(request, namespace)
+
     context = {
         'page_obj': page_obj,
+        'bulk_upload_url': bulk_upload_url,
         'current_project_id': current_project_id,
+        'projects': projects_for_sidebar.order_by('name'),
         'search_query': search_query,
-        'has_ios_filter': has_ios_filter,
-        'has_cbct_filter': has_cbct_filter,
-        'has_bite_filter': has_bite_filter,
-        'has_voice_filter': has_voice_filter,
         'has_reports_filter': has_reports_filter,
+        'has_bite_classification_filter': has_bite_classification_filter,
+        'has_landmarks_filter': has_landmarks_filter,
+        'has_segmentation_filter': has_segmentation_filter,
+        'presence_filter_specs': presence_filters,
         'folder_id': folder_id or 'all',
         'selected_tags': tags_selected,
         'folders': folders_with_counts,
@@ -459,6 +529,7 @@ def patient_list(request):
         'allowed_modalities': allowed_modalities,
         'status_filters': status_filters,
         'modality_filter_specs': modality_filter_specs,
+        'rerun_step_labels': rerun_step_labels_map,
     }
     # Prefer app-specific template via fallback helper
     return render_with_fallback(request, 'patient_list', context)

@@ -1,11 +1,10 @@
-<div class="mb-4">
-	<h6 class="mb-2"><i class="fas fa-x-ray me-2"></i>Teleradiography</h6>
-	<div class="mb-3">
-		<label for="{{ patient_upload_form.teleradiography.id_for_label }}" class="form-label">{{ patient_upload_form.teleradiography.label }}</label>
-		{{ patient_upload_form.teleradiography }}
-		{% if patient_upload_form.teleradiography.errors %}
-			<div class="text-danger">{{ patient_upload_form.teleradiography.errors }}</div>
-		{% endif %}
-		<div class="form-text">Upload teleradiography image (JPG, PNG formats)</div>
-	</div>
-</div>
+<article class="upload-modality">
+    <div class="upload-modality__head"><i class="fas fa-x-ray" aria-hidden="true"></i><h3>Teleradiography</h3></div>
+    <label class="upload-dropzone" for="{{ patient_upload_form.teleradiography.id_for_label }}">
+        {{ patient_upload_form.teleradiography }}
+        <i class="fas fa-image" aria-hidden="true"></i>
+        <strong>Drop an image</strong><small>JPG or PNG</small>
+        <span class="upload-file-summary" data-file-summary>No file selected</span>
+    </label>
+    {% for error in patient_upload_form.teleradiography.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+</article>

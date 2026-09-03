@@ -1,31 +1,13 @@
-<div class="mb-4">
-	<h6 class="mb-2"><i class="fas fa-cube me-2"></i>CBCT Scan</h6>
-	<div class="mb-3">
-		<label class="form-label">Upload Type</label>
-		<div class="btn-group w-100" role="group" aria-label="CBCT upload type">
-			<input type="radio" class="btn-check" name="cbct_upload_type" id="cbct_file_upload" value="file" checked>
-			<label class="btn btn-outline-primary" for="cbct_file_upload">
-				<i class="fas fa-file me-1"></i>Single File
-			</label>
-			<input type="radio" class="btn-check" name="cbct_upload_type" id="cbct_folder_upload" value="folder">
-			<label class="btn btn-outline-primary" for="cbct_folder_upload">
-				<i class="fas fa-folder me-1"></i>DICOM Folder
-			</label>
-		</div>
-	</div>
-	<div class="mb-3" id="cbct_file_section">
-		<label for="{{ patient_upload_form.cbct.id_for_label }}" class="form-label">{{ patient_upload_form.cbct.label }}</label>
-		{{ patient_upload_form.cbct }}
-		{% if patient_upload_form.cbct.errors %}
-			<div class="text-danger">{{ patient_upload_form.cbct.errors }}</div>
-		{% endif %}
-		<div class="form-text">Upload single CBCT file: DICOM (.dcm), NIfTI (.nii, .nii.gz), MetaImage (.mha, .mhd), NRRD (.nrrd, .nhdr), or archives (.zip, .tar)</div>
-	</div>
-	<div class="mb-3" id="cbct_folder_section" style="display: none;">
-		<label for="cbct_folder" class="form-label">CBCT Folder</label>
-		<input type="file" name="cbct_folder_files" id="cbct_folder" class="form-control" webkitdirectory directory multiple accept=".dcm,.dicom,application/dicom">
-		<div class="form-text">Select a folder containing DICOM files (.dcm, .dicom, or no extension) and/or a DICOMDIR file.</div>
-	</div>
-</div>
-
-
+<article class="upload-modality upload-modality--wide volume-upload-container" data-group="cbct">
+    <div class="upload-modality__head"><i class="fas fa-cube" aria-hidden="true"></i><h3>CBCT scan</h3></div>
+    <div class="cbct-file-section">
+        <label class="upload-dropzone" for="{{ patient_upload_form.cbct.id_for_label }}">
+            {{ patient_upload_form.cbct }}
+            <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+            <strong>Drop a CBCT file</strong>
+            <small>NIfTI or MetaImage (.mha)</small>
+            <span class="upload-file-summary" data-file-summary>No file selected</span>
+        </label>
+        {% for error in patient_upload_form.cbct.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+    </div>
+</article>

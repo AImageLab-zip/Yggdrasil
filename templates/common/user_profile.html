@@ -1,414 +1,147 @@
-{% extends 'base.html' %}
-{% load static %}
+{% extends 'common/base_app.html' %}
+{% load icons %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
 
-{% block title %}
-    {% if is_own_profile %}
-        My Profile
-    {% else %}
-        {{ target_user.username }}'s Profile
-    {% endif %}
-    - Yggdrasil
-{% endblock %}
+{% block title %}{% if is_own_profile %}My Profile{% else %}{{ target_user.username }}'s Profile{% endif %} - Yggdrasil{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <!-- Header -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <h2>
-                        <i class="fas fa-user-circle me-2"></i>
-                        {% if is_own_profile %}
-                            My Profile
-                        {% else %}
-                            {{ target_user.username }}'s Profile
-                        {% endif %}
-                    </h2>
-                    <p class="text-muted mb-0">
-                        {% if target_profile %}
-                            <span class="badge bg-secondary">{{ target_profile.get_role_display }}</span>
-                        {% endif %}
-                        {% if is_viewing_other_profile %}
-                            <span class="badge bg-info ms-2">Viewing Other Profile</span>
-                        {% endif %}
-                    </p>
-                </div>
-                {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-                <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left me-1"></i>Back to Scans
-                </a>
-            </div>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% icon 'user-circle' %}<span>{% if is_own_profile %}My profile{% else %}{{ target_user.username }}{% endif %}</span></h1>
+        <div class="mt-1 flex items-center gap-2">
+            {% if target_profile %}<span class="badge-ygg badge-neutral">{{ target_profile.get_role_display }}</span>{% endif %}
+            {% if is_viewing_other_profile %}<span class="badge-ygg badge-ok">Viewing other profile</span>{% endif %}
         </div>
     </div>
-
-    <!-- Statistics Cards -->
-    <div class="row mb-4">
-        <!-- Patients Uploaded -->
-        <div class="col-md-4 mb-3">
-            <div class="card h-100 border-primary">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <h6 class="card-subtitle mb-2 text-muted">
-                                <i class="fas fa-upload me-1"></i>Patients Uploaded
-                            </h6>
-                            <h2 class="card-title mb-0 text-primary">{{ total_patients_uploaded }}</h2>
-                        </div>
-                        <div class="text-end">
-                            <i class="fas fa-upload fa-3x text-primary opacity-25"></i>
-                        </div>
-                    </div>
-                    <hr>
-                    <small class="text-muted">
-                        <i class="fas fa-calendar-week me-1"></i>Last 7 days: 
-                        <strong>{{ uploads_last_7_days }}</strong>
-                    </small>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bite Classifications -->
-        <div class="col-md-4 mb-3">
-            <div class="card h-100 border-success">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <h6 class="card-subtitle mb-2 text-muted">
-                                <i class="fas fa-clipboard-check me-1"></i>Bite Classifications
-                            </h6>
-                            <h2 class="card-title mb-0 text-success">{{ total_classifications }}</h2>
-                        </div>
-                        <div class="text-end">
-                            <i class="fas fa-clipboard-check fa-3x text-success opacity-25"></i>
-                        </div>
-                    </div>
-                    <hr>
-                    <small class="text-muted">
-                        <i class="fas fa-users me-1"></i>Unique patients: 
-                        <strong>{{ unique_patients_annotated }}</strong>
-                        <br>
-                        <i class="fas fa-calendar-week me-1"></i>Last 7 days: 
-                        <strong>{{ classifications_last_7_days }}</strong>
-                    </small>
-                </div>
-            </div>
-        </div>
-
-        <!-- Voice Captions -->
-        <div class="col-md-4 mb-3">
-            <div class="card h-100 border-info">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <h6 class="card-subtitle mb-2 text-muted">
-                                <i class="fas fa-microphone me-1"></i>Voice Captions
-                            </h6>
-                            <h2 class="card-title mb-0 text-info">{{ total_voice_captions }}</h2>
-                        </div>
-                        <div class="text-end">
-                            <i class="fas fa-microphone fa-3x text-info opacity-25"></i>
-                        </div>
-                    </div>
-                    <hr>
-                    <small class="text-muted">
-                        <i class="fas fa-calendar-week me-1"></i>Last 7 days: 
-                        <strong>{{ voice_captions_last_7_days }}</strong>
-                    </small>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Last Activity -->
-    {% if last_activity %}
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="alert alert-light border">
-                <div class="d-flex align-items-center">
-                    <div class="me-3">
-                        {% if last_activity_type == 'upload' %}
-                            <i class="fas fa-upload fa-2x text-primary"></i>
-                        {% elif last_activity_type == 'classification' %}
-                            <i class="fas fa-clipboard-check fa-2x text-success"></i>
-                        {% elif last_activity_type == 'voice_caption' %}
-                            <i class="fas fa-microphone fa-2x text-info"></i>
-                        {% endif %}
-                    </div>
-                    <div>
-                        <h6 class="mb-1">Last Activity</h6>
-                        <p class="mb-0 text-muted">
-                            {% if last_activity_type == 'upload' %}
-                                Uploaded a patient
-                            {% elif last_activity_type == 'classification' %}
-                                Made a bite classification
-                            {% elif last_activity_type == 'voice_caption' %}
-                                Recorded a voice caption
-                            {% endif %}
-                            <strong>{{ last_activity|timesince }} ago</strong>
-                            <span class="text-muted">({{ last_activity|date:"Y-m-d H:i" }})</span>
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Activity Tables -->
-    <div class="row">
-        <!-- Recent Bite Classifications -->
-        <div class="col-lg-6 mb-4">
-            <div class="card">
-                <div class="card-header bg-success text-white">
-                    <h5 class="mb-0">
-                        <i class="fas fa-clipboard-check me-2"></i>Recent Bite Classifications
-                    </h5>
-                </div>
-                <div class="card-body p-0">
-                    {% if recent_classifications %}
-                        <div class="table-responsive">
-                            <table class="table table-hover table-sm mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Patient</th>
-                                        <th>Date & Time</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for classification in recent_classifications %}
-                                    <tr>
-                                        <td>
-                                            <i class="fas fa-user text-muted me-1"></i>
-                                            <strong>{{ classification.patient.name }}</strong>
-                                            <br>
-                                            <small class="text-muted">ID: {{ classification.patient.patient_id }}</small>
-                                        </td>
-                                        <td>
-                                            <span class="text-nowrap">{{ classification.timestamp|date:"Y-m-d" }}</span>
-                                            <br>
-                                            <small class="text-muted">{{ classification.timestamp|date:"H:i" }}</small>
-                                            <br>
-                                            <small class="text-muted">({{ classification.timestamp|timesince }} ago)</small>
-                                        </td>
-                                        <td>
-                                            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-                                            <a href="{% url ns|add:':patient_detail' classification.patient.patient_id %}" 
-                                               class="btn btn-sm btn-outline-primary">
-                                                <i class="fas fa-eye me-1"></i>View
-                                            </a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="p-4 text-center text-muted">
-                            <i class="fas fa-clipboard-list fa-2x mb-2"></i>
-                            <p class="mb-0">No bite classifications yet</p>
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <!-- Recent Voice Captions -->
-        <div class="col-lg-6 mb-4">
-            <div class="card">
-                <div class="card-header bg-info text-white">
-                    <h5 class="mb-0">
-                        <i class="fas fa-microphone me-2"></i>Recent Voice Captions
-                    </h5>
-                </div>
-                <div class="card-body p-0">
-                    {% if recent_voice_captions %}
-                        <div class="table-responsive">
-                            <table class="table table-hover table-sm mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Patient</th>
-                                        <th>Date & Time</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for caption in recent_voice_captions %}
-                                    <tr>
-                                        <td>
-                                            {% if caption.patient %}
-                                                <i class="fas fa-user text-muted me-1"></i>
-                                                <strong>{{ caption.patient.name }}</strong>
-                                                <br>
-                                                <small class="text-muted">ID: {{ caption.patient.patient_id }}</small>
-                                            {% else %}
-                                                <span class="text-muted">No patient</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <span class="text-nowrap">{{ caption.created_at|date:"Y-m-d" }}</span>
-                                            <br>
-                                            <small class="text-muted">{{ caption.created_at|date:"H:i" }}</small>
-                                            <br>
-                                            <small class="text-muted">({{ caption.created_at|timesince }} ago)</small>
-                                        </td>
-                                        <td>
-                                            {% if caption.patient %}
-                                                {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-                                                <a href="{% url ns|add:':patient_detail' caption.patient.patient_id %}" 
-                                                   class="btn btn-sm btn-outline-primary">
-                                                    <i class="fas fa-eye me-1"></i>View
-                                                </a>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="p-4 text-center text-muted">
-                            <i class="fas fa-microphone-slash fa-2x mb-2"></i>
-                            <p class="mb-0">No voice captions yet</p>
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Recent Uploads -->
-    <div class="row">
-        <div class="col-12 mb-4">
-            <div class="card">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">
-                        <i class="fas fa-upload me-2"></i>Recent Patient Uploads
-                    </h5>
-                </div>
-                <div class="card-body p-0">
-                    {% if recent_uploads %}
-                        <div class="table-responsive">
-                            <table class="table table-hover table-sm mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Patient</th>
-                                        <th>Project</th>
-                                        <th>Folder</th>
-                                        <th>Date & Time</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for patient in recent_uploads %}
-                                    <tr>
-                                        <td>
-                                            <i class="fas fa-user text-muted me-1"></i>
-                                            <strong>{{ patient.name }}</strong>
-                                            <br>
-                                            <small class="text-muted">ID: {{ patient.patient_id }}</small>
-                                        </td>
-                                        <td>
-                                            {% if patient.project %}
-                                                <span class="badge bg-secondary">{{ patient.project.name }}</span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if patient.folder %}
-                                                <span class="badge bg-secondary">{{ patient.folder.name }}</span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <span class="text-nowrap">{{ patient.uploaded_at|date:"Y-m-d" }}</span>
-                                            <br>
-                                            <small class="text-muted">{{ patient.uploaded_at|date:"H:i" }}</small>
-                                            <br>
-                                            <small class="text-muted">({{ patient.uploaded_at|timesince }} ago)</small>
-                                        </td>
-                                        <td>
-                                            {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-                                            <a href="{% url ns|add:':patient_detail' patient.patient_id %}" 
-                                               class="btn btn-sm btn-outline-primary">
-                                                <i class="fas fa-eye me-1"></i>View
-                                            </a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="p-4 text-center text-muted">
-                            <i class="fas fa-inbox fa-2x mb-2"></i>
-                            <p class="mb-0">No patients uploaded yet</p>
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- View Other Users Section (Admin & Project Manager) -->
-    {% if user.profile.can_view_other_profiles and is_own_profile %}
-    <div class="row">
-        <div class="col-12 mb-4">
-            <div class="card border-warning">
-                <div class="card-header bg-warning">
-                    <h5 class="mb-0">
-                        <i class="fas fa-users-cog me-2"></i>View Other Users
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">You can view the profile of any user in the system.</p>
-                    <form method="get" action="{% url ns|add:':user_profile_by_username' 'PLACEHOLDER' %}" class="row g-3" id="userSelectForm">
-                        <div class="col-auto">
-                            <select class="form-select" id="userSelect" name="username">
-                                <option value="">Select a user...</option>
-                                {% for user_obj in all_users %}
-                                    <option value="{{ user_obj.username }}">
-                                        {{ user_obj.username }}{% if user_obj.profile %} ({{ user_obj.profile.get_role_display }}){% endif %}
-                                    </option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-auto">
-                            <button type="button" class="btn btn-primary" onclick="viewUserProfile()">
-                                <i class="fas fa-eye me-1"></i>View Profile
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
+    <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">{% icon 'arrow-left' %}<span>Back to Scans</span></a>
 </div>
+
+<!-- Stat tiles -->
+<div class="grid gap-4 sm:grid-cols-3 mb-6">
+    <div class="card-ygg card-ygg-body">
+        <div class="flex items-center justify-between">
+            <div class="stat-label flex items-center gap-1">{% icon 'upload' 'ygg-icon-sm' %}<span>Patients uploaded</span></div>
+            {% icon 'upload' 'ygg-icon-lg text-content-muted opacity-40' %}
+        </div>
+        <div class="stat-value mt-2 text-primary">{{ total_patients_uploaded }}</div>
+        <div class="form-help mt-2">{% icon 'calendar-week' 'ygg-icon-sm' %} Last 7 days: <strong class="mono">{{ uploads_last_7_days }}</strong></div>
+    </div>
+    <div class="card-ygg card-ygg-body">
+        <div class="flex items-center justify-between">
+            <div class="stat-label flex items-center gap-1">{% icon 'clipboard-check' 'ygg-icon-sm' %}<span>Bite classifications</span></div>
+            {% icon 'clipboard-check' 'ygg-icon-lg text-content-muted opacity-40' %}
+        </div>
+        <div class="stat-value mt-2 text-proj-brain">{{ total_classifications }}</div>
+        <div class="form-help mt-2">{% icon 'users' 'ygg-icon-sm' %} Unique patients: <strong class="mono">{{ unique_patients_annotated }}</strong> · Last 7d: <strong class="mono">{{ classifications_last_7_days }}</strong></div>
+    </div>
+    <div class="card-ygg card-ygg-body">
+        <div class="flex items-center justify-between">
+            <div class="stat-label flex items-center gap-1">{% icon 'microphone' 'ygg-icon-sm' %}<span>Voice captions</span></div>
+            {% icon 'microphone' 'ygg-icon-lg text-content-muted opacity-40' %}
+        </div>
+        <div class="stat-value mt-2 text-proj-laparoscopy">{{ total_voice_captions }}</div>
+        <div class="form-help mt-2">{% icon 'calendar-week' 'ygg-icon-sm' %} Last 7 days: <strong class="mono">{{ voice_captions_last_7_days }}</strong></div>
+    </div>
+</div>
+
+{% if last_activity %}
+<div class="alert-ygg alert-info mb-6">
+    {% if last_activity_type == 'upload' %}{% icon 'upload' %}{% elif last_activity_type == 'classification' %}{% icon 'clipboard-check' %}{% elif last_activity_type == 'voice_caption' %}{% icon 'microphone' %}{% endif %}
+    <div>
+        <div class="font-semibold">Last activity</div>
+        <div>
+            {% if last_activity_type == 'upload' %}Uploaded a patient{% elif last_activity_type == 'classification' %}Made a bite classification{% elif last_activity_type == 'voice_caption' %}Recorded a voice caption{% endif %}
+            <strong>{{ last_activity|timesince }} ago</strong> <span class="mono text-xs">({{ last_activity|date:"Y-m-d H:i" }})</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="grid gap-6 lg:grid-cols-2 mb-6">
+    <!-- Recent classifications -->
+    <div class="card-ygg overflow-hidden">
+        <div class="px-5 py-3 border-b border-line flex items-center gap-2 font-semibold">{% icon 'clipboard-check' %}<span>Recent bite classifications</span></div>
+        {% if recent_classifications %}
+        <div class="overflow-x-auto"><table class="table-ygg">
+            <thead><tr><th>Patient</th><th>Date &amp; time</th><th></th></tr></thead>
+            <tbody>
+                {% for c in recent_classifications %}
+                <tr>
+                    <td><div class="flex items-center gap-1">{% icon 'user' 'ygg-icon-sm text-content-muted' %}<strong>{{ c.patient.name }}</strong></div><small class="mono text-xs text-content-muted">ID: {{ c.patient.patient_id }}</small></td>
+                    <td><span class="whitespace-nowrap">{{ c.timestamp|date:"Y-m-d" }}</span><br><small class="text-content-muted">{{ c.timestamp|date:"H:i" }} · {{ c.timestamp|timesince }} ago</small></td>
+                    <td><a href="{% url ns|add:':patient_detail' c.patient.patient_id %}" class="btn btn-secondary btn-sm">{% icon 'eye' 'ygg-icon-sm' %}<span>View</span></a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<div class="p-6 text-center text-content-muted">{% icon 'clipboard-list' 'ygg-icon-lg' %}<p class="mt-2 mb-0">No bite classifications yet</p></div>{% endif %}
+    </div>
+
+    <!-- Recent voice captions -->
+    <div class="card-ygg overflow-hidden">
+        <div class="px-5 py-3 border-b border-line flex items-center gap-2 font-semibold">{% icon 'microphone' %}<span>Recent voice captions</span></div>
+        {% if recent_voice_captions %}
+        <div class="overflow-x-auto"><table class="table-ygg">
+            <thead><tr><th>Patient</th><th>Date &amp; time</th><th></th></tr></thead>
+            <tbody>
+                {% for cap in recent_voice_captions %}
+                <tr>
+                    <td>{% if cap.patient %}<div class="flex items-center gap-1">{% icon 'user' 'ygg-icon-sm text-content-muted' %}<strong>{{ cap.patient.name }}</strong></div><small class="mono text-xs text-content-muted">ID: {{ cap.patient.patient_id }}</small>{% else %}<span class="text-content-muted">No patient</span>{% endif %}</td>
+                    <td><span class="whitespace-nowrap">{{ cap.created_at|date:"Y-m-d" }}</span><br><small class="text-content-muted">{{ cap.created_at|date:"H:i" }} · {{ cap.created_at|timesince }} ago</small></td>
+                    <td>{% if cap.patient %}<a href="{% url ns|add:':patient_detail' cap.patient.patient_id %}" class="btn btn-secondary btn-sm">{% icon 'eye' 'ygg-icon-sm' %}<span>View</span></a>{% else %}<span class="text-content-muted">-</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<div class="p-6 text-center text-content-muted">{% icon 'microphone-slash' 'ygg-icon-lg' %}<p class="mt-2 mb-0">No voice captions yet</p></div>{% endif %}
+    </div>
+</div>
+
+<!-- Recent uploads -->
+<div class="card-ygg overflow-hidden mb-6">
+    <div class="px-5 py-3 border-b border-line flex items-center gap-2 font-semibold">{% icon 'upload' %}<span>Recent patient uploads</span></div>
+    {% if recent_uploads %}
+    <div class="overflow-x-auto"><table class="table-ygg">
+        <thead><tr><th>Patient</th><th>Project</th><th>Folder</th><th>Date &amp; time</th><th></th></tr></thead>
+        <tbody>
+            {% for patient in recent_uploads %}
+            <tr>
+                <td><div class="flex items-center gap-1">{% icon 'user' 'ygg-icon-sm text-content-muted' %}<strong>{{ patient.name }}</strong></div><small class="mono text-xs text-content-muted">ID: {{ patient.patient_id }}</small></td>
+                <td>{% if patient.project %}<span class="badge-ygg badge-neutral">{{ patient.project.name }}</span>{% else %}<span class="text-content-muted">-</span>{% endif %}</td>
+                <td>{% if patient.folder %}<span class="badge-ygg badge-neutral">{{ patient.folder.name }}</span>{% else %}<span class="text-content-muted">-</span>{% endif %}</td>
+                <td><span class="whitespace-nowrap">{{ patient.uploaded_at|date:"Y-m-d" }}</span><br><small class="text-content-muted">{{ patient.uploaded_at|date:"H:i" }} · {{ patient.uploaded_at|timesince }} ago</small></td>
+                <td><a href="{% url ns|add:':patient_detail' patient.patient_id %}" class="btn btn-secondary btn-sm">{% icon 'eye' 'ygg-icon-sm' %}<span>View</span></a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="p-6 text-center text-content-muted">{% icon 'inbox' 'ygg-icon-lg' %}<p class="mt-2 mb-0">No patients uploaded yet</p></div>{% endif %}
+</div>
+
+{% if user.profile.can_view_other_profiles and is_own_profile %}
+<div class="card-ygg card-ygg-body mb-6">
+    <h2 class="flex items-center gap-2 font-semibold mb-3">{% icon 'users-cog' %}<span>View other users</span></h2>
+    <p class="text-content-muted mb-3">You can view the profile of any user in the system.</p>
+    <form method="get" action="{% url ns|add:':user_profile_by_username' 'PLACEHOLDER' %}" class="ygg-form flex flex-wrap items-end gap-3" id="userSelectForm">
+        <div class="min-w-64">
+            <select id="userSelect" name="username">
+                <option value="">Select a user…</option>
+                {% for user_obj in all_users %}<option value="{{ user_obj.username }}">{{ user_obj.username }}{% if user_obj.profile %} ({{ user_obj.profile.get_role_display }}){% endif %}</option>{% endfor %}
+            </select>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="viewUserProfile()">{% icon 'eye' %}<span>View profile</span></button>
+    </form>
+</div>
+{% endif %}
 
 <script>
 function viewUserProfile() {
-    const select = document.getElementById('userSelect');
-    const username = select.value;
+    const username = document.getElementById('userSelect').value;
     if (username) {
-        {% firstof request.resolver_match.namespace 'maxillo' as ns %}
         window.location.href = "{% url ns|add:':user_profile_by_username' 'PLACEHOLDER' %}".replace('PLACEHOLDER', username);
-    } else {
-        if (typeof window.appNotify === 'function') {
-            window.appNotify('warning', 'Please select a user.');
-        }
+    } else if (typeof window.appNotify === 'function') {
+        window.appNotify('warning', 'Please select a user.');
     }
 }
 </script>
-
-<style>
-.opacity-25 {
-    opacity: 0.25;
-}
-</style>
 {% endblock %}

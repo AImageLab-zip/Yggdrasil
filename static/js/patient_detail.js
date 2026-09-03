@@ -3,7 +3,40 @@
  * Handles common UI elements and modality viewer coordination
  */
 
-// Revolutionary Classification UI Functions
+function closeClassificationDropdown(dropdown, restoreFocus) {
+    if (!dropdown) return;
+
+    dropdown.classList.remove('show');
+    dropdown.classList.remove('open-up');
+    dropdown.style.position = '';
+    dropdown.style.left = '';
+    dropdown.style.top = '';
+    dropdown.style.bottom = '';
+    dropdown.style.width = '';
+    const button = dropdown.previousElementSibling;
+    if (button) {
+        button.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) button.focus();
+    }
+}
+
+function setSelectedClassificationOption(button, dropdown) {
+    const selectedText = button.textContent.trim();
+    dropdown.querySelectorAll('.dropdown-option').forEach(option => {
+        option.setAttribute('aria-selected', String(option.textContent.trim() === selectedText));
+    });
+}
+
+function focusClassificationOption(dropdown, position) {
+    const options = Array.from(dropdown.querySelectorAll('.dropdown-option'));
+    if (!options.length) return;
+
+    const selectedIndex = options.findIndex(option => option.getAttribute('aria-selected') === 'true');
+    const index = position === 'last' ? options.length - 1 : Math.max(selectedIndex, 0);
+    options[index].focus();
+}
+
+// Bite classification dropdowns
 function toggleDropdown(button) {
     if (!window.canEdit) {
         return; // Not editable for non-annotators
@@ -12,15 +45,43 @@ function toggleDropdown(button) {
     // Close all other dropdowns
     document.querySelectorAll('.value-dropdown.show').forEach(dropdown => {
         if (dropdown !== button.nextElementSibling) {
-            dropdown.classList.remove('show');
+            closeClassificationDropdown(dropdown, false);
         }
     });
     
     // Toggle this dropdown
     const dropdown = button.nextElementSibling;
     if (dropdown) {
-        dropdown.classList.toggle('show');
-        
+        const willShow = !dropdown.classList.contains('show');
+        dropdown.classList.toggle('show', willShow);
+        button.setAttribute('aria-expanded', String(willShow));
+
+        if (!willShow) return;
+
+        setSelectedClassificationOption(button, dropdown);
+
+        // The side-panel card clips absolutely-positioned dropdowns (overflow
+        // hidden/auto), so pin the menu to the viewport at the button's rect and
+        // flip it upward when there is no room below.
+        const rect = button.getBoundingClientRect();
+        const menuWidth = dropdown.offsetWidth || Math.max(rect.width, 160);
+        const menuHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
+        const gap = 6;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const openUp = menuHeight > 0 && spaceBelow < menuHeight + gap && rect.top > menuHeight + gap + 12;
+        const left = Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8));
+        dropdown.classList.toggle('open-up', openUp);
+        dropdown.style.position = 'fixed';
+        dropdown.style.left = left + 'px';
+        dropdown.style.width = Math.max(rect.width, Math.min(menuWidth, window.innerWidth - 16)) + 'px';
+        if (openUp) {
+            dropdown.style.top = 'auto';
+            dropdown.style.bottom = (window.innerHeight - rect.top + gap) + 'px';
+        } else {
+            dropdown.style.top = (rect.bottom + gap) + 'px';
+            dropdown.style.bottom = 'auto';
+        }
+
         dropdown.querySelectorAll('.dropdown-option').forEach(option => {
             option.onclick = function() {
                 updateClassification(button, option);
@@ -40,7 +101,10 @@ function updateClassification(button, option) {
     button.classList.add('manual-verified');
     
     // Hide dropdown
-    button.nextElementSibling.classList.remove('show');
+    option.parentElement.querySelectorAll('.dropdown-option').forEach(item => {
+        item.setAttribute('aria-selected', String(item === option));
+    });
+    closeClassificationDropdown(button.nextElementSibling, true);
     
     // Save via AJAX
     postJson(`/${window.projectNamespace}/patient/${window.scanId}/update/`, {
@@ -169,8 +233,53 @@ function syncManagementNameField(value) {
 document.addEventListener('click', function(event) {
     if (!event.target.closest('.classification-value')) {
         document.querySelectorAll('.value-dropdown.show').forEach(dropdown => {
-            dropdown.classList.remove('show');
+            closeClassificationDropdown(dropdown, false);
         });
+    }
+});
+
+document.addEventListener('keydown', function(event) {
+    const button = event.target.closest('.value-button');
+    if (button && event.key === 'Escape') {
+        const dropdown = button.nextElementSibling;
+        if (dropdown && dropdown.classList.contains('show')) {
+            event.preventDefault();
+            closeClassificationDropdown(dropdown, true);
+        }
+        return;
+    }
+
+    if (button && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        const dropdown = button.nextElementSibling;
+        if (!dropdown) return;
+        if (!dropdown.classList.contains('show')) toggleDropdown(button);
+        focusClassificationOption(dropdown, event.key === 'ArrowUp' ? 'last' : 'selected');
+        return;
+    }
+
+    const option = event.target.closest('.dropdown-option');
+    if (!option) return;
+
+    const dropdown = option.parentElement;
+    const options = Array.from(dropdown.querySelectorAll('.dropdown-option'));
+    const currentIndex = options.indexOf(option);
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const offset = event.key === 'ArrowDown' ? 1 : -1;
+        options[(currentIndex + offset + options.length) % options.length].focus();
+    } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        options[event.key === 'Home' ? 0 : options.length - 1].focus();
+    } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        updateClassification(dropdown.previousElementSibling, option);
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeClassificationDropdown(dropdown, true);
+    } else if (event.key === 'Tab') {
+        closeClassificationDropdown(dropdown, false);
     }
 });
 
@@ -305,6 +414,18 @@ function initViewerToggle() {
     const cbctControls = document.getElementById('cbctControls');
     const toggleGroup = document.getElementById('modalityToggleGroup');
 
+    // Image modalities (panoramic/intraoral/teleradiography) hide both control
+    // groups; collapse the toolbar bar so it does not render as an empty strip
+    // between the modality selector and the viewer.
+    const updateToolbarVisibility = function() {
+        const toolbar = document.querySelector('.viewer-toolbar');
+        if (!toolbar) return;
+        const anyVisible = [iosControls, cbctControls].some(function(group) {
+            return group && group.style.display !== 'none';
+        });
+        toolbar.style.display = anyVisible ? '' : 'none';
+    };
+
     const ensureCbctViewerReady = function(modality) {
         if (typeof window.CBCTViewer === 'undefined') {
             return;
@@ -330,6 +451,17 @@ function initViewerToggle() {
         if (typeof window.PanoramicViewer.loadInlineForCBCT !== 'function') {
             return;
         }
+        // **A CBCT patient with no panoramic yet is not an error, so it must not be
+        // fetched as one.** The panoramic pane is offered for every CBCT (one can be
+        // generated from the volume), and asking `?meta=1` before one exists is a
+        // request the server can only answer 404 -- which the browser logs as a failed
+        // GET before any handler runs, so no amount of catching quiets it. The page is
+        // told at render time whether a panoramic file exists; where none does, show
+        // the pane's own empty state and make no request.
+        if (window.hasPanoramicImage === false) {
+            window.PanoramicViewer.showInlineEmptyForCBCT();
+            return;
+        }
         window.PanoramicViewer.loadInlineForCBCT();
     };
 
@@ -353,13 +485,11 @@ function initViewerToggle() {
                 
                 if (iosContainer) iosContainer.style.display = 'block';
                 if (cbctContainer) cbctContainer.style.display = 'none';
-                if (iosControls) iosControls.style.display = 'block';
+                if (iosControls) iosControls.style.display = 'flex';
                 if (cbctControls) cbctControls.style.display = 'none';
                 
-                // Initialize IOS viewer if not already done
-                if (typeof window.IOSViewer !== 'undefined') {
-                    window.IOSViewer.init();
-                }
+                // The IOS mesh viewer is a Cornerstone module that starts itself, like
+                // teleradiography and intraoral. Nothing to initialise on a tab switch.
             } else if (modality === 'cbct') {
                 // Hide all image viewers
                 const imageViewers = ['intraoral-viewer', 'teleradiography-viewer', 'panoramic-viewer'];
@@ -371,7 +501,7 @@ function initViewerToggle() {
                 if (iosContainer) iosContainer.style.display = 'none';
                 if (cbctContainer) cbctContainer.style.display = 'block';
                 if (iosControls) iosControls.style.display = 'none';
-                if (cbctControls) cbctControls.style.display = 'block';
+                if (cbctControls) cbctControls.style.display = 'flex';
                 
                 // Show cbct-viewer container
                 const cbctViewer = document.getElementById('cbct-viewer');
@@ -399,10 +529,11 @@ function initViewerToggle() {
                 
                 const intraoralViewer = document.getElementById('intraoral-viewer');
                 if (intraoralViewer) {
+                    // Same as teleradiography below: the Cornerstone photo stack mounts
+                    // itself on import and sizes itself from a ResizeObserver, so showing
+                    // the tab is all this has to do. There is no load() to call and no
+                    // window global to call it on -- the bundle is an ES module.
                     intraoralViewer.style.display = 'block';
-                    if (typeof window.IntraoralViewer !== 'undefined') {
-                        window.IntraoralViewer.load();
-                    }
                 }
             } else if (modality === 'teleradiography') {
                 // Handle teleradiography viewer
@@ -417,10 +548,11 @@ function initViewerToggle() {
                 
                 const teleradiographyViewer = document.getElementById('teleradiography-viewer');
                 if (teleradiographyViewer) {
+                    // The Cornerstone photo stack mounts itself on import and sizes
+                    // itself from a ResizeObserver, so showing the tab is all this has
+                    // to do. There is no load() to call -- and no window global to call
+                    // it on: the bundle is an ES module.
                     teleradiographyViewer.style.display = 'block';
-                    if (typeof window.TeleradiographyViewer !== 'undefined') {
-                        window.TeleradiographyViewer.load();
-                    }
                 }
             } else if (modality === 'panoramic') {
                 // Handle panoramic viewer
@@ -437,7 +569,16 @@ function initViewerToggle() {
                 if (panoramicViewer) {
                     panoramicViewer.style.display = 'block';
                     if (typeof window.PanoramicViewer !== 'undefined') {
-                        window.PanoramicViewer.load();
+                        // Same reasoning as `loadCbctInlinePanoramic`: the standalone
+                        // pane is offered for every CBCT, and asking for a panoramic
+                        // that does not exist is a 404 the browser logs on our behalf.
+                        if (window.hasPanoramicImage === false) {
+                            window.PanoramicViewer.showEmpty(
+                                window.PanoramicViewer.targets.standalone
+                            );
+                        } else {
+                            window.PanoramicViewer.load();
+                        }
                     }
                 }
             } else {
@@ -455,7 +596,7 @@ function initViewerToggle() {
                 if (iosContainer) iosContainer.style.display = 'none';
                 if (cbctContainer) cbctContainer.style.display = 'none';
                 if (iosControls) iosControls.style.display = 'none';
-                if (cbctControls) cbctControls.style.display = 'block';
+                if (cbctControls) cbctControls.style.display = 'flex';
 
                 const generic = document.getElementById(`${modality}-viewer`);
                 const allGeneric = document.querySelectorAll('[id$="-viewer"]:not(#scan-viewer)');
@@ -474,6 +615,7 @@ function initViewerToggle() {
                     ensureCbctViewerReady(modality);
                 }
             }
+            updateToolbarVisibility();
         });
 
         // Ensure a default selection is applied if radios rendered without checked
@@ -502,8 +644,9 @@ function initViewerToggle() {
     if (iosRadio && !cbctRadio) {
         if (iosContainer) iosContainer.style.display = 'block';
         if (cbctContainer) cbctContainer.style.display = 'none';
-        if (iosControls) iosControls.style.display = 'block';
+        if (iosControls) iosControls.style.display = 'flex';
         if (cbctControls) cbctControls.style.display = 'none';
+        updateToolbarVisibility();
         return;
     }
 
@@ -512,11 +655,12 @@ function initViewerToggle() {
         if (iosContainer) iosContainer.style.display = 'none';
         if (cbctContainer) cbctContainer.style.display = 'block';
         if (iosControls) iosControls.style.display = 'none';
-        if (cbctControls) cbctControls.style.display = 'block';
+        if (cbctControls) cbctControls.style.display = 'flex';
         setTimeout(() => {
             ensureCbctViewerReady('cbct');
             loadCbctInlinePanoramic();
         }, 100);
+        updateToolbarVisibility();
         return;
     }
 
@@ -540,13 +684,11 @@ function initViewerToggle() {
             if (this.checked) {
                 if (iosContainer) iosContainer.style.display = 'block';
                 if (cbctContainer) cbctContainer.style.display = 'none';
-                if (iosControls) iosControls.style.display = 'block';
+                if (iosControls) iosControls.style.display = 'flex';
                 if (cbctControls) cbctControls.style.display = 'none';
                 
-                // Initialize IOS viewer if not already done
-                if (typeof window.IOSViewer !== 'undefined') {
-                    window.IOSViewer.init();
-                }
+                // The IOS mesh viewer is a Cornerstone module that starts itself, like
+                // teleradiography and intraoral. Nothing to initialise on a tab switch.
             }
         });
     }
@@ -557,7 +699,7 @@ function initViewerToggle() {
                 if (iosContainer) iosContainer.style.display = 'none';
                 if (cbctContainer) cbctContainer.style.display = 'block';
                 if (iosControls) iosControls.style.display = 'none';
-                if (cbctControls) cbctControls.style.display = 'block';
+                if (cbctControls) cbctControls.style.display = 'flex';
 
                 // Only initialize viewer if CBCT is processed
                 if (window.isCBCTProcessed) {
@@ -712,6 +854,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.scanId = djangoData.scanId;
     window.hasIOS = djangoData.hasIOS;
     window.hasCBCT = djangoData.hasCBCT;
+    window.hasPanoramicImage = djangoData.hasPanoramicImage;
     window.isCBCTProcessed = djangoData.isCBCTProcessed;
     window.modalities = Array.isArray(djangoData.modalities) ? djangoData.modalities : [];
     window.defaultModality = djangoData.defaultModality || null;
@@ -721,38 +864,8 @@ document.addEventListener('DOMContentLoaded', function() {
     console.debug('Has CBCT:', window.hasCBCT);
     console.debug('Is CBCT processed:', window.isCBCTProcessed);
 
-    // Preload CBCT volume in background only for legacy CBCT pipeline.
-    // Fixed NiiVue grid has its own fetch/cache path and preloading here would duplicate work.
-    let useLegacyVolumePreload = true;
-    const viewerGridDataEl = document.getElementById('viewerGridData');
-    if (viewerGridDataEl) {
-        try {
-            const viewerGridData = JSON.parse(viewerGridDataEl.textContent || '{}');
-            if (viewerGridData.fixedMode) {
-                useLegacyVolumePreload = false;
-            }
-        } catch (e) {
-            console.warn('Unable to parse viewerGridData for preload gating:', e);
-        }
-    }
-
-    if (useLegacyVolumePreload && window.hasCBCT && window.isCBCTProcessed && typeof window.VolumeLoader !== 'undefined') {
-        window.VolumeLoader.preload('cbct');
-    }
-
-    // Initialize modality viewers
-    if (window.hasIOS && typeof window.IOSViewer !== 'undefined') {
-        console.debug('Initializing IOS viewer');
-        window.IOSViewer.init();
-    }
-    
-    // Initialize image modality viewers
-    if (typeof window.IntraoralViewer !== 'undefined') {
-        window.IntraoralViewer.init(window.scanId);
-    }
-    if (typeof window.TeleradiographyViewer !== 'undefined') {
-        window.TeleradiographyViewer.init(window.scanId);
-    }
+    // Initialize image modality viewers. IOS and intraoral are absent on purpose -- both
+    // are Cornerstone modules that start themselves, like teleradiography.
     if (typeof window.PanoramicViewer !== 'undefined') {
         window.PanoramicViewer.init(window.scanId);
     }

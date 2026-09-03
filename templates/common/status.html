@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% load icons %}
+
+{% block title %}System Status - Yggdrasil{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">{% icon 'heartbeat' %}<span>System status</span></h1>
+    <span class="mono text-xs text-content-muted">Checked {{ checked_at|date:"Y-m-d H:i:s" }} UTC</span>
+</div>
+
+<div class="grid gap-4 md:grid-cols-3 mb-6">
+    <div class="card-ygg card-ygg-body">
+        <div class="stat-label flex items-center gap-1">{% icon 'database' 'ygg-icon-sm' %}<span>Database</span></div>
+        <div class="mt-2"><span class="badge-ygg {% if database.status == 'up' %}badge-ok{% else %}badge-danger{% endif %}">{{ database.status|upper }}</span></div>
+        <p class="text-sm text-content-muted mt-2 mb-0">{{ database.message }}</p>
+    </div>
+    <div class="card-ygg card-ygg-body">
+        <div class="stat-label flex items-center gap-1">{% icon 'server' 'ygg-icon-sm' %}<span>Object storage</span></div>
+        <div class="mt-2"><span class="badge-ygg {% if object_storage.status == 'up' %}badge-ok{% else %}badge-danger{% endif %}">{{ object_storage.status|upper }}</span></div>
+        <p class="text-sm text-content-muted mt-2 mb-0">{{ object_storage.message }}</p>
+    </div>
+    <div class="card-ygg card-ygg-body">
+        <div class="stat-label flex items-center gap-1">{% icon 'save' 'ygg-icon-sm' %}<span>Database backup</span></div>
+        <div class="mt-2"><span class="badge-ygg {% if backup.status == 'ok' %}badge-ok{% elif backup.status == 'warn' %}badge-warn{% else %}badge-danger{% endif %}">{{ backup.status|upper }}</span></div>
+        <p class="text-sm text-content-muted mt-2 mb-0">{{ backup.message }}</p>
+    </div>
+</div>
+
+<h2 class="flex items-center gap-2 text-base font-semibold mb-3">{% icon 'clock' %}<span>Recent maintenance runs</span></h2>
+{% if recent_checks %}
+<div class="card-ygg overflow-hidden">
+    <div class="overflow-x-auto"><table class="table-ygg">
+        <thead><tr><th>Check</th><th>Status</th><th>Ran at (UTC)</th><th>Duration</th><th>Details</th></tr></thead>
+        <tbody>
+            {% for check in recent_checks %}
+            <tr>
+                <td class="mono text-xs">{{ check.name }}</td>
+                <td><span class="badge-ygg {% if check.status == 'ok' %}badge-ok{% elif check.status == 'warn' %}badge-warn{% else %}badge-danger{% endif %}">{{ check.get_status_display }}</span></td>
+                <td class="mono text-xs whitespace-nowrap">{{ check.ran_at|date:"Y-m-d H:i:s" }}</td>
+                <td class="mono text-xs">{% if check.duration_ms is not None %}{{ check.duration_ms }} ms{% else %}-{% endif %}</td>
+                <td><code class="mono text-xs text-content-muted">{{ check.details }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% else %}
+<p class="text-content-muted">No maintenance runs recorded yet.</p>
+{% endif %}
+{% endblock %}

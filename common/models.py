@@ -1,5 +1,8 @@
-"""
-DOMAIN_CHOICES i srepeated multiple times across many models, might be the case to generalize it into some king of global variable?
+"""Shared cross-domain models (Job, ProcessingJob, FileRegistry, Project, ...).
+
+DOMAIN_CHOICES and the per-domain FK field map now live in common.domains
+(Phase 5.2) — single source of truth instead of the copies that used to be
+duplicated across the models below.
 """
 import uuid
 
@@ -7,16 +10,160 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils.text import slugify
 
+from common.domains import (
+	DOMAIN_CHOICES,
+	DOMAIN_FK_FIELDS,
+	fk_fields_for,
+	normalize_domain,
+)
+
+
+class DomainFKAccessorMixin:
+	"""Registry-driven access to the per-domain patient / voice_caption FKs.
+
+	Job, ProcessingJob and FileRegistry each carry three parallel patient FK
+	columns (maxillo/brain/laparoscopy) plus three voice_caption FKs. These
+	accessors wrap that fan-out so callers use ``obj.get_patient()`` /
+	``obj.set_patient(p)`` instead of branching on ``obj.domain`` by hand.
+	Methods only — no fields — so they add nothing to the migration state.
+	"""
+
+	def get_patient(self):
+		patient_fk, _ = fk_fields_for(self.domain)
+		return getattr(self, patient_fk, None)
+
+	def get_voice_caption(self):
+		_, voice_fk = fk_fields_for(self.domain)
+		return getattr(self, voice_fk, None)
+
+	def set_patient(self, patient):
+		domain = normalize_domain(
+			getattr(getattr(patient, "_meta", None), "app_label", self.domain)
+		)
+		self.domain = domain
+		for slug, (patient_fk, _voice_fk) in DOMAIN_FK_FIELDS.items():
+			setattr(self, patient_fk, patient if slug == domain else None)
+
+	def set_voice_caption(self, voice_caption):
+		patient = getattr(voice_caption, "patient", None)
+		domain = normalize_domain(
+			getattr(getattr(patient, "_meta", None), "app_label", self.domain)
+		)
+		self.domain = domain
+		for slug, (_patient_fk, voice_fk) in DOMAIN_FK_FIELDS.items():
+			setattr(self, voice_fk, voice_caption if slug == domain else None)
+
 
 class Project(models.Model):
-	name = models.CharField(max_length=50, unique=True)
+	# Unique per domain: two domains may both have a "Demo" project.
+	name = models.CharField(max_length=50)
 	slug = models.SlugField(max_length=60, unique=True, blank=True)
 	description = models.TextField(blank=True)
 	icon = models.CharField(max_length=100, blank=True)
+	# Domain this project belongs to (maxillo/brain/laparoscopy). Projects are
+	# scoped under one domain app: folders and patients inside the project live
+	# in that domain's tables.
+	domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='maxillo')
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
-	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+	# blank=True as well as null=True: this is an audit column nobody fills in by
+	# hand. Without it every ModelForm -- the admin's "add project" page, which
+	# the control panel's "New project" button links to -- made it a required
+	# picker and refused the form when it was left empty, so a project could not
+	# be created from the admin at all. The admin fills it from the request.
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 	modalities = models.ManyToManyField('Modality', blank=True, related_name='projects')
+	# Annotation methods enabled for this project. Empty = none; the UI hides
+	# annotation tools whose method is not enabled here.
+	annotation_methods = models.ManyToManyField('AnnotationMethod', blank=True, related_name='projects')
+	# Processing steps explicitly disabled for this project. Empty = all steps
+	# enabled (modulo the project's modality set); a step checked here never
+	# dispatches a job for this project's patients (upload-time dispatch, rerun
+	# picker and viewer availability all respect it).
+	disabled_steps = models.ManyToManyField(
+		'ProcessingStep', blank=True, related_name='disabled_for_projects'
+	)
+
+	class Meta:
+		ordering = ['domain', 'name']
+		unique_together = [('domain', 'name')]
+
+	def __str__(self):
+		return self.name
+
+	def allows_annotation(self, method_slug):
+		"""Whether an annotation method (e.g. 'ios_landmarks') is enabled."""
+		return self.annotation_methods.filter(
+			slug=method_slug, is_active=True
+		).exists()
+
+	def save(self, *args, **kwargs):
+		if not self.slug:
+			self.slug = slugify(self.name)
+		super().save(*args, **kwargs)
+
+
+class AnnotationMethod(models.Model):
+	"""An annotation tool a Project may enable (e.g. 'ios_landmarks').
+
+	``domain`` is blank for a method available in every domain (e.g. voice
+	captions) or set to one domain slug for a domain-specific tool (e.g.
+	'ios_landmarks' only makes sense under maxillo).
+	"""
+	name = models.CharField(max_length=100, unique=True)
+	slug = models.SlugField(max_length=60, unique=True, blank=True)
+	description = models.TextField(blank=True)
+	icon = models.CharField(max_length=100, blank=True)
+	domain = models.CharField(
+		max_length=20, choices=DOMAIN_CHOICES, blank=True, default='',
+		help_text="Leave blank for a method available in every domain.",
+	)
+	is_active = models.BooleanField(default=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	# See Project.created_by: null=True without blank=True made the admin's add
+	# form demand a value it exists to record automatically.
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+	class Meta:
+		ordering = ['domain', 'name']
+
+	def __str__(self):
+		return self.name
+
+	def save(self, *args, **kwargs):
+		if not self.slug:
+			self.slug = slugify(self.name)
+		super().save(*args, **kwargs)
+
+
+class Modality(models.Model):
+	"""An imaging modality a Project may collect (e.g. 'cbct').
+
+	``domain`` is blank for a modality available in every domain, or one domain
+	slug for a domain-specific one -- 'cbct' only means anything under maxillo.
+	Same field, same meaning and same blank-is-everywhere rule as
+	:class:`AnnotationMethod`, so the admin scopes both with one filter.
+	"""
+	name = models.CharField(max_length=50, unique=True)
+	slug = models.SlugField(max_length=60, unique=True, blank=True)
+	description = models.TextField(blank=True)
+	domain = models.CharField(
+		max_length=20, choices=DOMAIN_CHOICES, blank=True, default='',
+		help_text="Leave blank for a modality available in every domain.",
+	)
+	# Optional icon CSS class for UI (e.g., 'fas fa-cube', 'fas fa-tooth')
+	icon = models.CharField(max_length=100, blank=True)
+	# Optional short UI label used when no icon is provided (e.g., 'F', 'T1')
+	label = models.CharField(max_length=20, blank=True)
+	supported_extensions = models.JSONField(default=list)
+	# Optional list of subtypes (e.g., for IOS: ["upper", "lower"]).
+	# Allows per-modality subtype toggles and FileRegistry mapping.
+	subtypes = models.JSONField(default=list, blank=True)
+	requires_multiple_files = models.BooleanField(default=False)
+	is_active = models.BooleanField(default=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	# See Project.created_by.
+	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
 	class Meta:
 		ordering = ['name']
@@ -30,28 +177,87 @@ class Project(models.Model):
 		super().save(*args, **kwargs)
 
 
-class Modality(models.Model):
-	name = models.CharField(max_length=50, unique=True)
-	slug = models.SlugField(max_length=60, unique=True, blank=True)
-	description = models.TextField(blank=True)
-	# Optional icon CSS class for UI (e.g., 'fas fa-cube', 'fas fa-tooth')
-	icon = models.CharField(max_length=100, blank=True)
-	# Optional short UI label used when no icon is provided (e.g., 'F', 'T1')
-	label = models.CharField(max_length=20, blank=True)
-	supported_extensions = models.JSONField(default=list)
-	# Optional list of subtypes (e.g., for IOS: ["upper", "lower"]).
-	# Allows per-modality subtype toggles and FileRegistry mapping.
-	subtypes = models.JSONField(default=list, blank=True)
-	requires_multiple_files = models.BooleanField(default=False)
-	is_active = models.BooleanField(default=True)
-	created_at = models.DateTimeField(auto_now_add=True)
-	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+class ProcessingStep(models.Model):
+	"""Admin-declared processing step (one runner job) for a modality (Phase 4).
+
+	A modality can have several steps forming a DAG: a step may declare
+	prerequisite steps that must complete before it runs, and it receives their
+	outputs as its input (see Job._pull_dependency_outputs). This replaces the
+	single-flag ModalityProcessingConfig — a modality "needs processing" iff it
+	has at least one enabled step, folding the old ``requires_processing`` and
+	``is_enabled`` into one flag.
+
+	``slug`` is the runner routing key carried on Job.modality_slug, so it is
+	globally unique. The step whose slug equals its modality's slug is that
+	modality's *root* step: an upload's source Job stands in for it, and every
+	other step is wired (directly or transitively) downstream of a root.
+	"""
+	modality = models.ForeignKey(
+		Modality, on_delete=models.CASCADE, related_name='steps'
+	)
+	name = models.CharField(max_length=100)
+	# Runner routing key (e.g. 'ios', 'ios_orientation'); globally unique.
+	slug = models.SlugField(max_length=60, unique=True)
+	# Explicit queue override; when non-blank it wins over ALL env routing.
+	queue_name = models.CharField(max_length=100, blank=True, default='')
+	# SLURM-over-SSH dispatch opt-in (Yggdrasil 2.0). When non-blank, the runner
+	# worker submits settings.ALGO_BASE_DIR/<algo_name>/run.sbatch on the cluster
+	# login node for this step's jobs instead of enqueueing a Celery task; blank
+	# keeps the historical Celery path. Resource requests (partition, gres, time,
+	# ...) live as #SBATCH directives inside that run.sbatch, not here.
+	algo_name = models.CharField(
+		max_length=200, blank=True, default='',
+		help_text="Exact algo directory name under ALGO_BASE_DIR on the cluster "
+		"(e.g. 'sn' -> ALGO_BASE_DIR/sn/run.sbatch). Non-blank routes this step "
+		"to SLURM-over-SSH dispatch instead of Celery.",
+	)
+	# Steps whose output feeds this step's input. Declaring one here is what
+	# establishes the dependency: at upload time create_step_jobs wires a
+	# Job.dependencies edge so this step waits for each input to complete, and
+	# Job._pull_dependency_outputs merges each input's outputs into this step's
+	# input_files. Self-referential DAG (may span modalities, e.g. bite->ios).
+	depends_on = models.ManyToManyField(
+		'self', symmetrical=False, blank=True, related_name='dependents',
+		verbose_name='Inputs',
+		help_text="Steps whose output feeds this step's input. Declaring an "
+		"input automatically makes this step wait for it to complete.",
+	)
+	# Disabled steps create no runner Job (absorbs requires_processing + the old
+	# per-modality is_enabled kill switch).
+	is_enabled = models.BooleanField(default=True)
+	# When True, an in-flight job for this step gates patient readiness (patient
+	# shows 'processing') AND its modality's raw input files stay hidden/
+	# un-downloadable until processing produces a *_processed file.
+	is_blocking = models.BooleanField(default=True)
+	# When True, this modality's raw input files are never listed or served in
+	# the patient file view (a security screen). The files still exist in MySQL
+	# and object storage — only visibility/download is blocked.
+	discard_raw = models.BooleanField(default=False)
+	prefer_processed_for_viewer = models.BooleanField(
+		default=False,
+		help_text="Prefer a complete processed file set in the modality viewer, "
+		"falling back to raw files when processed files are unavailable.",
+	)
+	updated_at = models.DateTimeField(auto_now=True)
 
 	class Meta:
-		ordering = ['name']
+		ordering = ['modality__name', 'slug']
 
 	def __str__(self):
-		return self.name
+		return f"{self.modality.slug}:{self.slug}"
+
+	def clean(self):
+		"""Validate the step.
+
+		Every raw input is a NIfTI now, and for a NIfTI modality hiding the raw file
+		is a security screen with no cost: the viewer shows the *processed* volume,
+		and ``maxillo.views.patient_detail._usable_raw_volumes`` only ever falls back
+		to the raw ``.nii.gz`` when processing produced no ``volume_nifti``. So
+		``discard_raw`` needs no refusal here. The refusal that used to live in this
+		method was for natively-stored DICOM series, where the raw row *was* the only
+		volume there was; that storage path no longer exists.
+		"""
+		super().clean()
 
 	def save(self, *args, **kwargs):
 		if not self.slug:
@@ -88,13 +294,14 @@ class UserSession(models.Model):
 
 class ProjectAccess(models.Model):
 	ROLE_CHOICES = [
-		('standard', 'Standard User'),
+		('viewer', 'Viewer'),
+		('annotator', 'Annotator'),
 		('admin', 'Administrator'),
 	]
 
 	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='project_access')
 	project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='access_list')
-	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='standard')
+	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='viewer')
 	created_at = models.DateTimeField(auto_now_add=True)
 
 	class Meta:
@@ -104,7 +311,7 @@ class ProjectAccess(models.Model):
 		return f"{self.user.username} -> {self.project.name}"
 
 	def is_annotator(self):
-		return self.role == 'admin'
+		return self.role in ['annotator', 'admin']
 
 	def is_project_manager(self):
 		return False
@@ -116,13 +323,13 @@ class ProjectAccess(models.Model):
 		return False
 
 	def can_upload_scans(self):
-		return self.role in ['admin', 'standard']
+		return self.role in ['admin', 'annotator']
 
 	def can_see_debug_scans(self):
 		return self.role == 'admin'
 
 	def can_see_public_private_scans(self):
-		return self.role in ['admin', 'standard']
+		return True
 
 	def can_modify_scan_settings(self):
 		return self.role == 'admin'
@@ -145,13 +352,14 @@ class ProjectAccess(models.Model):
 
 class Invitation(models.Model):
 	ROLE_CHOICES = [
-		('standard', 'Standard User'),
+		('viewer', 'Viewer'),
+		('annotator', 'Annotator'),
 		('admin', 'Administrator'),
 	]
 
 	code = models.CharField(max_length=64, unique=True)
 	email = models.EmailField(blank=True, null=True)
-	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='standard')
+	role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='viewer')
 	projects = models.ManyToManyField(Project, related_name='invitations_multi', help_text='Projects the user will have access to')
 	project = models.ForeignKey(Project, on_delete=models.CASCADE, null=False, blank=False, related_name='invitations', help_text='Project the user will have access to')
 	created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
@@ -189,13 +397,7 @@ class Invitation(models.Model):
 		db_table = 'maxillo_invitation'
 
 
-class Job(models.Model):
-	DOMAIN_CHOICES = [
-		('maxillo', 'Maxillo'),
-		('brain', 'Brain'),
-		('laparoscopy', 'Laparoscopy'),
-	]
-
+class Job(DomainFKAccessorMixin, models.Model):
 	STATUS_CHOICES = [
 		('pending', 'Pending'),
 		('dependency', 'Waiting for Dependencies'),
@@ -206,6 +408,9 @@ class Job(models.Model):
 	]
 
 	modality_slug = models.CharField(max_length=60, help_text='Slug for modality (e.g., cbct, ios, audio, bite_classification)')
+	# Pipeline step this job runs, when declared in admin. Null for legacy jobs
+	# and jobs whose modality has no ProcessingStep rows.
+	step = models.ForeignKey('common.ProcessingStep', on_delete=models.SET_NULL, null=True, blank=True, related_name='jobs')
 	status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
 	priority = models.IntegerField(default=0, help_text='Higher values = higher priority')
 	dependencies = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='dependent_jobs', help_text='Jobs that must complete before this job can start')
@@ -233,6 +438,9 @@ class Job(models.Model):
 
 	# Worker info (generic, non-Docker-specific)
 	worker_id = models.CharField(max_length=100, blank=True, help_text='ID of worker processing this job')
+	# SLURM job id stamped by the runner worker (common.runner) for observability;
+	# cleared on retry. The web app never reads it — dispatch is pure Celery.
+	slurm_job_id = models.CharField(max_length=32, blank=True, default='', help_text='SLURM job id set by the runner worker')
 
 	class Meta:
 		ordering = ['-priority', 'created_at']
@@ -259,7 +467,7 @@ class Job(models.Model):
 		return f"Job {self.id} - {self.modality_slug} - {self.status}{related_str}"
 
 	def can_retry(self):
-		return self.status == 'failed' and self.retry_count < self.max_retries
+		return self.status in {'processing', 'failed'} and self.retry_count < self.max_retries
 
 	def mark_processing(self, worker_id=None):
 		self.status = 'processing'
@@ -273,6 +481,7 @@ class Job(models.Model):
 		self.status = 'completed'
 		from django.utils import timezone as _tz
 		self.completed_at = _tz.now()
+		self.error_logs = ''
 		if output_files:
 			self.output_files = output_files
 		self.save()
@@ -306,8 +515,25 @@ class Job(models.Model):
 			return True
 		return all(dep.status == 'completed' for dep in self.dependencies.all())
 
+	def _pull_dependency_outputs(self):
+		"""Merge each completed dependency's output_files into this job's
+		input_files, keyed by the dependency's routing slug, so a step consumes
+		its prerequisites' outputs. Mutates input_files in place (the caller
+		saves); returns True if anything was added."""
+		merged = dict(self.input_files or {})
+		changed = False
+		for dep in self.dependencies.all():
+			if dep.status == 'completed' and dep.output_files:
+				merged[dep.modality_slug or f'job_{dep.id}'] = dep.output_files
+				changed = True
+		if changed:
+			self.input_files = merged
+		return changed
+
 	def update_status_based_on_dependencies(self):
 		if self.status == 'dependency' and self.check_dependencies():
+			# Feed prerequisites' outputs in as this job's input before it runs.
+			self._pull_dependency_outputs()
 			self.status = 'pending'
 			self.save()
 			return True
@@ -331,13 +557,7 @@ class Job(models.Model):
 			return self.completed_at - self.started_at
 		return None
 
-class ProcessingJob(models.Model):
-	DOMAIN_CHOICES = [
-		('maxillo', 'Maxillo'),
-		('brain', 'Brain'),
-		('laparoscopy', 'Laparoscopy'),
-	]
-
+class ProcessingJob(DomainFKAccessorMixin, models.Model):
 	JOB_TYPE_CHOICES = [
 		('cbct', 'CBCT Processing'),
 		('ios', 'IOS Processing'),
@@ -484,13 +704,7 @@ class ProcessingJob(models.Model):
 		return None
 
 
-class FileRegistry(models.Model):
-	DOMAIN_CHOICES = [
-		('maxillo', 'Maxillo'),
-		('brain', 'Brain'),
-		('laparoscopy', 'Laparoscopy'),
-	]
-
+class FileRegistry(DomainFKAccessorMixin, models.Model):
 	FILE_TYPE_CHOICES = [
 		('cbct_raw', 'CBCT Raw'),
 		('cbct_processed', 'CBCT Processed'),
@@ -498,6 +712,8 @@ class FileRegistry(models.Model):
 		('ios_raw_lower', 'IOS Raw Lower'),
 		('ios_processed_upper', 'IOS Processed Upper'),
 		('ios_processed_lower', 'IOS Processed Lower'),
+		('ios_landmarks', 'IOS Landmarks'),
+		('ios_landmarks_prediction', 'IOS Landmark Prediction'),
 		('audio_raw', 'Audio Raw'),
 		('audio_processed', 'Audio Processed Text'),
 		('bite_classification', 'Bite Classification Results'),
@@ -530,6 +746,11 @@ class FileRegistry(models.Model):
 		# Generic video modality (used by laparoscopy and any future video domain)
 		('video_raw', 'Video Raw'),
 		('video_processed', 'Video Processed'),
+		# Dense annotation artifacts. Sparse annotations are MySQL rows (decision #20);
+		# a labelmap is not sparse, and the governing rule already says dense segmentation
+		# is a file artifact in object storage. Addressed by an AnnotationPayload, never
+		# read back as the annotation record itself.
+		('annotation_mask', 'Annotation Mask'),
 	]
 
 	file_type = models.CharField(max_length=255, choices=FILE_TYPE_CHOICES)
@@ -605,3 +826,162 @@ class FileRegistry(models.Model):
 		"""
 		choices_dict = cls.get_file_type_choices_dict()
 		return choices_dict.get(file_type, file_type.replace('_', ' ').title())
+
+
+class SystemCheck(models.Model):
+	"""Recorded outcome of a maintenance task or health check run.
+
+	One row per run (e.g. nightly database backup); the status dashboard
+	reads the latest row per name.
+	"""
+	STATUS_CHOICES = [
+		('ok', 'OK'),
+		('warn', 'Warning'),
+		('fail', 'Failed'),
+	]
+
+	name = models.CharField(max_length=100, db_index=True)
+	status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+	ran_at = models.DateTimeField(auto_now_add=True, db_index=True)
+	duration_ms = models.IntegerField(null=True, blank=True)
+	details = models.JSONField(default=dict, blank=True)
+
+	class Meta:
+		ordering = ['-ran_at']
+
+	def __str__(self):
+		return f"{self.name} [{self.status}] @ {self.ran_at:%Y-%m-%d %H:%M}"
+
+
+class SiteMaintenance(models.Model):
+	"""Global operator-controlled access mode and planned-maintenance notice."""
+	MODE_NORMAL = "normal"
+	MODE_READ_ONLY = "read_only"
+	MODE_LOCKDOWN = "lockdown"
+	ACCESS_MODE_CHOICES = [
+		(MODE_NORMAL, "Normal"),
+		(MODE_READ_ONLY, "Read-only"),
+		(MODE_LOCKDOWN, "Full lockdown"),
+	]
+
+	id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+	access_mode = models.CharField(
+		max_length=20, choices=ACCESS_MODE_CHOICES, default=MODE_NORMAL
+	)
+	planned_message_enabled = models.BooleanField(default=False)
+	planned_message = models.TextField(max_length=1000, blank=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		constraints = [
+			models.CheckConstraint(
+				condition=models.Q(id=1),
+				name="common_site_maintenance_singleton",
+			),
+		]
+		verbose_name = "site maintenance"
+		verbose_name_plural = "site maintenance"
+
+	def __str__(self):
+		return f"Site maintenance ({self.get_access_mode_display()})"
+
+	@classmethod
+	def get_solo(cls):
+		return cls.objects.get(pk=1)
+
+
+class UserPreference(models.Model):
+    """Cross-app per-user UI preferences.
+
+    Supersedes the brain-only ``brain.UserPreference``: the report-template
+    language now lives here so all three domains share one endpoint/context.
+    """
+    LANGUAGE_CHOICES = [
+        ('it', 'Italian'),
+        ('en', 'English'),
+        ('de', 'German'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='ygg_preference')
+    report_language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='it')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Preferences for {self.user.username}"
+
+
+class RecentlyViewed(models.Model):
+    """Per-user recently-opened patients across domains.
+
+    Patients live in per-app tables, so this stores ``(domain, patient_pk)``
+    rather than a hard FK. Powers the landing "Continue where you left off".
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='recently_viewed')
+    domain = models.CharField(max_length=20)
+    patient_pk = models.IntegerField()
+    patient_name = models.CharField(max_length=255, blank=True)
+    project_label = models.CharField(max_length=120, blank=True)
+    icon = models.CharField(max_length=40, blank=True)
+    viewed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-viewed_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=('user', 'domain', 'patient_pk'), name='common_recentlyviewed_uniq'
+            ),
+        ]
+        indexes = [models.Index(fields=['user', '-viewed_at'], name='common_rv_user_viewed_idx')]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.domain}#{self.patient_pk}"
+
+
+class ActivityEvent(models.Model):
+    """Cross-domain audit/activity feed (patient-view Activity tab).
+
+    Emitted via ``common.activity.log_activity`` at action sites (upload,
+    processing complete, classification edit, caption add/edit, export).
+    """
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='activity_events'
+    )
+    domain = models.CharField(max_length=20)
+    patient_pk = models.IntegerField(null=True, blank=True)
+    patient_name = models.CharField(max_length=255, blank=True)
+    verb = models.CharField(max_length=40)
+    target = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['domain', 'patient_pk', '-created_at'], name='common_ae_dom_pat_idx')]
+
+    def __str__(self):
+        return f"{self.actor_id or '?'} {self.verb} {self.domain}#{self.patient_pk}"
+
+
+class Notification(models.Model):
+    """Per-user in-app notification (topbar bell with unread count)."""
+    LEVEL_CHOICES = [
+        ('info', 'Info'),
+        ('success', 'Success'),
+        ('warning', 'Warning'),
+        ('danger', 'Danger'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    level = models.CharField(max_length=10, choices=LEVEL_CHOICES, default='info')
+    message = models.CharField(max_length=500)
+    url = models.CharField(max_length=500, blank=True)
+    is_read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['user', 'is_read', '-created_at'], name='common_notif_user_read_idx')]
+
+    def __str__(self):
+        return f"[{self.level}] {self.message[:40]} → {self.user.username}"
+

@@ -15,21 +15,6 @@ function handlePageJumpSubmit(event, maxPages) {
     return true;
 }
 
-// Filter management
-function toggleFilters() {
-    const content = document.getElementById('filterContent');
-    const chevron = document.getElementById('filterChevron');
-    
-    // Only proceed if both elements exist
-    if (!content || !chevron) {
-        return;
-    }
-    
-    content.classList.toggle('show');
-    chevron.classList.toggle('fa-chevron-down');
-    chevron.classList.toggle('fa-chevron-up');
-}
-
 // Clean form submission to only include non-empty values
 function cleanFormSubmission() {
     const form = document.getElementById('filterForm');
@@ -72,6 +57,8 @@ function updateFilterURL() {
     url.searchParams.delete('has_voice');
     url.searchParams.delete('has_bite');
     url.searchParams.delete('has_reports');
+    url.searchParams.delete('has_bite_classification');
+    url.searchParams.delete('has_landmarks');
     // Clear dynamic status_<slug> params
     Array.from(url.searchParams.keys()).forEach(key => {
         if (key.startsWith('status_')) {
@@ -113,36 +100,12 @@ function clearAllFilters() {
     
     // Preserve per_page if it's not the default
     const perPage = url.searchParams.get('per_page');
-    if (perPage && perPage !== '20') {
+    if (perPage && perPage !== '10') {
         newSearchParams.set('per_page', perPage);
     }
     
     url.search = newSearchParams.toString();
     window.location.href = url.toString();
-}
-
-// Auto-expand filters if any are active
-function autoExpandFilters() {
-    // Check if filter elements exist on this page
-    const filterContent = document.getElementById('filterContent');
-    if (!filterContent) {
-        return; // No filter UI on this page
-    }
-    
-    // Check if any filters are applied by looking at URL parameters
-    const url = new URL(window.location);
-    const hasFilters = url.searchParams.has('search') || 
-                      url.searchParams.has('has_ios') || 
-                      url.searchParams.has('has_cbct') || 
-                      url.searchParams.has('has_bite') || 
-                      url.searchParams.has('has_reports') || 
-                      url.searchParams.has('has_voice') || 
-                      Array.from(url.searchParams.keys()).some(k => k.startsWith('status_')) ||
-                      url.searchParams.has('tags');
-    
-    if (hasFilters) {
-        toggleFilters();
-    }
 }
 
 // Inline name editing functionality for list view
@@ -325,7 +288,7 @@ function initAdminActions() {
         if (!rerunModalityOptionsEl) return;
         rerunModalityOptionsEl.innerHTML = '';
         if (!modalitySlugs.length) {
-            rerunModalityOptionsEl.innerHTML = '<small class="text-muted">No rerunnable modalities available for this patient.</small>';
+            rerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable processing steps available for this patient.</p>';
             return;
         }
 
@@ -333,12 +296,12 @@ function initAdminActions() {
             const safeSlug = String(slug || '').trim();
             if (!safeSlug) return;
             const wrapper = document.createElement('div');
-            wrapper.className = 'form-check';
+            wrapper.className = 'check-row';
             const checkboxId = `rerunModality_${safeSlug}_${index}`;
             const label = rerunModalityLabels[safeSlug] || safeSlug.replace(/_/g, ' ');
             wrapper.innerHTML = `
-                <input class="form-check-input rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
-                <label class="form-check-label" for="${checkboxId}">${label}</label>
+                <input class="rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
+                <label for="${checkboxId}">${label}</label>
             `;
             rerunModalityOptionsEl.appendChild(wrapper);
         });
@@ -354,12 +317,11 @@ function initAdminActions() {
             const scanName = this.dataset.scanName || `Scan #${rerunTargetScanId}`;
             const subtitle = document.getElementById('rerunScanSubtitle');
             if (subtitle) subtitle.textContent = scanName;
-            rerunSelectedSlugs = (this.dataset.availableModalities || '')
+            rerunSelectedSlugs = (this.dataset.availableSteps || '')
                 .split(',')
                 .map(s => s.trim())
                 .filter(Boolean)
-                .filter((slug, idx, arr) => arr.indexOf(slug) === idx)
-                .filter(slug => slug !== 'rawzip');
+                .filter((slug, idx, arr) => arr.indexOf(slug) === idx);
             renderRerunOptions(rerunSelectedSlugs);
             if (rerunModal) rerunModal.show();
         });
@@ -375,8 +337,8 @@ function initAdminActions() {
             const label = this.querySelector('.label');
             const spinner = this.querySelector('.spinner');
             this.disabled = true;
-            if (label) label.classList.add('d-none');
-            if (spinner) spinner.classList.remove('d-none');
+            if (label) label.classList.add('hidden');
+            if (spinner) spinner.classList.remove('hidden');
             secureFetch(`/${window.projectNamespace}/patient/${rerunTargetScanId}/rerun-processing/`, {
                 method: 'POST',
                 body: JSON.stringify({ jobs })
@@ -399,8 +361,8 @@ function initAdminActions() {
                 }
             }).catch(error => showNotification('error', error.message || 'Network error')).finally(() => {
                 confirmRerunBtn.disabled = false;
-                if (label) label.classList.remove('d-none');
-                if (spinner) spinner.classList.add('d-none');
+                if (label) label.classList.remove('hidden');
+                if (spinner) spinner.classList.add('hidden');
             });
         });
     }
@@ -491,20 +453,6 @@ function showNotification(type, message) {
     }
 }
 
-// Initialize filter remove buttons
-function initFilterRemoveButtons() {
-    document.querySelectorAll('.remove[data-filter]').forEach(removeBtn => {
-        removeBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            const filterType = this.dataset.filter;
-            // This function is no longer needed as filters are removed from URL
-            // Keeping it for now in case it's re-added or used elsewhere, but it won't do anything.
-            console.warn(`Filter removal for type "${filterType}" is not implemented.`);
-        });
-    });
-}
-
 // Bulk selection and move functionality
 function initBulkSelection() {
     const selectAll = document.getElementById('selectAll');
@@ -526,17 +474,9 @@ function initBulkSelection() {
         const selected = document.querySelectorAll('.row-select:checked');
         const count = selected.length;
         if (countEl) countEl.textContent = `${count} selected`;
-        if (toolbar) toolbar.style.display = 'flex';
-        if (bulkCard) bulkCard.style.display = '';
-        // Enable/disable controls based on selection
-        const bulkToolbarEl = document.getElementById('bulkToolbar');
-        if (bulkToolbarEl) {
-            bulkToolbarEl.querySelectorAll('select, button').forEach(el => {
-                if (el.id !== 'btnClearSelection' && !el.classList.contains('collapse-toggle')) {
-                    el.disabled = count === 0;
-                }
-            });
-        }
+        // The bulk bar sits above the list and only exists while rows are
+        // selected, so there is nothing to disable — it is shown or it is gone.
+        if (bulkCard) bulkCard.hidden = count === 0;
         if (selectAll) selectAll.checked = count > 0 && document.querySelectorAll('.row-select').length === count;
     }
     
@@ -646,21 +586,15 @@ function initBulkSelection() {
         return Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value, 10)).filter(Number.isFinite);
     }
 
-    function collectAvailableModalitiesForSelectedRows() {
+    function collectAvailableStepsForSelectedRows() {
         const selectedRows = Array.from(document.querySelectorAll('.row-select:checked'))
             .map(cb => cb.closest('.patient-row') || cb.closest('.scan-row'))
             .filter(Boolean);
         const slugSet = new Set();
         selectedRows.forEach(row => {
-            row.querySelectorAll('.status-pill[data-modality-slug]').forEach(pill => {
-                const slug = (pill.dataset.modalitySlug || '').trim();
-                if (!slug || slug === 'rawzip') return;
-                if (pill.classList.contains('status-absent')) return;
-                if (slug === 'voice') {
-                    slugSet.add('voice');
-                    return;
-                }
-                slugSet.add(slug);
+            (row.dataset.availableSteps || '').split(',').forEach(slug => {
+                slug = String(slug || '').trim();
+                if (slug) slugSet.add(slug);
             });
         });
         return Array.from(slugSet).sort((a, b) => a.localeCompare(b));
@@ -670,19 +604,19 @@ function initBulkSelection() {
         if (!bulkRerunModalityOptionsEl) return;
         bulkRerunModalityOptionsEl.innerHTML = '';
         if (!modalitySlugs.length) {
-            bulkRerunModalityOptionsEl.innerHTML = '<small class="text-muted">No rerunnable modalities available for the selected scans.</small>';
+            bulkRerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable processing steps available for the selected scans.</p>';
             return;
         }
         modalitySlugs.forEach((slug, index) => {
             const safeSlug = String(slug || '').trim();
             if (!safeSlug) return;
             const wrapper = document.createElement('div');
-            wrapper.className = 'form-check';
+            wrapper.className = 'check-row';
             const checkboxId = `bulkRerunModality_${safeSlug}_${index}`;
             const label = (window.rerunModalityLabels && window.rerunModalityLabels[safeSlug]) || safeSlug.replace(/_/g, ' ');
             wrapper.innerHTML = `
-                <input class="form-check-input bulk-rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
-                <label class="form-check-label" for="${checkboxId}">${label}</label>
+                <input class="bulk-rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
+                <label for="${checkboxId}">${label}</label>
             `;
             bulkRerunModalityOptionsEl.appendChild(wrapper);
         });
@@ -692,7 +626,7 @@ function initBulkSelection() {
         bulkRerunBtn.addEventListener('click', function() {
             const ids = getSelectedPatientIds();
             if (!ids.length) return;
-            const modalities = collectAvailableModalitiesForSelectedRows();
+            const modalities = collectAvailableStepsForSelectedRows();
             renderBulkRerunOptions(modalities);
             if (bulkRerunSubtitleEl) {
                 bulkRerunSubtitleEl.textContent = `${ids.length} selected patient${ids.length === 1 ? '' : 's'}`;
@@ -717,8 +651,8 @@ function initBulkSelection() {
             const label = this.querySelector('.label');
             const spinner = this.querySelector('.spinner');
             this.disabled = true;
-            if (label) label.classList.add('d-none');
-            if (spinner) spinner.classList.remove('d-none');
+            if (label) label.classList.add('hidden');
+            if (spinner) spinner.classList.remove('hidden');
 
             secureFetch(`/${window.projectNamespace}/patients/bulk-rerun-processing/`, {
                 method: 'POST',
@@ -733,8 +667,8 @@ function initBulkSelection() {
                 }
             }).catch(() => showNotification('error', 'Network error')).finally(() => {
                 confirmBulkRerunBtn.disabled = false;
-                if (label) label.classList.remove('d-none');
-                if (spinner) spinner.classList.add('d-none');
+                if (label) label.classList.remove('hidden');
+                if (spinner) spinner.classList.add('hidden');
             });
         });
     }
@@ -772,8 +706,6 @@ function initFolderContextMenu() {
     if (!menu) return;
 
     let selectedFolder = null;
-    const modalEl = document.getElementById('folderPermissionsModal');
-    const modal = modalEl && window.bootstrap ? new window.bootstrap.Modal(modalEl) : null;
 
     function hideMenu() {
         menu.style.display = 'none';
@@ -824,72 +756,42 @@ function initFolderContextMenu() {
         });
     }
 
-    const permBtn = document.getElementById('folderMenuPermissions');
-    if (permBtn) {
-        permBtn.addEventListener('click', function () {
-            if (!selectedFolder || !modal) return;
-            loadFolderPermissions(selectedFolder.id, selectedFolder.name);
-            modal.show();
+    const deleteBtn = document.getElementById('folderMenuDelete');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function () {
+            if (!selectedFolder) return;
+            const folder = selectedFolder;
+            if (!confirm(`Delete folder "${folder.name}"? Its patients stay in the project, unfiled.`)) return;
+            // Two-step by design: the unforced call answers "how many patients
+            // would this unfile?", and only that count is worth a second prompt.
+            deleteFolder(folder, false).catch(err => {
+                if (err && err.patientCount) {
+                    if (!confirm(`${err.message}\n\nDelete the folder anyway?`)) return;
+                    deleteFolder(folder, true).catch(inner =>
+                        showNotification('error', inner.message || 'Failed to delete folder'));
+                    return;
+                }
+                showNotification('error', (err && err.message) || 'Failed to delete folder');
+            });
         });
     }
 
-    function loadFolderPermissions(folderId, folderName) {
-        const title = document.getElementById('folderPermissionsModalLabel');
-        if (title) title.textContent = `Folder Permissions - ${folderName}`;
-        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/`)
-            .then(parseJsonResponse)
-            .then(data => {
-                if (!data.success) throw new Error(data.error || 'Failed to load permissions');
-                const userSel = document.getElementById('folderPermUser');
-                const body = document.querySelector('#folderPermTable tbody');
-                if (userSel) {
-                    userSel.innerHTML = '<option value="">Select user</option>';
-                    data.users.forEach(u => {
-                        const opt = document.createElement('option');
-                        opt.value = String(u.id);
-                        opt.textContent = u.username;
-                        userSel.appendChild(opt);
-                    });
+    function deleteFolder(folder, force) {
+        const url = `/${window.projectNamespace}/folders/${folder.id}/delete/${force ? '?force=true' : ''}`;
+        // parseJsonResponse for the content-type guard, but the body is needed on
+        // a 400 too -- that is where `patient_count` comes from.
+        return secureFetch(url, { method: 'DELETE' })
+            .then(response => parseJsonResponse(response).then(data => ({ response, data })))
+            .then(({ response, data }) => {
+                if (!response.ok || !data.success) {
+                    const error = new Error(data.error || 'Failed to delete folder');
+                    error.patientCount = data.patient_count;
+                    throw error;
                 }
-                if (body) {
-                    body.innerHTML = '';
-                    data.permissions.forEach(row => {
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `<td>${row.username}</td><td>${row.role}</td><td class="text-end"><button class="btn btn-sm btn-outline-danger" data-user-id="${row.user_id}">Remove</button></td>`;
-                        body.appendChild(tr);
-                    });
-                    body.querySelectorAll('button[data-user-id]').forEach(btn => {
-                        btn.addEventListener('click', function () {
-                            const uid = this.dataset.userId;
-                            secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/${uid}/delete/`, { method: 'DELETE' })
-                                .then(parseJsonResponse)
-                                .then(resp => {
-                                    if (!resp.success) throw new Error(resp.error || 'Failed to remove permission');
-                                    loadFolderPermissions(folderId, folderName);
-                                })
-                                .catch(err => showNotification('error', err.message || 'Failed to remove permission'));
-                        });
-                    });
-                }
-
-                const saveBtn = document.getElementById('folderPermAddBtn');
-                if (saveBtn) {
-                    saveBtn.onclick = function () {
-                        const userId = document.getElementById('folderPermUser')?.value;
-                        const role = document.getElementById('folderPermRole')?.value;
-                        if (!userId || !role) return;
-                        secureFetch(`/${window.projectNamespace}/folders/${folderId}/permissions/upsert/`, {
-                            method: 'POST',
-                            body: JSON.stringify({ user_id: Number(userId), role }),
-                        }).then(parseJsonResponse).then(resp => {
-                            if (!resp.success) throw new Error(resp.error || 'Failed to save permission');
-                            loadFolderPermissions(folderId, folderName);
-                        }).catch(err => showNotification('error', err.message || 'Failed to save permission'));
-                    };
-                }
-            })
-            .catch(err => showNotification('error', err.message || 'Failed to load permissions'));
+                window.location.reload();
+            });
     }
+
 }
 
 function initTagAddInline() {
@@ -919,14 +821,6 @@ function initTagAddInline() {
                                 <button type="button" class="btn-remove-tag-inline" data-scan-id="${scanId}" data-tag="${tag}" title="Remove tag">&times;</button>
                             `;
                             tagsCol.insertBefore(span, this);
-                            
-
-                            
-                            // Refresh the tags dropdown to include the new tag
-                            if (window.refreshTagsDropdown) {
-                                window.refreshTagsDropdown();
-                            }
-
                         }
                     }
                     showNotification('success', 'Tag added');
@@ -936,144 +830,6 @@ function initTagAddInline() {
             }).catch(() => showNotification('error', 'Network error'));
         });
     });
-}
-
-function initTagFilter() {
-    const tagSearchInput = document.getElementById('tagSearchInput');
-    const tagsDropdown = document.getElementById('tagsDropdown');
-    const tagsInput = document.getElementById('tagsInput');
-    
-    if (!tagSearchInput || !tagsDropdown || !tagsInput) return;
-    
-    let selectedTags = new Set();
-    
-    // Initialize selected tags from hidden input
-    const initialTags = tagsInput.value ? tagsInput.value.split(',').filter(t => t.trim()) : [];
-    initialTags.forEach(tag => selectedTags.add(tag.trim()));
-    updateSelectedTagsDisplay();
-    
-    // Populate dropdown with available tags
-    populateTagsDropdown();
-    
-    // Show dropdown on focus
-    tagSearchInput.addEventListener('focus', function() {
-        tagsDropdown.classList.add('show');
-        updateTagsDropdown();
-    });
-    
-    // Hide dropdown on blur (with delay to allow clicking)
-    tagSearchInput.addEventListener('blur', function() {
-        setTimeout(() => {
-            tagsDropdown.classList.remove('show');
-        }, 200);
-    });
-    
-    // Search functionality
-    tagSearchInput.addEventListener('input', function() {
-        updateTagsDropdown();
-    });
-    
-    // Tag selection
-    tagsDropdown.addEventListener('click', function(e) {
-        const tagOption = e.target.closest('.tag-option');
-        if (!tagOption) return;
-        
-        const tagName = tagOption.dataset.tag;
-        if (selectedTags.has(tagName)) {
-            selectedTags.delete(tagName);
-        } else {
-            selectedTags.add(tagName);
-        }
-        
-        updateSelectedTagsDisplay();
-        updateTagsDropdown();
-        
-        // Update URL to reflect current tag selection
-        updateFilterURL();
-        tagSearchInput.value = '';
-        
-        // Update URL to reflect current tag selection
-        updateFilterURL();
-    });
-    
-    // Remove tag
-    tagSearchInput.parentNode.addEventListener('click', function(e) {
-        if (e.target.classList.contains('remove-tag')) {
-            const tagName = e.target.dataset.tag;
-            selectedTags.delete(tagName);
-            updateSelectedTagsDisplay();
-            updateTagsDropdown();
-        }
-    });
-    
-    function populateTagsDropdown() {
-        // Get all available tags from the page (you might need to pass this from Django)
-        const availableTags = Array.from(document.querySelectorAll('.tag-badge')).map(tag => tag.dataset.tag);
-        const uniqueTags = [...new Set(availableTags)];
-        
-        tagsDropdown.innerHTML = uniqueTags.map(tag => `
-            <div class="tag-option" data-tag="${tag}" data-selected="false">
-                <span class="tag-name">${tag}</span>
-                <span class="tag-checkbox">
-                    <i class="fas fa-check" style="display: none;"></i>
-                </span>
-            </div>
-        `).join('');
-    }
-    
-    // Function to refresh tags dropdown with current page tags
-    function refreshTagsDropdown() {
-        populateTagsDropdown();
-        updateTagsDropdown();
-    }
-    
-    // Make refreshTagsDropdown globally accessible
-    window.refreshTagsDropdown = refreshTagsDropdown;
-    
-    function updateTagsDropdown() {
-        const searchTerm = tagSearchInput.value.toLowerCase();
-        const tagOptions = tagsDropdown.querySelectorAll('.tag-option');
-        
-        tagOptions.forEach(option => {
-            const tagName = option.dataset.tag;
-            const isSelected = selectedTags.has(tagName);
-            const matchesSearch = tagName.toLowerCase().includes(searchTerm);
-            
-            option.style.display = matchesSearch ? 'block' : 'none';
-            option.dataset.selected = isSelected.toString();
-            const checkbox = option.querySelector('.tag-checkbox i');
-            if (checkbox) {
-                checkbox.style.display = isSelected ? 'inline' : 'none';
-            }
-        });
-    }
-    
-    function updateSelectedTagsDisplay() {
-        const tagsArray = Array.from(selectedTags);
-        tagsInput.value = tagsArray.join(',');
-        
-        // Clear existing tag chips
-        const existingChips = tagSearchInput.parentNode.querySelectorAll('.tag-chip');
-        existingChips.forEach(chip => chip.remove());
-        
-        // Add tag chips before the input
-        tagsArray.forEach(tag => {
-            const tagChip = document.createElement('span');
-            tagChip.className = 'tag-chip';
-            tagChip.innerHTML = `
-                ${tag}
-                <button type="button" class="remove-tag" data-tag="${tag}">&times;</button>
-            `;
-            tagSearchInput.parentNode.insertBefore(tagChip, tagSearchInput);
-        });
-        
-        // Update placeholder visibility
-        if (tagsArray.length > 0) {
-            tagSearchInput.placeholder = 'Add more tags...';
-        } else {
-            tagSearchInput.placeholder = 'Search tags...';
-        }
-    }
 }
 
 function initStatusFilterButtons() {
@@ -1086,13 +842,14 @@ function initStatusFilterButtons() {
         btn.addEventListener('click', function() {
             const filterKey = this.dataset.filter; // e.g., 'status_cbct' or legacy 'ios'
             const isReports = filterKey === 'reports';
+            const isPresence = filterKey.startsWith('presence_');
             const isDynamic = filterKey.startsWith('status_');
             const currentValue = this.dataset.value || '';
             
             let newValue, newClass;
             
             // Reports filter: '' -> yes (green) -> '' (gray)
-            if (isReports) {
+            if (isReports || isPresence) {
                 if (currentValue === '') { newValue = 'yes'; newClass = 'status-green'; }
                 else { newValue = ''; newClass = 'status-gray'; }
             }
@@ -1112,10 +869,12 @@ function initStatusFilterButtons() {
             
             // Update button state
             this.dataset.value = newValue;
-            this.className = `status-filter-btn ${newClass}`;
-            
+            setFilterButtonState(this, newClass);
+
             // Update hidden input value
-            const hiddenInput = document.getElementById(isDynamic ? `${filterKey}_value` : `${filterKey}FilterValue`);
+            const hiddenInput = document.getElementById(
+                (isDynamic || isPresence) ? `${filterKey}_value` : `${filterKey}FilterValue`
+            );
             if (hiddenInput) {
                 hiddenInput.value = newValue;
             }
@@ -1129,29 +888,31 @@ function initStatusFilterButtons() {
     });
 }
 
+// The filter buttons are icon-only, so their state class must be swapped
+// without clobbering the layout/icon classes the markup carries. (This used to
+// assign button.className wholesale, which stripped everything else.)
+const FILTER_STATE_CLASSES = ['status-gray', 'status-green', 'status-yellow', 'status-red'];
+
+function setFilterButtonState(button, stateClass) {
+    button.classList.remove(...FILTER_STATE_CLASSES);
+    button.classList.add(stateClass);
+}
+
 function initializeStatusButtonStates() {
-    // Legacy
-    const legacyMappings = [
-        { filter: 'ios', inputId: 'iosFilterValue', buttonSelector: '[data-filter="ios"]' },
-        { filter: 'cbct', inputId: 'cbctFilterValue', buttonSelector: '[data-filter="cbct"]' },
-        { filter: 'bite', inputId: 'biteFilterValue', buttonSelector: '[data-filter="bite"]' },
-        { filter: 'voice', inputId: 'voiceFilterValue', buttonSelector: '[data-filter="voice"]' },
-        { filter: 'reports', inputId: 'reportsFilterValue', buttonSelector: '[data-filter="reports"]' }
-    ];
-    legacyMappings.forEach(mapping => {
-        const input = document.getElementById(mapping.inputId);
-        const button = document.querySelector(mapping.buttonSelector);
-        if (input && button) {
-            const value = input.value;
-            let className = 'status-gray';
-            if (value === 'yes') className = 'status-green';
-            else if (value === 'no') className = 'status-yellow';
-            else if (value === 'failed') className = 'status-red';
-            button.dataset.value = value;
-            button.className = `status-filter-btn ${className}`;
-            updateButtonTitle(button, mapping.filter, value);
-        }
-    });
+    // Legacy 'reports' filter (the has_ios/has_cbct/has_bite/has_voice inputs it
+    // used to sit alongside were never applied by the view and are now gone).
+    const reportsInput = document.getElementById('reportsFilterValue');
+    const reportsButton = document.querySelector('[data-filter="reports"]');
+    if (reportsInput && reportsButton) {
+        const value = reportsInput.value;
+        let className = 'status-gray';
+        if (value === 'yes') className = 'status-green';
+        else if (value === 'no') className = 'status-yellow';
+        else if (value === 'failed') className = 'status-red';
+        reportsButton.dataset.value = value;
+        setFilterButtonState(reportsButton, className);
+        updateButtonTitle(reportsButton, 'reports', value);
+    }
 
     // Dynamic buttons
     document.querySelectorAll('input[id^="status_"][id$="_value"]').forEach(input => {
@@ -1164,27 +925,38 @@ function initializeStatusButtonStates() {
         else if (value === 'processing') className = 'status-yellow';
         else if (value === 'failed') className = 'status-red';
         button.dataset.value = value;
-        button.className = `status-filter-btn ${className}`;
+        setFilterButtonState(button, className);
         updateButtonTitle(button, `status_${slug}`, value);
+    });
+
+    document.querySelectorAll('input[id^="presence_"][id$="_value"]').forEach(input => {
+        const filterKey = input.id.replace(/_value$/, '');
+        const button = document.querySelector(`[data-filter="${filterKey}"]`);
+        if (!button) return;
+        const value = input.value;
+        button.dataset.value = value;
+        setFilterButtonState(button, value === 'yes' ? 'status-green' : 'status-gray');
+        updateButtonTitle(button, filterKey, value);
     });
 }
 
 function updateButtonTitle(button, filterKey, value) {
     if (filterKey.startsWith('status_')) {
-        const name = button.textContent.trim() || filterKey.replace('status_', '').toUpperCase();
+        // data-label carries the modality name: the buttons are icon-only, so
+        // textContent is empty and can't supply it.
+        const name = button.dataset.label || button.textContent.trim()
+            || filterKey.replace('status_', '').toUpperCase();
         const labels = { '': `All ${name} (no filter)`, 'processed': `${name} processed`, 'processing': `${name} processing`, 'failed': `${name} failed` };
         button.title = labels[value] || labels[''];
+    } else if (filterKey.startsWith('presence_')) {
+        const name = button.dataset.label || 'Data';
+        button.title = value === 'yes' ? `Has ${name}` : `All ${name} (no filter)`;
     } else {
-        const filter = filterKey;
         const filterLabels = {
-            'ios': { '': 'All IOS (no filter)', 'yes': 'Has IOS', 'no': 'No IOS', 'failed': 'IOS Failed' },
-            'cbct': { '': 'All CBCT (no filter)', 'yes': 'Has CBCT', 'no': 'No CBCT', 'failed': 'CBCT Failed' },
-            'bite': { '': 'All Bite (no filter)', 'yes': 'Has Bite Classification', 'no': 'No Bite Classification', 'failed': 'Bite Classification Failed' },
-            'voice': { '': 'All Voice (no filter)', 'yes': 'Has Voice', 'no': 'No Voice', 'failed': 'Voice Failed' },
             'reports': { '': 'All Reports (no filter)', 'yes': 'Has Reports' }
         };
-        const title = value ? (filterLabels[filter] && filterLabels[filter][value]) : (filterLabels[filter] && filterLabels[filter]['']);
-        button.title = title || '';
+        const labels = filterLabels[filterKey];
+        button.title = (labels && (value ? labels[value] : labels[''])) || '';
     }
 }
 
@@ -1202,38 +974,14 @@ function initInlineTagRemoval() {
                     body: JSON.stringify({ tag })
                 }).then(parseJsonResponse).then(data => {
                     if (data.success) {
-                        // Remove the tag badge from the UI
+                        // Remove the tag badge from the UI. The "add tag" button
+                        // is a persistent sibling in .tags-col (not rebuilt when
+                        // the last tag goes), so nothing else needs to change.
                         const tagBadge = e.target.closest('.tag-badge');
                         if (tagBadge) {
                             tagBadge.remove();
                         }
-                        
-                        // If no tags left, show the placeholder
-                        const tagsCol = e.target.closest('.tags-col');
-                        if (tagsCol && !tagsCol.querySelector('.tag-badge')) {
-                            // Clear the column and add placeholder and button
-                            tagsCol.innerHTML = '';
-                            const placeholder = document.createElement('small');
-                            placeholder.className = 'text-muted';
-                            placeholder.textContent = '-';
-                            tagsCol.appendChild(placeholder);
-                            
-                            // Re-add the add tag button
-                            const addButton = document.createElement('button');
-                            addButton.className = 'btn btn-sm btn-outline-secondary p-0 ms-1 btn-add-tag';
-                            addButton.dataset.scanId = scanId;
-                            addButton.title = 'Add tag';
-                            addButton.innerHTML = '<i class="fas fa-plus" style="font-size: 0.65rem;"></i>';
-                            tagsCol.appendChild(addButton);
-                            // Re-initialize the add tag functionality
-                            initTagAddInline();
-                        }
-                        
-                        // Refresh the tags dropdown to reflect the removed tag
-                        if (window.refreshTagsDropdown) {
-                            window.refreshTagsDropdown();
-                        }
-                        
+
                         showNotification('success', 'Tag removed successfully');
                     } else {
                         showNotification('error', data.error || 'Failed to remove tag');
@@ -1244,33 +992,22 @@ function initInlineTagRemoval() {
     });
 }
 
-// Initialize everything
 document.addEventListener('DOMContentLoaded', function() {
-    autoExpandFilters();
     initListNameEditing();
     initAdminActions();
-    initFilterRemoveButtons();
     initBulkSelection();
     initCreateFolder();
     initFolderContextMenu();
     initTagAddInline();
-    initTagFilter();
     initStatusFilterButtons();
     initInlineTagRemoval();
-    
-    // Ensure tag dropdown is refreshed after all initialization
-    setTimeout(() => {
-        if (window.refreshTagsDropdown) {
-            window.refreshTagsDropdown();
-        }
-    }, 100);
-    
+
     // Add form submission handler to clean empty values
     const filterForm = document.getElementById('filterForm');
     if (filterForm) {
         filterForm.addEventListener('submit', cleanFormSubmission);
     }
-    
+
     // Override per_page select onchange to use clean submission
     const perPageSelect = document.querySelector('select[name="per_page"]');
     if (perPageSelect) {
@@ -1280,7 +1017,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Remove the inline onchange to prevent double execution
         perPageSelect.removeAttribute('onchange');
     }
-    
+
     // Add search input change handler to update URL
     const searchInput = document.querySelector('input[name="search"]');
     if (searchInput) {
@@ -1292,36 +1029,4 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 500);
         });
     }
-
-    // Rotate chevrons on collapses
-    function initChevronRotation(toggleId, collapseId) {
-        const toggle = document.getElementById(toggleId);
-        const collapseEl = document.getElementById(collapseId);
-        if (!toggle || !collapseEl) return;
-        const icon = toggle.querySelector('i');
-        function syncIcon() {
-            const isShown = collapseEl.classList.contains('show');
-            icon.classList.toggle('fa-chevron-up', isShown);
-            icon.classList.toggle('fa-chevron-down', !isShown);
-        }
-        collapseEl.addEventListener('shown.bs.collapse', syncIcon);
-        collapseEl.addEventListener('hidden.bs.collapse', syncIcon);
-        // initial state
-        syncIcon();
-    }
-
-    initChevronRotation('filtersCollapseToggle', 'filtersCollapse');
-    initChevronRotation('bulkCollapseToggle', 'bulkCollapse');
-
-    // Ensure Filters and Bulk actions are expanded by default
-    function ensureShown(collapseId) {
-        const el = document.getElementById(collapseId);
-        if (!el) return;
-        if (!el.classList.contains('show') && window.bootstrap) {
-            const instance = window.bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
-            instance.show();
-        }
-    }
-    ensureShown('filtersCollapse');
-    ensureShown('bulkCollapse');
-}); 
+});

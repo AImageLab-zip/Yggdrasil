@@ -1,401 +1,355 @@
 {% load pagination_tags %}
+{% load icons %}
+{% comment %}
+  Patients list — rebuilt to the design handoff ("Yggdrasil Patients").
+
+  DOM CONTRACT: static/js/patient_list.js binds to the ids/classes/data-attrs
+  below. They are load-bearing and must not be renamed:
+    #filterForm, input[name=search|folder|per_page], #status_<slug>_value,
+    .status-filter-btn[data-filter], #selectAll, .row-select (value=patient_id,
+    intentionally no name), .patient-row[data-scan-id], .scan-name-text,
+    .btn-edit-name-list, .status-pill[data-modality-slug].status-<status>,
+    .tag-badge[data-tag], .btn-remove-tag-inline, .btn-add-tag, .btn-open,
+    .btn-rerun-processing, .btn-delete-scan, #bulkToolbar(Card), #selectedCount,
+    #moveFolderSelect, #btnMoveSelected/#btnDeleteSelected/#btnBulkRerunSelected/
+    #btnClearSelection, the folder/rerun modal ids, and handlePageJumpSubmit.
+    The rerun button carries data-available-steps (ProcessingStep slugs possible
+    for that patient, computed in the view); patient_list.js reads it.
+
+  Selection uses document-wide .row-select queries, so each patient must only
+  be rendered once.
+{% endcomment %}
 <!-- Hidden CSRF token for AJAX usage -->
 <form style="display:none;">{% csrf_token %}</form>
 
-    <div class="row align-items-center mb-3">
-        <div class="col-12 col-lg-10 offset-lg-2">
-            <h4 class="mb-0"><i class="fas fa-users me-2"></i>List of Patients</h4>
+<div class="patients-page">
+
+    <!-- Page header -->
+    <div class="patients-head">
+        <h1 class="patients-title">{% icon 'users' 'patients-title__icon' %}Patients</h1>
+        <div class="patients-head__actions">
+            {% if user.profile.can_upload_scans and not is_demo_guest %}
+            {% if bulk_upload_url %}
+            <a class="ygg-btn ygg-btn--ghost" href="{{ bulk_upload_url }}"
+               title="Create one patient per file">
+                <i class="fas fa-layer-group" aria-hidden="true"></i>Bulk upload
+            </a>
+            {% endif %}
+            <a class="ygg-btn ygg-btn--primary" href="{% url request.resolver_match.namespace|add:':upload_patient' %}">
+                <i class="fas fa-upload" aria-hidden="true"></i>Upload
+            </a>
+            {% endif %}
         </div>
     </div>
 
-    <div class="row patient-page g-3">
-        <aside class="sidebar-col col-12 col-lg-2">
-            <div class="card mt-3">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <strong><i class="fas fa-folder-tree me-2"></i>Folders</strong>
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#folderTreeCollapse" aria-expanded="true" aria-controls="folderTreeCollapse" title="Collapse folders" data-bs-toggle-tooltip>
-                        <i class="fas fa-chevron-up"></i>
-                    </button>
+    <div class="patients-grid">
+
+        <!-- Sidebar -->
+        <aside class="patients-side">
+            <!-- Projects (domain-level selector; folders live inside a project) -->
+            <div class="side-card">
+                <div class="side-card__label">Projects</div>
+                {% for p in projects %}
+                <div class="folder-item {% if current_project_id|stringformat:'s' == p.id|stringformat:'s' %}active{% endif %}">
+                    <a href="{% url request.resolver_match.namespace|add:':select_project' p.id %}">
+                        <span><i class="fas fa-briefcase folder-item__icon" aria-hidden="true"></i>{{ p.name }}</span>
+                    </a>
                 </div>
-                <div class="card-body">
-                    <div class="folder-item {% if folder_id == 'all' %}active{% endif %}" data-folder="all">
-                        <a href="?folder=all{% for key, value in request.GET.items %}{% if key != 'folder' and key != 'page' %}&{{ key|urlencode }}={{ value|urlencode }}{% endif %}{% endfor %}" class="text-decoration-none text-reset">
-                            <i class="fas fa-folder-open text-warning me-2"></i>Show All
-                        </a>
-                    </div>
-                    <div id="folderTreeCollapse" class="collapse show">
-                        <div id="folderTree">
-                        {% for f in folders %}
-                        <div class="folder-node" data-id="{{ f.folder.id }}" data-name="{{ f.folder.name|escape }}">
-                            <div class="folder-item {% if folder_id|stringformat:'s' == f.folder.id|stringformat:'s' %}active{% endif %}" data-folder="{{ f.folder.id }}">
-                                <a href="?folder={{ f.folder.id }}{% for key, value in request.GET.items %}{% if key != 'folder' and key != 'page' %}&{{ key|urlencode }}={{ value|urlencode }}{% endif %}{% endfor %}" class="text-decoration-none text-reset">
-                                    <i class="fas fa-folder text-warning me-2"></i>{{ f.folder.name }}
-                                    <span class="badge bg-secondary ms-2">{{ f.patient_count }}</span>
-                                </a>
-                            </div>
+                {% empty %}
+                <div class="side-card__empty">No projects</div>
+                {% endfor %}
+            </div>
+
+            <!-- Folders -->
+            <div class="side-card">
+                <div class="side-card__label">Folders</div>
+                <div class="folder-item {% if folder_id == 'all' %}active{% endif %}" data-folder="all">
+                    <a href="?folder=all{% for key, value in request.GET.items %}{% if key != 'folder' and key != 'page' %}&{{ key|urlencode }}={{ value|urlencode }}{% endif %}{% endfor %}">
+                        <span><i class="fas fa-folder-open folder-item__icon" aria-hidden="true"></i>Show all</span>
+                    </a>
+                </div>
+                <div id="folderTree">
+                    {% for f in folders %}
+                    <div class="folder-node" data-id="{{ f.folder.id }}" data-name="{{ f.folder.name|escape }}">
+                        <div class="folder-item {% if folder_id|stringformat:'s' == f.folder.id|stringformat:'s' %}active{% endif %}" data-folder="{{ f.folder.id }}">
+                            <a href="?folder={{ f.folder.id }}{% for key, value in request.GET.items %}{% if key != 'folder' and key != 'page' %}&{{ key|urlencode }}={{ value|urlencode }}{% endif %}{% endfor %}">
+                                <span><i class="fas fa-folder folder-item__icon" aria-hidden="true"></i>{{ f.folder.name }}</span>
+                                <span class="folder-item__count">{{ f.patient_count }}</span>
+                            </a>
                         </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if is_admin_user %}
+                <button class="ygg-btn ygg-btn--ghost ygg-btn--block mt-2" id="btnCreateFolder">
+                    <i class="fas fa-plus" aria-hidden="true"></i>New Folder
+                </button>
+                {% endif %}
+            </div>
+
+        </aside>
+
+        <!-- Main list -->
+        <main class="patients-main">
+
+            <form id="filterForm" class="filter-bar">
+                <input type="hidden" name="folder" value="{{ folder_id|default:'all' }}">
+
+                <div class="filter-bar__search">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="text" class="filter-input" name="search" placeholder="Name or ID" value="{{ search_query }}" aria-label="Search by name or ID">
+                </div>
+
+                <div class="filter-bar__group" aria-label="Patient filters">
+                    <span class="filter-bar__label">Filters</span>
+                    <div class="status-filter-buttons">
+                        {% for m in modality_filter_specs %}
+                        <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
+                        <button type="button" class="status-filter-btn" data-filter="status_{{ m.slug }}"
+                                data-label="{{ m.name }}" title="All {{ m.name }} (no filter)" data-ygg-toggle="tooltip">
+                            {% if m.icon %}
+                            <i class="{{ m.icon }}" aria-hidden="true"></i>
+                            {% else %}
+                            <span class="status-filter-label">{{ m.label|default:m.name }}</span>
+                            {% endif %}
+                        </button>
                         {% endfor %}
-                        </div>
-                    </div>
-                    {% if is_admin_user %}
-                    <div class="mt-2">
-                        <button class="btn btn-sm btn-outline-primary w-100" id="btnCreateFolder"><i class="fas fa-plus me-1"></i>New Folder</button>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="card mt-3">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <strong><i class="fas fa-filter me-2"></i>Filters</strong>
-                    <button id="filtersCollapseToggle" class="btn btn-sm btn-outline-secondary collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#filtersCollapse" aria-expanded="true" aria-controls="filtersCollapse" title="Collapse filters" data-bs-toggle-tooltip>
-                        <i class="fas fa-chevron-up"></i>
-                    </button>
-                </div>
-                <div id="filtersCollapse" class="collapse show card-body sidebar-filters">
-                    <div class="filter-section">
-                        <form id="filterForm">
-                            <input type="hidden" name="folder" value="{{ folder_id|default:'all' }}">
-                            <div class="filter-row">
-                                <div class="filter-item">
-                                    <label class="filter-label">Search</label>
-                                    <input type="text" class="filter-input" name="search" placeholder="Search by name or ID" value="{{ search_query }}">
-                                </div>
-                                <div class="filter-item">
-                                    <label class="filter-label">Modalities</label>
-                                    <div class="status-filter-buttons">
-                                        <input type="hidden" id="iosFilterValue" name="has_ios" value="{{ has_ios_filter }}">
-                                        <input type="hidden" id="cbctFilterValue" name="has_cbct" value="{{ has_cbct_filter }}">
-                                        <input type="hidden" id="biteFilterValue" name="has_bite" value="{{ has_bite_filter }}">
-                                         <input type="hidden" id="voiceFilterValue" name="has_voice" value="{{ has_voice_filter }}">
-                                         <input type="hidden" id="reportsFilterValue" name="has_reports" value="{{ has_reports_filter }}">
-                                         {% for m in modality_filter_specs %}
-                                         <input type="hidden" id="status_{{ m.slug }}_value" name="status_{{ m.slug }}" value="{{ m.value }}">
-                                         <button type="button" class="status-filter-btn" data-filter="status_{{ m.slug }}" title="All {{ m.name }} (no filter)" data-bs-toggle="tooltip">
-                                            {% if m.icon %}
-                                            <i class="{{ m.icon }}"></i>
-                                            {% else %}
-                                            <span class="status-filter-label">{{ m.label|default:m.name }}</span>
-                                            {% endif %}
-                                         </button>
-                                         {% endfor %}
-                                         <button type="button" class="status-filter-btn" data-filter="reports" title="All Reports (no filter)" data-bs-toggle="tooltip">
-                                             <i class="fas fa-comment"></i>
-                                         </button>
-                                     </div>
-                                 </div>
-                                <div class="filter-item">
-                                    <label class="filter-label">Per page</label>
-                                    <select name="per_page" class="filter-select">
-                                        <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-                                        <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
-                                        <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-                                        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
-                                    </select>
-                                </div>
-                                <div class="filter-item filter-actions">
-                                    <button type="submit" class="btn btn-primary uniform-btn">Apply</button>
-                                    <a class="btn btn-outline-secondary uniform-btn" href="?{% if folder_id and folder_id != 'all' %}folder={{ folder_id|urlencode }}{% endif %}{% if per_page and per_page != 20 %}{% if folder_id and folder_id != 'all' %}&{% endif %}per_page={{ per_page }}{% endif %}">Reset</a>
-                                </div>
-                            </div>
-                        </form>
+                        {% comment %} Only the annotations this project collects: see
+                           PRESENCE_FILTERS in maxillo/views/patient_list.py. The legacy
+                           Reports button keeps its `reportsFilterValue` id, which
+                           patient_list.js special-cases. {% endcomment %}
+                        {% for f in presence_filter_specs %}
+                        <input type="hidden" id="{% if f.key == 'reports' %}reportsFilterValue{% else %}{{ f.key }}_value{% endif %}"
+                               name="{{ f.param }}" value="{{ f.value }}">
+                        <button type="button" class="status-filter-btn" data-filter="{{ f.key }}"
+                                data-label="{{ f.label }}" title="All {{ f.label }} (no filter)" data-ygg-toggle="tooltip">
+                            <i class="{{ f.icon }}" aria-hidden="true"></i>
+                        </button>
+                        {% endfor %}
                     </div>
                 </div>
-            </div>
+
+                <label class="filter-bar__page-size">
+                    <span class="filter-bar__label">Per page</span>
+                    <select name="per_page" class="filter-select" aria-label="Results per page">
+                        <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+                        <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+                        <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                    </select>
+                </label>
+
+                <div class="filter-bar__actions">
+                    <button type="submit" class="ygg-btn ygg-btn--primary ygg-btn--sm">Apply</button>
+                    <a class="ygg-btn ygg-btn--ghost ygg-btn--sm" href="?{% if folder_id and folder_id != 'all' %}folder={{ folder_id|urlencode }}{% endif %}{% if per_page and per_page != 10 %}{% if folder_id and folder_id != 'all' %}&{% endif %}per_page={{ per_page }}{% endif %}">Reset</a>
+                </div>
+            </form>
+
             {% if is_admin_user %}
-            <div class="card mt-3" id="bulkToolbarCard">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <strong><i class="fas fa-layer-group me-2"></i>Bulk actions</strong>
-                    <button id="bulkCollapseToggle" class="btn btn-sm btn-outline-secondary collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#bulkCollapse" aria-expanded="true" aria-controls="bulkCollapse" title="Collapse bulk actions" data-bs-toggle-tooltip>
-                        <i class="fas fa-chevron-up"></i>
-                    </button>
-                </div>
-                <div id="bulkCollapse" class="collapse show card-body">
-                    <div class="bulk-toolbar d-flex align-items-center justify-content-between" id="bulkToolbar">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="text-muted small" id="selectedCount">0 selected</span>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <label for="moveFolderSelect" class="me-1 mb-0 small text-muted">Move to folder:</label>
-                            <select id="moveFolderSelect" class="form-select form-select-sm" aria-label="Move to folder">
-                                <option value="" selected>Choose…</option>
-                                <option value="all">Remove from folder</option>
-                                {% for f in folders %}
-                                <option value="{{ f.folder.id }}">{{ f.folder.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <button id="btnMoveSelected" class="btn btn-primary btn-sm uniform-btn" title="Move to folder" data-bs-toggle="tooltip" aria-label="Move to folder">
-                                <i class="fas fa-folder-open"></i><span class="btn-label ms-1">Move</span>
-                            </button>
-                            <button id="btnDeleteSelected" class="btn btn-danger btn-sm uniform-btn" title="Delete selected" data-bs-toggle="tooltip" aria-label="Delete selected">
-                                <i class="fas fa-trash"></i><span class="btn-label ms-1">Delete</span>
-                            </button>
-                            <button id="btnBulkRerunSelected" class="btn btn-outline-secondary btn-sm uniform-btn" title="Rerun selected" data-bs-toggle="tooltip" aria-label="Rerun selected">
-                                <i class="fas fa-sync"></i><span class="btn-label ms-1">Rerun</span>
-                            </button>
-                            <button class="btn btn-sm btn-outline-secondary uniform-btn" id="btnClearSelection" title="Clear selection" data-bs-toggle="tooltip" aria-label="Clear selection">
-                                <i class="fas fa-times"></i><span class="btn-label ms-1">Clear</span>
-                            </button>
-                        </div>
+            {% comment %} Bulk bar: sits ABOVE the list and only appears once rows are
+               selected. patient_list.js shows/hides #bulkToolbarCard. {% endcomment %}
+            <div id="bulkToolbarCard" class="bulk-bar" hidden>
+                <div class="bulk-bar__inner" id="bulkToolbar">
+                    <div class="bulk-bar__count" id="selectedCount">0 selected</div>
+                    <div class="bulk-bar__actions">
+                        <select id="moveFolderSelect" class="filter-select filter-select--sm" aria-label="Move to folder">
+                            <option value="" selected>Move to…</option>
+                            <option value="all">Remove from folder</option>
+                            {% for f in folders %}
+                            <option value="{{ f.folder.id }}">{{ f.folder.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button id="btnMoveSelected" class="ygg-btn ygg-btn--secondary ygg-btn--sm" title="Move to folder" aria-label="Move to folder">
+                            <i class="fas fa-folder-open" aria-hidden="true"></i>Move
+                        </button>
+                        <button id="btnBulkRerunSelected" class="ygg-btn ygg-btn--secondary ygg-btn--sm" title="Rerun selected" aria-label="Rerun selected">
+                            <i class="fas fa-rotate" aria-hidden="true"></i>Rerun
+                        </button>
+                        <button id="btnDeleteSelected" class="ygg-btn ygg-btn--danger ygg-btn--sm" title="Delete selected" aria-label="Delete selected">
+                            <i class="fas fa-trash" aria-hidden="true"></i>Delete
+                        </button>
+                        <button id="btnClearSelection" class="ygg-btn ygg-btn--ghost ygg-btn--sm" title="Clear selection" aria-label="Clear selection">Clear</button>
                     </div>
                 </div>
             </div>
             {% endif %}
-        </aside>
-        <main class="main-col col-12 col-lg-8">
-    <div class="patient-list-wrapper">
 
-    
-    <div class="patient-list">
-        <div class="patient-list-header">
-            <div class="col-check">
-                <input type="checkbox" id="selectAll">
-            </div>
-            <div>Patient</div>
-            <div>Modalities</div>
-            <div>Tags</div>
-            <div>Uploader</div>
-            <div>Folder</div>
-            <div>Actions</div>
-        </div>
-        {% for item in page_obj.object_list %}
-        {% with p=item.patient %}
-        <div class="patient-row" data-scan-id="{{ p.patient_id }}">
-            <div class="col-check">
-                <input type="checkbox" class="row-select" value="{{ p.patient_id }}">
-            </div>
-            <div class="scan-name">
-                <a class="scan-name-text" href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" title="Open patient" data-bs-toggle="tooltip" aria-label="Open patient">{{ p.name|default:'Unnamed' }}</a>
-                <small class="text-muted d-block">ID: {{ p.patient_id }}</small>
-                {% if user_profile.is_admin %}
-                <button class="btn btn-sm btn-outline-secondary p-0 px-1 btn-edit-name-list" data-scan-id="{{ p.patient_id }}" title="Rename" data-bs-toggle="tooltip" aria-label="Rename">
-                    <i class="fas fa-edit"></i>
-                </button>
-                {% endif %}
-            </div>
-            
-            <div class="processing-status">
-                <div class="status-indicators">
-                    {% for ms in item.modality_status_list %}
-                    {% if ms.slug != 'voice' %}
-                    <span class="badge rounded-pill me-1 status-pill status-{{ ms.status }}" data-modality-slug="{{ ms.slug }}" title="{{ ms.name }}" data-bs-toggle="tooltip" aria-label="{{ ms.name }}">{% if ms.icon %}<i class="{{ ms.icon }}"></i>{% else %}{{ ms.label|default:ms.name }}{% endif %}</span>
-                    {% endif %}
-                    {% endfor %}
-                    <span class="badge rounded-pill me-1 status-pill {% if item.voice_caption_processing %}status-processing{% elif item.voice_caption_processed %}status-processed{% else %}status-absent{% endif %} position-relative" data-modality-slug="voice" title="Voice{% if item.voice_caption_count %} ({{ item.voice_caption_count }} caption{{ item.voice_caption_count|pluralize }}){% endif %}" data-bs-toggle="tooltip" aria-label="Voice">
-                        <i class="fas fa-comment"></i>
-                        {% if item.voice_caption_count > 0 %}
-                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-success" style="font-size: 0.65rem; padding: 0.15rem 0.35rem;">
-                            {{ item.voice_caption_count }}
-                        </span>
-                        {% endif %}
-                    </span>
+            <div class="patient-list" id="patientList">
+                <div class="patient-list-header">
+                    <div class="col-check"><input type="checkbox" id="selectAll" aria-label="Select all"></div>
+                    <div>Patient</div>
+                    <div>Modalities</div>
+                    <div>Tags</div>
+                    <div>Uploader</div>
+                    <div>Folder</div>
+                    <div>Actions</div>
                 </div>
-            </div>
-            <div class="tags-col">
-                {% if p.tags.all %}
-                    {% for t in p.tags.all %}
-                        <span class="tag-badge" data-tag="{{ t.name }}">
-                            {{ t.name }}
-                            <button type="button" class="btn-remove-tag-inline" data-scan-id="{{ p.patient_id }}" data-tag="{{ t.name }}" title="Remove tag">&times;</button>
+
+                {% for item in page_obj.object_list %}
+                {% with p=item.patient %}
+                <div class="patient-row" data-scan-id="{{ p.patient_id }}">
+                    <div class="col-check">
+                        <input type="checkbox" class="row-select" value="{{ p.patient_id }}" aria-label="Select {{ p.name|default:'patient' }}">
+                    </div>
+
+                    <div class="scan-name">
+                        <span class="scan-name__meta">
+                            <a class="scan-name-text" href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" title="Open patient">{{ p.name|default:'Unnamed' }}</a>
+                            <span class="scan-name__id mono">ID {{ p.patient_id }}</span>
                         </span>
-                    {% empty %}
-                        <small class="text-muted">-</small>
-                    {% endfor %}
-                {% else %}
-                    <small class="text-muted">-</small>
-                {% endif %}
-                <button class="btn btn-sm btn-outline-secondary p-0 ms-1 btn-add-tag" data-scan-id="{{ p.patient_id }}" title="Add tag">
-                    <i class="fas fa-plus" style="font-size: 0.65rem;"></i>
-                </button>
-            </div>
-            <div class="uploader">
-                {% if p.uploaded_by %}
-                    <span class="uploader-name">{{ p.uploaded_by.username }}</span>
-                {% else %}
-                    <small class="text-muted">-</small>
-                {% endif %}
-            </div>
-            <div class="privacy">
-                {% if p.folder %}
-                <span class="privacy-badge">{{ p.folder.name }}</span>
-                {% else %}
-                <small class="text-muted">-</small>
-                {% endif %}
-            </div>
-            <div class="actions">
-                <div class="btn-group btn-group-sm" role="group">
-                    <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="btn btn-outline-primary btn-open" title="View" data-bs-toggle="tooltip" aria-label="View"><i class="fas fa-eye"></i>
-                    </a>
-                    {% if user_profile.is_admin %}
-                    <button class="btn btn-outline-secondary btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-modalities="{% for ms in item.modality_status_list %}{% if ms.slug != 'rawzip' and ms.status != 'absent' %}{% if not forloop.first %},{% endif %}{{ ms.slug }}{% endif %}{% endfor %}{% if item.voice_caption_count > 0 or item.voice_caption_processing or item.voice_caption_processed %},voice{% endif %}" title="Rerun processing" data-bs-toggle="tooltip" aria-label="Rerun"><i class="fas fa-sync"></i>
-                    </button>
-                    {% endif %}
-                    {% if item.can_delete %}
-                    <button class="btn btn-outline-danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" data-bs-toggle="tooltip" aria-label="Delete"><i class="fas fa-trash"></i>
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        {% endwith %}
-        {% endfor %}
-    </div>
-    
-    <div class="patient-list-footer mt-2">
-        <nav aria-label="Page navigation">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <ul class="pagination pagination-sm mb-0">
-                    {% if page_obj.has_previous %}
-                    <li class="page-item">
-                        <a class="page-link" href="{% pagination_url page_obj.previous_page_number %}" aria-label="Previous">
-                            <i class="fas fa-chevron-left"></i> Previous
-                        </a>
-                    </li>
-                    {% else %}
-                    <li class="page-item disabled">
-                        <span class="page-link"><i class="fas fa-chevron-left"></i> Previous</span>
-                    </li>
-                    {% endif %}
-                    
-                    <li class="page-item disabled">
-                        <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-                    </li>
-                    
-                    {% if page_obj.has_next %}
-                    <li class="page-item">
-                        <a class="page-link" href="{% pagination_url page_obj.next_page_number %}" aria-label="Next">
-                            Next <i class="fas fa-chevron-right"></i>
-                        </a>
-                    </li>
-                    {% else %}
-                    <li class="page-item disabled">
-                        <span class="page-link">Next <i class="fas fa-chevron-right"></i></span>
-                    </li>
-                    {% endif %}
-                </ul>
-                
-                {% if page_obj.paginator.num_pages > 1 %}
-                <div class="d-flex align-items-center gap-2">
-                    <small class="text-muted">Jump to page:</small>
-                    <form method="get" class="d-flex align-items-center gap-1" onsubmit="return handlePageJumpSubmit(event, {{ page_obj.paginator.num_pages }})">
-                        {% for key, value in request.GET.items %}
-                            {% if key != 'page' %}
-                            <input type="hidden" name="{{ key }}" value="{{ value }}">
-                            {% endif %}
-                        {% endfor %}
-                        <input type="number" 
-                               name="page" 
-                               class="form-control form-control-sm" 
-                               style="width: 70px;" 
-                               placeholder="#" 
-                               min="1" 
-                               max="{{ page_obj.paginator.num_pages }}"
-                               title="Enter page number (1-{{ page_obj.paginator.num_pages }})"
-                               aria-label="Page number">
-                        <button type="submit" class="btn btn-sm btn-primary" title="Go to page">
-                            <i class="fas fa-arrow-right"></i>
+                        {% if user_profile.is_admin %}
+                        <button class="icon-btn icon-btn--xs btn-edit-name-list" data-scan-id="{{ p.patient_id }}" title="Rename" aria-label="Rename">
+                            <i class="fas fa-pen" aria-hidden="true"></i>
                         </button>
-                    </form>
+                        {% endif %}
+                    </div>
+
+                    <div class="processing-status">
+                        <div class="status-indicators">
+                            {% for ms in item.modality_status_list %}
+                            {% if ms.slug != 'voice' %}
+                            <span class="status-pill status-{{ ms.status }}" data-modality-slug="{{ ms.slug }}" title="{{ ms.name }}: {{ ms.status }}" data-ygg-toggle="tooltip">{% if ms.icon %}<i class="{{ ms.icon }}" aria-hidden="true"></i>{% else %}{{ ms.label|default:ms.name }}{% endif %}</span>
+                            {% endif %}
+                            {% endfor %}
+                            <span class="status-pill {% if item.voice_caption_processing %}status-processing{% elif item.voice_caption_processed %}status-processed{% else %}status-absent{% endif %}" data-modality-slug="voice" title="Voice{% if item.voice_caption_count %} ({{ item.voice_caption_count }} caption{{ item.voice_caption_count|pluralize }}){% endif %}" data-ygg-toggle="tooltip">
+                                <i class="fas fa-comment" aria-hidden="true"></i>
+                                {% if item.voice_caption_count > 0 %}
+                                <span class="status-pill__count">{{ item.voice_caption_count }}</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="tags-col">
+                        {% for t in p.tags.all %}
+                            <span class="tag-badge" data-tag="{{ t.name }}">{{ t.name }}<button type="button" class="btn-remove-tag-inline" data-scan-id="{{ p.patient_id }}" data-tag="{{ t.name }}" title="Remove tag">&times;</button></span>
+                        {% endfor %}
+                        <button class="icon-btn icon-btn--xs btn-add-tag" data-scan-id="{{ p.patient_id }}" title="Add tag" aria-label="Add tag">
+                            <i class="fas fa-plus" aria-hidden="true"></i>
+                        </button>
+                    </div>
+
+                    <div class="uploader">
+                        {% if p.uploaded_by %}<span class="uploader-name">{{ p.uploaded_by.username }}</span>{% else %}<span class="cell-empty">—</span>{% endif %}
+                    </div>
+
+                    <div class="privacy">
+                        {% if item.folder %}<span class="privacy-badge">{{ item.folder.name }}</span>{% else %}<span class="cell-empty">—</span>{% endif %}
+                    </div>
+
+                    <div class="actions">
+                        <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="icon-btn btn-open" title="View" aria-label="View"><i class="fas fa-eye" aria-hidden="true"></i></a>
+                        {% if user_profile.is_admin %}
+                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-steps="{% for s in item.rerunnable_steps %}{% if not forloop.first %},{% endif %}{{ s.slug }}{% endfor %}" title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
+                        {% endif %}
+                        {% if item.can_delete %}
+                        <button class="icon-btn icon-btn--danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" aria-label="Delete"><i class="fas fa-trash" aria-hidden="true"></i></button>
+                        {% endif %}
+                    </div>
                 </div>
-                {% endif %}
+                {% endwith %}
+                {% empty %}
+                <div class="patient-empty">
+                    <i class="fas fa-inbox" aria-hidden="true"></i>
+                    No patients match these filters.
+                </div>
+                {% endfor %}
             </div>
-        </nav>
-    </div>
 
-    </div><!-- /.patient-list-wrapper -->
+            <!-- Pagination -->
+            <div class="patient-list-footer">
+                <div class="page-status">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+
+                <div class="page-nav">
+                    {% if page_obj.paginator.num_pages > 1 %}
+                    <form method="get" class="page-jump" onsubmit="return handlePageJumpSubmit(event, {{ page_obj.paginator.num_pages }})">
+                        {% for key, value in request.GET.items %}
+                            {% if key != 'page' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}
+                        {% endfor %}
+                        <input type="number" name="page" class="page-jump__input" placeholder="#" min="1"
+                               max="{{ page_obj.paginator.num_pages }}"
+                               title="Enter page number (1-{{ page_obj.paginator.num_pages }})" aria-label="Page number">
+                        <button type="submit" class="icon-btn" title="Go to page" aria-label="Go to page"><i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                    </form>
+                    {% endif %}
+
+                    {% if page_obj.has_previous %}
+                    <a class="icon-btn" href="{% pagination_url page_obj.previous_page_number %}" aria-label="Previous page"><i class="fas fa-chevron-left" aria-hidden="true"></i></a>
+                    {% else %}
+                    <span class="icon-btn is-disabled" aria-hidden="true"><i class="fas fa-chevron-left"></i></span>
+                    {% endif %}
+
+                    {% if page_obj.has_next %}
+                    <a class="icon-btn" href="{% pagination_url page_obj.next_page_number %}" aria-label="Next page"><i class="fas fa-chevron-right" aria-hidden="true"></i></a>
+                    {% else %}
+                    <span class="icon-btn is-disabled" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+                    {% endif %}
+                </div>
+            </div>
         </main>
-    </div>
-
-{% if is_admin_user %}
-<div id="folderContextMenu" class="card shadow" style="position: fixed; z-index: 1080; display: none; min-width: 220px;">
-    <div class="list-group list-group-flush">
-        <button type="button" class="list-group-item list-group-item-action" id="folderMenuStats">Statistics</button>
-        <button type="button" class="list-group-item list-group-item-action" id="folderMenuPermissions">Edit permissions</button>
-        <button type="button" class="list-group-item list-group-item-action" id="folderMenuRename">Rename folder</button>
     </div>
 </div>
 
-<div class="modal fade" id="folderPermissionsModal" tabindex="-1" aria-labelledby="folderPermissionsModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="folderPermissionsModalLabel">Folder Permissions</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="row g-2 align-items-end mb-3">
-            <div class="col-md-5">
-                <label for="folderPermUser" class="form-label">User</label>
-                <select id="folderPermUser" class="form-select"></select>
-            </div>
-            <div class="col-md-4">
-                <label for="folderPermRole" class="form-label">Role</label>
-                <select id="folderPermRole" class="form-select">
-                    <option value="standard">standard</option>
-                    <option value="annotator">annotator</option>
-                    <option value="project_manager">project_manager</option>
-                </select>
-            </div>
-            <div class="col-md-3">
-                <button class="btn btn-primary w-100" id="folderPermAddBtn">Save</button>
-            </div>
-        </div>
-        <table class="table table-sm" id="folderPermTable">
-            <thead><tr><th>User</th><th>Role</th><th></th></tr></thead>
-            <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+{% if is_admin_user %}
+{% comment %}No per-folder access entry here: access is granted per *project*,
+which is the only thing authorization reads, and it is edited on the project's
+Django admin page. The dialog that used to live here promised folder-level
+granularity the system has never had.{% endcomment %}
+<!-- Folder right-click menu -->
+<div id="folderContextMenu" class="folder-menu" style="display: none;">
+    <button type="button" class="folder-menu__item" id="folderMenuStats">Statistics</button>
+    <button type="button" class="folder-menu__item" id="folderMenuRename">Rename folder</button>
+    <button type="button" class="folder-menu__item folder-menu__item--danger" id="folderMenuDelete">Delete folder</button>
 </div>
 {% endif %}
 
-
-<div class="modal fade" id="rerunProcessingModal" tabindex="-1" aria-labelledby="rerunProcessingModalLabel" aria-hidden="true">
+<div class="modal" id="rerunProcessingModal" tabindex="-1" aria-labelledby="rerunProcessingModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="rerunProcessingModalLabel">Rerun processing</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-2"><small class="text-muted" id="rerunScanSubtitle"></small></div>
+        <p class="modal-sub" id="rerunScanSubtitle"></p>
         <div id="rerunModalityOptions"></div>
-        <div class="mt-2"><small class="text-muted">This will set existing jobs to pending. No new jobs will be created.</small></div>
+        <p class="modal-note">Select the processing steps to re-run. Missing pipeline jobs are created automatically.</p>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="confirmRerunBtn">
+        <button type="button" class="ygg-btn ygg-btn--ghost" data-ygg-dismiss="modal">Cancel</button>
+        <button type="button" class="ygg-btn ygg-btn--primary" id="confirmRerunBtn">
           <span class="label">Rerun selected</span>
-          <span class="spinner d-none"><i class="fas fa-spinner fa-spin"></i></span>
+          <span class="spinner hidden"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i></span>
         </button>
-</div>
-
-<script id="rerun-modality-labels" type="application/json">{
-{% for m in modality_filter_specs %}
-  "{{ m.slug }}": "{% if m.slug == 'voice' %}All voice transcriptions{% elif m.slug == 'ios' %}IOS processing{% else %}{{ m.label|default:m.name }}{% endif %}"{% if not forloop.last %},{% endif %}
-{% endfor %}
-}</script>
+      </div>
     </div>
   </div>
-    </div>
+</div>
 
-<div class="modal fade" id="bulkRerunProcessingModal" tabindex="-1" aria-labelledby="bulkRerunProcessingModalLabel" aria-hidden="true">
+{% comment %} Slug -> human label map consumed by patient_list.js (window.rerunModalityLabels).
+Labels are ProcessingStep names (admin/common/processingstep), falling back to modality
+labels when a domain declares no processing steps. {% endcomment %}
+<script id="rerun-modality-labels" type="application/json">{
+{% for slug, label in rerun_step_labels.items %}"{{ slug }}": "{{ label }}"{% if not forloop.last %},{% endif %}{% endfor %}
+}</script>
+
+<div class="modal" id="bulkRerunProcessingModal" tabindex="-1" aria-labelledby="bulkRerunProcessingModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="bulkRerunProcessingModalLabel">Bulk rerun processing</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-2"><small class="text-muted" id="bulkRerunScanSubtitle"></small></div>
+        <p class="modal-sub" id="bulkRerunScanSubtitle"></p>
         <div id="bulkRerunModalityOptions"></div>
-        <div class="mt-2"><small class="text-muted">This reruns only the latest existing job per selected modality per patient. No new jobs are created.</small></div>
+        <p class="modal-note">This reruns only the latest existing job per selected processing step per patient. Missing pipeline jobs are created automatically.</p>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="confirmBulkRerunBtn">
+        <button type="button" class="ygg-btn ygg-btn--ghost" data-ygg-dismiss="modal">Cancel</button>
+        <button type="button" class="ygg-btn ygg-btn--primary" id="confirmBulkRerunBtn">
           <span class="label">Rerun selected</span>
-          <span class="spinner d-none"><i class="fas fa-spinner fa-spin"></i></span>
+          <span class="spinner hidden"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i></span>
         </button>
       </div>
     </div>

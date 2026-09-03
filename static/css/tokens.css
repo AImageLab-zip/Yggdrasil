@@ -1,0 +1,175 @@
+/*
+ * Yggdrasil design tokens — the single source of truth for the 2.0 visual
+ * identity. One namespace: --ygg-*. Loaded before theme.css / tailwind.css on
+ * every page. Tailwind's theme (tailwind.config.js) maps onto these vars, so
+ * this file is the one place to change the palette.
+ *
+ * Identity: the world-tree, read as a clinical instrument. Deep ink/navy
+ * atmosphere on hero/dark surfaces; clean cool-white working surfaces (no
+ * parchment). Per the design Kit: Maxillo blue LEADS (it is --ygg-primary, the
+ * interactive color); medical green carries life/success states (--ygg-accent2);
+ * gold is reserved for the runic wordmark on the landing page ALONE and is never
+ * a field or button color. IBM Plex Sans for UI, IBM Plex Mono for technical
+ * data (scan IDs, metrics, timestamps).
+ */
+:root {
+    /* ---- Ink / navy (dark atmosphere) ---- */
+    --ygg-ink-950: #060a12;
+    --ygg-ink-900: #0a0f1a;
+    --ygg-ink-800: #0e1524;
+    --ygg-ink-700: #152036;
+    --ygg-navy-600: #1c2c48;
+    --ygg-navy-500: #294066;
+
+    /* ---- Blue (primary — Maxillo blue, the leading interactive color) ---- */
+    --ygg-blue-600: #3f6fd1;
+    --ygg-blue-500: #5b8def;
+    --ygg-blue-400: #7aa5ff;
+    --ygg-blue-100: #e7eefb;
+
+    /* ---- Green (life / medical — success + accent2) ---- */
+    --ygg-green-700: #0a5f4c;
+    --ygg-green-600: #0e7c66;
+    --ygg-green-500: #14a38b;
+    --ygg-green-400: #35c3a6;
+    --ygg-green-300: #7bdcc7;
+    --ygg-green-100: #d6f3ec;
+
+    /* ---- Gold (sparing rune accent) ---- */
+    --ygg-gold-600: #a8842f;
+    --ygg-gold-500: #c9a24b;
+    --ygg-gold-400: #dcb968;
+    --ygg-gold-200: #f0e2bd;
+
+    /* ---- Light surfaces (app pages) — cool, clean, no parchment ---- */
+    --ygg-surface: #ffffff;
+    --ygg-surface-alt: #f4f6f8;
+    --ygg-surface-sunken: #eef1f5;
+    --ygg-surface-2: #eef1f5;
+    --ygg-surface-3: #e3e8ee;
+    --ygg-border: #e3e8ee;
+    --ygg-border-strong: #cdd5e0;
+    --ygg-text: #1c2233;
+    --ygg-text-muted: #5c6577;
+    --ygg-text-faint: #95a0b3;
+
+    /* ---- Accent-soft + status-soft chips (theme-aware, consumed by pills) ---- */
+    --ygg-accent-soft: #e7eefb;
+    --ygg-ok-soft: #d6f3ec;
+    --ygg-warn-soft: #f7edda;
+    --ygg-danger-soft: #fbeae8;
+
+    /* ---- On-dark text ---- */
+    --ygg-text-on-dark: #eef2f8;
+    --ygg-text-on-dark-muted: #9fb0cc;
+
+    /* ---- Per-project accents ---- */
+    --ygg-maxillo: #5b8def;
+    --ygg-maxillo-grad: linear-gradient(135deg, #3f6fd1, #7aa5ff);
+    --ygg-brain: #14a38b;
+    --ygg-brain-grad: linear-gradient(135deg, #0e7c66, #35c3a6);
+    --ygg-laparoscopy: #e0785f;
+    --ygg-laparoscopy-grad: linear-gradient(135deg, #c85a42, #f09a80);
+
+    /* ---- Semantic aliases (what components consume) ----
+     * Kit rule: blue leads, green = life/success, gold = runic wordmark only. */
+    --ygg-primary: var(--ygg-blue-500);
+    --ygg-primary-hover: var(--ygg-blue-600);
+    --ygg-primary-soft: var(--ygg-blue-100);
+    --ygg-on-primary: #ffffff;
+    --ygg-accent2: var(--ygg-green-600);
+    --ygg-accent2-hover: var(--ygg-green-700);
+    --ygg-accent2-soft: var(--ygg-green-100);
+    /* Gold — landing runic wordmark ONLY. Do not consume for UI chrome. */
+    --ygg-accent: var(--ygg-gold-500);
+    --ygg-link: var(--ygg-blue-600);
+
+    /* ---- Status ---- */
+    --ygg-ok: #0e7c66;
+    --ygg-warn: #b7791f;
+    --ygg-danger: #c0392b;
+
+    /* ---- Typography ---- */
+    --ygg-font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --ygg-font-display: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --ygg-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+    --ygg-fs-hero: clamp(2.4rem, 5vw, 3.8rem);
+    --ygg-fs-h1: 1.9rem;
+    --ygg-fs-h2: 1.5rem;
+    --ygg-fs-h3: 1.25rem;
+    --ygg-fs-body: 1rem;
+    --ygg-fs-small: 0.875rem;
+    --ygg-tracking-display: -0.01em;
+    --ygg-tracking-mono: 0.02em;
+
+    /* ---- Shape / elevation ---- */
+    --ygg-radius-sm: 8px;
+    --ygg-radius-md: 12px;
+    --ygg-radius-lg: 16px;
+    --ygg-shadow-card: 0 10px 30px rgba(10, 15, 31, 0.25);
+    --ygg-shadow-card-light: 0 1px 2px rgba(28, 34, 51, 0.06), 0 4px 16px rgba(28, 34, 51, 0.06);
+    --ygg-shadow-pop: 0 8px 28px rgba(14, 21, 36, 0.14);
+
+    color-scheme: light;
+}
+
+/*
+ * ---- Dark theme -------------------------------------------------------------
+ * Sitewide dark mode. The Tailwind semantic colors (surface/line/content/
+ * primary/…) resolve these --ygg-* vars at runtime, so re-pointing the vars
+ * here flips every utility and .ygg-* component with no recompile. The stamp
+ * lives on <html data-theme="dark">, set pre-paint by the inline script in
+ * base.html and toggled from static/js/nav.js.
+ */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* Working surfaces → deep ink/navy atmosphere */
+    --ygg-surface: #0e1524;
+    --ygg-surface-alt: #0a0f1a;
+    --ygg-surface-sunken: #152036;
+    --ygg-surface-2: #152036;
+    --ygg-surface-3: #1c2c48;
+    --ygg-border: #1c2c48;
+    --ygg-border-strong: #294066;
+    --ygg-text: #eef2f8;
+    --ygg-text-muted: #9fb0cc;
+    --ygg-text-faint: #6b7a95;
+
+    /* On-dark aliases equal the base text on a dark ground */
+    --ygg-text-on-dark: #eef2f8;
+    --ygg-text-on-dark-muted: #9fb0cc;
+
+    /* Accents — brighter on dark for contrast. Primary text flips to ink
+     * (the mockups render dark-mode primary buttons as ink-on-blue). */
+    --ygg-primary: var(--ygg-blue-400);
+    --ygg-primary-hover: var(--ygg-blue-500);
+    --ygg-primary-soft: #16233c;
+    --ygg-on-primary: #0e1524;
+    --ygg-accent2: var(--ygg-green-400);
+    --ygg-accent2-hover: var(--ygg-green-300);
+    --ygg-accent2-soft: #0e2a26;
+    --ygg-link: var(--ygg-blue-400);
+    --ygg-accent: var(--ygg-gold-400);
+
+    /* Per-project accents (lighter variants) */
+    --ygg-maxillo: #7aa5ff;
+    --ygg-brain: #35c3a6;
+    --ygg-laparoscopy: #f09a80;
+
+    /* Soft chip backgrounds on dark */
+    --ygg-accent-soft: #16233c;
+    --ygg-ok-soft: #0e2a26;
+    --ygg-warn-soft: #332a15;
+    --ygg-danger-soft: #3a1e1a;
+
+    /* Status foregrounds tuned for dark */
+    --ygg-ok: #35c3a6;
+    --ygg-warn: #dcb968;
+    --ygg-danger: #e88a7d;
+
+    /* Elevation deepens on dark */
+    --ygg-shadow-card: 0 10px 30px rgba(4, 8, 16, 0.55);
+    --ygg-shadow-card-light: 0 10px 30px rgba(4, 8, 16, 0.45);
+    --ygg-shadow-pop: 0 8px 28px rgba(4, 8, 16, 0.6);
+}

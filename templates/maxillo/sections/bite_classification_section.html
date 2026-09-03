@@ -1,15 +1,4 @@
-    <!-- Bite Classification Section -->
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#biteClassificationCollapse" aria-expanded="true" aria-controls="biteClassificationCollapse" style="cursor: pointer;">
-        <h6 class="mb-0"><i class="fas fa-teeth-open me-2"></i>Bite Classification</h6>
-        <div class="d-flex align-items-center">
-            <small class="text-muted me-2">Classify the IOS bite</small>
-            <i class="fas fa-chevron-down collapse-indicator"></i>
-        </div>
-    </div>
-    
-    <div class="collapse show" id="biteClassificationCollapse">
-        <div class="classification-grid">
+        <div class="classification-grid{% if can_modify_segmentation %} classification-grid--editable{% endif %}">
             <div class="classification-legends mb-2">
                 <small class="legend-item">
                     <span class="legend-color ai-prediction"></span>AI Prediction
@@ -19,148 +8,148 @@
                 </small>
             </div>
             
-            <div class="row g-2">
-                <div class="col-4">
+            <div class="classification-fields">
+                <div class="classification-field">
                     <div class="classification-item">
                         <div class="classification-label">Sagittal Left</div>
                         <div class="classification-value" data-field="sagittal_left">
                             {% if manual_classification %}
-                                <button class="value-button manual-verified" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button manual-verified" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="sagittal-left-options"{% endif %}>
                                     {{ manual_classification.get_sagittal_left_display }}
                                 </button>
                             {% elif ai_classification %}
-                                <button class="value-button ai-prediction" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button ai-prediction" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="sagittal-left-options"{% endif %}>
                                     {{ ai_classification.get_sagittal_left_display }}
                                 </button>
                             {% else %}
-                                <button class="value-button" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="sagittal-left-options"{% endif %}>
                                     -
                                 </button>
                             {% endif %}
                             {% if can_modify_segmentation %}
-                                <div class="value-dropdown">
-                                    <div class="dropdown-option" data-value="Unknown">Unknown</div>
-                                    <div class="dropdown-option" data-value="I">Class I</div>
-                                    <div class="dropdown-option" data-value="II_edge">Class II Edge</div>
-                                    <div class="dropdown-option" data-value="II_full">Class II Full</div>
-                                    <div class="dropdown-option" data-value="III">Class III</div>
+                                <div class="value-dropdown" id="sagittal-left-options" role="listbox">
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="Unknown">Unknown</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="I">Class I</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="II_edge">Class II Edge</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="II_full">Class II Full</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="III">Class III</div>
                                 </div>
                             {% endif %}
                         </div>
                     </div>
                 </div>
                 
-                <div class="col-4">
+                <div class="classification-field">
                     <div class="classification-item">
                         <div class="classification-label">Sagittal Right</div>
                         <div class="classification-value" data-field="sagittal_right">
                             {% if manual_classification %}
-                                <button class="value-button manual-verified" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button manual-verified" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="sagittal-right-options"{% endif %}>
                                     {{ manual_classification.get_sagittal_right_display }}
                                 </button>
                             {% elif ai_classification %}
-                                <button class="value-button ai-prediction" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button ai-prediction" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="sagittal-right-options"{% endif %}>
                                     {{ ai_classification.get_sagittal_right_display }}
                                 </button>
                             {% else %}
-                                <button class="value-button" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="sagittal-right-options"{% endif %}>
                                     -
                                 </button>
                             {% endif %}
                             {% if can_modify_segmentation %}
-                                <div class="value-dropdown">
-                                    <div class="dropdown-option" data-value="Unknown">Unknown</div>
-                                    <div class="dropdown-option" data-value="I">Class I</div>
-                                    <div class="dropdown-option" data-value="II_edge">Class II Edge</div>
-                                    <div class="dropdown-option" data-value="II_full">Class II Full</div>
-                                    <div class="dropdown-option" data-value="III">Class III</div>
+                                <div class="value-dropdown" id="sagittal-right-options" role="listbox">
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="Unknown">Unknown</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="I">Class I</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="II_edge">Class II Edge</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="II_full">Class II Full</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="III">Class III</div>
                                 </div>
                             {% endif %}
                         </div>
                     </div>
                 </div>
                 
-                <div class="col-4">
+                <div class="classification-field">
                     <div class="classification-item">
                         <div class="classification-label">Vertical</div>
                         <div class="classification-value" data-field="vertical">
                             {% if manual_classification %}
-                                <button class="value-button manual-verified" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button manual-verified" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="vertical-options"{% endif %}>
                                     {{ manual_classification.get_vertical_display }}
                                 </button>
                             {% elif ai_classification %}
-                                <button class="value-button ai-prediction" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button ai-prediction" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="vertical-options"{% endif %}>
                                     {{ ai_classification.get_vertical_display }}
                                 </button>
                             {% else %}
-                                <button class="value-button" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="vertical-options"{% endif %}>
                                     -
                                 </button>
                             {% endif %}
                             {% if can_modify_segmentation %}
-                                <div class="value-dropdown">
-                                    <div class="dropdown-option" data-value="Unknown">Unknown</div>
-                                    <div class="dropdown-option" data-value="normal">Normal</div>
-                                    <div class="dropdown-option" data-value="deep">Deep Bite</div>
-                                    <div class="dropdown-option" data-value="reverse">Reverse Bite</div>
-                                    <div class="dropdown-option" data-value="open">Open Bite</div>
+                                <div class="value-dropdown" id="vertical-options" role="listbox">
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="Unknown">Unknown</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="normal">Normal</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="deep">Deep Bite</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="reverse">Reverse Bite</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="open">Open Bite</div>
                                 </div>
                             {% endif %}
                         </div>
                     </div>
                 </div>
                 
-                <div class="col-4">
+                <div class="classification-field">
                     <div class="classification-item">
                         <div class="classification-label">Transverse</div>
                         <div class="classification-value" data-field="transverse">
                             {% if manual_classification %}
-                                <button class="value-button manual-verified" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button manual-verified" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="transverse-options"{% endif %}>
                                     {{ manual_classification.get_transverse_display }}
                                 </button>
                             {% elif ai_classification %}
-                                <button class="value-button ai-prediction" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button ai-prediction" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="transverse-options"{% endif %}>
                                     {{ ai_classification.get_transverse_display }}
                                 </button>
                             {% else %}
-                                <button class="value-button" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="transverse-options"{% endif %}>
                                     -
                                 </button>
                             {% endif %}
                             {% if can_modify_segmentation %}
-                                <div class="value-dropdown">
-                                    <div class="dropdown-option" data-value="Unknown">Unknown</div>
-                                    <div class="dropdown-option" data-value="normal">Normal</div>
-                                    <div class="dropdown-option" data-value="cross">Cross Bite</div>
-                                    <div class="dropdown-option" data-value="scissor">Scissor Bite</div>
+                                <div class="value-dropdown" id="transverse-options" role="listbox">
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="Unknown">Unknown</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="normal">Normal</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="cross">Cross Bite</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="scissor">Scissor Bite</div>
                                 </div>
                             {% endif %}
                         </div>
                     </div>
                 </div>
                 
-                <div class="col-4">
+                <div class="classification-field classification-field--wide">
                     <div class="classification-item">
                         <div class="classification-label">Midline</div>
                         <div class="classification-value" data-field="midline">
                             {% if manual_classification %}
-                                <button class="value-button manual-verified" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button manual-verified" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="midline-options"{% endif %}>
                                     {{ manual_classification.get_midline_display }}
                                 </button>
                             {% elif ai_classification %}
-                                <button class="value-button ai-prediction" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button ai-prediction" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="midline-options"{% endif %}>
                                     {{ ai_classification.get_midline_display }}
                                 </button>
                             {% else %}
-                                <button class="value-button" onclick="toggleDropdown(this)">
+                                <button type="button" class="value-button" onclick="toggleDropdown(this)"{% if can_modify_segmentation %} aria-haspopup="listbox" aria-expanded="false" aria-controls="midline-options"{% endif %}>
                                     -
                                 </button>
                             {% endif %}
                             {% if can_modify_segmentation %}
-                                <div class="value-dropdown">
-                                    <div class="dropdown-option" data-value="Unknown">Unknown</div>
-                                    <div class="dropdown-option" data-value="centered">Centered</div>
-                                    <div class="dropdown-option" data-value="deviated">Deviated</div>
+                                <div class="value-dropdown" id="midline-options" role="listbox">
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="Unknown">Unknown</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="centered">Centered</div>
+                                    <div class="dropdown-option" role="option" tabindex="-1" data-value="deviated">Deviated</div>
                                 </div>
                             {% endif %}
                         </div>
@@ -193,6 +182,3 @@
                 </span>
             </div>
         {% endif %}
-    </div>
-</div>
-

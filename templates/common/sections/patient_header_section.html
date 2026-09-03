@@ -1,0 +1,103 @@
+{% load static %}
+{% comment %}
+  Patient-view header — net new (no equivalent existed before the 2.0 rebuild;
+  rename/rerun/delete previously lived only on the patients list or buried in
+  the collapsed Scan Settings card). Shared across all three apps.
+
+  Rename reuses the exact existing contract from static/js/patient_detail.js
+  (initNameEditing(), which grabs the first `.btn-edit-name` / `.scan-name-display`
+  on the page via plain querySelector and POSTs to update-name/) — this is now
+  that one instance; scan_settings_section.html no longer renders its own.
+
+  Rerun/Delete reuse the same endpoints the patients list uses
+  (`patient/<id>/rerun-processing/`, `patient/<id>/delete/`), called directly
+  here rather than via patient_list.js's modal (that JS/modal pair is list-page
+  only) — kept intentionally simple: confirm(), then POST, then reload/redirect.
+  Per-patient Export is not built (not selected by the user).
+{% endcomment %}
+<div class="patient-header">
+    <div class="patient-header__id">
+        <span class="patient-header__avatar">{{ patient.name|default:'?'|slice:':2' }}</span>
+        <div class="patient-header__meta">
+            <div class="patient-header__name-row">
+                <h1 class="patient-header__name scan-name-display"><strong>{{ patient.name|default:"Unnamed scan" }}</strong></h1>
+                {% if can_modify_segmentation %}
+                <button type="button" class="icon-btn icon-btn--xs btn-edit-name" title="Rename">
+                    <i class="fas fa-pen" aria-hidden="true"></i>
+                </button>
+                {% endif %}
+            </div>
+            <div class="patient-header__tags">
+                <span class="patient-header__tagid mono">ID {{ patient.patient_id }}</span>
+                {% for m in patient_modalities %}
+                    {% if m.slug != 'rawzip' %}
+                    <span class="patient-header__pill"><i class="{{ m.icon|default:'fas fa-cube' }}" aria-hidden="true"></i>{% if m.label %}{{ m.label }}{% else %}{{ m.name }}{% endif %}</span>
+                    {% endif %}
+                {% endfor %}
+                {% if patient.project %}<span class="patient-header__folder"><i class="fas fa-briefcase" aria-hidden="true"></i> {{ patient.project.name }}</span>{% endif %}
+                {% if patient.folder %}<span class="patient-header__folder">{{ patient.folder.name }}</span>{% endif %}
+                {% if patient.uploaded_by %}<span class="patient-header__uploader">uploaded by {{ patient.uploaded_by.username }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    {% if user_profile.is_admin %}
+    <div class="patient-header__actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="headerRerunBtn">
+            <i class="fas fa-rotate" aria-hidden="true"></i>Rerun
+        </button>
+        <button type="button" class="btn btn-danger btn-sm" id="headerDeleteBtn">
+            <i class="fas fa-trash" aria-hidden="true"></i>Delete
+        </button>
+    </div>
+    <script>
+    (function () {
+        function csrf() {
+            var m = document.cookie.match(/csrftoken=([^;]+)/);
+            return m ? m[1] : '';
+        }
+        var rerunBtn = document.getElementById('headerRerunBtn');
+        var deleteBtn = document.getElementById('headerDeleteBtn');
+        var patientId = {{ patient.patient_id }};
+
+        if (rerunBtn) {
+            rerunBtn.addEventListener('click', function () {
+                if (!confirm('Rerun processing for all modalities on this patient?')) return;
+                fetch('/' + window.projectNamespace + '/patient/' + patientId + '/rerun-processing/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+                    body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
+                }).then(function (r) { return r.json(); }).then(function (data) {
+                    if (data.success) { window.location.reload(); }
+                    else if (window.appNotify) { window.appNotify('error', data.error || 'Failed to rerun jobs'); }
+                }).catch(function () {
+                    if (window.appNotify) window.appNotify('error', 'Network error');
+                });
+            });
+        }
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', function () {
+                if (!confirm('Delete this patient? This cannot be undone.')) return;
+                fetch('/' + window.projectNamespace + '/patient/' + patientId + '/delete/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+                    body: JSON.stringify({})
+                }).then(function (r) { return r.json(); }).then(function (data) {
+                    if (data.success) { window.location.href = '/' + window.projectNamespace + '/'; }
+                    else if (window.appNotify) { window.appNotify('error', data.error || 'Failed to delete patient'); }
+                }).catch(function () {
+                    if (window.appNotify) window.appNotify('error', 'Network error');
+                });
+            });
+        }
+    })();
+    </script>
+    {% endif %}
+</div>
+{% comment %} Processing step slugs for the header's "rerun all" action (possible for this
+patient, computed in the patient_detail view; excludes nothing at the root,
+downstream steps included). {% endcomment %}
+<script>
+window.__patientHeaderStepSlugs = [
+{% for s in rerunnable_step_slugs %}"{{ s }}"{% if not forloop.last %},{% endif %}{% endfor %}
+];
+</script>

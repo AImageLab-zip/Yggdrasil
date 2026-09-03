@@ -1,24 +1,12 @@
-"""Brain view helper utilities."""
+"""Brain view helper utilities.
 
-from django.shortcuts import redirect, render
-from django.template.loader import select_template
-from django.urls import NoReverseMatch
+`render_with_fallback` / `redirect_with_namespace` live in
+`common/view_helpers.py` and are re-exported here so brain call sites keep their
+import path. The old brain-local copies hardcoded the "brain" namespace; the
+shared ones read it off ``request.resolver_match``, which is what brain's URLs
+supply anyway.
+"""
 
+from common.view_helpers import redirect_with_namespace, render_with_fallback
 
-def render_with_fallback(request, base_template_name: str, context: dict):
-    candidates = [
-        f"brain/{base_template_name}.html",
-        f"common/{base_template_name}.html",
-    ]
-    template = select_template(candidates)
-    return render(request, template.template.name, context)
-
-
-def redirect_with_namespace(request, name: str, *args, **kwargs):
-    try:
-        return redirect(f"brain:{name}", *args, **kwargs)
-    except NoReverseMatch:
-        try:
-            return redirect(name, *args, **kwargs)
-        except NoReverseMatch:
-            return redirect("/")
+__all__ = ["render_with_fallback", "redirect_with_namespace"]

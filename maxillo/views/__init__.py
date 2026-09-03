@@ -14,7 +14,10 @@ from .auth import register, invitation_list, delete_invitation
 from .patient_list import home, select_project, patient_list
 
 # Patient upload
-from .patient_upload import upload_patient
+from .patient_upload import bulk_upload_patients, upload_patient
+
+# Batch default-panoramic generation
+from .panoramic_warmup import panoramic_warmup, panoramic_warmup_pending
 
 # Classification
 from .classification import update_classification
@@ -26,9 +29,7 @@ from .folders_tags import (
     add_patient_tag,
     remove_patient_tag,
     folder_stats,
-    folder_permissions,
-    upsert_folder_permission,
-    delete_folder_permission,
+    delete_folder,
     rename_folder,
 )
 
@@ -45,21 +46,17 @@ from .patient_data import (
     patient_cbct_data,
     patient_volume_data,
     patient_panoramic_data,
+    save_browser_panoramic,
     patient_intraoral_data,
     patient_teleradiography_data,
-    patient_panoramic_data,
+    calibrate_image_pixel_spacing,
     save_rgb_image_edit,
 )
 
 # Intraoral segmentation APIs
-from .intraoral_segmentation import (
-    patient_intraoral_segmentation_data,
-    update_patient_intraoral_segmentation,
-)
 
 # Voice captions
 from .voice_captions import (
-    upload_voice_caption,
     delete_voice_caption,
     upload_text_caption,
     edit_voice_caption_transcription,
@@ -67,7 +64,7 @@ from .voice_captions import (
 )
 
 # Admin
-from .admin import rerun_processing, bulk_rerun_processing, admin_control_panel
+from .admin import rerun_processing, bulk_rerun_processing
 
 # Metadata
 from .metadata import get_nifti_metadata, update_nifti_metadata
@@ -104,6 +101,9 @@ __all__ = [
     'patient_list',
     # Upload
     'upload_patient',
+    'bulk_upload_patients',
+    'panoramic_warmup',
+    'panoramic_warmup_pending',
     # Detail
     'patient_detail',
     'update_patient_name',
@@ -116,14 +116,12 @@ __all__ = [
     'patient_cbct_data',
     'patient_volume_data',
     'patient_panoramic_data',
+    'save_browser_panoramic',
     'patient_intraoral_data',
     'patient_teleradiography_data',
-    'patient_panoramic_data',
+    'calibrate_image_pixel_spacing',
     'save_rgb_image_edit',
-    'patient_intraoral_segmentation_data',
-    'update_patient_intraoral_segmentation',
     # Voice captions
-    'upload_voice_caption',
     'delete_voice_caption',
     'upload_text_caption',
     'edit_voice_caption_transcription',
@@ -134,7 +132,6 @@ __all__ = [
     # Admin
     'rerun_processing',
     'bulk_rerun_processing',
-    'admin_control_panel',
     # Metadata
     'get_nifti_metadata',
     'update_nifti_metadata',
@@ -144,9 +141,7 @@ __all__ = [
     'add_patient_tag',
     'remove_patient_tag',
     'folder_stats',
-    'folder_permissions',
-    'upsert_folder_permission',
-    'delete_folder_permission',
+    'delete_folder',
     'rename_folder',
     # Profile
     'user_profile',

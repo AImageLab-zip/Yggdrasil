@@ -1,4 +1,41 @@
-from common.models import Project, ProjectAccess
+from django.conf import settings
+
+from common.models import Project, ProjectAccess, SiteMaintenance
+
+
+def app_meta(request):
+    from common.demo import is_demo_guest
+    return {
+        'app_version': getattr(settings, 'APP_VERSION', ''),
+        'is_demo_guest': is_demo_guest(getattr(request, 'user', None)),
+    }
+
+
+def site_maintenance(request):
+    try:
+        return {'site_maintenance': SiteMaintenance.get_solo()}
+    except Exception:
+        # Keeps deploys safe while migrations are being applied.
+        return {'site_maintenance': None}
+
+
+def user_prefs(request):
+    """Expose cross-app per-user UI preferences to every template.
+
+    Currently the report-template language (EN/IT/DE), read by the shared
+    Report Template panel under Voice Captions in all three domains.
+    """
+    language = 'it'
+    user = getattr(request, 'user', None)
+    if user is not None and getattr(user, 'is_authenticated', False):
+        try:
+            from common.models import UserPreference
+            pref = UserPreference.objects.filter(user=user).first()
+            if pref:
+                language = pref.report_language
+        except Exception:
+            pass
+    return {'report_language': language}
 
 
 def current_project(request):

@@ -1,9 +1,0 @@
-/* General shared styles */
-.uniform-btn { min-width: 90px; height: 32px; line-height: 18px; }
-.text-muted { color: #6c757d !important; }
-.badge { font-weight: 500; }
-
-/* Upload form organization section */
-.upload-organization h5 { color: #495057; border-bottom: 2px solid #e9ecef; padding-bottom: 0.5rem; }
-.upload-organization .form-label { font-weight: 600; color: #495057; }
-.upload-organization .form-text { color: #6c757d; font-size: 0.875rem; } 

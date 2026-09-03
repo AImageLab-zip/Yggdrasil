@@ -1,7 +1,10 @@
-{% extends 'base.html' %}
+{% extends 'common/base_app.html' %}
 {% load static %}
+{% load cornerstone %}
 
 {% block title %}Patient {{ patient.name }} - Yggdrasil{% endblock %}
+
+{% block main_class %}mx-auto px-4 pt-4{% endblock %}
 
 {% block extra_css %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
@@ -9,6 +12,7 @@
 <link rel="stylesheet" href="{% static 'css/image_viewer.css' %}">
 {% if ns == 'maxillo' %}
 <link rel="stylesheet" href="{% static 'css/intraoral_segmentation.css' %}">
+<link rel="stylesheet" href="{% static 'css/cbct_panorex_editor.css' %}">
 {% endif %}
 {% endblock %}
 
@@ -21,54 +25,73 @@
 
 {% block extra_js %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
-<script id="django-data" type="application/json">
-{
-    "canEdit": {{ can_modify_segmentation|yesno:"true,false" }},
-    "scanId": {{ patient.patient_id }},
-    "hasIOS": {{ patient.has_ios_scans|yesno:"true,false" }},
-    "hasCBCT": {{ has_cbct|yesno:"true,false" }},
-    "isCBCTProcessed": {{ patient.is_cbct_processed|yesno:"true,false" }},
-    "modalities": {{ patient_modalities_json|safe }},
-    "defaultModality": {{ default_modality_json|safe }}
-}
-</script>
-{# Core volume rendering #}
-<script src="{% static 'js/volume_renderer.js' %}"></script>
-
-{# Volume loading (preload cache + Web Worker support) #}
-<script src="{% static 'js/modality_viewers/volume_loader.js' %}"></script>
-
+{{ django_data|json_script:"django-data" }}
 {# Modality-specific viewers #}
-<script src="{% static 'js/modality_viewers/ios.js' %}"></script>
+<script src="{% static 'js/volume_metadata.js' %}"></script>
 {% if ns == 'maxillo' %}
-<script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.67.0/dist/niivue.umd.min.js"></script>
-<script src="{% static 'js/modality_viewers/niivue_viewer.js' %}"></script>
-<script src="{% static 'js/viewer_grid.js' %}"></script>
-<script src="{% static 'js/modality_viewers/maxillo_cbct_grid_adapter.js' %}"></script>
-{% else %}
-<script src="{% static 'js/modality_viewers/cbct.js' %}"></script>
+{% comment %}
+IOS meshes and the landmark tool (roadmap Phase 6). Replaces
+static/js/modality_viewers/ios.js and, with it, the three Three.js r128 CDN tags that
+used to sit in base.html -- that file was their only consumer.
+
+Inside the maxillo guard, unlike the script tag it replaces: ios.js was loaded on the
+brain and laparoscopy patient pages too, where it downloaded 1539 lines and then
+returned because #scan-viewer does not exist there.
+{% endcomment %}
+{% cornerstone_entry 'mesh-landmarks' %}
+{% comment %}
+Cornerstone3D volume grid (roadmap Phase 3). Replaces NiiVue, viewer_grid.js and
+maxillo_cbct_grid_adapter.js. `volume_metadata.js` above stays: the CBCT conversion
+worker still parses headers through it (finding F2).
+{% endcomment %}
+{% cornerstone_entry 'volume-grid' %}
 {% endif %}
-<script src="{% static 'js/modality_viewers/intraoral.js' %}"></script>
+{% comment %}
+    rgb_editor.js survives Phases 4+5 and is NOT scaffolding. It is a *geometric* editor
+    -- crop, mirror, rotate -- and it writes the `*_processed` FileRegistry rows the
+    export catalog and `is_processed` both read. No Cornerstone tool replaces any of
+    that, so deleting it would be a capability regression dressed up as a migration.
+    What Phases 4+5 removed is its mounting from the two old viewers; the photo stack's
+    Edit button opens it instead.
+{% endcomment %}
 <script src="{% static 'js/modality_viewers/rgb_editor.js' %}"></script>
-<script src="{% static 'js/modality_viewers/teleradiography.js' %}"></script>
 <script src="{% static 'js/modality_viewers/panoramic.js' %}"></script>
+{% if ns == 'maxillo' %}
+{% comment %}
+    Photo stacks on Cornerstone3D: teleradiography (Phase 4) and the intraoral
+    photographs with tooth segmentation (Phase 5). One entry, two surfaces -- it mounts
+    one stack per payload element on the page, each with its own ids and its own
+    rendering engine. Replaces modality_viewers/teleradiography.js,
+    modality_viewers/intraoral.js and intraoral_segmentation.js.
+{% endcomment %}
+{% cornerstone_entry 'photo-stack' %}
+{% endif %}
 
 {# Main patient detail controller #}
 <script src="{% static 'js/patient_detail.js' %}"></script>
 {% if ns == 'maxillo' %}
-<script src="https://cdn.jsdelivr.net/npm/konva@9.3.20/konva.min.js"></script>
-<script src="{% static 'js/intraoral_segmentation.js' %}"></script>
-{% endif %}
-
-{# Brain STT: load transformers.js as a classic script so document.currentScript #}
-{# is available during ONNX/wasm initialisation (null inside dynamic import()). #}
-{% if ns == 'brain' %}
-<script src="{% static 'vendor/transformers/dist/transformers.min.js' %}"></script>
+{% comment %}
+    The panoramic's reconstruction core, and the one script the Cornerstone bundle reads
+    through a global rather than importing. Decision #8 requires the exported strips to
+    keep their bytes, so this file is untouched by the migration and is *the* implementation
+    of the arch mathematics -- bundling a copy would create the second one this phase
+    exists to avoid. A classic script, so it has run before the deferred module below.
+{% endcomment %}
+<script src="{% static 'js/seg2pano_core.js' %}"></script>
+{% comment %}
+    The panoramic on Cornerstone3D + vtk.js ImageCPRMapper (Phase 7). The arch is edited on
+    an axial viewport and the strip reformats live as it moves; the strip that is *saved*
+    is still baked by seg2pano_core.js above. Replaces modality_viewers/cbct_panorex_editor.js.
+{% endcomment %}
+{% cornerstone_entry 'panoramic-cpr' %}
 {% endif %}
 
 {# Additional features #}
 <script src="{% static 'js/vocal_caption.js' %}"></script>
 <script src="{% static 'js/nifti_metadata.js' %}"></script>
-<script src="{% static 'js/collapse_sections.js' %}"></script>
+<script src="{% static 'js/cbct_convert.js' %}"></script>
 <script src="{% static 'js/cbct_upload.js' %}"></script>
+
+{# Sidebar tab controller (Classification/Captions/Files/Metadata/Settings/Activity) #}
+<script src="{% static 'js/patient_tabs.js' %}"></script>
 {% endblock %}

@@ -22,8 +22,6 @@ def _detect_extension_and_format(filename_lower: str):
         return ".nii.gz", "nifti_compressed"
     if filename_lower.endswith(".nii"):
         return ".nii", "nifti"
-    if filename_lower.endswith((".dcm", ".dicom")):
-        return ".dcm", "dicom_single"
     return os.path.splitext(filename_lower)[1] or ".bin", "unknown"
 
 
@@ -96,5 +94,9 @@ def save_brain_modality_file(patient, modality_slug, uploaded_file):
         job.started_at = job.started_at or timezone.now()
         job.completed_at = timezone.now()
         job.save(update_fields=["started_at", "completed_at"])
+    elif job and job.status == "pending":
+        # Spawn the modality's downstream step pipeline, if any is declared.
+        from common.uploads import create_step_jobs
+        create_step_jobs(job)
 
     return file_registry, job

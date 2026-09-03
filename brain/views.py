@@ -12,11 +12,23 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse, Http404, HttpResponseGone
 from django.utils import timezone
 from django.contrib.auth.views import redirect_to_login
 
+from common.annotation_lock import annotation_lock_reasons, lock_message
+from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
+from common.demo import landing_demo_url
+from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
+from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
+from common.modality_config import (
+    modality_status,
+    rerun_step_labels,
+    rerunnable_steps_for_patient,
+)
+from common import export_catalog, export_ui
+from common.project_filters import presence_filter_specs
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
 from common.permissions import (
@@ -24,25 +36,25 @@ from common.permissions import (
     filter_patients_for_user,
     user_can_delete_single_patient,
     user_can_edit_caption,
-    user_can_read_folder,
-    user_can_write_annotations,
+    user_can_write_patient_annotations,
+    project_allows_annotation,
+    user_has_project_access,
     user_is_project_admin,
 )
 
-from maxillo.utils.export_processor import ExportProcessor, start_export_processing
-from maxillo.views.export import (
-    _build_shared_download_url,
-    _coerce_bool,
-    _kill_export_processes,
-    _recover_stuck_export,
-    _resolve_content_selection,
+from common.export_processing import (
+    ExportProcessor,
+    start_export_processing,
+    build_shared_download_url as _build_shared_download_url,
     format_file_size,
+    kill_export_processes as _kill_export_processes,
+    recover_stuck_export as _recover_stuck_export,
 )
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from .helpers import redirect_with_namespace, render_with_fallback
-from .models import Export, Folder, FolderAccess, Patient, Tag, UserPreference
+from .models import Export, Folder, Patient, Tag
 
 
 logger = logging.getLogger(__name__)
@@ -58,13 +70,16 @@ def home(request):
         if current_project_id:
             current_project = projects.filter(id=current_project_id).first()
             current_project_name = current_project.name if current_project else None
+        ordered_projects = order_projects_for_landing(projects)
         return render(request, "common/landing.html", {
-            "projects": projects.order_by("name"),
+            "projects": ordered_projects,
+            "landing_cards": landing_domain_cards(),
             "current_project_id": current_project_id,
             "current_project_name": current_project_name,
             "continue_url": "/brain/" if current_project_name else None,
+            "demo_url": landing_demo_url(),
         })
-    return render(request, "common/landing.html")
+    return render(request, "common/landing.html", {"demo_url": landing_demo_url()})
 
 
 @login_required
@@ -76,15 +91,14 @@ def select_project(request, project_id):
             messages.error(request, f"You don't have access to the {project.name} project.")
             return redirect("home")
     request.session["current_project_id"] = project.id
-    messages.success(request, f"Project set to {project.name}")
     return redirect("brain:patient_list")
 
 
 @login_required
 def patient_detail(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view = bool(any(user_can_read_folder(request.user, f, request) for f in patient.folders.all()))
-    if user_is_project_admin(request.user, "brain"):
+    can_view = bool(patient.project and user_has_project_access(request.user, patient.project))
+    if user_is_project_admin(request.user, patient.project):
         can_view = True
     if not can_view:
         messages.error(request, "You do not have permission to view this scan.")
@@ -92,8 +106,8 @@ def patient_detail(request, patient_id):
 
     management_form = PatientManagementForm(instance=patient, user=request.user)
 
-    can_modify = bool(any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all()))
-    if user_is_project_admin(request.user, "brain"):
+    can_modify = bool(patient.project and user_can_write_patient_annotations(request.user, patient))
+    if user_is_project_admin(request.user, patient.project):
         can_modify = True
 
     if request.method == "POST" and can_modify:
@@ -150,16 +164,17 @@ def patient_detail(request, patient_id):
             patient_files["other"].append(file_data)
 
     voice_captions = patient.voice_captions.all()
-    is_admin_user = user_is_project_admin(request.user, "brain")
+    is_admin_user = user_is_project_admin(request.user, patient.project)
     for caption in voice_captions:
         caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
         caption.can_edit_content = bool(is_admin_user or caption.user_id == request.user.id)
         caption.is_ghost = not caption.can_view_content
 
-    pref = UserPreference.objects.filter(user=request.user).first()
     allowed_modalities = list(Modality.objects.filter(projects__id=request.session.get("current_project_id"), is_active=True))
     if not allowed_modalities:
         allowed_modalities = list(Modality.objects.filter(is_active=True))
+
+    _brain_raw_lock_reasons = annotation_lock_reasons(patient)
 
     context = {
         "patient": patient,
@@ -167,24 +182,74 @@ def patient_detail(request, patient_id):
         "management_form": management_form,
         "has_cbct": False,
         "has_uploaded_panoramic": False,
-        "has_intraoral_modality": False,
         "can_modify_segmentation": can_modify,
         "can_create_caption": can_modify,
         "patient_modalities": patient_modalities,
         "default_modality_slug": next((m["slug"] for m in patient_modalities if m["slug"] != "braintumor-mri-seg"), None),
-        "patient_modalities_json": _json.dumps(patient_modalities),
-        "default_modality_json": _json.dumps(next((m["slug"] for m in patient_modalities if m["slug"] != "braintumor-mri-seg"), None)),
+        # Structured payloads rendered via |json_script (XSS-safe, no |safe needed)
+        "django_data": {
+            "canEdit": bool(can_modify),
+            "scanId": patient.patient_id,
+            "hasIOS": bool(getattr(patient, "has_ios_scans", False)),
+            "hasCBCT": False,
+            "isCBCTProcessed": bool(getattr(patient, "is_cbct_processed", False)),
+            "modalities": patient_modalities,
+            "defaultModality": next((m["slug"] for m in patient_modalities if m["slug"] != "braintumor-mri-seg"), None),
+        },
+        "viewer_grid_data": {
+            "scanId": patient.patient_id,
+            "projectNamespace": (request.resolver_match.namespace if request.resolver_match else None) or "brain",
+            "modalityFiles": modality_files,
+            "segmentationFile": segmentation_file,
+            # Stated rather than left to the client's default. Brain is the surface
+            # drag-and-drop exists for -- four co-registered sequences and no single
+            # primary -- and the flag now decides two things: that the chips are bound,
+            # and that the four windows start *empty* rather than showing one
+            # arbitrarily-chosen series four times over.
+            # maxillo/views/patient_detail.py sets it False for the CBCT grid, whose
+            # windows are three fixed planes and a render.
+            "enableDragDrop": True,
+        },
         "patient_files": patient_files,
+        # Brain has no add/remove raw controls of its own, but it renders the
+        # shared file-management section, so it carries the same lock banner.
+        "raw_data_locked": bool(_brain_raw_lock_reasons),
+        "raw_lock_message": lock_message(_brain_raw_lock_reasons),
         "voice_captions": voice_captions,
         "is_admin_user": is_admin_user,
         "modality_files": modality_files,
-        "modality_files_json": _json.dumps(modality_files),
         "segmentation_file": segmentation_file,
-        "segmentation_file_json": _json.dumps(segmentation_file),
+        "rerunnable_step_slugs": [
+            m["slug"] for m in patient_modalities
+            if m.get("slug") not in ("rawzip", "braintumor-mri-seg")
+        ],
         "allowed_modalities": allowed_modalities,
         "allowed_modality_slugs": [m.slug for m in allowed_modalities],
-        "report_language": pref.report_language if pref else "it",
+        # report_language now provided globally by common.context_processors.user_prefs
     }
+
+    # Annotation methods + sidebar default tab (captions pane hides when the
+    # project disables voice_caption).
+    allowed_annotations = []
+    if getattr(patient, "project", None) is not None:
+        allowed_annotations = list(
+            patient.project.annotation_methods
+            .filter(is_active=True)
+            .values_list("slug", flat=True)
+        )
+    captions_enabled = "voice_caption" in allowed_annotations
+    context["allowed_annotations"] = allowed_annotations
+    context["captions_enabled"] = captions_enabled
+    context["default_tab"] = "captions" if captions_enabled else "files"
+    context["occlusion_enabled"] = False
+
+    # Record for the landing "Continue where you left off" strip (best-effort).
+    from common.activity import record_recent
+    record_recent(
+        request.user, "brain", patient.patient_id,
+        patient_name=getattr(patient, "name", "") or "",
+        project_label="Brain",
+    )
     return render_with_fallback(request, "patient_detail", context)
 
 
@@ -212,10 +277,10 @@ def patient_list(request):
     folder_id = request.GET.get("folder")
     if folder_id and folder_id != "all":
         if folder_id == "root":
-            patients = patients.filter(folders__isnull=True)
+            patients = patients.filter(folder__isnull=True)
         else:
             try:
-                patients = patients.filter(folders__id=int(folder_id)).distinct()
+                patients = patients.filter(folder_id=int(folder_id))
             except ValueError:
                 pass
 
@@ -223,15 +288,33 @@ def patient_list(request):
     if tags_selected:
         patients = patients.filter(tags__name__in=tags_selected).distinct()
 
+    has_reports_filter = request.GET.get("has_reports", "")
+    if has_reports_filter == "yes":
+        patients = patients.filter(voice_captions__isnull=False).distinct()
+
     patients = patients.order_by("-uploaded_at")
     allowed_modalities = []
+    current_project = None
     if current_project_id:
-        project = Project.objects.filter(id=current_project_id).prefetch_related("modalities").first()
+        project = (
+            Project.objects.filter(id=current_project_id)
+            .prefetch_related("modalities", "annotation_methods")
+            .first()
+        )
         if project:
+            current_project = project
             allowed_modalities = list(project.modalities.filter(is_active=True))
 
+    status_filters = {}
+    for modality in allowed_modalities:
+        slug = modality.slug or ""
+        if slug and slug != "rawzip":
+            value = request.GET.get(f"status_{slug}", "").strip()
+            if value in {"processed", "processing", "failed"}:
+                status_filters[slug] = value
+
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, "brain")
+    is_admin = user_is_project_admin(request.user, request)
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -248,16 +331,11 @@ def patient_list(request):
             slug = modality.slug or ""
             if slug in {"rawzip", "voice"}:
                 continue
-            jobs = jobs_by_modality.get(slug, [])
-            status = "absent"
-            if any(job.status == "failed" for job in jobs):
-                status = "failed"
-            elif any(job.status == "processing" for job in jobs):
-                status = "processing"
-            elif any(job.status in ["pending", "retrying"] for job in jobs):
-                status = "pending"
-            elif files_by_modality.get(slug):
-                status = "processed"
+            status = modality_status(
+                slug,
+                jobs_by_modality.get(slug, []),
+                bool(files_by_modality.get(slug)),
+            )
             modality_status_list.append({
                 "slug": slug,
                 "name": modality.name,
@@ -272,34 +350,75 @@ def patient_list(request):
             "voice_caption_count": len(voice_captions),
             "voice_annotators": list({vc.user.username for vc in voice_captions}),
             "tags": patient.tag_names(),
-            "folder": patient.folders.first(),
+            "folder": patient.folder,
             "available_modalities": [m.slug for m in patient.modalities.all()],
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
-            "can_delete": bool(is_admin or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())),
+            "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient),
+            "can_delete": bool(is_admin or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))),
         })
 
-    per_page = int(request.GET.get("per_page", 20))
+    if status_filters:
+        patients_with_status = [
+            item for item in patients_with_status
+            if all(item["modality_statuses"].get(slug, "absent") == value for slug, value in status_filters.items())
+        ]
+
+    try:
+        per_page = int(request.GET.get("per_page", 10))
+    except (TypeError, ValueError):
+        per_page = 10
+    if per_page not in {10, 20, 50, 100}:
+        per_page = 10
     page_obj = Paginator(patients_with_status, per_page).get_page(request.GET.get("page"))
-    folders = filter_folders_for_user(request.user, Folder.objects.filter(parent__isnull=True).order_by("name"), "brain")
+    project_id = current_project_id
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True)
+        .filter(project_id=project_id if project_id else None)
+        .order_by("name"),
+        "brain",
+    )
+    projects_for_sidebar = Project.objects.filter(domain="brain", is_active=True)
+    if not request.user.is_staff:
+        accessible_project_ids = ProjectAccess.objects.filter(
+            user=request.user
+        ).values_list("project_id", flat=True)
+        projects_for_sidebar = projects_for_sidebar.filter(id__in=accessible_project_ids)
     context = {
         "page_obj": page_obj,
         "current_project_id": current_project_id,
+        "projects": projects_for_sidebar.order_by("name"),
         "search_query": search_query,
         "folder_id": folder_id or "all",
         "selected_tags": tags_selected,
-        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folders=folder).count()} for folder in folders],
+        "folders": [{"folder": folder, "patient_count": patients_for_folder_counts.filter(folder=folder).count()} for folder in folders],
         "all_tags": Tag.objects.all().order_by("name"),
         "per_page": per_page,
         "user_profile": request.user.profile,
         "is_admin_user": is_admin,
+        "has_reports_filter": has_reports_filter,
+        # Shared filter bar: only the annotations this project collects. Brain
+        # collects voice captions; the maxillo-only entries never apply here
+        # because their annotation methods are not enabled on brain projects.
+        "presence_filter_specs": presence_filter_specs(
+            request, current_project, {m.slug for m in allowed_modalities}
+        ),
         "allowed_modalities": allowed_modalities,
-        "status_filters": {},
+        "status_filters": status_filters,
         "modality_filter_specs": [
-            {"slug": m.slug, "name": m.name, "icon": m.icon or "", "label": m.label or "", "value": ""}
+            {"slug": m.slug, "name": m.name, "icon": m.icon or "", "label": m.label or "", "value": status_filters.get(m.slug, "")}
             for m in allowed_modalities
             if m.slug != "rawzip"
         ],
+        "rerun_step_labels": rerun_step_labels(
+            None,
+            [
+                {"slug": m.slug, "name": m.name, "label": m.label or "", "status": None}
+                for m in allowed_modalities
+                if m.slug != "rawzip"
+            ],
+        ),
     }
     return render_with_fallback(request, "patient_list", context)
 
@@ -317,11 +436,42 @@ def upload_patient(request):
         messages.error(request, "You do not have permission to upload scans.")
         return redirect_with_namespace(request, "patient_list")
 
+    current_project_id = request.session.get("current_project_id")
+    folders = filter_folders_for_user(
+        request.user,
+        Folder.objects.filter(parent__isnull=True)
+        .filter(project_id=current_project_id if current_project_id else None)
+        .order_by("name"),
+        namespace,
+    )
+    allowed_modalities = []
+    if current_project_id:
+        try:
+            project = Project.objects.prefetch_related("modalities").get(id=current_project_id)
+            allowed_modalities = list(project.modalities.filter(is_active=True).exclude(slug="rawzip"))
+        except Project.DoesNotExist:
+            pass
+
     if request.method == "POST":
-        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
+        patient_upload_form = PatientUploadForm(
+            request.POST, request.FILES, user=request.user, current_project=project
+        )
         patient_form = PatientForm()
 
-        if patient_upload_form.is_valid():
+        brain_upload_fields = {
+            "braintumor-mri-t1",
+            "braintumor-mri-t2",
+            "braintumor-mri-flair",
+            "braintumor-mri-t1c",
+            "braintumor-mri-seg",
+        }
+        has_upload = any(request.FILES.getlist(field_name) for field_name in brain_upload_fields)
+        form_is_valid = patient_upload_form.is_valid()
+        if form_is_valid and not has_upload:
+            patient_upload_form.add_error(None, "Add at least one file before uploading.")
+            form_is_valid = False
+
+        if form_is_valid:
             patient = patient_upload_form.save(commit=False)
             patient.uploaded_by = request.user
 
@@ -345,14 +495,20 @@ def upload_patient(request):
                         "patient_form": patient_form,
                         "patient_upload_form": patient_upload_form,
                         "folders": allowed_folders,
+                        "allowed_modalities": allowed_modalities,
                     })
 
             patient.save()
             patient_upload_form.instance = patient
             patient_upload_form.save(commit=True)
 
+            # Project scope is mandatory: assign the current project + folder.
+            project = Project.objects.filter(id=current_project_id).first() if current_project_id else None
+            if project:
+                patient.project = project
             if folder:
-                patient.folders.set([folder])
+                patient.folder = folder
+            patient.save()
 
             uploaded_modalities = []
             processing_job_ids = []
@@ -396,22 +552,7 @@ def upload_patient(request):
             return redirect_with_namespace(request, "patient_list")
     else:
         patient_form = PatientForm()
-        patient_upload_form = PatientUploadForm(user=request.user)
-
-    folders = filter_folders_for_user(
-        request.user,
-        Folder.objects.filter(parent__isnull=True).order_by("name"),
-        namespace,
-    )
-
-    allowed_modalities = []
-    current_project_id = request.session.get("current_project_id")
-    if current_project_id:
-        try:
-            project = Project.objects.prefetch_related("modalities").get(id=current_project_id)
-            allowed_modalities = list(project.modalities.filter(is_active=True))
-        except Project.DoesNotExist:
-            pass
+        patient_upload_form = PatientUploadForm(user=request.user, current_project=project)
 
     return render(request, "common/upload/upload.html", {
         "patient_form": patient_form,
@@ -433,8 +574,9 @@ def _with_brain_export_mappings(view_func):
 @require_POST
 def update_patient_name(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not user_is_project_admin(request.user, "brain") and not (
-        any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
+    if not (
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
     try:
@@ -454,8 +596,8 @@ def update_patient_name(request, patient_id):
 def delete_patient(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     can_delete = bool(
-        user_is_project_admin(request.user, "brain")
-        or any(user_can_delete_single_patient(request.user, f, request) for f in patient.folders.all())
+        user_is_project_admin(request.user, patient.project)
+        or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))
     )
     if not can_delete:
         return JsonResponse(
@@ -638,82 +780,30 @@ def rename_folder(request, folder_id):
 @login_required
 @require_http_methods(["DELETE"])
 def delete_folder(request, folder_id):
-    if not user_is_project_admin(request.user, "brain"):
+    """Delete a brain folder. Patients survive, unfiled.
+
+    The rule lives in :func:`common.deletion.delete_folder` so the three domains
+    cannot drift: this copy counted only the folder's *direct* patients, so a
+    folder with populated sub-folders read as empty and took them silently.
+    """
+    folder = get_object_or_404(Folder, id=folder_id)
+    # The folder's own project, not the domain slug: passing "brain" makes
+    # `_project_from_context` fall back to the first active brain project by
+    # name, so with more than one brain project the check consulted the wrong
+    # one -- refusing its own admins and admitting another project's.
+    if not user_is_project_admin(request.user, folder.project):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
 
-    folder = get_object_or_404(Folder, id=folder_id)
-
-    patient_count = folder.patients.count()
-    force = request.GET.get("force") == "true"
-    if patient_count and not force:
+    try:
+        unfiled = _delete_folder(folder, force=request.GET.get("force") == "true")
+    except FolderNotEmpty as exc:
         return JsonResponse(
-            {
-                "success": False,
-                "error": (
-                    f"Folder still contains {patient_count} patient(s). "
-                    "Move or delete them first, or pass ?force=true to delete the folder anyway."
-                ),
-            },
+            {"success": False, "error": str(exc), "patient_count": exc.patient_count},
             status=400,
         )
-
-    folder.delete()
-    return JsonResponse({"success": True})
+    return JsonResponse({"success": True, "unfiled_patients": unfiled})
 
 
-@login_required
-def folder_permissions(request, folder_id):
-    folder = get_object_or_404(Folder, id=folder_id)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    rows = folder.access_list.select_related("user").order_by("user__username")
-    users = User.objects.filter(is_active=True).order_by("username")
-    return JsonResponse(
-        {
-            "success": True,
-            "folder": {"id": folder.id, "name": folder.name},
-            "permissions": [
-                {"user_id": row.user_id, "username": row.user.username, "role": row.role}
-                for row in rows
-            ],
-            "users": [{"id": user.id, "username": user.username} for user in users],
-        }
-    )
-
-
-@login_required
-@require_POST
-def upsert_folder_permission(request, folder_id):
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    folder = get_object_or_404(Folder, id=folder_id)
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    user_id = data.get("user_id")
-    role = data.get("role")
-    valid_roles = {choice[0] for choice in FolderAccess.ROLE_CHOICES}
-    if role not in valid_roles:
-        return JsonResponse({"success": False, "error": "Invalid role"}, status=400)
-    if not user_id:
-        return JsonResponse({"success": False, "error": "user_id required"}, status=400)
-    row, _ = FolderAccess.objects.update_or_create(
-        folder=folder,
-        user_id=user_id,
-        defaults={"role": role},
-    )
-    return JsonResponse({"success": True, "user_id": row.user_id, "role": row.role})
-
-
-@login_required
-@require_http_methods(["DELETE"])
-def delete_folder_permission(request, folder_id, user_id):
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    folder = get_object_or_404(Folder, id=folder_id)
-    FolderAccess.objects.filter(folder=folder, user_id=user_id).delete()
-    return JsonResponse({"success": True})
 
 
 @login_required
@@ -735,7 +825,10 @@ def move_patients_to_folder(request):
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        patient.folders.set([folder] if folder else [])
+        patient.folder = folder
+        if folder:
+            patient.project = folder.project
+        patient.save(update_fields=["folder", "project"])
         updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
@@ -759,7 +852,9 @@ def add_patients_to_folder(request):
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        patient.folders.add(folder)
+        patient.folder = folder
+        patient.project = folder.project
+        patient.save(update_fields=["folder", "project"])
         updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
@@ -783,7 +878,13 @@ def remove_patients_from_folder(request):
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        patient.folders.remove(folder)
+        if patient.folder_id != folder.id:
+            continue
+        # Folders are mandatory: removing a folder falls back to the project's
+        # default folder rather than leaving the patient folderless.
+        default_folder = Folder.objects.filter(project=patient.project, parent__isnull=True).first()
+        patient.folder = default_folder or folder
+        patient.save(update_fields=["folder"])
         updated += 1
     return JsonResponse({"success": True, "updated": updated})
 
@@ -793,8 +894,8 @@ def remove_patients_from_folder(request):
 def add_patient_tag(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
-        user_is_project_admin(request.user, "brain")
-        or any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
@@ -814,8 +915,8 @@ def add_patient_tag(request, patient_id):
 def remove_patient_tag(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     if not (
-        user_is_project_admin(request.user, "brain")
-        or any(user_can_write_annotations(request.user, f, request) for f in patient.folders.all())
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
@@ -833,14 +934,16 @@ def remove_patient_tag(request, patient_id):
 
 
 @login_required
-def upload_voice_caption(request, patient_id):
-    return JsonResponse({"error": "Voice captions are handled by text captions for Brain."}, status=400)
-
-
-@login_required
 @require_POST
 def upload_text_caption(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        user_is_project_admin(request.user, patient.project)
+        or user_can_write_patient_annotations(request.user, patient)
+    ):
+        return JsonResponse({"error": "Permission denied"}, status=403)
+    if not project_allows_annotation(patient, "voice_caption"):
+        return JsonResponse({"error": "Voice captions are disabled for this project"}, status=403)
     try:
         data = _json.loads(request.body) if request.body else request.POST
     except _json.JSONDecodeError:
@@ -874,12 +977,13 @@ def upload_text_caption(request, patient_id):
 
 
 @login_required
+@require_http_methods(["DELETE"])
 def delete_voice_caption(request, patient_id, caption_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     caption = get_object_or_404(patient.voice_captions, id=caption_id)
 
     is_owner = caption.user_id == request.user.id
-    is_admin = user_is_project_admin(request.user, "brain")
+    is_admin = user_is_project_admin(request.user, caption.patient.project)
     if not is_owner and not is_admin:
         return JsonResponse(
             {
@@ -967,13 +1071,7 @@ def patient_viewer_data(request, patient_id):
 patient_cbct_data = patient_viewer_data
 patient_panoramic_data = patient_viewer_data
 patient_intraoral_data = patient_viewer_data
-patient_intraoral_segmentation_data = patient_viewer_data
 patient_teleradiography_data = patient_viewer_data
-
-
-@login_required
-def update_patient_intraoral_segmentation(request, patient_id):
-    return JsonResponse({"error": "Not available for Brain."}, status=400)
 
 
 @login_required
@@ -999,14 +1097,16 @@ def _brain_shared_export_availability(share_token):
     """Resolve a brain export by share token and whether it's downloadable."""
     export = Export.objects.filter(share_token=share_token).first()
     if not export:
-        return None, False
+        return None, False, "invalid"
     if export.share_mode == "private":
-        return export, False
+        return export, False, "private"
+    if is_share_expired(export):
+        return export, False, "expired"
     if export.status != "completed":
-        return export, False
+        return export, False, "not_completed"
     if not export.file_path or not artifact_exists(export.file_path):
-        return export, False
-    return export, True
+        return export, False, "missing_file"
+    return export, True, ""
 
 
 @login_required
@@ -1036,121 +1136,128 @@ def export_list(request):
 @login_required
 @_with_brain_export_mappings
 def export_new(request):
-    """Create-export page. Reuses the maxillo template with ns='brain'."""
+    """Create-export page. Reuses the maxillo template with ns='brain'.
+
+    Same project-scoped model as maxillo: folders of the selected project
+    (including sub-folders), artifacts the project's own MRI channels can
+    produce, and filters derived from the project.
+    """
+    project = _current_export_project(request)
+    if project is None:
+        messages.error(request, "Select a project before creating an export.")
+        return redirect("brain:patient_list")
+
     if request.method == "POST":
         folder_ids = [int(fid) for fid in request.POST.getlist("folder_ids")]
-        modality_slugs = request.POST.getlist("modality_slugs")
+        artifact_keys = request.POST.getlist("artifacts")
+        filters = export_catalog.filters_from_form(request.POST)
 
         if not folder_ids:
             messages.error(request, "Please select at least one folder.")
             return redirect("brain:export_new")
-        if not modality_slugs:
-            messages.error(request, "Please select at least one modality.")
+
+        if Folder.objects.filter(id__in=folder_ids, project=project).count() != len(set(folder_ids)):
+            messages.error(request, "Select folders from the current project only.")
             return redirect("brain:export_new")
 
-        filters = {
-            key.replace("filter_", ""): True
-            for key in request.POST.keys()
-            if key.startswith("filter_")
-        }
-        include_raw, include_processed = _resolve_content_selection(
-            request.POST, default_when_missing=False
-        )
-        include_reports = _coerce_bool(request.POST.get("include_reports"), default=False)
-
-        if not include_raw and not include_processed and not include_reports:
-            messages.error(
-                request,
-                "Please select at least one content type: Raw files, Processed files, and/or Reports.",
-            )
+        allowed_keys = export_ui.allowed_artifact_keys("brain", project)
+        artifact_keys = [key for key in artifact_keys if key in allowed_keys]
+        if not artifact_keys:
+            messages.error(request, "Please select at least one artifact to export.")
             return redirect("brain:export_new")
 
+        artifacts = export_catalog.resolve_artifacts("brain", artifact_keys)
         query_params = {
             "domain": "brain",
+            "project_id": project.id,
             "folder_ids": folder_ids,
-            "modality_slugs": modality_slugs,
+            "artifacts": artifact_keys,
             "filters": filters,
-            "include_raw": include_raw,
-            "include_processed": include_processed,
-            "include_reports": include_reports,
+            "modality_slugs": sorted(export_catalog.modality_slugs_for(artifacts)),
         }
 
-        modality_names = list(
-            Modality.objects.filter(slug__in=modality_slugs).values_list("name", flat=True)
-        ) or modality_slugs
-        selected_content = [
-            label
-            for label, on in (
-                ("Raw", include_raw),
-                ("Processed", include_processed),
-                ("Reports", include_reports),
-            )
-            if on
-        ]
-        query_summary = ", ".join(
-            [
-                f"{len(folder_ids)} folder{'s' if len(folder_ids) != 1 else ''}",
-                " + ".join(modality_names),
-                f"Content: {' + '.join(selected_content)}",
-            ]
+        summary_parts = [f"{len(folder_ids)} folder{'s' if len(folder_ids) != 1 else ''}"]
+        summary_parts.append(", ".join(a.label for a in artifacts) or "nothing")
+        described = export_catalog.describe_filters(
+            "brain", project, [m.slug for m in export_ui.project_modalities(project)], filters
         )
+        if described:
+            summary_parts.append(", ".join(described))
 
         export = Export.objects.create(
             user=request.user,
             status="pending",
             query_params=query_params,
-            query_summary=query_summary,
+            query_summary=", ".join(summary_parts),
         )
 
         start_export_processing(export.id, "brain")
         messages.success(request, f"Export #{export.id} created and processing started.")
         return redirect("brain:export_list")
 
-    folders = filter_folders_for_user(
-        request.user,
-        Folder.objects.filter(parent__isnull=True).order_by("name"),
+    folders = export_ui.folder_tree(
+        filter_folders_for_user(
+            request.user,
+            Folder.objects.filter(project=project).order_by("name"),
+            "brain",
+        ),
+        Patient,
         "brain",
     )
-    folders_with_counts = [
-        {"folder": folder, "patient_count": folder.patients.count()} for folder in folders
-    ]
-    modalities = Modality.objects.filter(projects__slug="brain", is_active=True).order_by("name")
+    visible_folder_ids = [entry["folder"].id for entry in folders]
+    patients_in_scope = Patient.objects.filter(folder_id__in=visible_folder_ids)
+    modalities = export_ui.project_modalities(project)
+
     return render(
         request,
         "maxillo/export_new.html",
-        {"folders": folders_with_counts, "modalities": modalities, "ns": "brain"},
+        {
+            "project": project,
+            "folders": folders,
+            "modalities": modalities,
+            "artifact_groups": export_ui.artifact_groups(
+                "brain", project, patients_in_scope, patient_fk="brain_patient"
+            ),
+            "filter_groups": export_ui.grouped_filters(
+                "brain", project, [m.slug for m in modalities]
+            ),
+            "ns": "brain",
+        },
+    )
+
+
+def _current_export_project(request):
+    project_id = request.session.get("current_project_id")
+    if not project_id:
+        return None
+    return (
+        Project.objects.filter(id=project_id)
+        .prefetch_related("modalities", "annotation_methods", "disabled_steps")
+        .first()
     )
 
 
 @login_required
 @_with_brain_export_mappings
 def export_preview(request):
-    """AJAX export statistics. Reuses the generalized ExportProcessor for brain."""
+    """AJAX export statistics, run through the same ExportProcessor as the export."""
     try:
-        if request.method == "POST":
-            data = _json.loads(request.body) if request.body else {}
-        else:
-            data = request.GET
+        data = (_json.loads(request.body) if request.body else {}) if request.method == "POST" else request.GET
 
         folder_ids = data.get("folder_ids", [])
         if isinstance(folder_ids, str):
-            folder_ids = [int(fid) for fid in folder_ids.split(",") if fid]
-        else:
-            folder_ids = [int(fid) for fid in folder_ids if fid]
+            folder_ids = [fid for fid in folder_ids.split(",") if fid]
+        folder_ids = [int(fid) for fid in folder_ids if str(fid).strip()]
 
-        modality_slugs = data.get("modality_slugs", [])
-        if isinstance(modality_slugs, str):
-            modality_slugs = modality_slugs.split(",") if modality_slugs else []
+        artifact_keys = data.get("artifacts", [])
+        if isinstance(artifact_keys, str):
+            artifact_keys = [key for key in artifact_keys.split(",") if key]
 
-        include_raw, include_processed = _resolve_content_selection(data)
         query_params = {
             "domain": "brain",
             "folder_ids": folder_ids,
-            "modality_slugs": modality_slugs,
+            "artifacts": list(artifact_keys),
             "filters": data.get("filters", {}),
-            "include_raw": include_raw,
-            "include_processed": include_processed,
-            "include_reports": _coerce_bool(data.get("include_reports"), default=False),
         }
 
         proc = ExportProcessor(
@@ -1169,7 +1276,8 @@ def export_preview(request):
                 "success": True,
                 "patient_count": patient_count,
                 "folder_count": len(folder_ids),
-                "modality_count": len(modality_slugs),
+                "modality_count": len(proc.modality_slugs),
+                "artifact_count": len(proc.artifacts),
                 "file_count": file_count,
                 "estimated_size": format_file_size(total_size),
                 "estimated_size_bytes": total_size,
@@ -1275,28 +1383,47 @@ def export_share_update(request, export_id):
     if share_mode == "private":
         export.share_token = None
         export.shared_at = None
-        export.save(update_fields=["share_mode", "share_token", "shared_at"])
-        return JsonResponse(
-            {"success": True, "share_mode": export.share_mode, "share_url": None}
+        export.expires_at = None
+        export.save(
+            update_fields=["share_mode", "share_token", "shared_at", "expires_at"]
         )
+        return JsonResponse(
+            {
+                "success": True,
+                "share_mode": export.share_mode,
+                "share_url": None,
+                "expires_at": None,
+            }
+        )
+
+    expires_at, expiry_error = resolve_share_expiry(
+        data.get("expires_in_days"),
+        current=export.expires_at,
+        can_set_never=request.user.is_staff
+        or user_is_project_admin(request.user, "brain"),
+    )
+    if expiry_error:
+        return JsonResponse({"success": False, "error": expiry_error}, status=400)
 
     if regenerate or not export.share_token:
         export.ensure_share_token(force_new=regenerate)
     export.shared_at = timezone.now()
-    export.save(update_fields=["share_mode", "shared_at"])
+    export.expires_at = expires_at
+    export.save(update_fields=["share_mode", "shared_at", "expires_at"])
 
     return JsonResponse(
         {
             "success": True,
             "share_mode": export.share_mode,
             "share_url": _build_shared_download_url(request, export.share_token),
+            "expires_at": export.expires_at.isoformat() if export.expires_at else None,
         }
     )
 
 
 @require_http_methods(["GET"])
 def export_shared_landing(request, share_token):
-    export, is_available = _brain_shared_export_availability(share_token)
+    export, is_available, reason = _brain_shared_export_availability(share_token)
     if (
         export
         and export.share_mode == "authenticated"
@@ -1310,17 +1437,21 @@ def export_shared_landing(request, share_token):
             "ns": "brain",
             "export": export,
             "is_available": is_available,
+            "is_expired": reason == "expired",
             "share_token": share_token,
             "file_size_human": format_file_size(export.file_size)
             if export and export.file_size
             else None,
         },
+        status=410 if reason == "expired" else 200,
     )
 
 
 @require_http_methods(["GET"])
 def export_shared_download(request, share_token):
-    export, is_available = _brain_shared_export_availability(share_token)
+    export, is_available, reason = _brain_shared_export_availability(share_token)
+    if reason == "expired":
+        return HttpResponseGone("This share link has expired.")
     if not export or not is_available:
         raise Http404("Export is not available.")
     if export.share_mode == "authenticated" and not request.user.is_authenticated:

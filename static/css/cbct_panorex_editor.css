@@ -1,0 +1,298 @@
+.panorex-editor {
+    --pano-accent: var(--ygg-primary);
+    --pano-surface: var(--ygg-surface);
+    --pano-sunken: var(--ygg-surface-sunken);
+    --pano-border: var(--ygg-border);
+    margin-top: 0.75rem;
+    overflow: hidden;
+    border: 1px solid var(--pano-border);
+    border-radius: var(--ygg-radius-md);
+    background: var(--pano-surface);
+    box-shadow: var(--ygg-shadow-card-light);
+}
+
+.panorex-editor[hidden] { display: none; }
+
+.panorex-editor__header,
+.panorex-editor__panel-title,
+.panorex-editor__slice-controls,
+.panorex-editor__edit-actions,
+.panorex-editor__primary-actions,
+.panorex-editor__mode {
+    display: flex;
+    align-items: center;
+}
+
+.panorex-editor__header {
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--pano-border);
+    background: linear-gradient(105deg, var(--ygg-surface-2), var(--pano-surface));
+}
+
+.panorex-editor__header h3 {
+    margin: 0.1rem 0 0;
+    color: var(--ygg-text);
+    font-size: 1rem;
+}
+
+.panorex-editor__eyebrow {
+    color: var(--pano-accent);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.panorex-editor__status {
+    color: var(--ygg-text-muted);
+    font-size: 0.78rem;
+}
+
+.panorex-editor__workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 1px;
+    background: var(--pano-border);
+}
+
+.panorex-editor__axial-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 54px;
+    gap: 0.65rem;
+    align-items: stretch;
+}
+
+.panorex-editor__panel {
+    min-width: 0;
+    padding: 0.8rem;
+    background: var(--pano-surface);
+}
+
+.panorex-editor__panel-title {
+    min-height: 40px;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: var(--ygg-text);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.panorex-editor__mono {
+    color: var(--ygg-text-muted);
+    font-family: var(--ygg-font-mono);
+    font-weight: 500;
+}
+
+.panorex-editor__stage,
+.panorex-editor__preview {
+    position: relative;
+    width: 100%;
+    min-height: 300px;
+    overflow: hidden;
+    border: 1px solid var(--pano-border);
+    border-radius: var(--ygg-radius-sm);
+    background: #03060b;
+}
+
+.panorex-editor__stage,
+.panorex-editor__stage canvas,
+.panorex-editor__stage .konvajs-content {
+    touch-action: none;
+}
+
+.panorex-editor__stage canvas { display: block; }
+
+.panorex-editor__slice-controls {
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 0.3rem;
+    min-height: 300px;
+    color: var(--ygg-text-muted);
+    font-size: 0.64rem;
+    text-align: center;
+}
+
+.panorex-editor__slice-controls input {
+    flex: 1;
+    width: 28px;
+    min-height: 112px;
+    accent-color: var(--pano-accent);
+    direction: ltr;
+    writing-mode: vertical-lr;
+}
+
+.panorex-editor__z-value {
+    width: 100%;
+    padding: 0.25rem 0;
+    border-radius: 5px;
+    background: var(--pano-sunken);
+}
+
+.panorex-editor button {
+    min-height: 40px;
+    padding: 0 0.75rem;
+    border: 1px solid var(--pano-border);
+    border-radius: 7px;
+    background: var(--ygg-surface-2);
+    color: var(--ygg-text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.panorex-editor button:hover:not(:disabled) { border-color: var(--pano-accent); }
+.panorex-editor button:focus-visible { outline: 3px solid color-mix(in srgb, var(--pano-accent) 35%, transparent); outline-offset: 2px; }
+.panorex-editor button:disabled { cursor: not-allowed; opacity: 0.48; }
+.panorex-editor button i { margin-right: 0.35rem; }
+
+.panorex-editor__icon-button {
+    width: 40px;
+    flex: 0 0 40px;
+    padding: 0 !important;
+}
+
+.panorex-editor__icon-button i { margin: 0 !important; }
+
+.panorex-editor__edit-actions,
+.panorex-editor__primary-actions {
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.65rem;
+}
+
+.panorex-editor__mode {
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--pano-sunken);
+}
+
+.panorex-editor__mode button {
+    min-height: 36px;
+    border: 0;
+    background: transparent;
+}
+
+.panorex-editor__mode button.is-active {
+    background: var(--pano-surface);
+    color: var(--pano-accent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+.panorex-editor__preview {
+    display: grid;
+    place-items: center;
+}
+
+.panorex-editor__preview canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 340px;
+    image-rendering: auto;
+}
+
+.panorex-editor__empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 2rem;
+    color: #91a0b7;
+    text-align: center;
+    font-size: 0.8rem;
+}
+
+.panorex-editor__empty[hidden] { display: none; }
+
+/*
+ * The live reformat pane.
+ *
+ * It fills the same box the baked strip does, because the two are alternatives rather than
+ * neighbours: the CPR follows the arch while it is being dragged, and the canvas holds the
+ * strip that will actually be stored. `hidden` on either is honoured explicitly -- a grid
+ * item with `display: grid` from the rule above would otherwise ignore it.
+ */
+.panorex-editor__cpr {
+    width: 100%;
+    height: 340px;
+    max-height: 340px;
+}
+
+.panorex-editor__cpr[hidden],
+.panorex-editor__preview canvas[hidden] { display: none; }
+
+.panorex-editor__progress {
+    height: 4px;
+    margin-top: 0.65rem;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--pano-sunken);
+}
+
+/* Reserve the bar's space even while idle so showing/hiding it during
+   generation/save never shifts the surrounding layout up or down. */
+.panorex-editor__progress[hidden] {
+    display: block;
+    visibility: hidden;
+}
+
+.panorex-editor__progress > div {
+    width: 0;
+    height: 100%;
+    background: var(--pano-accent);
+    transition: width 120ms linear;
+}
+
+.panorex-editor__error {
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.65rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--ygg-danger) 35%, transparent);
+    border-radius: 7px;
+    background: var(--ygg-danger-soft);
+    color: var(--ygg-danger);
+    font-size: 0.78rem;
+}
+
+.panorex-editor__error:not([hidden]) { display: flex; }
+
+.panorex-editor__error button {
+    min-height: 32px;
+    flex: 0 0 auto;
+    border-color: currentColor;
+    color: inherit;
+}
+
+.panorex-editor__primary-actions { justify-content: flex-end; }
+
+.panorex-editor__primary-actions button {
+    min-width: 116px;
+    color: var(--ygg-on-primary);
+    border-color: var(--pano-accent);
+    background: var(--pano-accent);
+}
+
+.panorex-editor__primary-actions .panorex-editor__save {
+    border-color: var(--ygg-accent2);
+    background: var(--ygg-accent2);
+    color: #fff;
+}
+
+@media (max-width: 900px) {
+    .panorex-editor__workspace { grid-template-columns: 1fr; }
+    .panorex-editor__stage, .panorex-editor__preview { min-height: 250px; }
+    .panorex-editor__slice-controls { min-height: 250px; }
+}
+
+@media (max-width: 560px) {
+    .panorex-editor__header { align-items: flex-start; flex-direction: column; }
+    .panorex-editor__panel-title { align-items: flex-start; flex-direction: column; margin-bottom: 0.45rem; }
+    .panorex-editor__mode { width: 100%; }
+    .panorex-editor__mode button { flex: 1; }
+    .panorex-editor__edit-actions button, .panorex-editor__primary-actions button { flex: 1 1 120px; }
+    .panorex-editor__axial-layout { grid-template-columns: minmax(0, 1fr) 48px; gap: 0.35rem; }
+}

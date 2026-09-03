@@ -2,21 +2,18 @@ from django.urls import path, include
 from django.shortcuts import redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from common.models import Project, ProjectAccess
+from common.models import Project
+from common.permissions import entry_project_for
 from laparoscopy import views as laparo_views
 
 
 @login_required
 def set_laparoscopy(request):
-    proj = Project.objects.filter(slug='laparoscopy').first()
-    if not proj:
-        proj = Project.objects.create(name='laparoscopy', slug='laparoscopy')
-
-    if not (request.user.profile.is_admin or request.user.profile.is_student_developer()):
-        has_access = ProjectAccess.objects.filter(user=request.user, project=proj).exists()
-        if not has_access:
-            messages.error(request, "You don't have access to the laparoscopy project.")
-            return redirect('home')
+    proj = entry_project_for(request.user, 'laparoscopy')
+    if proj is None:
+        proj = Project.objects.filter(slug='laparoscopy').first()
+    if proj is None:
+        proj = Project.objects.create(name='Laparoscopy', slug='laparoscopy', domain='laparoscopy')
 
     request.session['current_project_id'] = proj.id
     return redirect('laparoscopy:patient_list')
@@ -30,9 +27,11 @@ urlpatterns = [
     path('api/quadrant-types/', laparo_views.quadrant_types, name='quadrant_types'),
     path('api/quadrant-types/<int:pk>/', laparo_views.quadrant_type_detail, name='quadrant_type_detail'),
 
-    # Region annotation API
-    path('api/patient/<int:patient_id>/annotations/', laparo_views.patient_region_annotations, name='patient_region_annotations'),
-    path('api/annotations/<int:annotation_id>/', laparo_views.region_annotation_detail, name='region_annotation_detail'),
+    # Region annotation API. One whole-state route, GET and PUT: the per-stroke
+    # create/patch/delete endpoints went with the strokes themselves in Phase 10 --
+    # decision #14 makes the labelmap canonical, and there is no "the stroke with id 41"
+    # to address once the eraser has mutated the pixels it drew.
+    path('api/patient/<int:patient_id>/video-annotations/', laparo_views.patient_video_annotations, name='patient_video_annotations'),
     path('api/region-types/', laparo_views.region_types, name='region_types'),
     path('api/region-types/<int:pk>/', laparo_views.region_type_detail, name='region_type_detail'),
 

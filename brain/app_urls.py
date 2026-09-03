@@ -2,6 +2,7 @@ from django.shortcuts import redirect
 from django.urls import path
 
 from brain import api_views, views
+from annotations import views as annotations_views
 
 
 app_name = "brain"
@@ -18,11 +19,6 @@ urlpatterns = [
         "patient/<int:patient_id>/update-name/",
         views.update_patient_name,
         name="update_patient_name",
-    ),
-    path(
-        "patient/<int:patient_id>/voice-caption/",
-        views.upload_voice_caption,
-        name="upload_voice_caption",
     ),
     path(
         "patient/<int:patient_id>/text-caption/",
@@ -86,9 +82,6 @@ urlpatterns = [
     path("folders/<int:folder_id>/stats/", views.folder_stats, name="folder_stats"),
     path("folders/<int:folder_id>/rename/", views.rename_folder, name="rename_folder"),
     path("folders/<int:folder_id>/delete/", views.delete_folder, name="delete_folder"),
-    path("folders/<int:folder_id>/permissions/", views.folder_permissions, name="folder_permissions"),
-    path("folders/<int:folder_id>/permissions/upsert/", views.upsert_folder_permission, name="upsert_folder_permission"),
-    path("folders/<int:folder_id>/permissions/<int:user_id>/delete/", views.delete_folder_permission, name="delete_folder_permission"),
     path(
         "folders/move-patients/",
         views.move_patients_to_folder,
@@ -155,16 +148,10 @@ urlpatterns = [
         views.patient_intraoral_data,
         name="patient_intraoral_photo_data",
     ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/",
-        views.patient_intraoral_segmentation_data,
-        name="patient_intraoral_segmentation_data",
-    ),
-    path(
-        "api/patient/<int:patient_id>/intraoral-segmentation/update/",
-        views.update_patient_intraoral_segmentation,
-        name="update_patient_intraoral_segmentation",
-    ),
+    # No `intraoral-segmentation/` routes: these were namespace parity with maxillo, and
+    # maxillo's went with the Konva editor in Phase 5. Keeping brain's would leave two
+    # routes answering for a surface brain does not have and whose maxillo counterpart no
+    # longer exists.
     path(
         "api/patient/<int:patient_id>/teleradiography/",
         views.patient_teleradiography_data,
@@ -188,7 +175,7 @@ urlpatterns = [
     path("api/processing/health/", api_views.health_check, name="api_health_check"),
     path(
         "api/processing/jobs/",
-        api_views.ProcessingJobListView.as_view(),
+        api_views._job_list,
         name="api_processing_jobs",
     ),
     path(
@@ -196,21 +183,8 @@ urlpatterns = [
         api_views.get_job_status,
         name="api_get_job_status",
     ),
-    path(
-        "api/runner/jobs/<int:job_id>/claim/",
-        api_views.runner_claim_job,
-        name="api_runner_claim_job",
-    ),
-    path(
-        "api/runner/jobs/<int:job_id>/complete/",
-        api_views.runner_complete_job,
-        name="api_runner_complete_job",
-    ),
-    path(
-        "api/runner/jobs/<int:job_id>/fail/",
-        api_views.runner_fail_job,
-        name="api_runner_fail_job",
-    ),
+    # Runner callbacks intentionally removed — external runners use the single
+    # token-authenticated contract at /api/runner/jobs/<id>/... (domain-agnostic).
     path(
         "api/processing/files/",
         api_views.get_file_registry,
@@ -220,5 +194,39 @@ urlpatterns = [
         "api/processing/files/serve/<int:file_id>/",
         api_views.serve_file,
         name="api_serve_file",
+    ),
+    # Same view, filename-suffixed. Cornerstone's NIfTI loader does `new URL(url)`
+    # (which throws on a relative path) and then tests `pathname.endsWith('.gz')`
+    # (which excludes the query string), so `?ext=.gz` cannot help -- finding F3 of
+    # docs/cornerstone-roadmap.md. The suffix must be the last path segment and must
+    # carry no trailing slash, which is why `file_key` stays a query parameter.
+    # `filename` is decorative: it never takes part in resolving the file.
+    path(
+        "api/processing/files/serve/<int:file_id>/<str:filename>",
+        api_views.serve_file,
+        name="api_serve_file_named",
+    ),
+    # Same view again, with the bundle key in the path. Finding F14: the NIfTI
+    # loader appends `?frame=N` with a literal `?`, so a URL that already carries
+    # `?file_key=` produces two of them and every slice resolves to frame 0. The
+    # maxillo CBCT display volume *is* a bundle member, so the viewer needs a
+    # query-free way to name one. `filename` stays decorative here too.
+    path(
+        "api/processing/files/serve/<int:file_id>/key/<str:bundle_key>/<str:filename>",
+        api_views.serve_file,
+        name="api_serve_file_bundle",
+    ),
+    # Measurements made in the volume grid become durable annotation revisions.
+    # Domain-oriented on purpose (the governing architectural rule): the URL names a
+    # patient and the work, not a viewer. See annotations/views.py.
+    path(
+        "api/patients/<int:patient_id>/measurements/",
+        annotations_views.save_measurements_api,
+        name="api_save_measurements",
+    ),
+    path(
+        "api/patients/<int:patient_id>/measurements/state/",
+        annotations_views.measurements_state_api,
+        name="api_measurements_state",
     ),
 ]

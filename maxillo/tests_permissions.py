@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from common.models import Job, Project, ProjectAccess
+from common.models import AnnotationMethod, Job, Project, ProjectAccess
 from common.permissions import (
     filter_patients_for_user,
     user_can_delete_caption,
@@ -17,100 +17,132 @@ from common.permissions import (
     user_can_view_caption_content,
     user_can_write_annotations,
 )
-from maxillo.models import Folder, FolderAccess, Patient, VoiceCaption
+from maxillo.models import Folder, Patient, VoiceCaption
 
 
-class MaxilloFolderAclTests(TestCase):
+class MaxilloProjectAclTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(name="maxillo", defaults={"slug": "maxillo"})
+        self.project = Project.objects.create(
+            name="Maxillo ACL", slug="maxillo-acl", domain="maxillo"
+        )
+        # ``common.0043`` seeds the AnnotationMethod registry and wires it to the
+        # projects that existed then; a project created here starts with an empty
+        # set, and ``project_allows_annotation`` refuses on an empty set.
+        self.project.annotation_methods.set(
+            AnnotationMethod.objects.filter(slug="voice_caption")
+        )
         self.admin = User.objects.create_user(username="admin", password="x")
-        self.user = User.objects.create_user(username="user", password="x")
+        self.viewer = User.objects.create_user(username="viewer", password="x")
+        self.annotator = User.objects.create_user(username="annotator", password="x")
         self.other = User.objects.create_user(username="other", password="x")
 
         ProjectAccess.objects.create(user=self.admin, project=self.project, role="admin")
-        ProjectAccess.objects.create(user=self.user, project=self.project, role="standard")
-        ProjectAccess.objects.create(user=self.other, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=self.viewer, project=self.project, role="viewer")
+        ProjectAccess.objects.create(user=self.annotator, project=self.project, role="annotator")
 
-        self.folder = Folder.objects.create(name="F1")
-        self.patient = Patient.objects.create(name="P1", folder=self.folder)
+        self.folder = Folder.objects.create(name="F1", project=self.project)
+        self.patient = Patient.objects.create(
+            name="P1", folder=self.folder, project=self.project
+        )
 
     def test_admin_sees_all_patients(self):
         qs = filter_patients_for_user(self.admin, Patient.objects.all(), "maxillo")
         self.assertEqual(qs.count(), 1)
 
-    def test_non_admin_without_folder_access_sees_nothing(self):
-        qs = filter_patients_for_user(self.user, Patient.objects.all(), "maxillo")
+    def test_user_without_project_access_sees_nothing(self):
+        qs = filter_patients_for_user(self.other, Patient.objects.all(), "maxillo")
         self.assertEqual(qs.count(), 0)
 
-    def test_non_admin_with_folder_access_sees_patient(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="standard")
-        qs = filter_patients_for_user(self.user, Patient.objects.all(), "maxillo")
+    def test_project_member_sees_patient(self):
+        qs = filter_patients_for_user(self.viewer, Patient.objects.all(), "maxillo")
         self.assertEqual(list(qs), [self.patient])
 
-    def test_standard_role_read_only(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="standard")
-        self.assertTrue(user_can_read_folder(self.user, self.folder, "maxillo"))
-        self.assertFalse(user_can_write_annotations(self.user, self.folder, "maxillo"))
+    def test_viewer_role_read_only(self):
+        self.assertTrue(user_can_read_folder(self.viewer, self.folder, self.project))
+        self.assertFalse(user_can_write_annotations(self.viewer, self.folder, self.project))
 
     def test_annotator_can_write_and_delete_single(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="annotator")
-        self.assertTrue(user_can_write_annotations(self.user, self.folder, "maxillo"))
-        self.assertTrue(user_can_delete_single_patient(self.user, self.folder, "maxillo"))
+        self.assertTrue(user_can_write_annotations(self.annotator, self.folder, self.project))
+        self.assertTrue(user_can_delete_single_patient(self.annotator, self.folder, self.project))
 
-    def test_project_manager_matches_annotator(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="project_manager")
-        self.assertTrue(user_can_write_annotations(self.user, self.folder, "maxillo"))
-        self.assertTrue(user_can_delete_single_patient(self.user, self.folder, "maxillo"))
+    def test_admin_matches_annotator_plus_more(self):
+        self.assertTrue(user_can_write_annotations(self.admin, self.folder, self.project))
+        self.assertTrue(user_can_delete_single_patient(self.admin, self.folder, self.project))
+        self.assertTrue(user_can_move_patient(self.admin, self.patient))
+        self.assertTrue(user_can_perform_bulk_operations(self.admin, self.project))
 
     def test_move_and_bulk_admin_only(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="project_manager")
-        self.assertFalse(user_can_move_patient(self.user, self.patient))
-        self.assertFalse(user_can_perform_bulk_operations(self.user, "maxillo"))
-        self.assertTrue(user_can_move_patient(self.admin, self.patient))
-        self.assertTrue(user_can_perform_bulk_operations(self.admin, "maxillo"))
+        self.assertFalse(user_can_move_patient(self.annotator, self.patient))
+        self.assertFalse(user_can_perform_bulk_operations(self.annotator, self.project))
+        self.assertFalse(user_can_move_patient(self.viewer, self.patient))
 
     def test_metadata_admin_only(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="project_manager")
-        self.assertFalse(user_can_edit_metadata(self.user, self.patient))
+        self.assertFalse(user_can_edit_metadata(self.annotator, self.patient))
+        self.assertFalse(user_can_edit_metadata(self.viewer, self.patient))
         self.assertTrue(user_can_edit_metadata(self.admin, self.patient))
 
     def test_caption_owner_or_admin(self):
-        caption = VoiceCaption.objects.create(patient=self.patient, user=self.user, modality="audio", duration=1.0)
-        self.assertTrue(user_can_edit_caption(self.user, caption))
-        self.assertFalse(user_can_edit_caption(self.other, caption))
+        caption = VoiceCaption.objects.create(patient=self.patient, user=self.viewer, modality="audio", duration=1.0)
+        self.assertTrue(user_can_edit_caption(self.viewer, caption))
+        self.assertFalse(user_can_edit_caption(self.annotator, caption))
         self.assertTrue(user_can_edit_caption(self.admin, caption))
         self.assertTrue(user_can_delete_caption(self.admin, caption))
 
-    def test_caption_content_visibility_by_folder_role(self):
+    def test_caption_content_visibility_by_project_role(self):
         owner = User.objects.create_user(username="caption_owner", password="x")
-        standard = User.objects.create_user(username="caption_standard", password="x")
+        standard = User.objects.create_user(username="caption_viewer", password="x")
         annotator = User.objects.create_user(username="caption_annotator", password="x")
-        project_manager = User.objects.create_user(username="caption_pm", password="x")
+        pm = User.objects.create_user(username="caption_admin", password="x")
         outsider = User.objects.create_user(username="caption_outsider", password="x")
 
-        ProjectAccess.objects.create(user=owner, project=self.project, role="standard")
-        ProjectAccess.objects.create(user=standard, project=self.project, role="standard")
-        ProjectAccess.objects.create(user=annotator, project=self.project, role="standard")
-        ProjectAccess.objects.create(user=project_manager, project=self.project, role="standard")
-        ProjectAccess.objects.create(user=outsider, project=self.project, role="standard")
-
-        FolderAccess.objects.create(user=owner, folder=self.folder, role="annotator")
-        FolderAccess.objects.create(user=standard, folder=self.folder, role="standard")
-        FolderAccess.objects.create(user=annotator, folder=self.folder, role="annotator")
-        FolderAccess.objects.create(user=project_manager, folder=self.folder, role="project_manager")
+        ProjectAccess.objects.create(user=owner, project=self.project, role="viewer")
+        ProjectAccess.objects.create(user=standard, project=self.project, role="viewer")
+        ProjectAccess.objects.create(user=annotator, project=self.project, role="annotator")
+        ProjectAccess.objects.create(user=pm, project=self.project, role="admin")
 
         caption = VoiceCaption.objects.create(patient=self.patient, user=owner, modality="audio", duration=1.0)
 
-        self.assertTrue(user_can_view_caption_content(owner, caption, "maxillo"))
-        self.assertTrue(user_can_view_caption_content(self.admin, caption, "maxillo"))
-        self.assertTrue(user_can_view_caption_content(standard, caption, "maxillo"))
-        self.assertTrue(user_can_view_caption_content(project_manager, caption, "maxillo"))
-        self.assertFalse(user_can_view_caption_content(annotator, caption, "maxillo"))
-        self.assertFalse(user_can_view_caption_content(outsider, caption, "maxillo"))
+        # Owner always sees their own content.
+        self.assertTrue(user_can_view_caption_content(owner, caption, self.project))
+        # Admin and viewers see all content.
+        self.assertTrue(user_can_view_caption_content(self.admin, caption, self.project))
+        self.assertTrue(user_can_view_caption_content(standard, caption, self.project))
+        self.assertTrue(user_can_view_caption_content(pm, caption, self.project))
+        # Annotators see only their own captions (bias guard), outsiders nothing.
+        self.assertFalse(user_can_view_caption_content(annotator, caption, self.project))
+        self.assertFalse(user_can_view_caption_content(outsider, caption, self.project))
 
-    def test_standard_role_cannot_create_text_caption(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="standard")
-        self.client.force_login(self.user)
+    def test_caption_visibility_does_not_depend_on_the_patient_having_a_folder(self):
+        """An unfiled patient's captions stay visible to the project's viewers.
+
+        The patient detail view used to derive the role from ``patient.folder``,
+        so a patient with no folder -- ``Patient.folder`` is SET_NULL, and a
+        deleted folder unfiles every patient in it -- had no role at all and its
+        captions were ghosted for the project's own viewers.
+        """
+        viewer = User.objects.create_user(username="unfiled_viewer", password="x")
+        ProjectAccess.objects.create(user=viewer, project=self.project, role="viewer")
+        owner = User.objects.create_user(username="unfiled_owner", password="x")
+
+        self.patient.folder = None
+        self.patient.save(update_fields=["folder"])
+        caption = VoiceCaption.objects.create(
+            patient=self.patient, user=owner, modality="audio", duration=1.0
+        )
+
+        self.assertTrue(user_can_view_caption_content(viewer, caption))
+
+        # And through the view, which is where the folder-derived role lived.
+        self.client.force_login(viewer)
+        response = self.client.get(
+            reverse("maxillo:patient_detail", args=[self.patient.patient_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        rendered = response.context["voice_captions"]
+        self.assertTrue(all(c.can_view_content for c in rendered))
+
+    def test_viewer_role_cannot_create_text_caption(self):
+        self.client.force_login(self.viewer)
 
         response = self.client.post(
             reverse(
@@ -125,8 +157,7 @@ class MaxilloFolderAclTests(TestCase):
         self.assertEqual(VoiceCaption.objects.count(), 0)
 
     def test_annotator_role_can_create_text_caption(self):
-        FolderAccess.objects.create(user=self.user, folder=self.folder, role="annotator")
-        self.client.force_login(self.user)
+        self.client.force_login(self.annotator)
 
         response = self.client.post(
             reverse(
@@ -143,47 +174,42 @@ class MaxilloFolderAclTests(TestCase):
 
 class MaxilloJobApiAclTests(TestCase):
     def setUp(self):
-        self.project, _ = Project.objects.get_or_create(
-            name="maxillo", defaults={"slug": "maxillo"}
+        self.project = Project.objects.create(
+            name="Maxillo job ACL", slug="maxillo-job-acl", domain="maxillo"
         )
         self.admin = User.objects.create_user(username="job_admin", password="x")
         self.user = User.objects.create_user(username="job_user", password="x")
         self.other = User.objects.create_user(username="job_other", password="x")
 
         ProjectAccess.objects.create(user=self.admin, project=self.project, role="admin")
-        ProjectAccess.objects.create(user=self.user, project=self.project, role="standard")
-        ProjectAccess.objects.create(user=self.other, project=self.project, role="standard")
+        ProjectAccess.objects.create(user=self.user, project=self.project, role="viewer")
 
-        self.folder_allowed = Folder.objects.create(name="F-allowed")
-        self.folder_denied = Folder.objects.create(name="F-denied")
-        self.patient_allowed = Patient.objects.create(name="P-allowed", folder=self.folder_allowed)
-        self.patient_denied = Patient.objects.create(name="P-denied", folder=self.folder_denied)
-
-        FolderAccess.objects.create(user=self.user, folder=self.folder_allowed, role="standard")
-
-        self.allowed_job = Job.objects.create(
-            domain="maxillo", modality_slug="cbct", patient=self.patient_allowed
+        self.folder = Folder.objects.create(name="F", project=self.project)
+        self.patient = Patient.objects.create(
+            name="P", folder=self.folder, project=self.project
         )
-        self.denied_job = Job.objects.create(
-            domain="maxillo", modality_slug="cbct", patient=self.patient_denied
+        self.job = Job.objects.create(
+            domain="maxillo", modality_slug="cbct", patient=self.patient
         )
 
     def test_job_endpoints_require_login(self):
         response = self.client.get(reverse("maxillo:api_processing_jobs"))
         self.assertEqual(response.status_code, 302)
 
-    def test_job_list_is_folder_filtered_for_non_admin(self):
+    def test_job_list_is_project_filtered_for_member(self):
         self.client.login(username="job_user", password="x")
         response = self.client.get(reverse("maxillo:api_processing_jobs"))
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertTrue(body.get("success"))
         self.assertEqual(len(body.get("jobs", [])), 1)
-        self.assertEqual(body["jobs"][0]["id"], self.allowed_job.id)
+        self.assertEqual(body["jobs"][0]["id"], self.job.id)
 
-    def test_job_status_denies_unassigned_folder_user(self):
+    def test_job_status_denies_user_without_project_access(self):
         self.client.login(username="job_other", password="x")
         response = self.client.get(
-            reverse("maxillo:api_get_job_status", kwargs={"job_id": self.allowed_job.id})
+            reverse("maxillo:api_get_job_status", kwargs={"job_id": self.job.id})
         )
-        self.assertEqual(response.status_code, 403)
+        # Users without ProjectAccess to the domain are bounced by the profile
+        # middleware (redirect to home) before any view runs.
+        self.assertEqual(response.status_code, 302)

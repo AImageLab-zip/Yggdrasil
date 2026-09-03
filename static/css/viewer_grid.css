@@ -9,6 +9,25 @@
   margin-top: 1rem;
 }
 
+.viewer-grid.viewer-grid--render-focus {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: clamp(520px, 72vh, 820px);
+}
+
+.viewer-grid--render-focus .viewer-window[data-window-index="0"],
+.viewer-grid--render-focus .viewer-window[data-window-index="1"],
+.viewer-grid--render-focus .viewer-window[data-window-index="2"] {
+  display: none;
+}
+
+.viewer-grid--render-focus .viewer-window[data-window-index="3"] {
+  display: block;
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  min-height: 0;
+}
+
 .viewer-tools-bar {
   display: flex;
   align-items: center;
@@ -18,6 +37,12 @@
   margin-bottom: 0.35rem;
 }
 
+.viewer-tools-bar--render-focus [data-tool="measure"],
+.viewer-tools-bar--render-focus [data-tool-action="clear-measurements"],
+.viewer-tools-bar--render-focus .viewer-tool-status {
+  display: none;
+}
+
 .viewer-tools-left {
   display: flex;
   align-items: center;
@@ -25,12 +50,12 @@
 }
 
 .viewer-tool-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid #ced4da;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--ygg-border);
   border-radius: 6px;
-  background: #fff;
-  color: #495057;
+  background: var(--ygg-surface);
+  color: var(--ygg-text);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -39,8 +64,8 @@
 }
 
 .viewer-tool-btn:hover {
-  background: #f1f3f5;
-  border-color: #adb5bd;
+  background: var(--ygg-surface-2);
+  border-color: var(--ygg-border-strong);
 }
 
 .viewer-tool-btn.active {
@@ -63,8 +88,125 @@
   font-weight: 700;
 }
 
+#cbctControls {
+  flex: 1 1 680px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#cbctControls .icon-btn,
+.cbct-3d-toggle,
+.cbct-render-action,
+.cbct-render-select select {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.cbct-window-controls {
+  display: flex;
+  align-items: center;
+  flex: 1 1 360px;
+  gap: 14px;
+}
+
+.cbct-range-control {
+  display: grid;
+  grid-template-columns: 88px minmax(110px, 1fr);
+  align-items: center;
+  flex: 1 1 180px;
+  min-height: 40px;
+  margin: 0;
+  color: var(--ygg-text-muted, #6c757d);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.cbct-range-control span {
+  white-space: nowrap;
+}
+
+.cbct-range-control output {
+  display: inline-block;
+  min-width: 2.2em;
+  color: var(--ygg-text, #212529);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cbct-range-control input[type="range"] {
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  accent-color: var(--ygg-primary, #0d6efd);
+  cursor: pointer;
+}
+
+.cbct-3d-toggle,
+.cbct-render-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--ygg-border, #ced4da);
+  border-radius: 7px;
+  background: var(--ygg-surface, #fff);
+  color: var(--ygg-text, #212529);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cbct-3d-toggle.active {
+  border-color: var(--ygg-primary, #0d6efd);
+  background: var(--ygg-primary, #0d6efd);
+  color: #fff;
+}
+
+.cbct-3d-toggle:disabled,
+.cbct-render-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.cbct-render-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  margin: 0;
+  color: var(--ygg-text-muted, #6c757d);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.cbct-render-select select {
+  max-width: 170px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--ygg-border, #ced4da);
+  border-radius: 7px;
+  background: var(--ygg-surface, #fff);
+  color: var(--ygg-text, #212529);
+}
+
+.cbct-render-status {
+  flex: 1 1 180px;
+  color: var(--ygg-text-muted, #6c757d);
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.cbct-render-status.is-error {
+  color: var(--ygg-danger, #dc3545);
+}
+
+.cbct-exit-focus[hidden] {
+  display: none;
+}
+
 .viewer-tool-status {
-  color: #495057;
+  color: var(--ygg-text-muted);
   font-size: 0.86rem;
 }
 
@@ -111,13 +253,58 @@
   display: none;
 }
 
+.viewer-window--render .orientation-menu,
+.viewer-window--render .slice-counter,
+.viewer-window--render .measurement-overlay {
+  display: none !important;
+}
+
+.viewer-optional-3d {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #adb5bd;
+  gap: 0.5rem;
+}
+
+.viewer-optional-3d > i {
+  font-size: 2.25rem;
+}
+
+.viewer-optional-3d > p {
+  margin: 0;
+}
+
+.viewer-load-3d-btn {
+  min-height: 40px;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--ygg-border-strong, #adb5bd);
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.viewer-load-3d-btn:hover {
+  border-color: var(--ygg-primary, #0d6efd);
+  background: color-mix(in srgb, var(--ygg-primary, #0d6efd) 18%, transparent);
+}
+
+.viewer-load-3d-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 /* Modality Chips - Draggable Pills */
 .modality-chip {
   display: inline-block;
   padding: 0.375rem 0.75rem;
   margin-right: 0.5rem;
-  background: #e9ecef;
-  border: 1px solid #dee2e6;
+  background: var(--ygg-surface-2);
+  border: 1px solid var(--ygg-border);
   border-radius: 1rem;
   cursor: grab;
   user-select: none;
@@ -127,8 +314,8 @@
 }
 
 .modality-chip:hover {
-  background: #dee2e6;
-  border-color: #adb5bd;
+  background: var(--ygg-surface-3);
+  border-color: var(--ygg-border-strong);
   transform: translateY(-1px);
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
@@ -167,18 +354,104 @@
 
 .cbct-inline-panoramic {
   margin-top: 0.75rem;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--ygg-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--ygg-surface);
 }
 
 .cbct-inline-panoramic-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.9rem;
   font-weight: 600;
-  color: #495057;
-  border-bottom: 1px solid #e9ecef;
-  background: #f8f9fa;
+  color: var(--ygg-text);
+  border-bottom: 1px solid var(--ygg-border);
+  background: var(--ygg-surface-2);
+}
+
+.panoramic-edit-arch {
+  min-height: 36px;
+  padding: 0 0.7rem;
+  border: 1px solid var(--ygg-border);
+  border-radius: 6px;
+  background: var(--ygg-surface);
+  color: var(--ygg-text);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panoramic-edit-arch:hover { border-color: var(--ygg-primary); color: var(--ygg-primary); }
+.panoramic-edit-arch[hidden] { display: none; }
+
+/* Replaces the Edit arch button once annotations freeze the panoramic. Sized to
+   match it so the header does not shift between a locked and unlocked patient. */
+.panoramic-arch-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 36px;
+  padding: 0 0.7rem;
+  border: 1px dashed var(--ygg-border);
+  border-radius: 6px;
+  color: var(--ygg-text-muted, var(--ygg-text));
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: default;
+}
+
+.panoramic-variant-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--ygg-text-muted, #6c757d);
+  font-size: 0.82rem;
+}
+
+.panoramic-variant-controls[hidden] {
+  display: none;
+}
+
+.panoramic-projection-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--ygg-surface-2, #e9ecef);
+}
+
+.panoramic-mode-btn {
+  padding: 0.3rem 0.65rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ygg-text-muted, #6c757d);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panoramic-mode-btn.active {
+  background: var(--ygg-surface, #fff);
+  color: var(--ygg-primary, #0d6efd);
+  box-shadow: var(--ygg-shadow-card-light, 0 1px 3px rgba(0, 0, 0, 0.15));
+}
+
+.panoramic-z-control {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.panoramic-z-control input {
+  width: min(220px, 42vw);
+  accent-color: var(--ygg-primary, #0d6efd);
 }
 
 .cbct-inline-panoramic-body {
@@ -204,6 +477,31 @@
     min-height: 200px;
   }
 
+  .viewer-grid.viewer-grid--render-focus {
+    grid-template-rows: minmax(0, 1fr);
+    height: clamp(380px, 62vh, 650px);
+  }
+
+  #cbctControls {
+    flex-basis: 100%;
+  }
+
+  .cbct-window-controls {
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .cbct-range-control {
+    flex-basis: auto;
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+
+  .cbct-render-status {
+    flex-basis: 100%;
+  }
+
   .modality-chip {
     margin-bottom: 0.5rem;
   }
@@ -219,7 +517,7 @@
 
 /* Viewer Instructions Card (in help modal) */
 .viewer-instructions-card {
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--ygg-border);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -285,8 +583,8 @@
 }
 
 .orientation-btn {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     border: none;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.6);
@@ -311,8 +609,8 @@
 
 /* Free Scroll Button */
 .free-scroll-btn {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     border: none;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.6);
@@ -340,8 +638,8 @@
 
 /* Reset View Button */
 .reset-view-btn {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     border: none;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.6);
@@ -360,8 +658,8 @@
 
 /* Crosshair Toggle Button */
 .crosshair-toggle-btn {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     border: none;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.6);
@@ -426,8 +724,9 @@
 /* Context Menu Styles */
 .viewer-context-menu {
     position: fixed;
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text);
     border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     z-index: 1000;
@@ -441,7 +740,7 @@
 }
 
 .context-menu-section + .context-menu-section {
-    border-top: 1px solid #e9ecef;
+    border-top: 1px solid var(--ygg-border);
     margin-top: 4px;
     padding-top: 8px;
 }
@@ -450,7 +749,7 @@
     padding: 4px 16px;
     font-size: 11px;
     font-weight: 600;
-    color: #6c757d;
+    color: var(--ygg-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -464,8 +763,9 @@
 .context-menu-orient-btn {
     flex: 1;
     padding: 6px 12px;
-    border: 1px solid #dee2e6;
-    background: white;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
     border-radius: 4px;
     cursor: pointer;
     font-weight: 600;
@@ -473,7 +773,7 @@
 }
 
 .context-menu-orient-btn:hover {
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
     border-color: #0d6efd;
 }
 
@@ -491,10 +791,409 @@
 }
 
 .context-menu-option:hover {
-    background: #f8f9fa;
+    background: var(--ygg-surface-2);
 }
 
 .context-menu-option i {
     width: 16px;
     text-align: center;
+}
+
+.orientation-warning {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 130px);
+    background: rgba(31, 23, 0, 0.92);
+    border: 1px solid var(--ygg-warn, #ffc107);
+    color: var(--ygg-warn, #ffc107);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    z-index: 30;
+}
+
+.orientation-warning i {
+    flex-shrink: 0;
+}
+
+.orientation-warning__action {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid var(--ygg-warn, #ffc107);
+    border-radius: 4px;
+    color: var(--ygg-warn, #ffc107);
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    white-space: nowrap;
+}
+
+.orientation-warning__action:hover {
+    background: rgba(255, 193, 7, 0.15);
+}
+
+/* ---------------------------------------------------------------------------
+ * Viewport overlay (Cornerstone3D grid, roadmap Phase 3).
+ *
+ * Panel name, orientation letters, slice counter and window/level, drawn over the
+ * canvas. Built by frontend/imaging/grid/viewportOverlay.js.
+ *
+ * `pointer-events: none` on the root is load-bearing: the overlay covers the whole
+ * viewport, and without it every drag meant for the image -- crosshairs, window/level,
+ * pan -- would land on a label instead.
+ * ------------------------------------------------------------------------- */
+
+.ygg-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+
+.ygg-overlay__panel {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Beside the panel name: which series this window is showing. Constant on the
+   CBCT grid, and the only way to tell four MRIs apart on the brain one. */
+.ygg-overlay__modality {
+  position: absolute;
+  top: 0.5rem;
+  left: 3rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+/* Bottom-left, matching where every viewer puts it. */
+.ygg-overlay__slice {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.6rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Bottom-right, out of the way of the slice counter. Quiet by default: it is a
+ * readout, not a control, and it should not compete with the image. */
+.ygg-overlay__window {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.6rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.7rem;
+}
+
+/* The anatomical letters. Centred on each edge, and deliberately brighter than the
+ * numbers: getting left and right the wrong way round is the error that matters. */
+.ygg-overlay__edge {
+  position: absolute;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ygg-overlay__edge--top {
+  top: 0.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ygg-overlay__edge--bottom {
+  bottom: 0.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ygg-overlay__edge--left {
+  left: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ygg-overlay__edge--right {
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* The viewport element Cornerstone renders into has to establish a containing block
+ * for the absolutely positioned overlay above. */
+.viewer-window {
+  position: relative;
+}
+
+/* Load failures and the F2 orientation warning. */
+.viewer-window__message {
+  position: absolute;
+  inset: auto 0.6rem 2rem 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.viewer-window__message--warning {
+  background: rgba(120, 85, 0, 0.85);
+  color: #ffe9b0;
+}
+
+.viewer-window__message--error {
+  background: rgba(120, 20, 20, 0.9);
+  color: #ffd9d9;
+}
+
+/* Replaces the percent Level/Window sliders (decision #5). Window/level is dragged on
+ * the image with Shift; the number lives in each viewport's overlay. */
+.cbct-window-hint {
+  font-size: 0.75rem;
+  color: var(--ygg-text-muted);
+}
+
+/* --- Loading indicator ---------------------------------------------------- */
+
+.ygg-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  z-index: 4;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.8rem;
+}
+
+.ygg-loading__spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  animation: ygg-spin 0.8s linear infinite;
+}
+
+@keyframes ygg-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Respect a user who has asked for less motion: the text still reports progress. */
+@media (prefers-reduced-motion: reduce) {
+  .ygg-loading__spinner { animation: none; }
+}
+
+/* --- Annotation mode ------------------------------------------------------ */
+
+/* A switch, not an icon button. The eye button it replaces could not say whether it
+ * was reporting a state or offering an action, and was clicked in the belief that it
+ * enabled annotations while it hid them. `role="switch"` plus a visible on/off word
+ * removes the question. Off is the default and the resting look. */
+.cbct-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.3rem;
+  border: 1px solid var(--ygg-border, rgba(255, 255, 255, 0.18));
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.cbct-mode-toggle__track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: var(--ygg-border, rgba(255, 255, 255, 0.25));
+  transition: background 120ms ease;
+}
+
+.cbct-mode-toggle__knob {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.1rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms ease;
+}
+
+.cbct-mode-toggle__state {
+  min-width: 1.6rem;
+  font-weight: 600;
+  /* Reserved width and a fixed side: "on" and "off" differ by a character, and a
+   * toolbar that reflows on every toggle reads as a glitch. */
+  text-align: left;
+  color: var(--ygg-text-muted);
+}
+
+.cbct-mode-toggle[aria-checked='true'] {
+  border-color: var(--ygg-primary);
+  color: var(--ygg-primary);
+}
+
+.cbct-mode-toggle[aria-checked='true'] .cbct-mode-toggle__track {
+  background: var(--ygg-primary);
+}
+
+.cbct-mode-toggle[aria-checked='true'] .cbct-mode-toggle__knob {
+  transform: translateX(0.8rem);
+}
+
+.cbct-mode-toggle[aria-checked='true'] .cbct-mode-toggle__state {
+  color: var(--ygg-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cbct-mode-toggle__track,
+  .cbct-mode-toggle__knob { transition: none; }
+}
+
+/* The tools the mode reveals. `hidden` does the hiding -- the attribute, so the state
+ * is in the DOM where the switch's `aria-controls` points and not only in JavaScript.
+ * The `display` here is what `hidden` has to beat, hence the explicit override. */
+.cbct-annotation-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cbct-annotation-tools[hidden] {
+  display: none;
+}
+
+/* --- Measurement tool group ----------------------------------------------- */
+
+.cbct-tool-group {
+  display: inline-flex;
+  gap: 0.15rem;
+  align-items: center;
+}
+
+/* This project's design tokens are `--ygg-*` (Tailwind), not Bootstrap's `--bs-*`.
+ * The first version of this rule used `var(--bs-primary, …)`, which does not exist
+ * here, so the fallback hex was always what showed -- a blue that belongs to a
+ * different design system. */
+.cbct-tool.is-active,
+.cbct-tool[aria-pressed='true'] {
+  background: var(--ygg-primary);
+  color: var(--ygg-on-primary);
+}
+
+/* --- 3D expanded to fill the grid ----------------------------------------- */
+
+/* Hides the three slice views and gives their space to the render. Display rather
+ * than opacity: a hidden-but-laid-out viewport still costs Cornerstone a render. */
+.viewer-grid.is-3d-expanded .viewer-window:not([data-window-index='3']) {
+  display: none;
+}
+
+.viewer-grid.is-3d-expanded .viewer-window[data-window-index='3'] {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+/* ---------------------------------------------------------------------------
+   Photo stack (teleradiography, intraoral) -- roadmap Phases 4+5.
+
+   Shares the CBCT toolbar's mode switch (`.cbct-mode-toggle`) rather than
+   defining a second one: the two surfaces have the same annotation-mode
+   concept, and two switches that looked slightly different would invite the
+   conclusion that they behave differently.
+   --------------------------------------------------------------------------- */
+
+/* The photo surfaces use the page's own `.viewer-toolbar` component (chrome,
+   groups, labels and .icon-btn, in patient_detail.css) rather than a second
+   toolbar of their own: the IOS bar sits directly above them on this page, and
+   two toolbars styled almost alike read as two different kinds of control. Only
+   the readouts below are specific to a photo stack. */
+
+.photo-counter,
+.photo-calibration {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  min-width: 4ch;
+  text-align: center;
+}
+
+/* The viewport is sized by CSS and read back by a ResizeObserver, so it needs a
+   real height before Cornerstone measures it: a camera fitted to a 0-height
+   element is not a camera. */
+.photo-viewport {
+  position: relative;
+  width: 100%;
+  min-height: 24rem;
+  height: 60vh;
+  background: #000;
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.photo-viewport canvas {
+  display: block;
+}
+
+/* The photo surface's own dialogs (calibration, naming a point, the image editor).
+   `.modal` is the app's convention and is styled in the Tailwind layer; these two
+   rules are the parts a dynamically-created dialog needs that a template-declared
+   one gets from its markup. */
+.ygg-photo-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1060;
+  overflow-y: auto;
+  background: rgb(0 0 0 / 45%);
+}
+
+.ygg-photo-dialog .modal-dialog {
+  margin: 3rem auto;
+  max-width: 32rem;
+}
+
+/* The editor panel hosts an image and the editor's own toolbar, so it needs room the
+   question dialogs do not. */
+.ygg-photo-dialog:has(.modal-title .fa-crop) .modal-dialog {
+  max-width: min(64rem, 92vw);
+}
+
+/* Segmentation overlay control -----------------------------------------------
+   Just the on/off switch now. It briefly carried a per-class list -- a colour
+   swatch and a checkbox per label -- which is gone on the maintainer's call: the
+   overlay is all of it or none of it. The switch itself reuses
+   `.cbct-mode-toggle`, the same control annotation mode uses. */
+.viewer-seg-control {
+  display: inline-flex;
+}
+
+
+/* A chip being dragged. The pre-3.0 handler set `style.opacity` inline; a class
+   keeps the appearance in the stylesheet with the rest of the chip's states. */
+.modality-chip.is-dragging {
+  opacity: 0.5;
+  cursor: grabbing;
 }

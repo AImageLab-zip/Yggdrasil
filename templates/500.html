@@ -1,0 +1,26 @@
+{% extends 'common/error_base.html' %}
+
+{% comment %}
+Rendered with NO context: django.views.defaults.server_error calls
+template.render() without a request, so no context processor has run. Nothing
+below reads context, and the nav and footer are blanked because base.html's
+footer renders `{{ app_version }}` and its nav branches on `user`.
+
+For the same reason there is no "sign in" action here: `{% url %}` would work,
+but the page must stay useful even when the failure is in whatever the session
+touches.
+{% endcomment %}
+
+{% block title %}Something went wrong - Yggdrasil{% endblock %}
+{% block chrome %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block error_code %}500{% endblock %}
+{% block error_title %}Yggdrasil hit an unexpected error{% endblock %}
+{% block error_lead %}
+The problem has been recorded. Nothing you were looking at has been changed by
+it. Try again in a moment, and if it keeps happening tell an administrator what
+you were doing.
+{% endblock %}
+{% block error_actions %}
+<a class="btn btn-primary" href="/">Back to the home page</a>
+{% endblock %}

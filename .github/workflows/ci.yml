@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: ["release/3.0", "main"]
+  pull_request:
+
+jobs:
+  lint:
+    # Runner labels: repo-level self-hosted runner with Docker (see CONTRIBUTING.md).
+    runs-on: [self-hosted, linux]
+    container: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ruff
+        run: pip install --no-cache-dir "$(grep '^ruff==' requirements-dev.txt)"
+      - name: Ruff check
+        run: ruff check .
+
+  test:
+    runs-on: [self-hosted, linux]
+    container: python:3.11-slim
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: citestpass
+          MYSQL_DATABASE: ygg
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pcitestpass"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      redis:
+        # No auth: the official image only takes a password via command args,
+        # which GitHub `services:` cannot override. Celery URLs are set
+        # explicitly below; the passworded presence URL fails gracefully.
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      SECRET_KEY: ci-only-secret-key
+      DEBUG: "False"
+      DB_NAME: ygg
+      DB_USER: root
+      DB_PASSWORD: citestpass
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_PASSWORD: ci-unused
+      REDIS_HOST: redis
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+      EMAIL_HOST: localhost
+      EMAIL_PORT: "25"
+      EMAIL_HOST_USER: ci
+      EMAIL_HOST_PASSWORD: ci
+      EMAIL_USE_TLS: "False"
+      EMAIL_USE_SSL: "False"
+      DEFAULT_FROM_EMAIL: ci@example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps for mysqlclient
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gcc pkg-config default-libmysqlclient-dev
+      - name: Install Python deps
+        run: pip install --no-cache-dir -r requirements.txt
+      - name: Migration hygiene gate
+        run: python manage.py makemigrations --check --dry-run
+      - name: Migrate
+        run: python manage.py migrate --noinput
+      - name: Test
+        run: python manage.py test --noinput -v 2
+
+  frontend:
+    # Builds the Cornerstone3D bundle from source and requires the result to be
+    # byte-identical to what is committed under static/vendor/cornerstone/.
+    # See CONTRIBUTING.md, "The frontend bundle".
+    #
+    # NOTE: this job needs npm-registry egress on the self-hosted runner, the same
+    # way the release workflow needs `gh`.
+    runs-on: [self-hosted, linux]
+    container: node:22-slim
+    steps:
+      # Before checkout: without git in the container, actions/checkout falls back to
+      # a tarball and there is no repository for `git diff` to compare against.
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+      - uses: actions/checkout@v4
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install JS deps
+        run: npm ci
+      - name: Build the vendored bundle
+        run: npm run build
+      - name: Committed bundle must match a fresh build
+        # esbuild output is byte-reproducible here: the version is pinned exactly, the
+        # lockfile is committed, and sourcemaps are off.
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::static/vendor/cornerstone/ is stale -- run scripts/build_frontend.sh and commit the result" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain >&2
+            echo "::error::the build left untracked files -- commit them or ignore them" >&2
+            exit 1
+          fi
+      - name: Verify bundle assets (worker/wasm URLs resolve)
+        run: npm run verify
+      - name: JS tests
+        run: npm test

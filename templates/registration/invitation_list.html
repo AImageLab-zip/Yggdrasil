@@ -1,144 +1,107 @@
-{% extends 'base.html' %}
+{% extends 'common/base_app.html' %}
+{% load icons %}
 
 {% block title %}Manage Invitations - Yggdrasil{% endblock %}
 
 {% block content %}
-<div class="container">
-    <div class="row">
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Create Invitation</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post">
-                        {% csrf_token %}
-                        <div class="mb-3">
-                            <label for="{{ form.email.id_for_label }}" class="form-label">Email (Optional)</label>
-                            {{ form.email }}
-                            <div class="form-text">{{ form.email.help_text }}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="{{ form.sender_email.id_for_label }}" class="form-label">Sender</label>
-                            {{ form.sender_email }}
-                            <div class="form-text">{{ form.sender_email.help_text }}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="{{ form.role.id_for_label }}" class="form-label">Role</label>
-                            {{ form.role }}
-                        </div>
-                        <div class="mb-3">
-                            <label for="{{ form.projects.id_for_label }}" class="form-label">Projects</label>
-                            {{ form.projects }}
-                            <div class="form-text">{{ form.projects.help_text }}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="{{ form.expiry_days.id_for_label }}" class="form-label">Expires In (Days)</label>
-                            {{ form.expiry_days }}
-                            <div class="form-text">{{ form.expiry_days.help_text }}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="{{ form.signature.id_for_label }}" class="form-label">Signature</label>
-                            {{ form.signature }}
-                            <div class="form-text">{{ form.signature.help_text }}</div>
-                        </div>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-plus me-2"></i>Generate Invitation
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-envelope me-2"></i>Active Invitations</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Code</th>
-                                    <th>Email</th>
-                                    <th>Role</th>
-                                    <th>Projects</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for invitation in invitations %}
-                                <tr>
-                                    <td>
-                                        <div class="d-flex align-items-center gap-1 code-cell">
-                                        <code class="code-preview" title="{{ invitation.code }}">{{ invitation.code|slice:":8" }}...</code>
-                                        <button class="btn btn-sm btn-link p-0" title="Copy invitation link" onclick="copyInvitationLink('{{ invitation.code }}')">
-                                            <i class="fas fa-copy"></i>
-                                        </button>
-                                        </div>
-                                    </td>
-                                    <td>{{ invitation.email|default:"-" }}</td>
-                                    <td>{{ invitation.get_role_display }}</td>
-                                    <td>
-                                        {% with projects=invitation.projects.all %}
-                                            {% if projects %}
-                                                <div class="d-flex flex-wrap gap-1">
-                                                    {% for project in projects %}
-                                                        {% if forloop.counter <= 2 %}
-                                                            <span class="badge bg-info-subtle text-info-emphasis project-badge">{{ project.name }}</span>
-                                                        {% endif %}
-                                                    {% endfor %}
-                                                {% if projects|length > 2 %}
-                                                        <span class="badge bg-secondary-subtle text-secondary-emphasis project-badge">+{{ projects|length|add:"-2" }} more</span>
-                                                {% endif %}
-                                                </div>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        {% endwith %}
-                                    </td>
-                                    <td>
-                                        <div class="d-flex flex-wrap gap-1">
-                                            {% if invitation.used_at %}
-                                                <span class="badge bg-success-subtle text-success-emphasis">Used by {{ invitation.used_by.username }}</span>
-                                            {% elif invitation.is_valid %}
-                                                <span class="badge bg-primary-subtle text-primary-emphasis">Active</span>
-                                            {% else %}
-                                                <span class="badge bg-danger-subtle text-danger-emphasis">Expired</span>
-                                            {% endif %}
+<div class="page-header">
+    <h1 class="page-title">{% icon 'envelope' %}<span>Invitations</span></h1>
+</div>
 
-                                            {% if invitation.email %}
-                                                {% if invitation.email_sent_at %}
-                                                    <span class="badge bg-success-subtle text-success-emphasis">Email sent</span>
-                                                {% elif invitation.email_send_error %}
-                                                    <span class="badge bg-warning-subtle text-warning-emphasis" title="{{ invitation.email_send_error }}">Email failed - send manually</span>
-                                                {% else %}
-                                                    <span class="badge bg-secondary-subtle text-secondary-emphasis">Email pending</span>
-                                                {% endif %}
-                                            {% else %}
-                                                <span class="badge bg-secondary-subtle text-secondary-emphasis">No recipient email</span>
-                                            {% endif %}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        {% if not invitation.used_at %}
-                                            <a href="{% url 'delete_invitation' invitation.code %}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this invitation?')">
-                                                <i class="fas fa-trash"></i>
-                                            </a>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% empty %}
-                                <tr>
-                                    <td colspan="6" class="text-center">No invitations found.</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+<div class="grid gap-5 lg:grid-cols-3">
+    <!-- Create -->
+    <div class="lg:col-span-1">
+        <div class="card-ygg card-ygg-body">
+            <h2 class="flex items-center gap-2 text-base font-semibold mb-4">{% icon 'plus-circle' %}<span>Create invitation</span></h2>
+            <form method="post" class="ygg-form">
+                {% csrf_token %}
+                <div class="form-field">
+                    <label for="{{ form.email.id_for_label }}" class="form-label">Email (optional)</label>
+                    {{ form.email }}
+                    <div class="form-help">{{ form.email.help_text }}</div>
                 </div>
+                <div class="form-field">
+                    <label for="{{ form.sender_email.id_for_label }}" class="form-label">Sender</label>
+                    {{ form.sender_email }}
+                    <div class="form-help">{{ form.sender_email.help_text }}</div>
+                </div>
+                <div class="form-field">
+                    <label for="{{ form.role.id_for_label }}" class="form-label">Role</label>
+                    {{ form.role }}
+                </div>
+                <div class="form-field">
+                    <label for="{{ form.projects.id_for_label }}" class="form-label">Projects</label>
+                    {{ form.projects }}
+                    <div class="form-help">{{ form.projects.help_text }}</div>
+                </div>
+                <div class="form-field">
+                    <label for="{{ form.expiry_days.id_for_label }}" class="form-label">Expires in (days)</label>
+                    {{ form.expiry_days }}
+                    <div class="form-help">{{ form.expiry_days.help_text }}</div>
+                </div>
+                <div class="form-field">
+                    <label for="{{ form.signature.id_for_label }}" class="form-label">Signature</label>
+                    {{ form.signature }}
+                    <div class="form-help">{{ form.signature.help_text }}</div>
+                </div>
+                <button type="submit" class="btn btn-primary w-full">{% icon 'plus' %}<span>Generate invitation</span></button>
+            </form>
+        </div>
+    </div>
+
+    <!-- List -->
+    <div class="lg:col-span-2">
+        <div class="card-ygg card-ygg-body">
+            <h2 class="flex items-center gap-2 text-base font-semibold mb-4">{% icon 'inbox' %}<span>Active invitations</span></h2>
+            <div class="overflow-x-auto">
+                <table class="table-ygg">
+                    <thead>
+                        <tr><th>Code</th><th>Email</th><th>Role</th><th>Projects</th><th>Status</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for invitation in invitations %}
+                        <tr>
+                            <td>
+                                <div class="flex items-center gap-1 whitespace-nowrap">
+                                    <code class="mono text-xs" title="{{ invitation.code }}">{{ invitation.code|slice:":8" }}…</code>
+                                    <button class="btn-ghost rounded p-1" title="Copy invitation link" onclick="copyInvitationLink('{{ invitation.code }}')">{% icon 'copy' 'ygg-icon-sm' %}</button>
+                                </div>
+                            </td>
+                            <td>{{ invitation.email|default:"-" }}</td>
+                            <td>{{ invitation.get_role_display }}</td>
+                            <td>
+                                {% with projects=invitation.projects.all %}
+                                    {% if projects %}
+                                        <div class="flex flex-wrap gap-1">
+                                            {% for project in projects %}{% if forloop.counter <= 2 %}<span class="badge-ygg badge-neutral">{{ project.name }}</span>{% endif %}{% endfor %}
+                                            {% if projects|length > 2 %}<span class="badge-ygg badge-neutral">+{{ projects|length|add:"-2" }} more</span>{% endif %}
+                                        </div>
+                                    {% else %}<span class="text-content-muted">-</span>{% endif %}
+                                {% endwith %}
+                            </td>
+                            <td>
+                                <div class="flex flex-wrap gap-1">
+                                    {% if invitation.used_at %}<span class="badge-ygg badge-ok">Used by {{ invitation.used_by.username }}</span>
+                                    {% elif invitation.is_valid %}<span class="badge-ygg badge-ok">Active</span>
+                                    {% else %}<span class="badge-ygg badge-danger">Expired</span>{% endif %}
+                                    {% if invitation.email %}
+                                        {% if invitation.email_sent_at %}<span class="badge-ygg badge-ok">Email sent</span>
+                                        {% elif invitation.email_send_error %}<span class="badge-ygg badge-warn" title="{{ invitation.email_send_error }}">Email failed</span>
+                                        {% else %}<span class="badge-ygg badge-neutral">Email pending</span>{% endif %}
+                                    {% else %}<span class="badge-ygg badge-neutral">No recipient email</span>{% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if not invitation.used_at %}
+                                    <a href="{% url 'delete_invitation' invitation.code %}" class="btn btn-danger btn-sm" onclick="return confirm('Delete this invitation?')">{% icon 'trash' 'ygg-icon-sm' %}</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="text-center text-content-muted py-6">No invitations found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -154,25 +117,4 @@ function copyInvitationLink(code) {
     });
 }
 </script>
-
-<style>
-.form-control, .form-select {
-    margin-top: 0.25rem;
-}
-
-.code-preview {
-    display: inline-block;
-    min-width: 5.5rem;
-}
-
-.code-cell {
-    white-space: nowrap;
-}
-
-.project-badge {
-    max-width: 14rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-</style>
-{% endblock %} 
+{% endblock %}

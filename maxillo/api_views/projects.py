@@ -1,6 +1,5 @@
 """Project-based API endpoints."""
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Prefetch
 from django.apps import apps
@@ -29,7 +28,10 @@ RAWZIP_SLUG = 'rawzip'
 
 
 def _project_domain(project_slug):
-    return 'maxillo'
+    try:
+        return Project.objects.get(slug=project_slug).domain
+    except Project.DoesNotExist:
+        return 'maxillo'
 
 
 def _project_models(project_slug):
@@ -44,7 +46,6 @@ def _upload_form_class(project_slug):
     from ..forms import PatientUploadForm
     return PatientUploadForm
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def project_upload_api(request, project_slug):
     """
@@ -73,19 +74,7 @@ def project_upload_api(request, project_slug):
         
         # Use the existing form logic from upload_scan view
         PatientUploadForm = _upload_form_class(project_slug)
-        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user)
-        
-        # Validate CBCT folder uploads before creating the patient so invalid
-        # folder selections do not leave behind empty patient rows.
-        cbct_upload_type = request.POST.get('cbct_upload_type', 'file')
-        cbct_folder_files = request.FILES.getlist('cbct_folder_files')
-        if cbct_upload_type == 'folder' and cbct_folder_files:
-            try:
-                from ..models import validate_cbct_folder
-
-                validate_cbct_folder(cbct_folder_files)
-            except Exception as e:
-                return JsonResponse({'error': f'Invalid CBCT folder upload: {e}'}, status=400)
+        patient_upload_form = PatientUploadForm(request.POST, request.FILES, user=request.user, current_project=project)
         
         if not patient_upload_form.is_valid():
             return JsonResponse({
@@ -97,13 +86,14 @@ def project_upload_api(request, project_slug):
         patient = patient_upload_form.save(commit=False)
         patient.uploaded_by = request.user
         
-        # Handle folder assignment
+        # Project + folder come from the form (both mandatory).
+        patient.project = project
         folder = patient_upload_form.cleaned_data.get('folder')
         if folder:
             patient.folder = folder
 
         if not user_is_project_admin(request.user, project):
-            if not folder or not user_can_write_annotations(request.user, folder, _project_domain(project_slug)):
+            if not folder or not user_can_write_annotations(request.user, folder, project):
                 return JsonResponse({'error': 'You do not have permission to upload into this folder'}, status=403)
         
         patient.save()
@@ -120,8 +110,7 @@ def project_upload_api(request, project_slug):
         
         # Get allowed modalities for this project
         allowed_slugs = set(project.modalities.values_list('slug', flat=True))
-        logger.error(f"Allowed slugs: {allowed_slugs}")
-        logger.error(f"Candidate slugs: {candidate_slugs}")
+        logger.debug("Allowed slugs: %s; candidate slugs: %s", allowed_slugs, candidate_slugs)
         # Add modalities to patient
         if candidate_slugs:
             try:
@@ -135,7 +124,7 @@ def project_upload_api(request, project_slug):
                         m = _Modality.objects.filter(slug=_slugify(slug)).first()
                     if m and (not allowed_slugs or m.slug in allowed_slugs):
                         patient.modalities.add(m)
-                        logger.error(f"Added modality {m.slug} to patient {patient.patient_id}")
+                        logger.debug("Added modality %s to patient %s", m.slug, patient.patient_id)
             except Exception:
                 pass
         
@@ -167,8 +156,8 @@ def project_upload_api(request, project_slug):
         
         # Handle CBCT files
         try:
+            from django.core.exceptions import ValidationError
             cbct_file = request.FILES.get('cbct')
-            cbct_folder_files = request.FILES.getlist('cbct_folder_files')
             if cbct_file:
                 from ..file_utils import save_cbct_to_dataset
 
@@ -179,20 +168,12 @@ def project_upload_api(request, project_slug):
                         'type': 'cbct',
                         'status': processing_job.status
                     })
-                    upload_results['messages'].append(f"CBCT scan queued for processing")
-            elif cbct_folder_files:
-                from ..file_utils import save_cbct_folder_to_dataset
-
-                folder_path, processing_job = save_cbct_folder_to_dataset(patient, cbct_folder_files)
-                if processing_job:
-                    upload_results['jobs'].append({
-                        'id': processing_job.id,
-                        'type': 'cbct',
-                        'status': processing_job.status
-                    })
-                    upload_results['messages'].append(f"CBCT folder queued for processing")
+                    upload_results['messages'].append("CBCT scan queued for processing")
+        except ValidationError as e:
+            err_msg = e.message if hasattr(e, 'message') else '; '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return JsonResponse({'error': err_msg}, status=400)
         except Exception as e:
-            upload_results['messages'].append(f"Error creating CBCT processing job: {e}\ntraceback: {traceback.format_exc()}")
+            return JsonResponse({'error': f"Error creating CBCT processing job: {e}"}, status=400)
 
         # Handle intraoral photographs
         try:
@@ -213,56 +194,23 @@ def project_upload_api(request, project_slug):
         except Exception as e:
             upload_results['messages'].append(f"Error creating intraoral processing job: {e}")
         
-        # Handle Teleradiography and Panoramic
-        try:
-            teleradiography_file = request.FILES.get('teleradiography')
-            if teleradiography_file:
-                from ..file_utils import save_generic_modality_file
-                fr, job = save_generic_modality_file(patient, 'teleradiography', teleradiography_file)
-                if fr:
-                    upload_results['messages'].append(f"Teleradiography uploaded successfully")
-                if job:
-                    upload_results['jobs'].append({
-                        'id': job.id,
-                        'type': 'teleradiography',
-                        'status': job.status
-                    })
-        except Exception as e:
-            upload_results['messages'].append(f"Error creating teleradiography processing job: {e}")
-        
-        try:
-            panoramic_file = request.FILES.get('panoramic')
-            if panoramic_file:
-                from ..file_utils import save_generic_modality_file
-                fr, job = save_generic_modality_file(patient, 'panoramic', panoramic_file)
-                if fr:
-                    upload_results['messages'].append(f"Panoramic uploaded successfully")
-                if job:
-                    upload_results['jobs'].append({
-                        'id': job.id,
-                        'type': 'panoramic',
-                        'status': job.status
-                    })
-        except Exception as e:
-            upload_results['messages'].append(f"Error creating panoramic processing job: {e}")
-        
-        # Handle Rawzip
-        try:
-            rawzip_file = request.FILES.get('rawzip')
-            if rawzip_file:
-                from ..file_utils import save_generic_modality_file
-                fr, job = save_generic_modality_file(patient, 'rawzip', rawzip_file)
-        
-                if fr:
-                    upload_results['messages'].append(f"Rawzip uploaded successfully")
-                if job:
-                    upload_results['jobs'].append({
-                        'id': job.id,
-                        'type': 'rawzip',
-                        'status': job.status
-                    })
-        except Exception as e:
-            upload_results['messages'].append(f"Error creating rawzip processing job: {e}")
+        # Handle single-file generic modalities (Teleradiography, Panoramic, Rawzip)
+        from ..file_utils import save_generic_modality_file
+        for slug, label in (('teleradiography', 'Teleradiography'), ('panoramic', 'Panoramic'), ('rawzip', 'Rawzip')):
+            try:
+                generic_file = request.FILES.get(slug)
+                if generic_file:
+                    fr, job = save_generic_modality_file(patient, slug, generic_file)
+                    if fr:
+                        upload_results['messages'].append(f"{label} uploaded successfully")
+                    if job:
+                        upload_results['jobs'].append({
+                            'id': job.id,
+                            'type': slug,
+                            'status': job.status
+                        })
+            except Exception as e:
+                upload_results['messages'].append(f"Error creating {slug} processing job: {e}")
         
         # Prepare response data
         patient_data = {
@@ -312,7 +260,6 @@ def project_upload_api(request, project_slug):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_project_folders(request, project_slug):
     """
@@ -331,8 +278,8 @@ def get_project_folders(request, project_slug):
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Authentication required'}, status=401)
         
-        # Get all folders - we'll get all folders as they can be used across projects
-        folders = Folder.objects.filter(parent__isnull=True).order_by('name')
+        # Folders are project-scoped now.
+        folders = Folder.objects.filter(parent__isnull=True, project=project).order_by('name')
         folders = filter_folders_for_user(request.user, folders, _project_domain(project_slug))
         
         folders_data = []
@@ -367,7 +314,6 @@ def get_project_folders(request, project_slug):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def project_patients_handler(request, project_slug):
     """
     Handler for /<project_slug>/api/patients/
@@ -382,7 +328,6 @@ def project_patients_handler(request, project_slug):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_project_patients_and_modalities(request, project_slug):
     """
@@ -450,7 +395,6 @@ def get_project_patients_and_modalities(request, project_slug):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_patient_files(request, project_slug, patient_id):
     """
@@ -527,7 +471,6 @@ def get_patient_files(request, project_slug, patient_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def get_multiple_patients_files(request, project_slug):
     """
