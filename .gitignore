@@ -1,17 +1,42 @@
-*.sql.gz
+# ---------------------------------------------------------------------------
+# Yggdrasil .gitignore
+#
+# Rule of thumb: ignore *specific* local junk, never whole directories that
+# hold source. A blanket ignore plus an `!` allowlist means every new file in
+# that directory silently vanishes from `git status`, which is how a script
+# gets written, used and lost.
+# ---------------------------------------------------------------------------
+
+# --- Secrets and credentials -----------------------------------------------
+.env
+.env.dev
+.env.prod
 .env.worker
-secrets
-# certs/ is TRACKED on purpose: it holds the pinned *public* certificate of the Live
-# Whisper upstream (docs/setup.md records its fingerprint). A private key must never
-# land there, so the shapes one arrives as are ignored rather than left to review.
+.env-zip-dgx
+# A hand-made pre-change copy of .env is still a copy of .env.
+.env.bak*
+/secrets/
+local_settings.py
+
+# certs/ is TRACKED on purpose: it holds the pinned *public* certificate of the
+# Live Whisper upstream (docs/setup.md records its fingerprint). A private key
+# must never land there, so the shapes one arrives as are ignored rather than
+# left to review.
 certs/*.key
 certs/*private*
 certs/*privkey*
-*.zip
-.claude
-backup*
-!common/management/commands/backup_now.py
-# Python
+
+# --- Database dumps and backups --------------------------------------------
+# Anchored: `backup*` unanchored would swallow common/backup_utils.py and any
+# future <app>/backups/ package.
+/backups/
+/backup*
+/prod_db.sql
+*.sql
+*.sql.gz
+*.bak
+
+# --- Python ----------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,228 +44,126 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 env.bak/
 venv.bak/
-.env.dev
-.env.prod
-.env-zip-dgx
+.python-version
 
-# Django
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Logs directory
-logs/
-
-# Media files
-storage/
-media/
-
-# Static files
-staticfiles/
-collected-static/
-
-# Environment variables
-.env
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Docker
-.dockerignore
-
-# Django #
-*.log
-*.pot
-*.pyc
-__pycache__
-db.sqlite3
-media
-
-# Backup files #
-*.bak
-
-# If you are using PyCharm #
-# User-specific stuff
-.idea/**/workspace.xml
-.idea/**/tasks.xml
-.idea/**/usage.statistics.xml
-.idea/**/dictionaries
-.idea/**/shelf
-
-# AWS User-specific
-.idea/**/aws.xml
-
-# Generated files
-.idea/**/contentModel.xml
-
-# Sensitive or high-churn files
-.idea/**/dataSources/
-.idea/**/dataSources.ids
-.idea/**/dataSources.local.xml
-.idea/**/sqlDataSources.xml
-.idea/**/dynamic.xml
-.idea/**/uiDesigner.xml
-.idea/**/dbnavigator.xml
-
-# Gradle
-.idea/**/gradle.xml
-.idea/**/libraries
-
-# File-based project format
-*.iws
-
-# IntelliJ
-out/
-
-# JIRA plugin
-atlassian-ide-plugin.xml
-
-# Python #
-*.py[cod]
-*$py.class
-
-# Distribution / packaging
-.Python build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+# Packaging. Anchored: an unanchored `lib/` would swallow any <app>/lib/ package.
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
 *.whl
+*.egg
 *.egg-info/
 .installed.cfg
-*.egg
 *.manifest
 *.spec
-
-# Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
+# --- Tooling caches --------------------------------------------------------
+.cache
 .coverage
 .coverage.*
-.cache
-.pytest_cache/
-nosetests.xml
-coverage.xml
-*.cover
 .hypothesis/
-
-# Jupyter Notebook
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+coverage.xml
+htmlcov/
+nosetests.xml
+*.cover
 .ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# celery
 celerybeat-schedule.*
-
-# SageMath parsed files
 *.sage.py
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# --- Django runtime --------------------------------------------------------
+*.log
+*.pot
+logs/
+db.sqlite3
+db.sqlite3-journal
+media/
+storage/
+staticfiles/
+collected-static/
 
-# mkdocs documentation
-/site
+# --- Frontend --------------------------------------------------------------
+# The emitted bundle under static/vendor/cornerstone/ IS committed (CI rebuilds
+# it and fails on any diff); only the toolchain's inputs are ignored.
+node_modules/
 
-# mypy
-.mypy_cache/
+# Large model weights fetched at runtime, not source.
+static/vendor/transformers/models/
+static/vendor/transformers/onnxruntime*/
 
-# Sublime Text #
+# --- Local scripts ---------------------------------------------------------
+# NOT a blanket `scripts/*` ignore: everything under scripts/ is source unless
+# it is a downloaded binary or a scratch file.
+scripts/.bin/
+scripts/*.local.*
+scripts/scratch_*
+
+# --- Agent / editor local state --------------------------------------------
+# CLAUDE.md and AGENTS.md are tracked project instructions, not local artifacts.
+.claude/settings.local.json
+.code-review-graph
+ANALYSIS.md
+MODULE_DESIGN.md
+Trace-*.json
+.tmp_trace_*.tsv
+/Makefile
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+.history
+*.swp
+*.swo
+*.iws
+/out/
+atlassian-ide-plugin.xml
+sftp-config.json
 *.tmlanguage.cache
 *.tmPreferences.cache
 *.stTheme.cache
 *.sublime-workspace
 *.sublime-project
 
-# sftp configuration file
-sftp-config.json
+# .dockerignore was ignored before this cleanup and stays ignored, so the
+# ignored set is unchanged by it. It is arguably a repo file that should be
+# tracked; that is a separate decision.
+.dockerignore
 
-# Package control specific files Package
-Control.last-run
-Control.ca-list
-Control.ca-bundle
-Control.system-ca-bundle
-GitHub.sublime-settings
+# --- OS -------------------------------------------------------------------
+.DS_Store
+Thumbs.db
 
-# Visual Studio Code #
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-.history
+# --- Archives and local working copies ------------------------------------
+*.zip
+/site
 
-# Database
-prod_db.sql
-*.sql
+# External reference repo (browser panorex port source).
+/seg2pano/
 
-# Frontend build (npm + esbuild, dev-only -- the emitted bundle under
-# static/vendor/cornerstone/ IS committed; see docs/cornerstone-roadmap.md).
-node_modules/
-
-# Local scripts (tracked ones re-included explicitly below)
-scripts/*
-!scripts/backup_prod.sh
-!scripts/restore_prod.sh
-!scripts/mirror_bucket.py
-!scripts/manual_test_external_api.py
-!scripts/dev_bootstrap.sh
-!scripts/build_frontend.sh
-!scripts/build_frontend.mjs
-!scripts/check_bundle_assets.mjs
-
-# OpenCode local artifacts
-AGENTS.md
-ANALYSIS.md
-MODULE_DESIGN.md
-Trace-*.json
-.tmp_trace_*.tsv
-Makefile
-CLAUDE.md
-.code-review-graph
-
-# Claude local artifacts
-*.claude*
-
-# ONNX Models
-static/vendor/transformers/models/
-static/vendor/transformers/onnxruntime*/
-scripts/.bin/
-
-# External reference repo (browser panorex port source)
-seg2pano/
-
-# Local working copies of cluster algorithms (deployed to
-# /work/yggdrasil_workers/algo/<name>/, each with its own lifecycle). See seg2pano/.
-laparoscopy-video/
-iop-compass/
-# The weight files uploaded to algo/iop-compass/weights/ on the cluster.
-IOP_weights/
+# Local working copies of cluster algorithms, deployed to
+# /work/yggdrasil_workers/algo/<name>/ with their own lifecycle.
+/laparoscopy-video/
+/iop-compass/
+# Weight files uploaded to algo/iop-compass/weights/ on the cluster.
+/IOP_weights/
