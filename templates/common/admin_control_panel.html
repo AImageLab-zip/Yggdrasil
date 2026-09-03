@@ -1,6 +1,5 @@
 {% extends 'common/base_app.html' %}
 {% load icons %}
-{% firstof request.resolver_match.namespace 'maxillo' as ns %}
 
 {% block title %}Control Panel - Yggdrasil{% endblock %}
 
@@ -10,7 +9,7 @@
     <div class="flex gap-2">
         <a href="{% url 'online_users_dashboard' %}" class="btn btn-secondary btn-sm">{% icon 'circle-dot' %}<span>Live Users</span></a>
         <a href="{% url 'user_activity_stats' %}" class="btn btn-secondary btn-sm">{% icon 'chart-line' %}<span>User Activity</span></a>
-        <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary btn-sm">{% icon 'arrow-left' %}<span>Back to Scans</span></a>
+        <a href="{% url 'maxillo:patient_list' %}" class="btn btn-secondary btn-sm">{% icon 'arrow-left' %}<span>Back to Scans</span></a>
     </div>
 </div>
 

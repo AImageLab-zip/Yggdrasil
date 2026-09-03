@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
 
 import {
     DISPLAY_LETTERS,
@@ -15,7 +15,8 @@ import {
     viewRightFrom,
 } from '../imaging/grid/viewportOverlay.js';
 
-const REPO = '/srv/Yggdrasil';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = join(HERE, '..', '..');
 const ORIENTATION_DIR = join(
     REPO, 'node_modules', '@cornerstonejs', 'tools', 'dist', 'esm', 'utilities', 'orientation'
 );
