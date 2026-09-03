@@ -64,7 +64,7 @@ from .voice_captions import (
 )
 
 # Admin
-from .admin import rerun_processing, bulk_rerun_processing, admin_control_panel
+from .admin import rerun_processing, bulk_rerun_processing
 
 # Metadata
 from .metadata import get_nifti_metadata, update_nifti_metadata
@@ -132,7 +132,6 @@ __all__ = [
     # Admin
     'rerun_processing',
     'bulk_rerun_processing',
-    'admin_control_panel',
     # Metadata
     'get_nifti_metadata',
     'update_nifti_metadata',

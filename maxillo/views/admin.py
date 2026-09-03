@@ -1,11 +1,10 @@
-"""Admin control panel and processing management views."""
+"""Processing management views (rerun / bulk rerun)."""
 
-from django.shortcuts import render, get_object_or_404
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.shortcuts import get_object_or_404
+from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse
-from django.db.models import Count, Q
 import json
 import logging
 
@@ -241,60 +240,3 @@ def bulk_rerun_processing(request):
     except Exception as e:
         logger.error(f"Error in bulk rerun processing: {e}", exc_info=True)
         return JsonResponse({"success": False, "error": str(e)}, status=500)
-
-
-def admin_control_panel(request):
-    """Admin control panel showing job stats."""
-    from common.models import Job
-
-    domain = get_namespace(request)
-
-    # Get job statistics
-    jobs = Job.objects.filter(domain=domain)
-    job_stats = jobs.aggregate(
-        total_jobs=Count("id"),
-        pending_jobs=Count("id", filter=Q(status="pending")),
-        processing_jobs=Count("id", filter=Q(status="processing")),
-        completed_jobs=Count("id", filter=Q(status="completed")),
-        failed_jobs=Count("id", filter=Q(status="failed")),
-    )
-
-    # Get job breakdown by type
-    job_type_stats = (
-        jobs.values("modality_slug")
-        .annotate(
-            total=Count("id"),
-            pending=Count("id", filter=Q(status="pending")),
-            processing=Count("id", filter=Q(status="processing")),
-            completed=Count("id", filter=Q(status="completed")),
-            failed=Count("id", filter=Q(status="failed")),
-        )
-        .order_by("modality_slug")
-    )
-
-    # Get recent failed jobs
-    recent_failed_jobs = (
-        jobs.filter(status="failed")
-        .select_related("patient", "voice_caption")
-        .order_by("-created_at")[:10]
-    )
-
-    # Get processing queue info (dynamic by modality)
-    from django.utils.text import slugify as _slugify
-    from common.models import Modality as _Modality
-
-    processing_queue = {}
-    for _m in _Modality.objects.order_by("name"):
-        _slug = _m.slug or _slugify(_m.name)
-        processing_queue[_slug] = jobs.filter(
-            modality_slug=_slug, status="pending"
-        ).count()
-
-    context = {
-        "job_stats": job_stats,
-        "job_type_stats": job_type_stats,
-        "recent_failed_jobs": recent_failed_jobs,
-        "processing_queue": processing_queue,
-    }
-
-    return render(request, "maxillo/admin_control_panel.html", context)
