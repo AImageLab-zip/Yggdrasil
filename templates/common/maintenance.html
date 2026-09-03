@@ -11,11 +11,17 @@
 {% block main_class %}maintenance-shell{% endblock %}
 {% block content %}
 <header class="maintenance-bar">
-    <a class="maintenance-brand" href="/" aria-label="Yggdrasil home">
-        <img src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
-        <span>Yggdrasil</span>
-        <span class="maintenance-version mono">v{{ app_version }}</span>
-    </a>
+    {% comment %} The version links to the changelog, so it cannot stay inside the brand
+       anchor -- anchors do not nest. /changelog/ is in
+       SiteMaintenanceMiddleware.PUBLIC_PATHS, so this link works during lockdown
+       instead of bouncing back to this page. {% endcomment %}
+    <div class="inline-flex items-center gap-2">
+        <a class="maintenance-brand" href="/" aria-label="Yggdrasil home">
+            <img src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
+            <span>Yggdrasil</span>
+        </a>
+        <a class="maintenance-version mono" href="{% url 'changelog_page' %}" title="What's new in this release">v{{ app_version }}</a>
+    </div>
     <button type="button" class="maintenance-theme" data-theme-toggle aria-label="Switch theme" title="Switch theme">
         <i class="fas fa-moon" data-theme-icon="moon" aria-hidden="true"></i>
         <i class="fas fa-sun" data-theme-icon="sun" aria-hidden="true" hidden></i>

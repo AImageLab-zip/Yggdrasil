@@ -46,6 +46,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("status/", common_views.status_page, name="status_page"),
     path("maintenance/", common_views.maintenance_page, name="maintenance_page"),
+    path("changelog/", common_views.changelog_page, name="changelog_page"),
     path("healthz", common_views.healthz, name="healthz"),
     path(
         "api/preferences/report-language/",

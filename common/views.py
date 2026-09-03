@@ -448,3 +448,160 @@ def notifications_mark_read(request):
         qs = qs.filter(id=nid)
     updated = qs.update(is_read=True)
     return JsonResponse({"ok": True, "marked": updated})
+
+
+# ---------------------------------------------------------------------------
+# Changelog page
+#
+# ``CHANGELOG.md`` is the single source of truth: ``.github/workflows/release.yml``
+# extracts a version's section from it to build the GitHub release notes, and a
+# prior step hard-fails unless ``VERSION`` matches the tag. So this page *parses*
+# that file rather than keeping a second copy of the same text.
+#
+# Read once at import, the pattern of ``common/cornerstone_assets.py`` and
+# ``yggdrasil/settings.py:22-30``, and with the same rule: a missing or
+# unreadable file must degrade to an empty page, never to a 500.
+# ---------------------------------------------------------------------------
+
+#: Authors, by era. Not in CHANGELOG.md -- release notes are about the work, this
+#: is about the people. Counts are from ``git shortlog -sne --all``, summed over
+#: the several identities some contributors committed under.
+CHANGELOG_CREDITS = [
+    {
+        "era": "1.0 - 1.9",
+        "note": "The original application, then named ToothFairy4M.",
+        "lead": "Luca Lumetti",
+        "others": [
+            "Omar Carpentiero",
+            "Lorenzo Borghi",
+            "Kevin Marchesini",
+            "Nicola Morelli",
+            "Matteo Ferrari",
+        ],
+    },
+    {
+        "era": "2.0 - 3.0",
+        "note": "Yggdrasil: the rename, the imaging rebuild and the platform work.",
+        "lead": "Lorenzo Borghi",
+        "others": [],
+    },
+]
+
+
+def _changelog_inline(text):
+    """Render the small subset of Markdown used in CHANGELOG.md bodies.
+
+    ``**bold**`` and ``` `code` ``` only -- everything else is escaped. Escaping
+    happens first, so the source file can never inject markup.
+    """
+    import re
+
+    from django.utils.html import escape
+    from django.utils.safestring import mark_safe
+
+    out = escape(text)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out, flags=re.S)
+    out = re.sub(r"`([^`]+)`", r'<code class="mono text-xs">\1</code>', out)
+    # S308: safe because `escape` above runs *first* -- every `<`, `>`, `&` and
+    # quote in the source is already an entity by the time these two
+    # substitutions add the only markup this function can emit. Keep that order
+    # if you extend the subset.
+    return mark_safe(out)  # noqa: S308
+
+
+def _parse_changelog(path):
+    """Split CHANGELOG.md into the releases the page renders.
+
+    Returns a list of dicts: ``version``, ``date``, ``intro`` (paragraphs) and
+    ``sections`` (``{"heading", "items"}``). The contract with the release
+    workflow is that a release starts with ``## [`` at column 0; this parser
+    reads exactly that boundary, so the two cannot drift apart.
+    """
+    import re
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    releases = []
+    current = None
+    section = None
+    buffer = []
+
+    def flush_paragraph():
+        nonlocal buffer
+        text = " ".join(line.strip() for line in buffer).strip()
+        buffer = []
+        if not text or current is None:
+            return
+        if section is not None:
+            section["items"].append(_changelog_inline(text))
+        else:
+            current["intro"].append(_changelog_inline(text))
+
+    for line in raw.splitlines():
+        heading = re.match(r"^## \[([^\]]+)\](?:\s*-\s*(\S+))?\s*$", line)
+        if heading:
+            flush_paragraph()
+            section = None
+            current = {
+                "version": heading.group(1),
+                "date": heading.group(2) or "",
+                "intro": [],
+                "sections": [],
+            }
+            releases.append(current)
+            continue
+        if current is None:
+            continue
+        sub = re.match(r"^### +(.+?)\s*$", line)
+        if sub:
+            flush_paragraph()
+            section = {"heading": sub.group(1), "items": []}
+            current["sections"].append(section)
+            continue
+        item = re.match(r"^[-*] +(.*)$", line)
+        if item:
+            flush_paragraph()
+            buffer = [item.group(1)]
+            continue
+        if not line.strip():
+            flush_paragraph()
+            continue
+        buffer.append(line)
+
+    flush_paragraph()
+    return releases
+
+
+def _load_changelog():
+    try:
+        return _parse_changelog(settings.BASE_DIR / "CHANGELOG.md")
+    except Exception:  # noqa: BLE001 -- a broken changelog must not break boot
+        import logging
+
+        logging.getLogger(__name__).exception("Could not parse CHANGELOG.md")
+        return []
+
+
+#: Parsed once at import; see the module note above.
+_CHANGELOG_RELEASES = _load_changelog()
+
+
+def changelog_page(request):
+    """Public release history, reached from the version in the footer.
+
+    Deliberately undecorated, like ``maintenance_page`` and ``healthz``: the
+    footer renders on ``/login/``, the landing page and the anonymous demo, so a
+    login gate here would bounce visitors off a link they can see.
+    """
+    return render(
+        request,
+        "common/changelog.html",
+        {
+            "releases": _CHANGELOG_RELEASES,
+            "credits": CHANGELOG_CREDITS,
+            "hide_maintenance_banner": False,
+        },
+    )

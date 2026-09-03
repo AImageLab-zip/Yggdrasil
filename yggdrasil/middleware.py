@@ -181,7 +181,9 @@ class SiteMaintenanceMiddleware(MiddlewareMixin):
     """Apply global maintenance access rules before application views run."""
 
     SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
-    PUBLIC_PATHS = ("/maintenance/", "/login/", "/logout/", "/healthz")
+    # "/changelog/" is public because the maintenance page itself shows the version
+    # as a link to it; without this, that link would redirect straight back here.
+    PUBLIC_PATHS = ("/maintenance/", "/login/", "/logout/", "/healthz", "/changelog/")
 
     @staticmethod
     def _is_runner_callback(path):

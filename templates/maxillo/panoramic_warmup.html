@@ -70,8 +70,8 @@
         </div>
     </div>
 
-    {# The patient view is loaded here; the panoramic-cpr bundle generates and
-       saves the default panoramic, then posts the outcome to this page. #}
+    {% comment %} The patient view is loaded here; the panoramic-cpr bundle generates and
+       saves the default panoramic, then posts the outcome to this page. {% endcomment %}
     <iframe id="warmupFrame" title="Panoramic generation worker"
             style="width: 1px; height: 1px; border: 0; position: absolute; left: -9999px;"></iframe>
 </div>

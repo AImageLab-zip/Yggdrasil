@@ -177,7 +177,12 @@
             <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
                 <span>&copy; 2026 Yggdrasil</span>
                 <a href="https://github.com/AImagelab-Zip/Yggdrasil" target="_blank" rel="noopener" class="text-content-muted hover:text-content" aria-label="GitHub repository">{% icon 'github' %}</a>
-                <span class="mono text-xs">v{{ app_version }}</span>
+                {% comment %}
+                The version is the entry point to the changelog. Keep "v" and the
+                number in one text node: common.tests asserts
+                assertContains(response, "v<version>").
+                {% endcomment %}
+                <a class="mono text-xs text-content-muted hover:text-content" href="{% url 'changelog_page' %}" title="What's new in this release">v{{ app_version }}</a>
             </div>
         </div>
     </footer>

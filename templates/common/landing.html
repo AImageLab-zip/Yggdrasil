@@ -9,8 +9,8 @@
 <link rel="stylesheet" href="{% static 'css/landing.css' %}">
 {% endblock %}
 
-{# Landing brings its own chrome (top bar); the shared app footer (base.html)
-   is used verbatim so the landing footer matches the rest of the platform. #}
+{% comment %} Landing brings its own chrome (top bar); the shared app footer (base.html)
+   is used verbatim so the landing footer matches the rest of the platform. {% endcomment %}
 {% block chrome %}{% endblock %}
 {% block main_class %}landing{% endblock %}
 {% block theme_default_dark %}true{% endblock %}
@@ -21,7 +21,7 @@
     <div class="landing-bar__brand">
         <img class="landing-bar__logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="" aria-hidden="true">
         <span class="landing-bar__word">Yggdrasil</span>
-        <span class="landing-bar__ver mono">v{{ app_version }}</span>
+        <a class="landing-bar__ver mono" href="{% url 'changelog_page' %}" title="What's new in this release">v{{ app_version }}</a>
     </div>
 
     <div class="landing-bar__actions">
