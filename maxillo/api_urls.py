@@ -1,7 +1,6 @@
 from django.urls import path
 
 from annotations import views as annotations_views
-from common.dicom import views as dicom_views
 
 from . import api_views
 
@@ -41,21 +40,6 @@ urlpatterns = [
         "runner/jobs/<int:job_id>/fail/",
         api_views.runner_fail_job,
         name="api_runner_fail_job",
-    ),
-    # DICOMweb: the minimal read subset Cornerstone's `wadors` loader calls, and
-    # nothing more (see common/dicom/views.py). Mounted here, in the global `api`
-    # namespace, which F9 established is *not* covered by ActiveProfileMiddleware --
-    # each view does its own authorization.
-    path(
-        "dicomweb/studies/<str:study_uid>/series/<str:series_uid>/metadata",
-        dicom_views.series_metadata,
-        name="api_dicomweb_series_metadata",
-    ),
-    path(
-        "dicomweb/studies/<str:study_uid>/series/<str:series_uid>"
-        "/instances/<str:sop_uid>/frames/<str:frame_numbers>",
-        dicom_views.instance_frames,
-        name="api_dicomweb_instance_frames",
     ),
     # Files
     path(

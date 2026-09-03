@@ -64,10 +64,10 @@ class LabelSchema(models.Model):
 class LabelDefinition(models.Model):
     """One label inside a schema: an integer value with a fixed meaning.
 
-    ``value`` is what appears in a labelmap's voxels and in a DICOM SEG's
-    segment numbers. ``code`` is the external identifier where one exists -- an
-    FDI tooth number, a SNOMED code -- and is what an adapter should match on
-    when importing, because an external system's numbering is its own.
+    ``value`` is what appears in a labelmap's voxels. ``code`` is the external
+    identifier where one exists -- an FDI tooth number, a SNOMED code -- and is
+    what an adapter should match on when importing, because an external system's
+    numbering is its own.
     """
 
     schema = models.ForeignKey(

@@ -3,7 +3,7 @@
 
 Written for the v1.9 -> 3.0 server migration: production's blobs live in a bucket the
 new instance must not write to, so the new instance gets its own bucket holding the
-same keys. See docs/upgrade-1.9-to-3.0.md.
+same keys.
 
 Both buckets are addressed through the *same* endpoint and credential, which is what
 makes the copy server-side: ``CopyObject`` is a single request to the destination
@@ -182,7 +182,7 @@ def main():
 
     # Shuffled, not sorted. Keys sort by prefix, and size correlates strongly with
     # prefix -- ``exports/`` is multi-GB zips, ``maxillo/processed/cbct/`` hundreds of
-    # MB, ``raw/cbct/`` ~1 MB DICOM slices. Copying in key order therefore points every
+    # MB, ``raw/cbct/`` ~1 MB folder members. Copying in key order therefore points every
     # worker at the same size class at once, so a run of giant objects blocks the whole
     # pool for minutes while the store thrashes. Interleaving sizes keeps throughput and
     # visible progress steady. Seeded so a resumed run is reproducible.

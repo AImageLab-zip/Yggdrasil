@@ -154,7 +154,7 @@ class PrimaryAndCanonicalSlotTests(AnnotationSchemaTestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             AnnotationPayload.objects.create(
                 revision=revision,
-                format=PayloadFormat.DICOM_SR,
+                format=PayloadFormat.NIFTI_LABELMAP,
                 canonical_slot=1,
                 data={"claiming": "canonical too"},
             )
@@ -253,7 +253,7 @@ class MeasurementCalibrationTests(AnnotationSchemaTestCase):
             value=12.5,
             unit=MeasurementUnit.MM,
             is_calibrated=True,
-            calibration_note="DICOM PixelSpacing",
+            calibration_note="NIfTI affine spacing",
         )
 
         self.assertTrue(measurement.is_calibrated)

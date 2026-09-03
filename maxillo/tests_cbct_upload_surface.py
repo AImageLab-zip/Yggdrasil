@@ -1,10 +1,11 @@
-"""The CBCT upload surface, now that uploading DICOM is switched off.
+"""The CBCT upload surface: `.nii.gz` only, and nothing offering anything else.
 
 Two interfaces are asserted here, and they are the ones that go wrong quietly.
 `static/js/cbct_upload.js` resolves the file input **by name** to decide whether a
 selection goes through the in-browser converter, so a rename leaves the converter
-inert; and the DICOM controls have to be gone from the page at the same time as the
-server refuses DICOM, or the page offers an upload that can only fail.
+inert; and no DICOM control may reappear on the page, because the server has no
+code left that could accept one -- `test_the_page_offers_no_dicom_upload` is a
+permanent regression guard, not a description of a transitional state.
 """
 
 from django.contrib.auth.models import User
@@ -25,7 +26,7 @@ class CbctUploadSurfaceTests(TestCase):
         self.project.modalities.set([modality])
         Folder.objects.create(name="Uploads", project=self.project)
 
-        self.user = User.objects.create_user(username="dcm-upload", password="x")  # noqa: S106
+        self.user = User.objects.create_user(username="cbct-upload", password="x")  # noqa: S106
         ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
         self.client.force_login(self.user)
 
@@ -39,6 +40,9 @@ class CbctUploadSurfaceTests(TestCase):
         self.assertIn('name="cbct"', html)
 
     def test_the_page_offers_no_dicom_upload(self):
+        """A permanent guard. DICOM support is gone from the server entirely, so a
+        control that reappeared here would offer an upload that cannot be handled by
+        anything at all."""
         html = self._render()
         for marker in (
             "DICOM",

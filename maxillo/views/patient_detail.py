@@ -77,54 +77,21 @@ def _bundle_output_hash(file_obj, file_key):
     return file_obj.file_hash
 
 
-def _dicom_series_identity(file_obj):
-    """``{'studyUid', 'seriesUid'}`` when this row is a stored DICOM series.
-
-    ``None`` otherwise, which is every NIfTI row -- so its presence in the viewer
-    payload is what selects the DICOM volume path in the browser.
-    """
-    series = getattr(file_obj, "dicom_series", None)
-    if series is None:
-        return None
-    return {
-        "studyUid": series.study_instance_uid,
-        "seriesUid": series.series_instance_uid,
-    }
-
-
 def _usable_raw_volumes(raw_files):
     """Raw rows the viewer can actually display, keyed by the path a job names.
 
-    Two kinds now. A NIfTI raw is one object, and its existence is a ``head()``.
-    A DICOM series (Phase 8) is a *prefix* holding hundreds of objects, and
-    ``head()`` on a prefix raises -- which is finding F13, and is why existence is
-    established from the catalog instead. A series with instances recorded is a series
-    that was written; nothing else would have created those rows.
-
-    This is the line that decides whether a DICOM CBCT is visible at all. If the
-    processing step stops emitting ``volume_nifti``, the raw series *is* the display
-    volume, and it reaches the viewer through here or not at all.
+    A raw volume is one ``.nii.gz`` object, so its existence is a ``head()``. Rows
+    that are object-storage *prefixes* rather than objects (folder uploads) are not
+    display volumes and are left out: ``head()`` on a prefix raises, which is finding
+    F13, and the extension test is what keeps them out before that can happen.
     """
-    from common.dicom.models import DicomSeries
-
-    usable = {
+    return {
         file_obj.file_path: file_obj
         for file_obj in raw_files
         if file_obj.file_path
         and file_obj.file_path.endswith(('.nii', '.nii.gz'))
         and artifact_exists(file_obj.file_path)
     }
-
-    series_by_file = {
-        series.file_id: series
-        for series in DicomSeries.objects.filter(
-            file__in=[row.pk for row in raw_files], instance_count__gt=0
-        )
-    }
-    for file_obj in raw_files:
-        if file_obj.pk in series_by_file and file_obj.file_path:
-            usable.setdefault(file_obj.file_path, file_obj)
-    return usable
 
 
 def _resolved_cbct_viewer_source(patient):
@@ -689,13 +656,6 @@ def patient_detail(request, patient_id):
                             'file_type': file_obj.file_type,
                             'file_key': file_key,
                         }
-                        # A stored DICOM series is addressed by its UIDs, not by a
-                        # serve path: the viewer fetches the series metadata and then
-                        # one frame per instance. Absent for every NIfTI row, which is
-                        # how the grid tells the two apart.
-                        series = _dicom_series_identity(file_obj)
-                        if series:
-                            entry['dicom'] = series
                         modality_files[slug] = entry
     except Exception as e:
         logger.warning(f"Error building modality_files: {e}")

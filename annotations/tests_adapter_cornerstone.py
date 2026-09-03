@@ -114,7 +114,7 @@ class GeometryMathTests(SimpleTestCase):
 
 
 class RuntimeIdentifierTests(SimpleTestCase):
-    """Session-scoped ids do not reach the store; the DICOM one does."""
+    """Session-scoped ids do not reach the store; the durable one does."""
 
     def test_every_runtime_key_is_stripped_at_any_depth(self):
         # A walk, not a top-level key test: the realistic way one gets in is nested
@@ -136,7 +136,13 @@ class RuntimeIdentifierTests(SimpleTestCase):
         self.assertIn("annotationUID", payload)
 
     def test_the_frame_of_reference_uid_is_kept(self):
-        """It is DICOM's identifier, not Cornerstone's, and has a column for it."""
+        """It names the patient frame the coordinates are in, not the session.
+
+        Unlike ``annotationUID`` / ``volumeId`` / ``referencedImageId``, this one is
+        durable and comparable across sessions -- coordinates in ``patient_lps_mm``
+        are only comparable within one frame of reference -- so it has a column
+        (``SourceResource.frame_of_reference_uid``) and must survive the strip.
+        """
         descriptors = cs.descriptors_for_annotation(
             annotation("Length", [[0, 0, 0], [3, 4, 0]])
         )

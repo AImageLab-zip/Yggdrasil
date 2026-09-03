@@ -4,11 +4,12 @@
  * are turned into a compressed NIfTI (.nii.gz) with valid orientation metadata
  * (qform/sform >= 1).
  *
- * **DICOM is not converted here, and must not be.** Phase 8 stores an uploaded series
- * as DICOM (`common/dicom/ingest.py`); the browser conversion that used to destroy it
- * was deleted with the rest of this file's DICOM half. A future edit that adds a
- * CONVERT_DICOM_SERIES branch back would silently re-introduce the data loss this
- * phase exists to end.
+ * **DICOM is not converted here, and must not be.** The platform stores `.nii.gz`
+ * only and has no DICOM code left on either side. The browser conversion that used to
+ * destroy a series was deleted with the rest of this file's DICOM half; a future edit
+ * that adds a CONVERT_DICOM_SERIES branch back would re-introduce that data loss and
+ * produce a volume no upload path would accept. `cbct_convert_worker.test.js` guards
+ * the absence of that branch.
  */
 
 /* global importScripts, self, VolumeMetadata, nifti, fflate */

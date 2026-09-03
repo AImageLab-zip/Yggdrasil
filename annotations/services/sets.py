@@ -188,46 +188,12 @@ def record_revision(
     if origin in AnnotationOrigin.HUMAN and not annotation_set.ever_annotated:
         annotation_set.ever_annotated = True
         updates.append("ever_annotated")
-        _seal_dicom_sources(annotation_set)
     if status is not None and status != annotation_set.status:
         annotation_set.status = status
         updates.append("status")
     annotation_set.save(update_fields=updates)
 
     return revision
-
-
-def _seal_dicom_sources(annotation_set):
-    """Freeze any DICOM series this set is anchored to, the first time a human writes.
-
-    ``ever_annotated`` freezes the patient's raw *rows*, which is the whole lock for a
-    NIfTI scan: one row, one file. A DICOM series is one row holding several hundred
-    objects, and rewriting instance 137 in place would re-base every coordinate drawn
-    on the volume without touching the row at all. ``sealed_at`` is what closes that,
-    and this is the moment it has to close -- the same moment, and for the same reason,
-    that the raw data itself stops being replaceable.
-
-    Machine output does not seal, because it does not set ``ever_annotated``: a
-    prediction over a series must not stop a correction being ingested later.
-
-    **F21: which targets count cannot be decided by resource kind.** This asked for
-    ``kind=dicom_series`` and read ``series_instance_uid`` off the target, which is the
-    resource ``common.dicom.ingest`` registers -- and the resource nothing else ever
-    writes. The volume grid saves through ``annotations.views``, which registers a
-    ``logical_volume`` against the ``FileRegistry`` row, so on every study a user has
-    actually annotated the filter matched nothing and the seal never fired. The suite
-    did not see it because its test attached the ingest-side resource by hand, which is
-    the one shape production never produces. ``series_for_resource`` asks the question
-    both ways round, and it is asked of *every* target, because "is there DICOM under
-    this annotation" is a fact about the bytes and not about which registrar named them.
-    """
-    from common.dicom.models import series_for_resource
-
-    targets = annotation_set.targets.select_related("source_resource")
-    for target in targets:
-        series = series_for_resource(target.source_resource)
-        if series is not None and series.sealed_at is None:
-            series.seal()
 
 
 @transaction.atomic

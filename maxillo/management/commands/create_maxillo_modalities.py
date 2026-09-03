@@ -35,9 +35,9 @@ class Command(BaseCommand):
                 "description": "Cone Beam Computed Tomography volume",
                 "icon": "fas fa-cube",
                 "label": "CBCT",
-                # No .dcm/.dicom: DICOM upload is disabled (maxillo.file_utils
-                # .save_cbct_to_dataset refuses it), and this list is what the bulk
-                # upload screen advertises as acceptable.
+                # The platform stores .nii.gz only (maxillo.file_utils
+                # .save_cbct_to_dataset refuses anything else), and this list is
+                # what the bulk upload screen advertises as acceptable.
                 "supported_extensions": [
                     ".nii",
                     ".nii.gz",

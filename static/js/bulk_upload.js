@@ -2,8 +2,8 @@
  * Bulk patient upload (administrators).
  *
  * Posts one file per request rather than one request for the whole selection:
- * each CBCT needs its own client-side conversion pass (DICOM / .nii / .mha ->
- * .nii.gz), a 200-volume request would be neither resumable nor reportable, and
+ * each CBCT needs its own client-side conversion pass (.nii / .mha -> .nii.gz),
+ * a 200-volume request would be neither resumable nor reportable, and
  * per-file requests let the server report per-file outcomes as they happen.
  *
  * Conversion runs sequentially on purpose - each pass materializes a whole
@@ -12,9 +12,8 @@
 (function () {
     'use strict';
 
-    // DICOM is deliberately absent: it is uploaded as-is and stored as DICOM
-    // (common/dicom/ingest.py). Only the two formats the server cannot store
-    // natively are converted here.
+    // DICOM is deliberately absent: the platform has no DICOM path at all. Only
+    // the two formats the server cannot store natively are converted here.
     var CONVERTIBLE = /\.(nii|mha)$/i;
 
     function element(id) { return document.getElementById(id); }

@@ -83,7 +83,7 @@ INTENSITY_TOOLS = frozenset({"Probe"})
 LABEL_TOOLS = frozenset({"Label"})
 
 #: Frames whose coordinates mean nothing outside the one resource that defines them,
-#: and which therefore cannot carry a DICOM Frame of Reference UID.
+#: and which therefore cannot carry a Frame of Reference UID.
 RESOURCE_SCOPED_FRAMES = frozenset(
     {CoordinateSystem.VOLUME_VOXEL, CoordinateSystem.RESOURCE_LOCAL}
 )

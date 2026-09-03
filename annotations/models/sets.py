@@ -355,8 +355,8 @@ class AnnotationPayload(models.Model):
     """One encoding of a revision's content. A revision may have several.
 
     One-to-many rather than one-to-one because the same work legitimately exists
-    in more than one form at once: the canonical NIfTI labelmap, a DICOM SEG for
-    export, a PNG render for the panoramic strips, and a Cornerstone scratch
+    in more than one form at once: the canonical NIfTI labelmap, a PNG render
+    for the panoramic strips, and a Cornerstone scratch
     state so the next editing session resumes where the last one stopped. Only
     the canonical one is read back as truth.
 

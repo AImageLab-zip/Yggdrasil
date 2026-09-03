@@ -181,10 +181,10 @@ def delete_project(project):
 def _storage_keys(project):
     """The stored ``file_path`` of every file the delete will remove.
 
-    A row's ``file_path`` is either an object key or -- for folder uploads and
-    DICOM series, which register one row per bundle -- the *prefix* the members
-    live under. Both are swept by listing the prefix, so this needs no special
-    case and no reading of ``metadata['files']``.
+    A row's ``file_path`` is either an object key or -- for folder uploads, which
+    register one row per bundle -- the *prefix* the members live under. Both are
+    swept by listing the prefix, so this needs no special case and no reading of
+    ``metadata['files']``.
     """
     return [path for path in files_of(project).values_list("file_path", flat=True) if path]
 

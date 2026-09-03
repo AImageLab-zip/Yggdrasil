@@ -151,7 +151,7 @@ class MaxilloCbctFolderUploadTests(TestCase):
                 'name': 'Invalid CBCT Patient',
                 'project': str(self.project.id),
                 'folder': str(self.folder.id),
-                'cbct': SimpleUploadedFile('scan.dcm', b'raw dicom', content_type='application/dicom'),
+                'cbct': SimpleUploadedFile('scan.mha', b'not a nifti', content_type='application/octet-stream'),
             },
         )
 

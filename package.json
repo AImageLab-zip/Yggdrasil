@@ -2,7 +2,7 @@
   "name": "yggdrasil-frontend",
   "version": "3.0.0",
   "private": true,
-  "description": "Dev-only build toolchain for the Yggdrasil imaging frontend. Nothing here is needed at deploy time: the emitted bundle under static/vendor/cornerstone/ is committed. See docs/cornerstone-roadmap.md, Phase 1.",
+  "description": "Dev-only build toolchain for the Yggdrasil imaging frontend. Nothing here is needed at deploy time: the emitted bundle under static/vendor/cornerstone/ is committed. See CONTRIBUTING.md, \"The frontend bundle\".",
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "build": "bash scripts/build_frontend.sh",
@@ -11,7 +11,6 @@
   },
   "devDependencies": {
     "@cornerstonejs/core": "5.8.2",
-    "@cornerstonejs/dicom-image-loader": "5.8.2",
     "@cornerstonejs/labelmap-interpolation": "5.8.2",
     "@cornerstonejs/metadata": "5.8.2",
     "@cornerstonejs/nifti-volume-loader": "5.8.2",

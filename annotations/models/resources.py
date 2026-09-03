@@ -10,7 +10,7 @@ annotation points at one of these instead.
 ``identity_key`` is that name, as a single unique string. It is a single column
 because of F12: MySQL compiles ``UniqueConstraint(condition=...)`` to *nothing*,
 no partial index and no error, so a rule like "unique per file when kind=file,
-unique per UID when kind=dicom_series" would look enforced in the model and be
+unique per member when kind=logical_volume" would look enforced in the model and be
 absent in the database. One unconditional unique column cannot be silently
 dropped. ``annotations.identity`` builds the string; keeping construction in one
 pure function is what makes the column trustworthy.
@@ -41,7 +41,7 @@ class SourceResource(models.Model):
         null=True,
         blank=True,
         related_name="annotation_resources",
-        help_text="Set for kind=file and for bundle members; NULL for DICOM and derived kinds.",
+        help_text="Set for kind=file and for bundle members; NULL for derived kinds.",
     )
     file_key = models.CharField(
         max_length=60,
@@ -52,10 +52,9 @@ class SourceResource(models.Model):
         ),
     )
 
-    # DICOM identity, populated from Phase 8 onward. Kept here rather than in a
-    # subclass so a single unique identity_key covers every kind.
-    sop_instance_uid = models.CharField(max_length=64, blank=True)
-    series_instance_uid = models.CharField(max_length=64, blank=True)
+    # A frame of reference groups volumes whose coordinates are comparable. Written
+    # for Cornerstone/NIfTI volumes too (see annotations/adapters/cornerstone.py),
+    # so it is not DICOM-specific despite the name it inherits from DICOM's LPS.
     frame_of_reference_uid = models.CharField(
         max_length=64,
         blank=True,
@@ -89,7 +88,6 @@ class SourceResource(models.Model):
         indexes = [
             models.Index(fields=["kind"]),
             models.Index(fields=["file", "file_key"]),
-            models.Index(fields=["series_instance_uid"]),
             models.Index(fields=["frame_of_reference_uid"]),
         ]
 

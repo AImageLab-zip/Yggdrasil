@@ -6,7 +6,7 @@
  * own self-contained bundle at the exact relative depth its `new URL(...,
  * import.meta.url)` call site expects (F4).
  *
- * See docs/cornerstone-roadmap.md, Phase 1.
+ * See CONTRIBUTING.md, "The frontend bundle".
  */
 
 import { createHash } from 'node:crypto';
@@ -106,11 +106,11 @@ const itkPipelinesBaseUrlPlugin = {
 };
 
 /**
- * Resolve `fs` and `path` to an empty module -- but only inside the DICOM codecs.
+ * Resolve `fs` and `path` to an empty module inside vendored `@cornerstonejs` code.
  *
- * The emscripten glue in `@cornerstonejs/codec-*` imports both behind a runtime
+ * Emscripten glue in those packages imports both behind a runtime
  * `ENVIRONMENT_IS_NODE` check. esbuild resolves imports without evaluating the check,
- * so a browser build fails on eight "Could not resolve" errors for code that can never
+ * so a browser build fails on "Could not resolve" errors for code that can never
  * execute.
  *
  * Scoped to those packages by importer rather than aliased globally: `import 'fs'`
@@ -182,17 +182,6 @@ const WORKERS = [
         outfile: 'app/workers/interpolationWorker.js',
     },
     {
-        // @cornerstonejs/dicom-image-loader/init.js:5
-        //   new Worker(new URL('./decodeImageFrameWorker.js', import.meta.url))
-        // resolved from app/ -> <build>/app/decodeImageFrameWorker.js
-        //
-        // Not optional and not only for compressed data: decodeImageFrame.js routes
-        // *every* transfer syntax through this worker, uncompressed included, so
-        // without it a stored DICOM series does not render at all.
-        entry: 'node_modules/@cornerstonejs/dicom-image-loader/dist/esm/decodeImageFrameWorker.js',
-        outfile: 'app/decodeImageFrameWorker.js',
-    },
-    {
         // itk-wasm/dist/pipeline/create-web-worker.js:9 -- a *nested* worker the
         // interpolation worker spawns:
         //   new Worker(new URL('./web-workers/itk-wasm-pipeline.worker.js', import.meta.url))
@@ -225,45 +214,6 @@ const WORKERS = [
  */
 const WORKER_STUBS = [
     { at: 'app/workers/computeWorker.js', target: '../../workers/computeWorker.js' },
-];
-
-/**
- * The DICOM decode codecs' wasm, copied under one directory the loader is pointed at.
- *
- * `@cornerstonejs/dicom-image-loader`'s decoders each do
- * `new URL('@cornerstonejs/codec-charls/decodewasm', import.meta.url)` -- a **bare
- * package specifier inside `new URL`**, which esbuild copies through untouched and
- * which therefore resolves at runtime to a nonexistent path under `app/`. That is
- * finding F4's shape again, and `npm run verify` is what caught it.
- *
- * The fix uses the loader's own supported hook rather than rewriting the package:
- * `init({ wasmBasePath })` reaches the decode worker through `decodeConfig`, and
- * `shared/wasmBasePath.js::resolveWasmUrl` then resolves each codec by **file name**,
- * ignoring the broken default entirely. Copying with the real `.wasm` extension is
- * also what makes the static server send `application/wasm`, so
- * `WebAssembly.instantiateStreaming` succeeds instead of falling back to an
- * ArrayBuffer with a console warning on every compressed study.
- *
- * The names on the right are not ours to choose: they are the strings each decoder
- * passes to `resolveWasmUrl`.
- */
-const CODEC_WASM = [
-    {
-        from: 'node_modules/@cornerstonejs/codec-charls/dist/charlswasm_decode.wasm',
-        to: 'codec-wasm/charlswasm_decode.wasm',
-    },
-    {
-        from: 'node_modules/@cornerstonejs/codec-libjpeg-turbo-8bit/dist/libjpegturbowasm_decode.wasm',
-        to: 'codec-wasm/libjpegturbowasm_decode.wasm',
-    },
-    {
-        from: 'node_modules/@cornerstonejs/codec-openjpeg/dist/openjpegwasm_decode.wasm',
-        to: 'codec-wasm/openjpegwasm_decode.wasm',
-    },
-    {
-        from: 'node_modules/@cornerstonejs/codec-openjph/dist/openjphjs.wasm',
-        to: 'codec-wasm/openjphjs.wasm',
-    },
 ];
 
 /** Runtime assets fetched by URL rather than imported, so they must be copied. */
@@ -355,13 +305,6 @@ async function main() {
     // 4. Runtime asset trees.
     for (const tree of VENDORED_TREES) {
         cpSync(join(ROOT, tree.from), join(outDir, tree.to), { recursive: true });
-    }
-
-    // 4b. The DICOM codec wasm, under the one directory `wasmBasePath` names.
-    for (const asset of CODEC_WASM) {
-        const target = join(outDir, asset.to);
-        mkdirSync(dirname(target), { recursive: true });
-        cpSync(join(ROOT, asset.from), target);
     }
 
     // 5. The manifest Django reads (common/cornerstone_assets.py).

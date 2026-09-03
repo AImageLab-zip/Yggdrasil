@@ -34,7 +34,6 @@ test('volumeFor reads the entry for the slug the user picked', () => {
     // route work (its serve_file raises Http404 for any bundle key).
     assert.equal(volume.bundleKey, 'primary');
     assert.equal(volume.filename, 'braintumor-mri-t1c.nii.gz');
-    assert.equal(volume.dicom, null);
 });
 
 test('volumeFor says nothing rather than guessing for a modality with no file', () => {
@@ -54,26 +53,24 @@ test('primaryVolumeFrom still prefers CBCT, then the page default', () => {
     );
 });
 
-test('descriptorFor builds the serve URL for a NIfTI and the series URL for DICOM', () => {
+test('descriptorFor builds the serve URL for a volume', () => {
     const nifti = descriptorFor(volumeFor(DATA, 'braintumor-mri-flair'), {
         namespace: 'brain',
         origin: 'https://ygg.example',
     });
     assert.match(nifti.url, /\/brain\/api\/processing\/files\/serve\/11\/braintumor-mri-flair\.nii\.gz$/);
-    assert.equal(nifti.dicom, null);
 
-    const dicom = descriptorFor(
+    // The bundle-member form, which is how a maxillo CBCT display volume is addressed.
+    const bundled = descriptorFor(
         {
             fileId: 9,
             modality: 'cbct',
-            bundleKey: 'primary',
+            bundleKey: 'volume_nifti',
             filename: 'cbct.nii.gz',
-            dicom: { studyUid: '1.2.3', seriesUid: '1.2.4' },
         },
         { namespace: 'maxillo', origin: 'https://ygg.example' }
     );
-    assert.match(dicom.url, /1\.2\.3/);
-    assert.match(dicom.url, /1\.2\.4/);
+    assert.match(bundled.url, /\/9\/key\/volume_nifti\/cbct\.nii\.gz$/);
 });
 
 // --- which surface gets drag-and-drop, and what it opens with ----------------------

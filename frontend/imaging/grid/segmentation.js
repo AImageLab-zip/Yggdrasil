@@ -28,8 +28,7 @@
  *   1. **A grid mismatch is refused, not resampled.** A labelmap describes voxels of
  *      one volume. If the segmentation's dimensions are not the reference volume's,
  *      the two are not the same study and any resampling would file a rendering guess
- *      as clinical data. `common/interop/seg.py` refuses a SEG whose grid disagrees
- *      with its series for exactly this reason; so does this.
+ *      as clinical data.
  *   2. **The palette is the old one, value for value.** Users approved work against
  *      those colours. `paletteFor` reproduces both branches of
  *      `static/js/modality_viewers/niivue_viewer.js:163-194` -- recover it with

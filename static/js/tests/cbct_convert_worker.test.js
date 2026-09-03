@@ -267,10 +267,10 @@ test('MetaImage orientation is derived from its TransformMatrix', () => {
 // --- DICOM is not converted here -----------------------------------------------
 
 /**
- * Phase 8 stores an uploaded series as DICOM (`common/dicom/ingest.py`). The browser
- * conversion that used to destroy it is deleted, and these two tests are what stop it
- * coming back: a re-added branch would be silent data loss, visible only as "the DICOM
- * we were told is stored is not there".
+ * The platform stores .nii.gz only and has no DICOM code left. The browser
+ * conversion that used to destroy a series is deleted, and these two tests are what
+ * stop it coming back: a re-added branch would be silent data loss producing a volume
+ * no upload path on the server would accept.
  */
 test('the worker has no DICOM conversion branch', () => {
     const { context, posted } = loadWorker();

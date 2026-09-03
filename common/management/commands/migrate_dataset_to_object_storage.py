@@ -301,7 +301,7 @@ class Command(BaseCommand):
                 # A rewrite is only safe if the object is actually there, so this is
                 # checked in dry-run too -- the point of the dry run is to prove every
                 # path resolves before any row is touched. A row may name a single
-                # object or, for folder/DICOM bundles, a prefix.
+                # object or, for folder bundles, a prefix.
                 if _storage_has(storage, key):
                     uploaded[local_path] = key
                     return key

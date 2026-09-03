@@ -123,6 +123,30 @@ class DemoIsolationTests(TestCase):
         self.demo_folder.save(update_fields=["is_demo"])
         self.assertEqual(self.client.get(reverse("demo:index")).status_code, 404)
 
+    def test_guest_file_read_is_scoped_to_demo_folders(self):
+        """The ``is_demo`` narrowing holds at the HTTP layer, not only in predicates.
+
+        Re-homed from the DICOMweb suite, which was the only place this was asserted
+        against a real streaming endpoint. Finding F10 is why it has to be: ``/demo/``
+        logs an anonymous visitor in as a *real* user, so ``@login_required`` alone
+        scopes nothing at all -- the refusal has to come from the folder flag. Every
+        endpoint that streams a ``FileRegistry`` row funnels through
+        ``common.file_access.authorize_file_read``, so asserting it here asserts it
+        for all of them.
+        """
+        self.client.force_login(self.guest)
+        denied = self.client.get(
+            reverse("api:api_serve_file", args=[self.priv_file.id])
+        )
+        self.assertIn(denied.status_code, (403, 404))
+        # And the narrowing is a narrowing, not a blanket refusal: the demo folder's
+        # own file is not blocked by the permission layer. It 404s on the missing
+        # object instead, which is a storage answer and not an authorization one.
+        allowed = self.client.get(
+            reverse("api:api_serve_file", args=[self.demo_file.id])
+        )
+        self.assertNotEqual(allowed.status_code, 403)
+
     def test_guest_write_request_forbidden(self):
         self.client.force_login(self.guest)
         # Any non-safe method by the guest is rejected before the view runs.

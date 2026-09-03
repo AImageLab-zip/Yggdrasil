@@ -173,9 +173,9 @@
      * Whether this input's selection has to go through the in-browser converter.
      *
      * The two formats the server cannot store natively, plus the .nii.gz orientation
-     * repair the server-side validator demands. DICOM is not among them: uploading it
-     * is disabled (maxillo/file_utils.py refuses it by the DICM marker in the bytes,
-     * not by a filename), so nothing here converts it back either.
+     * repair the server-side validator demands. DICOM is not among them: the platform
+     * has no DICOM path at all any more, and `_validate_and_extract_nifti_orientation`
+     * in maxillo/file_utils.py refuses anything that is not a .nii.gz.
      */
     var BROWSER_CONVERTIBLE = /\.(nii|nii\.gz|mha)$/i;
 

@@ -50,7 +50,6 @@ import { DEFAULT_RENDER_MODE, applyLabelmapRenderMode, applyRenderMode } from '.
 import { createOverlay, updateOverlay } from './viewportOverlay.js';
 import { formatWindow } from './voi.js';
 import { residualModalityLut } from '../metadata/modalityLutModule.js';
-import { prepareDicomSeries } from './dicomVolume.js';
 import { awaitVolumeLoad, fetchHeader, readScalarData } from './volumeLoading.js';
 import { describeGeometry } from '../geometry/orientation.js';
 // The same list and filter a save uses: what is hidden, cleared and stored is one set.
@@ -816,34 +815,16 @@ async function loadVolumeIntoWindows({
         volumeLoader,
         createNiftiImageIdsAndCacheMetadata,
         setVolumesForViewports,
-        dicomMetaDataManager,
     } = cornerstone;
-    const { url, modality, fileId, dicom } = descriptor;
+    const { url, modality, fileId } = descriptor;
     const volumeId = volumeIdFor(url);
     const generations = new Map(
         windowIndices.map((index) => [index, beginLoad(state, index, { modality, fileId, volumeId })])
     );
 
     try {
-        // The only place a DICOM series differs from a NIfTI: where the header and the
-        // imageIds come from. `dicomSeriesHeader` states the series in the same terms
-        // `describeGeometry` and `openingVoi` already read, so everything below --
-        // the cache, the VOI, the orientation overlay, the tools -- is shared rather
-        // than duplicated. See imaging/grid/dicomVolume.js.
-        let header;
-        let imageIds;
-        if (dicom) {
-            const prepared = await prepareDicomSeries({
-                studyUid: dicom.studyUid,
-                seriesUid: dicom.seriesUid,
-                metaDataManager: dicomMetaDataManager,
-            });
-            header = prepared.header;
-            imageIds = prepared.imageIds;
-        } else {
-            header = await fetchHeader(url);
-            imageIds = await createNiftiImageIdsAndCacheMetadata({ url });
-        }
+        const header = await fetchHeader(url);
+        const imageIds = await createNiftiImageIdsAndCacheMetadata({ url });
         const geometry = describeGeometry(header);
 
         if (!imageIds?.length) {

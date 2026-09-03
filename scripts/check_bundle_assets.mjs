@@ -3,8 +3,8 @@
  *
  * esbuild does not rewrite `new URL(..., import.meta.url)`: it copies the specifier
  * through verbatim, so whether a worker loads depends entirely on where the *emitting
- * file* ended up. Finding F4 of docs/cornerstone-roadmap.md counts three such call
- * sites at two relative depths; building Phase 1 turned up a fourth (itk-wasm spawns
+ * file* ended up. There are three such call
+ * sites at two relative depths, plus a fourth found while building the bundle (itk-wasm spawns
  * a nested pipeline worker from inside the interpolation worker). Every one of them
  * fails at runtime, in a clinical viewer, with no build error. So they are re-derived
  * here from the emitted bytes and checked against the filesystem.
@@ -41,24 +41,7 @@ const PUBLIC_PATH = /\/static\/vendor\/cornerstone\/[A-Za-z0-9][A-Za-z0-9._/-]*/
 const problems = [];
 /** Not problems: things a reader should know, printed either way. */
 const noted = [];
-const checked = { files: 0, importMetaUrls: 0, publicPaths: 0, codecWasm: 0 };
-
-/**
- * Bare package specifiers the DICOM decoders pass to `new URL(..., import.meta.url)`,
- * mapped to the wasm file each one is really asking for.
- *
- * These cannot resolve as written -- a bare specifier is not a relative path -- so the
- * build copies the four blobs to `<build>/codec-wasm/` under exactly these names and
- * `frontend/entries/volume-grid.js` initialises the loader with a matching
- * `wasmBasePath`. The names are the strings each decoder hands `resolveWasmUrl`, not
- * ours to choose.
- */
-const CODEC_WASM_SPECIFIERS = {
-    '@cornerstonejs/codec-charls/decodewasm': 'charlswasm_decode.wasm',
-    '@cornerstonejs/codec-libjpeg-turbo-8bit/decodewasm': 'libjpegturbowasm_decode.wasm',
-    '@cornerstonejs/codec-openjpeg/decodewasm': 'openjpegwasm_decode.wasm',
-    '@cornerstonejs/codec-openjph/wasm': 'openjphjs.wasm',
-};
+const checked = { files: 0, importMetaUrls: 0, publicPaths: 0 };
 
 function fail(message) {
     problems.push(message);
@@ -152,24 +135,6 @@ for (const file of walk(buildDir)) {
     for (const match of text.matchAll(IMPORT_META_URL)) {
         const spec = match[2];
         checked.importMetaUrls += 1;
-        if (CODEC_WASM_SPECIFIERS[spec]) {
-            // A *bare package specifier* inside `new URL`, which esbuild copies
-            // through untouched and which can therefore never resolve at runtime.
-            // Not suppressed: superseded. The loader is initialised with a
-            // `wasmBasePath`, and `shared/wasmBasePath.js::resolveWasmUrl` then
-            // resolves each codec by file name and never touches this value. So the
-            // check becomes "is the replacement actually there", which is the thing
-            // that would really break.
-            checked.codecWasm += 1;
-            const wasm = join(buildDir, 'codec-wasm', CODEC_WASM_SPECIFIERS[spec]);
-            if (!existsSync(wasm)) {
-                fail(
-                    `${rel(file)}: new URL('${spec}', ...) cannot resolve, and its ` +
-                        `wasmBasePath replacement ${rel(wasm)} is missing`
-                );
-            }
-            continue;
-        }
         if (/^[a-z][a-z0-9+.-]*:/i.test(spec)) {
             fail(`${rel(file)}: new URL('${spec}', import.meta.url) is an absolute URL, not a bundled asset`);
             continue;
@@ -209,7 +174,6 @@ function report() {
     console.log(
         `bundle ${manifest.build} ok: ${checked.files} files, ` +
             `${checked.importMetaUrls} import.meta.url refs, ` +
-            `${checked.codecWasm} codec wasm refs, ` +
             `${checked.publicPaths} public paths` +
             (noted.length ? `, ${noted.length} CDN reference(s) noted above` : '')
     );

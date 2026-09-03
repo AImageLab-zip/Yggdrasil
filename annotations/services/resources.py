@@ -81,50 +81,6 @@ def register_logical_volume(file_obj, *, file_key=None, content_hash=None, descr
 
 
 @transaction.atomic
-def register_dicom_series(series, *, descriptor=None):
-    """Register a stored DICOM series as something annotations can anchor to.
-
-    The DICOM counterpart of :func:`register_logical_volume`, and it exists for the
-    same reason: a series *is* a voxel grid with an affine, and that grid is what
-    stored coordinates were measured against.
-
-    Two fields are populated here that no other resource kind carries.
-    ``series_instance_uid`` is the durable name -- globally unique by construction, so
-    unlike a ``FileRegistry`` id it survives the row being re-created.
-    ``frame_of_reference_uid`` is the one that matters clinically: coordinates in
-    ``patient_lps_mm`` are only comparable *within* one frame of reference, and without
-    it on the record two series from one study look interchangeable when they are not.
-
-    ``content_hash`` is the series' ``FileRegistry.file_hash`` -- a digest over the
-    members' digests -- so ``annotations_crosscheck`` sees an instance being rewritten
-    underneath its annotations, which the per-row lock cannot.
-    """
-    key = identity.for_dicom_series(series.series_instance_uid)
-    defaults = {
-        "kind": ResourceKind.DICOM_SERIES,
-        # Deliberately set: the series is stored *as* a FileRegistry prefix row, so the
-        # authorization funnel and the raw-data lock both reach it the ordinary way.
-        "file": series.file,
-        "series_instance_uid": series.series_instance_uid,
-        "frame_of_reference_uid": series.frame_of_reference_uid,
-        "content_hash": series.file.file_hash or "",
-        "descriptor": descriptor or {},
-    }
-    resource, created = SourceResource.objects.get_or_create(
-        identity_key=key, defaults=defaults
-    )
-    if not created:
-        for field in ("series_instance_uid", "frame_of_reference_uid"):
-            setattr(resource, field, defaults[field])
-        resource.save(update_fields=["series_instance_uid", "frame_of_reference_uid"])
-    return _update_if_changed(
-        resource,
-        content_hash=defaults["content_hash"],
-        descriptor=descriptor or {},
-    )
-
-
-@transaction.atomic
 def register_derived(
     producer, source_resource, *, discriminator=None, file_obj=None, descriptor=None
 ):

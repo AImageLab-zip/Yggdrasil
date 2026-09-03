@@ -14,8 +14,7 @@ class ResourceKind:
     """What a :class:`~annotations.models.SourceResource` points at.
 
     ``FILE`` is a ``common.FileRegistry`` row (optionally one keyed member of a
-    multi-file bundle). ``DICOM_SERIES``/``DICOM_INSTANCE`` are placeholders for
-    the Phase 8 catalog and carry their UIDs in ``identity_key`` today.
+    multi-file bundle).
     ``DERIVED_RESOURCE`` is something produced from another resource that is not
     itself a stored file (a rendered panoramic strip, a resampled grid).
     ``LOGICAL_VOLUME`` is the one that needs explaining: a CBCT "volume" a user
@@ -24,15 +23,11 @@ class ResourceKind:
     """
 
     FILE = "file"
-    DICOM_SERIES = "dicom_series"
-    DICOM_INSTANCE = "dicom_instance"
     DERIVED_RESOURCE = "derived_resource"
     LOGICAL_VOLUME = "logical_volume"
 
     CHOICES = [
         (FILE, "File"),
-        (DICOM_SERIES, "DICOM series"),
-        (DICOM_INSTANCE, "DICOM instance"),
         (DERIVED_RESOURCE, "Derived resource"),
         (LOGICAL_VOLUME, "Logical volume"),
     ]
@@ -189,12 +184,6 @@ class PayloadFormat:
     CORNERSTONE_STATE = "cornerstone_state"
     #: Dense segmentation as a NIfTI labelmap in object storage.
     NIFTI_LABELMAP = "nifti_labelmap"
-    #: Dense segmentation as DICOM SEG, for interchange.
-    DICOM_SEG = "dicom_seg"
-    #: Contours as DICOM RTSTRUCT, for interchange.
-    DICOM_RTSTRUCT = "dicom_rtstruct"
-    #: Measurements as a DICOM Structured Report, for interchange.
-    DICOM_SR = "dicom_sr"
     #: A baked PNG preview -- the panoramic MIP/ray-sum strips, which are
     #: derived artifacts that decision #8 requires to stay exportable.
     PNG_RENDER = "png_render"
@@ -205,9 +194,6 @@ class PayloadFormat:
         (YGGDRASIL_JSON, "Yggdrasil JSON"),
         (CORNERSTONE_STATE, "Cornerstone state"),
         (NIFTI_LABELMAP, "NIfTI labelmap"),
-        (DICOM_SEG, "DICOM SEG"),
-        (DICOM_RTSTRUCT, "DICOM RTSTRUCT"),
-        (DICOM_SR, "DICOM SR"),
         (PNG_RENDER, "PNG render"),
         (NPZ_MASK, "NPZ mask"),
     ]
@@ -215,9 +201,7 @@ class PayloadFormat:
 
     #: Formats whose bytes live in object storage and are addressed by a
     #: ``FileRegistry`` row rather than stored inline as JSON.
-    ARTIFACT = frozenset(
-        {NIFTI_LABELMAP, DICOM_SEG, DICOM_RTSTRUCT, DICOM_SR, PNG_RENDER, NPZ_MASK}
-    )
+    ARTIFACT = frozenset({NIFTI_LABELMAP, PNG_RENDER, NPZ_MASK})
     #: Formats stored inline in the payload's JSON column.
     INLINE = frozenset({YGGDRASIL_JSON, CORNERSTONE_STATE})
 

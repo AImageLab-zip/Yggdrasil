@@ -1,10 +1,10 @@
 <article class="upload-modality">
     <div class="upload-modality__head"><i class="fas fa-brain" aria-hidden="true"></i><h3>{{ title }}</h3></div>
     <label class="upload-dropzone" for="{{ slug }}_file">
-        <input type="file" name="{{ slug }}" id="{{ slug }}_file" accept=".dcm,.dicom,.nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz,application/dicom">
+        <input type="file" name="{{ slug }}" id="{{ slug }}_file" accept=".nii,.nii.gz,.gz,.mha,.mhd,.nrrd,.nhdr,.zip,.tar,.tar.gz,.tgz">
         <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
         <strong>Drop {{ short_title }} data</strong>
-        <small>DICOM, NIfTI, MetaImage, NRRD or archive</small>
+        <small>NIfTI, MetaImage, NRRD or archive</small>
         <span class="upload-file-summary" data-file-summary>No file selected</span>
     </label>
 </article>

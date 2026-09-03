@@ -298,16 +298,15 @@ class ExportProcessor:
         """Members of a prefix row, or ``None`` if this row is a single object.
 
         Some ``FileRegistry`` rows have a ``file_path`` that is an object-storage
-        *prefix* rather than an object: folder uploads
-        (``maxillo.file_utils.save_generic_modality_folder``) and, since Phase 8, DICOM
-        series. Both record their members as a **list** under ``metadata['files']``,
-        which is what distinguishes them from a processed CBCT bundle -- that stores a
-        *dict* keyed by output name.
+        *prefix* rather than an object: folder uploads, written by
+        ``maxillo.file_utils.save_generic_modality_folder``. They record their members
+        as a **list** under ``metadata['files']``, which is what distinguishes them
+        from a processed CBCT bundle -- that stores a *dict* keyed by output name.
 
         This is finding F13. ``artifact_exists(prefix)`` heads a key that does not
         exist, raises, and the artifact is skipped **with a warning and no error**, so
-        a folder upload has always exported as nothing at all. Phase 8 makes that
-        matter: a DICOM series is the raw scan.
+        a folder upload had always exported as nothing at all. Guarded by
+        ``common/tests_export_prefix.py``.
         """
         metadata = row.metadata if isinstance(row.metadata, dict) else {}
         files = metadata.get("files")
@@ -372,9 +371,6 @@ class ExportProcessor:
             "occlusion": self._collect_occlusion,
             "tooth_segmentation": self._collect_tooth_segmentation,
             "ios_landmarks": self._collect_ios_landmarks,
-            "dicom_sr": self._collect_dicom_sr,
-            "dicom_rtstruct": self._collect_dicom_rtstruct,
-            "dicom_seg": self._collect_dicom_seg,
         }.get(artifact.collector)
         if producer is None:
             logger.warning("No collector registered for artifact %s", artifact.key)
@@ -516,164 +512,6 @@ class ExportProcessor:
                 len(content.encode("utf-8")),
             )
 
-    # ------------------------------------------------------------------ interop
-    #
-    # Roadmap Phase 9. All three collectors share one shape and one refusal: an
-    # interchange object references *source DICOM instances*, so a patient whose CBCT
-    # arrived as a .nii.gz contributes nothing here. Fabricating a Secondary Capture
-    # series so the export had something to point at would file an invention as
-    # provenance -- see common/interop/__init__.py.
-    #
-    # `content` is bytes rather than str for these three. `create_zip` needed no change:
-    # it hands the entry to `zipfile.writestr`, which has always taken either.
-
-    def _dicom_anchored_revisions(self, patient):
-        """``(series, revision)`` for every DICOM-backed set this patient has.
-
-        Only the latest revision of each set, for the same reason the viewer's state
-        endpoint returns only the latest: earlier ones are the audit trail, and an
-        export holding six revisions of the same measurement would be six documents
-        making contradictory claims about one study.
-        """
-        if self.domain != "maxillo":
-            return
-        from annotations.models import AnnotationSet
-        from common.dicom.models import series_for_resource
-
-        sets = (
-            AnnotationSet.objects.filter(patient=patient)
-            .prefetch_related("targets__source_resource")
-            .order_by("id")
-        )
-        for annotation_set in sets:
-            revision = annotation_set.revisions.order_by("-revision_number").first()
-            if revision is None:
-                continue
-            seen = set()
-            for target in annotation_set.targets.all():
-                series = series_for_resource(target.source_resource)
-                if series is None or series.pk in seen:
-                    continue
-                seen.add(series.pk)
-                yield series, revision
-
-    def _interop_entry(self, patient, artifact, dataset, filename):
-        """One generated DICOM object as a ZIP entry."""
-        import io
-
-        buffer = io.BytesIO()
-        dataset.save_as(buffer, enforce_file_format=True)
-        content = buffer.getvalue()
-        return (
-            {
-                "type": "document",
-                "patient": patient,
-                "artifact": artifact,
-                "content": content,
-                "filename": filename,
-            },
-            len(content),
-        )
-
-    def _collect_dicom_sr(self, patient, artifact):
-        """Measurements as a Comprehensive3DSR, one per DICOM-backed revision."""
-        from common.interop import InteropUnavailable, build_sr, instance_datasets
-
-        for series, revision in self._dicom_anchored_revisions(patient):
-            try:
-                datasets = instance_datasets(series)
-                document = build_sr(revision, series, datasets)
-            except InteropUnavailable as exc:
-                logger.warning("No SR for series %s: %s", series.series_instance_uid, exc)
-                continue
-            if document is None:
-                continue
-            yield self._interop_entry(
-                patient, artifact, document, f"sr_{series.series_instance_uid}.dcm"
-            )
-
-    def _collect_dicom_rtstruct(self, patient, artifact):
-        """3D contours as an RT Structure Set, one per DICOM-backed revision."""
-        from common.interop import (
-            InteropUnavailable,
-            build_rtstruct,
-            instance_datasets,
-        )
-
-        for series, revision in self._dicom_anchored_revisions(patient):
-            try:
-                datasets = instance_datasets(series)
-                document = build_rtstruct(revision, series, datasets)
-            except InteropUnavailable as exc:
-                logger.warning(
-                    "No RTSTRUCT for series %s: %s", series.series_instance_uid, exc
-                )
-                continue
-            if document is None:
-                continue
-            yield self._interop_entry(
-                patient, artifact, document, f"rtstruct_{series.series_instance_uid}.dcm"
-            )
-
-    def _collect_dicom_seg(self, patient, artifact):
-        """The CBCT pipeline's labelmap as a DICOM SEG.
-
-        The only dense segmentation the platform produces is ``segmentation_nifti``,
-        published as a bundle member of a ``cbct_processed`` row -- the same member the
-        ``cbct.segmentation`` artifact exports as a NIfTI. It is rendered against the
-        series the runner read, which since Phase 8 is the DICOM series itself, so the
-        two are already on one grid; :func:`common.interop.seg.build_seg` asserts that
-        rather than resampling to make it true.
-        """
-        if self.domain != "maxillo":
-            return
-        import numpy as np
-
-        from common.dicom.models import DicomSeries
-        from common.interop import InteropUnavailable, build_seg, instance_datasets
-        from common.models import FileRegistry
-        from common.object_storage import download_to_tempfile
-
-        series = (
-            DicomSeries.objects.filter(file__domain=self.domain, **{f"file__{self.patient_fk}": patient})
-            .order_by("id")
-            .first()
-        )
-        if series is None:
-            return
-
-        rows = FileRegistry.objects.filter(
-            domain=self.domain, file_type="cbct_processed", **{self.patient_fk: patient}
-        )
-        for row in rows:
-            entry = ((row.metadata or {}).get("files") or {}).get("segmentation_nifti")
-            path = (entry or {}).get("path") if isinstance(entry, dict) else entry
-            if not path or not artifact_exists(path):
-                continue
-            suffix = ".nii.gz" if str(path).endswith(".nii.gz") else ".nii"
-            try:
-                import nibabel as nib
-
-                with download_to_tempfile(path, suffix=suffix) as local_path:
-                    image = nib.load(local_path)
-                    # The labelmap is integer label values, so it is read without the
-                    # float rescale get_fdata applies: a label is a name, not a
-                    # measurement, and scaling one is meaningless.
-                    volume = np.asanyarray(image.dataobj)
-                    affine = np.asarray(image.affine, dtype=float)
-                datasets = instance_datasets(series)
-                document = build_seg(
-                    volume, affine, series, datasets, revision_key=str(row.pk)
-                )
-            except InteropUnavailable as exc:
-                logger.warning("No SEG for series %s: %s", series.series_instance_uid, exc)
-                continue
-            if document is None:
-                continue
-            yield self._interop_entry(
-                patient, artifact, document, f"seg_{series.series_instance_uid}.dcm"
-            )
-
     @staticmethod
     def _patient_folder(patient):
         """`patient_<id>_<name>` with anything path-unsafe stripped."""
@@ -685,8 +523,8 @@ class ExportProcessor:
     def _write_series(zipf, used_paths, directory, folder, entry):
         """Write every member of a prefix row, and report how many landed.
 
-        One directory per series inside the artifact's own directory, so a patient
-        with two series does not interleave several hundred instances under one name.
+        One directory per prefix row inside the artifact's own directory, so a patient
+        with two folder uploads does not interleave their members under one name.
         """
         written = 0
         for member in entry["members"]:

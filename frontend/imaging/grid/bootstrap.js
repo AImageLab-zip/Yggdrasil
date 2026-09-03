@@ -24,7 +24,6 @@ import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, ORIENTATIONS, viewportId 
 import { windowAt } from './windowState.js';
 import { isMeasurable, observeSize } from '../runtime/elementSize.js';
 import { volumeUrl } from '../ids/imageIds.js';
-import { dicomSeriesUrl } from './dicomVolume.js';
 import {
     CLEARED_MESSAGE,
     SAVED_MESSAGE,
@@ -134,7 +133,7 @@ export function primaryVolumeFrom(data) {
  *
  * @param {object} data the `viewer_grid_data` payload.
  * @param {string} slug a modality slug.
- * @returns {{fileId: number, bundleKey: string, filename: string, modality: string, dicom: object|null}|null}
+ * @returns {{fileId: number, bundleKey: string, filename: string, modality: string}|null}
  */
 export function volumeFor(data, slug) {
     const entry = slug ? (data?.modalityFiles || {})[slug] : null;
@@ -146,39 +145,28 @@ export function volumeFor(data, slug) {
         bundleKey: entry.file_key || 'primary',
         filename: entry.filename || `${slug}.nii.gz`,
         modality: slug,
-        // Present only for a stored DICOM series (Phase 8). Its presence is what
-        // selects the DICOM volume path; `maxillo.views.patient_detail` omits it for
-        // every NIfTI row, so neither side has to guess from a filename.
-        dicom: entry.dicom ?? null,
     };
 }
 
 /**
  * The descriptor `loadVolumeIntoWindows` takes, for one modality.
  *
- * One URL either way, because it is also the volume cache key (`volumeIdFor`): one per
- * volume, stable across reloads, unique. For a series that is its metadata endpoint;
- * for a file, its serve path.
+ * The URL is also the volume cache key (`volumeIdFor`): one per volume, stable across
+ * reloads, unique. It is the row's serve path.
  *
  * @param {object} volume from {@link volumeFor}.
  * @param {object} options `namespace` and `origin`.
- * @returns {{url: string, modality: string, fileId: number, dicom: object|null}}
+ * @returns {{url: string, modality: string, fileId: number}}
  */
 export function descriptorFor(volume, { namespace, origin } = {}) {
-    const url = volume.dicom
-        ? dicomSeriesUrl({
-              studyUid: volume.dicom.studyUid,
-              seriesUid: volume.dicom.seriesUid,
-              origin,
-          })
-        : volumeUrl({
-              fileId: volume.fileId,
-              bundleKey: volume.bundleKey,
-              filename: volume.filename,
-              namespace,
-              origin,
-          });
-    return { url, modality: volume.modality, fileId: volume.fileId, dicom: volume.dicom };
+    const url = volumeUrl({
+        fileId: volume.fileId,
+        bundleKey: volume.bundleKey,
+        filename: volume.filename,
+        namespace,
+        origin,
+    });
+    return { url, modality: volume.modality, fileId: volume.fileId };
 }
 
 /**

@@ -22,8 +22,6 @@ def _detect_extension_and_format(filename_lower: str):
         return ".nii.gz", "nifti_compressed"
     if filename_lower.endswith(".nii"):
         return ".nii", "nifti"
-    if filename_lower.endswith((".dcm", ".dicom")):
-        return ".dcm", "dicom_single"
     return os.path.splitext(filename_lower)[1] or ".bin", "unknown"
 
 

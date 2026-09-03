@@ -290,7 +290,7 @@ def upload_patient(request):
 # Extensions that name a patient but must not end up in its name.
 _KNOWN_UPLOAD_SUFFIXES = (
     '.nii.gz', '.tar.gz', '.nii', '.mha', '.mhd', '.nrrd', '.nhdr',
-    '.dcm', '.dicom', '.stl', '.obj', '.ply', '.jpg', '.jpeg', '.png',
+    '.stl', '.obj', '.ply', '.jpg', '.jpeg', '.png',
     '.zip', '.tar', '.tgz', '.7z', '.mp4', '.avi',
 )
 

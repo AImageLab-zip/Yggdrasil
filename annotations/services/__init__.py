@@ -34,7 +34,6 @@ from annotations.services.panoramic import (
 from annotations.services.resources import (
     fingerprint_targets,
     register_derived,
-    register_dicom_series,
     register_file,
     register_logical_volume,
 )
@@ -78,7 +77,6 @@ __all__ = [
     "panoramic_arch_state",
     "record_revision",
     "register_derived",
-    "register_dicom_series",
     "register_file",
     "register_logical_volume",
     "save_measurements",

@@ -2,12 +2,12 @@
 #
 # Build the vendored Cornerstone3D bundle into static/vendor/cornerstone/.
 #
-# Dev-only (decision #1 of docs/cornerstone-roadmap.md): the emitted tree is
+# Dev-only by design: the emitted tree is
 # committed, so nothing here runs at deploy time. CI re-runs it and requires
 # `git diff --exit-code` to be clean, which is what keeps the committed bundle
 # honest -- see CONTRIBUTING.md.
 #
-# Deliberately NOT regenerated here, contrary to the roadmap's Phase 1 text:
+# Deliberately NOT regenerated here:
 #
 #   static/js/nifti-reader.js       is esbuild output, but of a custom entry that
 #                                   assigns `window.nifti = {...}`. That entry was

@@ -305,7 +305,7 @@ def get_file_type_for_modality(
 
     # File format-based fallbacks for unknown modalities
     if not is_processed and file_format:
-        if file_format in ["nii", "nii.gz", "dicom", "mha", "mhd", "nrrd"]:
+        if file_format in ["nii", "nii.gz", "mha", "mhd", "nrrd"]:
             return "volume_raw"
         elif file_format in ["jpg", "jpeg", "png", "bmp", "tiff", "tif"]:
             return "image_raw"
@@ -424,10 +424,6 @@ def _detect_extension_and_format(filename_lower: str):
         return ".nii.gz", "nifti_compressed"
     if filename_lower.endswith(".nii"):
         return ".nii", "nifti"
-    if filename_lower.endswith((".dcm", ".dicom")):
-        return ".dcm", "dicom_single"
-    if filename_lower == "dicomdir" or filename_lower.endswith("/dicomdir"):
-        return "", "dicomdir"
     if filename_lower.endswith(".mha"):
         return ".mha", "metaimage"
     if filename_lower.endswith(".mhd"):
@@ -437,13 +433,13 @@ def _detect_extension_and_format(filename_lower: str):
     if filename_lower.endswith(".nhdr"):
         return ".nhdr", "nrrd_header"
     if filename_lower.endswith(".zip"):
-        return ".zip", "dicom_archive_zip"
+        return ".zip", "archive_zip"
     if filename_lower.endswith((".tar", ".tar.gz", ".tgz")):
         if filename_lower.endswith(".tar.gz"):
-            return ".tar.gz", "dicom_archive_tar"
+            return ".tar.gz", "archive_tar"
         if filename_lower.endswith(".tgz"):
-            return ".tgz", "dicom_archive_tar"
-        return ".tar", "dicom_archive_tar"
+            return ".tgz", "archive_tar"
+        return ".tar", "archive_tar"
     # Fallback
     return os.path.splitext(filename_lower)[1] or ".bin", "unknown"
 
@@ -528,7 +524,9 @@ def save_generic_modality_file(
 
 def save_generic_modality_folder(patient: Patient, modality_slug: str, folder_files):
     """Save a folder upload for an arbitrary modality slug and create a Job.
-    Similar to save_cbct_folder_to_dataset but generic and sets FileRegistry.modality.
+    Stores every uploaded member under one object-storage *prefix* and records them
+    as a list in ``metadata['files']``, which is what makes the row a prefix row --
+    see ``common.export_processing.ExportProcessor._prefix_members``.
     """
     base_prefix = f"{_raw_key_prefix_for(patient, modality_slug)}/{modality_slug}_patient_{patient.patient_id}_folder"
     saved_files = []
@@ -606,9 +604,8 @@ def _validate_and_extract_nifti_orientation(cbct_file):
     filename_lower = original_name.lower()
     if not filename_lower.endswith(".nii.gz"):
         raise ValidationError(
-            "CBCT upload requires a compressed NIfTI file (.nii.gz) or a DICOM "
-            "file or folder. MetaImage (.mha) is not accepted; convert it to "
-            ".nii.gz first."
+            "CBCT upload requires a compressed NIfTI file (.nii.gz). MetaImage "
+            "(.mha) is not accepted; convert it to .nii.gz first."
         )
 
     import tempfile
@@ -665,39 +662,15 @@ def _validate_and_extract_nifti_orientation(cbct_file):
     return orientation
 
 
-def _is_dicom_upload(uploaded_file):
-    """Whether an uploaded file carries the DICOM ``DICM`` marker at byte 128.
-
-    Read from the bytes, not from the name. The extension is unreliable in both
-    directions -- DICOM instances on a burned disc routinely have no extension at all,
-    and ``.dcm`` on something that is not DICOM should fail as "not DICOM" rather than
-    part-way through an ingest.
-    """
-    try:
-        uploaded_file.seek(128)
-        marker = uploaded_file.read(4)
-    except Exception:
-        return False
-    finally:
-        with contextlib.suppress(Exception):
-            uploaded_file.seek(0)
-    return marker == b"DICM"
-
-
 def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     """
     Save a CBCT upload to object storage and create the processing job.
 
-    Accepts a compressed NIfTI, whose orientation metadata is validated server-side.
-
-    **DICOM upload is disabled.** The refusal lives here, on the bytes, rather than in
-    the form or the template: it is the one point every upload path goes through (the
-    upload page, the project API, replacing a patient's files), and a ``.dcm`` that is
-    not DICOM or a DICOM instance with no extension both have to be judged by the DICM
-    marker, never by the filename. Native DICOM storage itself
-    (:func:`save_cbct_folder_to_dataset`, ``common.dicom.ingest``) is untouched and
-    still serves the series already in the database -- what is switched off is
-    accepting new ones.
+    Accepts a compressed NIfTI, and nothing else. The platform stores ``.nii.gz``
+    only, so :func:`_validate_and_extract_nifti_orientation` is the single refusal --
+    it runs here, at the one point every upload path goes through (the upload page,
+    the project API, replacing a patient's files), rather than in the form or the
+    template where a second caller could miss it.
 
     Args:
         patient_or_legacy: Patient or legacy object with .patient
@@ -706,15 +679,8 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     Returns:
         tuple: (file_path, processing_job)
     """
-    from django.core.exceptions import ValidationError
-
     patient = _get_patient(patient_or_legacy)
     original_name = getattr(cbct_file, "name", "cbct.nii.gz") or "cbct.nii.gz"
-
-    if _is_dicom_upload(cbct_file):
-        raise ValidationError(
-            "DICOM upload is disabled. Upload the CBCT as a compressed NIfTI (.nii.gz)."
-        )
 
     orientation = _validate_and_extract_nifti_orientation(cbct_file)
 
@@ -769,69 +735,6 @@ def save_cbct_to_dataset(patient_or_legacy, cbct_file):
     )
 
     return key, processing_job
-
-
-def save_cbct_folder_to_dataset(patient_or_legacy, folder_files):
-    """Store a DICOM folder natively, as DICOM.
-
-    No upload path reaches this while DICOM upload is disabled (see
-    :func:`save_cbct_to_dataset`); it is kept, tested and correct so that re-enabling
-    the upload is a UI change and not a rewrite.
-
-    Until Phase 8 this function existed only to raise: the folder was converted to a
-    single ``.nii.gz`` in the browser and the DICOM was discarded, so reaching the
-    server with a folder meant the conversion had not run. The conversion is gone. The
-    series is now stored as it arrived, de-identified but not transformed, and the
-    processing job is pointed at it.
-
-    Two behaviours the deleted converter had, which are not preserved because neither
-    was correct: it threw *every* slice in the folder into one volume regardless of
-    ``SeriesInstanceUID`` (so a folder holding a scout alongside the volume produced a
-    single interleaved mess), and it refused compressed pixel data outright, which made
-    an ordinary JPEG-Lossless CBCT un-uploadable. Series are now separated, and
-    compressed pixels are stored untouched.
-
-    :returns: ``(prefix, job)`` for the largest series, matching the shape every caller
-        already unpacks. Every series gets its own row and its own job -- nothing is
-        silently dropped -- and the largest one is reported back because on a folder
-        holding a scout and a volume, the volume is what the uploader came to upload.
-    """
-    from common.dicom.ingest import DicomIngestError, ingest_dicom_series
-
-    patient = _get_patient(patient_or_legacy)
-    modality_fk = None
-    try:
-        from common.models import Modality as _Modality
-
-        modality_fk = _Modality.objects.filter(slug="cbct").first()
-    except Exception:
-        modality_fk = None
-
-    try:
-        created = ingest_dicom_series(
-            patient,
-            modality_slug="cbct",
-            file_type=get_file_type_for_modality("cbct", is_processed=False),
-            files=list(folder_files or []),
-            modality=modality_fk,
-        )
-    except DicomIngestError as exc:
-        from django.core.exceptions import ValidationError
-
-        # Every reason at once: an uploader fixing one refused slice only to hit the
-        # next has learned nothing from the first round trip.
-        raise ValidationError(list(exc.reasons)) from exc
-
-    jobs = {
-        series.pk: _create_job_if_runner_enabled(
-            "cbct",
-            **_entity_fk_kwargs(patient),
-            input_files={"input": series.file.file_path},
-        )
-        for series in created
-    }
-    primary = max(created, key=lambda series: series.instance_count)
-    return primary.file.file_path, jobs.get(primary.pk)
 
 
 def save_ios_to_dataset(patient_or_legacy, upper_file=None, lower_file=None):

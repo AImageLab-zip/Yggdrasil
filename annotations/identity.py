@@ -85,25 +85,6 @@ def for_logical_volume(file_id, file_key=None):
     return _build(ResourceKind.LOGICAL_VOLUME, identifier, _clean(key, what="file key"))
 
 
-def for_dicom_series(series_instance_uid):
-    """Identity of a DICOM series, by its own UID.
-
-    A UID is globally unique by construction, so it needs nothing else. This is
-    populated from Phase 8; the format is settled now so the Phase 2 schema does
-    not have to change to accept it.
-    """
-    return _build(
-        ResourceKind.DICOM_SERIES, _clean(series_instance_uid, what="SeriesInstanceUID")
-    )
-
-
-def for_dicom_instance(sop_instance_uid):
-    """Identity of a single DICOM instance, by its own UID."""
-    return _build(
-        ResourceKind.DICOM_INSTANCE, _clean(sop_instance_uid, what="SOPInstanceUID")
-    )
-
-
 def for_derived_resource(producer, source_identity_key, discriminator=None):
     """Identity of something computed from another resource.
 

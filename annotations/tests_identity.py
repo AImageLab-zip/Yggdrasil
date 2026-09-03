@@ -52,9 +52,9 @@ class SeparatorTests(SimpleTestCase):
                 with self.assertRaises(IdentityError):
                     identity.for_file(412, bad)
 
-    def test_a_uid_containing_a_separator_is_refused(self):
+    def test_a_file_key_containing_a_separator_is_refused_for_a_volume_too(self):
         with self.assertRaises(IdentityError):
-            identity.for_dicom_series("1.2.840/999")
+            identity.for_logical_volume(412, "volume:nifti")
 
 
 class LogicalVolumeTests(SimpleTestCase):
@@ -70,20 +70,6 @@ class LogicalVolumeTests(SimpleTestCase):
         self.assertEqual(
             identity.for_logical_volume(412), identity.for_logical_volume(412, "primary")
         )
-
-
-class DicomIdentityTests(SimpleTestCase):
-    def test_a_series_and_an_instance_with_the_same_uid_stay_distinct(self):
-        """UIDs are unique per object, but the kind prefix is what proves it here."""
-        self.assertNotEqual(
-            identity.for_dicom_series("1.2.840.113619.2.55.3"),
-            identity.for_dicom_instance("1.2.840.113619.2.55.3"),
-        )
-
-    def test_a_uid_is_taken_verbatim(self):
-        uid = "1.2.840.113619.2.55.3.604688119.971.1618834931.16"
-
-        self.assertIn(uid, identity.for_dicom_series(uid))
 
 
 class DerivedResourceTests(SimpleTestCase):

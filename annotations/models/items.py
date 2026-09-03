@@ -214,7 +214,7 @@ class MeasurementItem(AnnotationItemBase):
     calibration_note = models.CharField(
         max_length=255,
         blank=True,
-        help_text="Where the scale came from: DICOM PixelSpacing, a NIfTI affine, a manual ruler.",
+        help_text="Where the scale came from: a NIfTI affine, a manual ruler.",
     )
     sample_count = models.PositiveIntegerField(
         null=True,

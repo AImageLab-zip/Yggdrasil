@@ -2,10 +2,12 @@
  * CBCTConvert - Front-end manager for in-browser CBCT conversion.
  * Orchestrates worker execution for MetaImage and NIfTI repair.
  *
- * **DICOM is not converted.** It is uploaded as-is and stored as DICOM by
- * `common/dicom/ingest.py` (Phase 8). Everything that used to turn a selected DICOM
- * folder into a .nii.gz -- and throw the series away -- is deleted; a `.dcm` or an
- * extensionless file now falls through to the server untouched, which is the point.
+ * **DICOM is not converted, and must not be.** The platform stores `.nii.gz` only
+ * and has no DICOM code left on either side; the server refuses anything else. The
+ * browser conversion that used to turn a selected DICOM folder into a .nii.gz -- and
+ * throw the series away -- is deleted, and `cbct_convert.test.js` guards its absence.
+ * Re-adding it would resurrect that data loss with nothing on the server to accept
+ * the result.
  */
 
 (function (root, factory) {
@@ -38,7 +40,7 @@
     /**
      * Convert a MetaImage or a raw NIfTI into a compressed NIfTI (.nii.gz) File object.
      *
-     * DICOM is not accepted: it is stored natively and never converted.
+     * DICOM is not accepted: there is no DICOM path anywhere in the platform.
      *
      * @param {FileList|File[]} files
      * @param {Object} [options]
@@ -137,7 +139,7 @@
                     });
             } else {
                 cleanup();
-                reject(new Error('Selected file(s) are not supported here. This converter handles NIfTI (.nii) and MetaImage (.mha); DICOM is uploaded as-is.'));
+                reject(new Error('Selected file(s) are not supported here. This converter handles NIfTI (.nii) and MetaImage (.mha); the server accepts .nii.gz only.'));
             }
         });
     }

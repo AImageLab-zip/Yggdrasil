@@ -34,7 +34,7 @@ function loadConvertContext() {
 }
 
 test('DICOM is not something this converter claims to handle', () => {
-    // Phase 8 stores a series as DICOM. The predicates that used to classify one for
+    // The platform stores .nii.gz only. The predicates that used to classify a DICOM
     // conversion are gone, and their absence is the contract: anything still asking
     // this module about DICOM is asking the wrong module.
     const { CBCTConvert } = loadConvertContext();
