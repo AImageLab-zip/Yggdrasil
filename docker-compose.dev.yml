@@ -10,7 +10,7 @@ name: yggdrasil-dev
 services:
     web:
         build: .
-        command: /app/entrypoint.sh
+        command: ["sh", "/app/entrypoint.sh"]
         volumes:
             - .:/app
         ports:
