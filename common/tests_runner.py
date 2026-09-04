@@ -6,7 +6,10 @@ from types import SimpleNamespace
 import sys
 from unittest import mock
 
+from botocore.exceptions import EndpointConnectionError
 from django.test import SimpleTestCase, override_settings
+
+from common.object_storage import ObjectStorage, ObjectStorageError
 
 from common.runner import run as run_mod
 from common.runner.ssh import SlurmSSH, SlurmSSHError
@@ -158,6 +161,41 @@ class SshHelperTests(SimpleTestCase):
 
 
 class RunHelperTests(SimpleTestCase):
+    def test_unreachable_store_surfaces_as_object_storage_error(self):
+        """DNS/connection failure is one exception type, never raw botocore.
+
+        CI has no object storage (garage:3900 does not resolve there), so every
+        network call must normalize BotoCoreError into ObjectStorageError.
+        file_access.exists() only swallows ObjectStorageError; a raw
+        EndpointConnectionError escaping here is what failed CI run 91546356994.
+        """
+        store = ObjectStorage.__new__(ObjectStorage)
+        store.bucket = "yggdrasil"
+        store.key_prefix = ""
+        client = mock.Mock()
+        client.head_object.side_effect = EndpointConnectionError(
+            endpoint_url="http://garage:3900/yggdrasil"
+        )
+        client.head_bucket.side_effect = EndpointConnectionError(
+            endpoint_url="http://garage:3900/yggdrasil"
+        )
+        client.get_object.side_effect = EndpointConnectionError(
+            endpoint_url="http://garage:3900/yggdrasil"
+        )
+        client.upload_file.side_effect = EndpointConnectionError(
+            endpoint_url="http://garage:3900/yggdrasil"
+        )
+        store._client = client
+
+        with self.assertRaises(ObjectStorageError):
+            store.head("a.nii.gz")
+        # exists() maps unreachable -> absent (False), same as missing key.
+        self.assertFalse(store.exists("a.nii.gz"))
+        with self.assertRaises(ObjectStorageError):
+            store.get("a.nii.gz")
+        with self.assertRaises(ObjectStorageError):
+            store.ensure_bucket_exists()
+
     def test_iter_input_keys_nested_dedup(self):
         keys = list(run_mod.iter_input_keys(
             {"ios": {"upper": "p/u.stl", "lower": "p/l.stl"}, "flat": "p/f.stl", "dup": "p/u.stl"}

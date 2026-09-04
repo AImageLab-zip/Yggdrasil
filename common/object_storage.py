@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 
 
@@ -116,6 +116,14 @@ class ObjectStorage:
         key_n = self.normalize_key(key)
         try:
             resp = self._client.head_object(Bucket=self.bucket, Key=key_n)
+        except BotoCoreError as exc:
+            # Transport-level failure (DNS, connection refused, timeout): the
+            # store is unreachable, not merely missing the key. Normalize to
+            # ObjectStorageError so callers with an unreachable-store policy
+            # (e.g. file_access.exists) see one exception type. CI has no
+            # object storage; without this a ClientError-only except lets
+            # EndpointConnectionError escape raw.
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             code = self._client_error_code(exc)
             if code in {"NoSuchKey", "404", "NotFound"}:
@@ -140,6 +148,8 @@ class ObjectStorage:
         try:
             self._client.head_bucket(Bucket=self.bucket)
             return
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             code = self._client_error_code(exc)
             if code not in {"404", "NoSuchBucket", "NotFound"}:
@@ -152,6 +162,8 @@ class ObjectStorage:
                     "LocationConstraint": self.region_name
                 }
             self._client.create_bucket(**kwargs)
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             code = self._client_error_code(exc)
             if code not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
@@ -163,11 +175,20 @@ class ObjectStorage:
             return True
         except FileNotFoundError:
             return False
+        except ObjectStorageError:
+            # Missing object reads as absent; an unreachable store (DNS down,
+            # connection refused, timeout) reads as absent too once head()
+            # normalizes BotoCoreError into ObjectStorageError. CI has no object
+            # storage, so exists() returning False is what keeps export
+            # collection green there instead of erroring the whole test.
+            return False
 
     def get(self, key: str) -> Tuple[BinaryIO, ObjectInfo]:
         key_n = self.normalize_key(key)
         try:
             resp = self._client.get_object(Bucket=self.bucket, Key=key_n)
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             code = self._client_error_code(exc)
             if code in {"NoSuchKey", "404", "NotFound"}:
@@ -187,6 +208,8 @@ class ObjectStorage:
         key_n = self.normalize_key(key)
         try:
             resp = self._client.get_object(Bucket=self.bucket, Key=key_n, Range=byte_range)
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             code = self._client_error_code(exc)
             if code in {"NoSuchKey", "404", "NotFound"}:
@@ -232,6 +255,8 @@ class ObjectStorage:
         self.ensure_bucket_exists()
         try:
             self._client.upload_file(local_path, self.bucket, key_n, ExtraArgs=extra)
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
         return self.head(key)
@@ -254,6 +279,8 @@ class ObjectStorage:
         self.ensure_bucket_exists()
         try:
             self._client.upload_fileobj(fileobj, self.bucket, key_n, ExtraArgs=extra)
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
 
@@ -263,6 +290,8 @@ class ObjectStorage:
         key_n = self.normalize_key(key)
         try:
             self._client.delete_object(Bucket=self.bucket, Key=key_n)
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
 
@@ -294,6 +323,8 @@ class ObjectStorage:
                     yield ObjectInfo(
                         key=key, content_length=obj.get("Size"), etag=etag
                     )
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
 
@@ -330,6 +361,10 @@ class ObjectStorage:
                     Bucket=self.bucket, Key=dest_key_n, CopySource=copy_source
                 )
                 return
+            except BotoCoreError as exc:
+                raise ObjectStorageError(
+                    f"copy {source_bucket}/{source_key} -> {self.bucket}/{dest_key_n}: {exc}"
+                ) from exc
             except ClientError as exc:
                 code = self._client_error_code(exc)
                 # Only "too big" is worth retrying as multipart; anything else is real.
@@ -354,6 +389,8 @@ class ObjectStorage:
         """Size of an object in an arbitrary bucket this client can read."""
         try:
             return int(self._client.head_object(Bucket=bucket, Key=key)["ContentLength"])
+        except BotoCoreError as exc:
+            raise ObjectStorageError(f"head {bucket}/{key}: {exc}") from exc
         except ClientError as exc:
             raise ObjectStorageError(f"head {bucket}/{key}: {exc}") from exc
 
@@ -362,6 +399,8 @@ class ObjectStorage:
             upload_id = self._client.create_multipart_upload(
                 Bucket=self.bucket, Key=dest_key_n
             )["UploadId"]
+        except BotoCoreError as exc:
+            raise ObjectStorageError(f"multipart init for {label}: {exc}") from exc
         except ClientError as exc:
             raise ObjectStorageError(f"multipart init for {label}: {exc}") from exc
 
@@ -404,15 +443,20 @@ class ObjectStorage:
     def list_keys(self, prefix: str) -> Generator[str, None, None]:
         prefix_n = self.normalize_key(prefix)
         paginator = self._client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix_n):
-            for obj in page.get("Contents", []) or []:
-                key_n = obj.get("Key")
-                if not key_n:
-                    continue
-                if self.key_prefix and key_n.startswith(self.key_prefix + "/"):
-                    yield key_n[len(self.key_prefix) + 1 :]
-                else:
-                    yield key_n
+        try:
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix_n):
+                for obj in page.get("Contents", []) or []:
+                    key_n = obj.get("Key")
+                    if not key_n:
+                        continue
+                    if self.key_prefix and key_n.startswith(self.key_prefix + "/"):
+                        yield key_n[len(self.key_prefix) + 1 :]
+                    else:
+                        yield key_n
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
+        except ClientError as exc:
+            raise ObjectStorageError(str(exc)) from exc
 
     def presign_get(self, key: str, *, expires_seconds: int = 600) -> str:
         key_n = self.normalize_key(key)
@@ -422,6 +466,8 @@ class ObjectStorage:
                 Params={"Bucket": self.bucket, "Key": key_n},
                 ExpiresIn=int(expires_seconds),
             )
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
 
