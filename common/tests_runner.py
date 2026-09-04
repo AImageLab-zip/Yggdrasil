@@ -164,10 +164,11 @@ class RunHelperTests(SimpleTestCase):
     def test_unreachable_store_surfaces_as_object_storage_error(self):
         """DNS/connection failure is one exception type, never raw botocore.
 
-        CI has no object storage (garage:3900 does not resolve there), so every
-        network call must normalize BotoCoreError into ObjectStorageError.
-        file_access.exists() only swallows ObjectStorageError; a raw
-        EndpointConnectionError escaping here is what failed CI run 91546356994.
+        Every network call normalizes BotoCoreError into ObjectStorageError, so a
+        caller sees "the store is unreachable" as one thing rather than as whichever
+        botocore transport error happened to fire. The distinction the store must keep
+        is unreachable vs. absent: file_access.exists() decides to treat an outage as
+        absence, and it can only make that choice if this layer does not make it first.
         """
         store = ObjectStorage.__new__(ObjectStorage)
         store.bucket = "yggdrasil"
@@ -189,8 +190,10 @@ class RunHelperTests(SimpleTestCase):
 
         with self.assertRaises(ObjectStorageError):
             store.head("a.nii.gz")
-        # exists() maps unreachable -> absent (False), same as missing key.
-        self.assertFalse(store.exists("a.nii.gz"))
+        # An unreachable store is not an absent object: exists() raises rather than
+        # answering False, so an outage cannot read as "the file was never there".
+        with self.assertRaises(ObjectStorageError):
+            store.exists("a.nii.gz")
         with self.assertRaises(ObjectStorageError):
             store.get("a.nii.gz")
         with self.assertRaises(ObjectStorageError):

@@ -310,6 +310,11 @@ OBJECT_STORAGE_ADDRESSING_STYLE = config(
 )
 OBJECT_STORAGE_KEY_PREFIX = config("OBJECT_STORAGE_KEY_PREFIX", default="")
 
+# The endpoint above is a compose service, so a test run either cannot reach a store at
+# all or writes into the live bucket. The runner swaps in an in-memory one instead; see
+# common/testing.py.
+TEST_RUNNER = "common.testing.StorageIsolatingRunner"
+
 # Async jobs (distributed runners)
 _REDIS_PASSWORD = config("REDIS_PASSWORD")
 _REDIS_HOST = config("REDIS_HOST", default="redis")

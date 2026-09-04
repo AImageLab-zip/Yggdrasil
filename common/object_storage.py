@@ -175,13 +175,6 @@ class ObjectStorage:
             return True
         except FileNotFoundError:
             return False
-        except ObjectStorageError:
-            # Missing object reads as absent; an unreachable store (DNS down,
-            # connection refused, timeout) reads as absent too once head()
-            # normalizes BotoCoreError into ObjectStorageError. CI has no object
-            # storage, so exists() returning False is what keeps export
-            # collection green there instead of erroring the whole test.
-            return False
 
     def get(self, key: str) -> Tuple[BinaryIO, ObjectInfo]:
         key_n = self.normalize_key(key)
