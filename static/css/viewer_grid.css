@@ -388,6 +388,24 @@
 .panoramic-edit-arch:hover { border-color: var(--ygg-primary); color: var(--ygg-primary); }
 .panoramic-edit-arch[hidden] { display: none; }
 
+/* The way in when there is no panoramic yet. Same button as Edit arch, in the pane
+   rather than in the header: the two are never offered at the same moment. */
+.panoramic-generate {
+  min-height: 36px;
+  padding: 0 0.7rem;
+  border: 1px solid var(--ygg-border);
+  border-radius: 6px;
+  background: var(--ygg-surface);
+  color: var(--ygg-text);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panoramic-generate:hover { border-color: var(--ygg-primary); color: var(--ygg-primary); }
+.panoramic-generate[hidden] { display: none; }
+
 /* Replaces the Edit arch button once annotations freeze the panoramic. Sized to
    match it so the header does not shift between a locked and unlocked patient. */
 .panoramic-arch-locked {
@@ -461,7 +479,8 @@
 
 .cbct-inline-panoramic-body .panoramic-loading,
 .cbct-inline-panoramic-body .panoramic-content,
-.cbct-inline-panoramic-body .panoramic-error {
+.cbct-inline-panoramic-body .panoramic-error,
+.cbct-inline-panoramic-body .panoramic-placeholder {
   height: 100%;
 }
 

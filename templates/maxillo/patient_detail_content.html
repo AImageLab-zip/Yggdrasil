@@ -285,6 +285,7 @@
                                     <p class="text-muted mb-0">Panoramic image not available.</p>
                                 </div>
                             </div>
+                            {% include 'maxillo/sections/panoramic_placeholder.html' with id_prefix='cbctPanoramic' %}
                         </div>
                     </div>
                     {% include 'maxillo/sections/cbct_panorex_editor.html' %}
@@ -507,6 +508,7 @@
                         <p class="text-muted">Upload panoramic image to view it here.</p>
                     </div>
                 </div>
+                {% include 'maxillo/sections/panoramic_placeholder.html' with id_prefix='panoramic' %}
             </div>
             {% endif %}
 

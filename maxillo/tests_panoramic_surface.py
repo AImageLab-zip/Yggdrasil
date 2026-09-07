@@ -40,6 +40,21 @@ CONTROL_IDS = (
     "editSavedPanoramic",
 )
 
+#: The inline saved-panoramic pane's "there isn't one yet" state, by the id
+#: `static/js/modality_viewers/panoramic.js` shows and hides it by. The standalone
+#: Panoramic tab carries `panoramicPlaceholder` from the same partial, but that tab is
+#: only rendered for a patient who has a raw CBCT or an uploaded panoramic, which this
+#: fixture deliberately does not.
+PLACEHOLDER_ID = "cbctPanoramicPlaceholder"
+
+#: And the hooks `frontend/imaging/panoramic/placeholder.js` writes both panes through.
+#: Data attributes rather than ids because there are two of each on the page.
+PLACEHOLDER_HOOKS = (
+    "data-panoramic-placeholder",
+    "data-panoramic-placeholder-message",
+    "data-panoramic-generate",
+)
+
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class PanoramicSurfaceRenderTests(TestCase):
@@ -90,6 +105,25 @@ class PanoramicSurfaceRenderTests(TestCase):
         for control_id in CONTROL_IDS:
             with self.subTest(control=control_id):
                 self.assertIn(f'id="{control_id}"', html)
+
+    def test_both_panes_ship_the_not_generated_yet_placeholder(self):
+        """A patient with no panoramic is not an error, and must not be drawn as one.
+
+        The pane used to show `.panoramic-error` -- a warning triangle over "Panoramic
+        image not available." -- from the moment a newly uploaded patient's page rendered.
+        The placeholder is the honest state, and it ships with its terminal wording so a
+        page whose `panoramic-cpr` bundle never runs still reads correctly; the bundle
+        takes ownership by rewriting it, the same contract as the Edit-arch button.
+        """
+        html = self._render()
+
+        self.assertIn(f'id="{PLACEHOLDER_ID}"', html)
+        for hook in PLACEHOLDER_HOOKS:
+            with self.subTest(hook=hook):
+                self.assertIn(hook, html)
+        # Nothing is offered until the surface says the CBCT has arrived.
+        start = html.index("data-panoramic-generate")
+        self.assertIn("hidden", html[start : html.index(">", start)])
 
     def test_the_cbct_grid_keeps_its_crosshair_and_its_shift_hint(self):
         """The other branch of the shared toolbar, which the brain page takes the false

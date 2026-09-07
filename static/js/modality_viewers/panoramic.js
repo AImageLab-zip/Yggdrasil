@@ -14,6 +14,7 @@ window.PanoramicViewer = {
             loadingId: 'panoramicLoading',
             contentId: 'panoramicContent',
             errorId: 'panoramicError',
+            placeholderId: 'panoramicPlaceholder',
             imageId: 'panoramicStandaloneImage',
             requestToken: 0,
             abortController: null
@@ -22,6 +23,7 @@ window.PanoramicViewer = {
             loadingId: 'cbctPanoramicLoading',
             contentId: 'cbctPanoramicContent',
             errorId: 'cbctPanoramicError',
+            placeholderId: 'cbctPanoramicPlaceholder',
             imageId: 'cbctPanoramicImage',
             requestToken: 0,
             abortController: null
@@ -153,6 +155,11 @@ window.PanoramicViewer = {
         const loading = document.getElementById(config.loadingId);
         const content = document.getElementById(config.contentId);
         const error = document.getElementById(config.errorId);
+        // Whether this is showing is decided here; what it *says* is decided by the
+        // panoramic-cpr bundle, which is the only thing that knows whether the CBCT has
+        // arrived and whether a default can be generated from it. Same split as the
+        // Edit-arch button -- see `frontend/imaging/panoramic/controls.js:setEditReady`.
+        const placeholder = document.getElementById(config.placeholderId);
         const img = document.getElementById(config.imageId);
 
         if (!img) {
@@ -168,6 +175,7 @@ window.PanoramicViewer = {
         if (loading) loading.style.display = 'block';
         if (content) content.style.display = 'none';
         if (error) error.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'none';
         
         fetch(this.getMetaUrl(), config.abortController ? { signal: config.abortController.signal } : undefined)
             .then(response => {
@@ -254,9 +262,15 @@ window.PanoramicViewer = {
     /**
      * The pane's own empty state: no spinner, no content, the placeholder shown.
      *
-     * This is the same end state `loadInto`'s catch reaches, reached without the
-     * request -- see the caller in `static/js/patient_detail.js`. A request in flight
-     * is abandoned first, so a slow answer cannot re-show the pane behind this.
+     * Reached without a request -- see the caller in `static/js/patient_detail.js`. A
+     * request in flight is abandoned first, so a slow answer cannot re-show the pane
+     * behind this.
+     *
+     * **Not the error pane.** "This patient has no panoramic yet" and "the image failed
+     * to load" are different facts, and while they shared one box every newly uploaded
+     * patient was greeted by a warning triangle. The error pane stays for the failures
+     * `loadInto` actually meets; this shows the placeholder, whose wording the
+     * panoramic-cpr bundle owns.
      */
     showEmpty: function(config) {
         config.requestToken = (config.requestToken || 0) + 1;
@@ -264,9 +278,11 @@ window.PanoramicViewer = {
         const loading = document.getElementById(config.loadingId);
         const content = document.getElementById(config.contentId);
         const error = document.getElementById(config.errorId);
+        const placeholder = document.getElementById(config.placeholderId);
         if (loading) loading.style.display = 'none';
         if (content) content.style.display = 'none';
-        if (error) error.style.display = 'block';
+        if (error) error.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'block';
     },
 
     refreshAfterSave: function(data) {

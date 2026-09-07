@@ -1,0 +1,29 @@
+{% comment %}
+The saved-panoramic pane's "there isn't one yet" state.
+
+Deliberately *not* the `.panoramic-error` block beside it. "No panoramic yet" and "the
+image failed to load" are different facts, and sharing one box meant every newly
+uploaded patient was greeted by a warning triangle.
+
+Included twice -- once for the inline card in the CBCT tab, once for the standalone
+Panoramic tab -- with an `id_prefix`, because both panes show the same patient and there
+is nothing to say twice. `static/js/modality_viewers/panoramic.js` toggles the container
+by id, exactly as it toggles its loading/content/error siblings; the message and the
+button carry data attributes instead, because there are two of each on the page and
+`frontend/imaging/panoramic/placeholder.js` writes both in one call. The same reason
+`[data-panoramic-variant-controls]` is a data attribute.
+
+The wording shipped here is the terminal one: a page whose `panoramic-cpr` bundle never
+runs shows an honest static message rather than a spinner that never resolves. The
+bundle takes ownership by rewriting it -- the same contract as the Edit-arch button,
+which the template ships `hidden` for the same reason.
+{% endcomment %}
+<div class="panoramic-placeholder" id="{{ id_prefix }}Placeholder" data-panoramic-placeholder style="display: none;">
+    <div class="text-center py-3">
+        <div class="mb-2"><i class="fas fa-circle-info fa-2x text-secondary" aria-hidden="true"></i></div>
+        <p class="text-muted mb-2" data-panoramic-placeholder-message role="status" aria-live="polite">No panoramic yet.</p>
+        <button type="button" class="panoramic-generate" data-panoramic-generate hidden>
+            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Generate panoramic
+        </button>
+    </div>
+</div>

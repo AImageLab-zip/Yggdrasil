@@ -990,9 +990,10 @@
     background: var(--ygg-surface-2);
 }
 
-/* Panoramic loading and error states */
+/* Panoramic loading, error and "not generated yet" states */
 .panoramic-loading,
-.panoramic-error {
+.panoramic-error,
+.panoramic-placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1006,7 +1007,8 @@
     height: 1.5rem;
 }
 
-.panoramic-error i {
+.panoramic-error i,
+.panoramic-placeholder i {
     font-size: 1.5rem;
     margin-bottom: 0.5rem;
 }
