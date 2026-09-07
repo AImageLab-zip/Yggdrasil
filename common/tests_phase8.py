@@ -6,17 +6,19 @@ Locks two things:
     contract under /api/runner/...);
   * ``resubmit_jobs`` creates a pending Job (with correct domain + input) for a
     patient that has a raw file but no job, is idempotent without
-    ``--include-existing``, and re-pends with it.
+    ``--include-existing``, re-pends with it, and re-dispatches a job that is
+    *already* pending (no status transition, so the enqueue signal never fires).
 """
 
 from io import StringIO
+from unittest.mock import patch
 
 from django.apps import apps
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import NoReverseMatch, reverse
 
-from common.models import FileRegistry, Job, Modality
+from common.models import FileRegistry, Job, Modality, ProcessingStep
 from common.uploads import domain_for_patient
 
 
@@ -93,6 +95,46 @@ class ResubmitJobsTests(TestCase):
         self._run("--include-existing")
         job.refresh_from_db()
         self.assertEqual(job.status, "pending")
+
+    def test_include_existing_redispatches_already_pending(self):
+        """A job stuck in ``pending`` is re-dispatched, not silently skipped.
+
+        Its status never transitions, so ``_job_post_save`` does not fire; the
+        command has to enqueue explicitly. This is the recovery case the command
+        exists for -- a broker outage strands jobs in exactly this state.
+        """
+        # The dispatch gate requires an enabled step for the modality; created
+        # here rather than in setUpTestData so the other cases keep their
+        # runner-disabled fixture.
+        ProcessingStep.objects.create(
+            modality=self.modality,
+            name="FLAIR",
+            slug="braintumor_mri_flair",
+            is_enabled=True,
+        )
+
+        self._run()
+        job = Job.objects.get(
+            brain_patient=self.patient, modality_slug="braintumor_mri_flair"
+        )
+        self.assertEqual(job.status, "pending")
+        # Stale execution state left by an attempt that never finished; a
+        # surviving slurm_job_id would make the worker reattach instead of submit.
+        Job.objects.filter(pk=job.pk).update(
+            slurm_job_id="900", worker_id="w1", error_logs="boom"
+        )
+
+        with patch("common.signals.celery_app.send_task") as send_task:
+            self._run("--include-existing")
+
+        self.assertEqual(send_task.call_count, 1)
+        self.assertEqual(send_task.call_args.kwargs["args"], [job.id])
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "pending")
+        self.assertEqual(job.slurm_job_id, "")
+        self.assertEqual(job.worker_id, "")
+        self.assertEqual(job.error_logs, "")
 
     def test_dry_run_writes_nothing(self):
         self._run("--dry-run")

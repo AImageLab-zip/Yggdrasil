@@ -6,7 +6,9 @@ patients that already exist in the database. For each matching patient:
   * if no Job exists for (patient, modality) -> create a fresh ``pending`` Job
     from the patient's raw file for that modality (the common on-upload path);
   * if a Job already exists and ``--include-existing`` is given -> flip it back
-    to ``pending`` so a worker picks it up again.
+    to ``pending`` so a worker picks it up again (a job that is *already*
+    pending is re-dispatched directly, since no status transition occurs and
+    the enqueue signal would therefore never fire).
 
 Creating/flipping a Job to ``pending`` triggers the normal enqueue signal
 (``common.signals._job_post_save``), so this reuses the exact same routing the
@@ -25,6 +27,7 @@ from django.core.management.base import BaseCommand, CommandError
 from common.domains import DOMAINS, fk_fields_for
 from common.job_routing import is_runner_enabled_for_modality
 from common.models import FileRegistry, Job
+from common.signals import enqueue_runner_task
 
 
 class Command(BaseCommand):
@@ -91,8 +94,27 @@ class Command(BaseCommand):
                     continue
                 repended += 1
                 if not dry:
-                    job.status = "pending"
-                    job.save()
+                    if job.status == "pending":
+                        # Already pending: the status never changes, so the
+                        # post_save dispatch signal never fires. Re-dispatch
+                        # explicitly -- a job stranded in pending is exactly what
+                        # this command exists to recover. Clear first what
+                        # _job_pre_save would have cleared on a transition; a
+                        # stale slurm_job_id would make the worker reattach to a
+                        # finished allocation instead of submitting a new one.
+                        Job.objects.filter(pk=job.pk).update(
+                            output_files={},
+                            started_at=None,
+                            completed_at=None,
+                            worker_id="",
+                            slurm_job_id="",
+                            error_logs="",
+                        )
+                        job.refresh_from_db()
+                        enqueue_runner_task(job)
+                    else:
+                        job.status = "pending"
+                        job.save()
                 continue
 
             raw = (

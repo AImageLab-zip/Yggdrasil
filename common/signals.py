@@ -37,44 +37,66 @@ def _job_pre_save(sender, instance: Job, **kwargs):
             instance.error_logs = ""
 
 
+def enqueue_runner_task(job) -> bool:
+    """Send the runner task for ``job``; return True if it was enqueued.
+
+    The single place a dispatch is performed. ``_job_post_save`` decides only
+    *whether* a save warrants one; management commands that re-dispatch an
+    existing job call this directly, because a job that is already ``pending``
+    never transitions and so never fires the signal.
+
+    This lives here rather than in ``common.job_routing`` because the whole test
+    suite patches ``common.signals.celery_app.send_task`` as its dispatch seam —
+    including the frozen runner-API contract tests.
+
+    Never raises: a failure is logged and recorded on the job, because nothing
+    re-scans the pending table and a stranded job is otherwise indistinguishable
+    from a healthy one.
+    """
+    job_id = getattr(job, "id", None)
+    modality_slug = getattr(job, "modality_slug", None)
+    try:
+        if not is_runner_enabled_for_modality(modality_slug):
+            logger.info(
+                "Not enqueueing Job %s for disabled modality '%s'",
+                job_id,
+                modality_slug,
+            )
+            return False
+
+        queue = select_runner_queue(job)
+        task_name = getattr(
+            settings, "RUNNER_TASK_NAME", "yggdrasil.runner.process_job"
+        )
+        celery_app.send_task(task_name, args=[job_id], queue=queue)
+        logger.info(
+            "Enqueued Job %s to queue '%s' (task=%s)", job_id, queue, task_name
+        )
+        return True
+    except Exception as exc:
+        logger.error("Failed to enqueue Job %s: %s", job_id, exc, exc_info=True)
+        try:
+            Job.objects.filter(pk=getattr(job, "pk", None)).update(
+                error_logs=f"enqueue failed: {exc!r}"
+            )
+        except Exception:
+            logger.exception("Could not record enqueue failure on Job %s", job_id)
+        return False
+
+
 @receiver(post_save, sender=Job)
 def _job_post_save(sender, instance: Job, created: bool, **kwargs):
     """Dispatch is pure Redis/Celery: enqueue the runner task and nothing more.
 
+    This decides only *whether* a save warrants a dispatch; performing one is
+    enqueue_runner_task above, which management commands share.
+
     The web app knows nothing about how jobs execute — a dedicated Celery worker
     (see common.runner) consumes the queue and drives the cluster.
     """
-    try:
-        prev = getattr(instance, "_previous_status", None)
-        should_enqueue = False
-        if created and instance.status in {"pending", "retrying"}:
-            should_enqueue = True
-        elif prev != instance.status and instance.status in {"pending", "retrying"}:
-            should_enqueue = True
-
-        if not should_enqueue:
-            return
-
-        if not is_runner_enabled_for_modality(instance.modality_slug):
-            logger.info(
-                "Not enqueueing Job %s for disabled modality '%s'",
-                instance.id,
-                instance.modality_slug,
-            )
-            return
-
-        queue = select_runner_queue(instance)
-        task_name = getattr(
-            settings, "RUNNER_TASK_NAME", "yggdrasil.runner.process_job"
-        )
-        celery_app.send_task(task_name, args=[instance.id], queue=queue)
-        logger.info(
-            "Enqueued Job %s to queue '%s' (task=%s)", instance.id, queue, task_name
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to enqueue Job %s: %s",
-            getattr(instance, "id", None),
-            exc,
-            exc_info=True,
-        )
+    if instance.status not in {"pending", "retrying"}:
+        return
+    prev = getattr(instance, "_previous_status", None)
+    if not (created or prev != instance.status):
+        return
+    enqueue_runner_task(instance)

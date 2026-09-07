@@ -83,7 +83,11 @@ services:
         working_dir: /app
         # Consumes every runner queue (RUNNER_QUEUES from .env.worker) and drives the
         # SLURM cluster over SSH. The ONLY service with the SSH key + cluster config.
-        command: sh -c 'python -m celery -A yggdrasil worker --queues "$${RUNNER_QUEUES:-runner_prod}" --concurrency "$${RUNNER_CONCURRENCY:-4}" --loglevel=info'
+        # Thread pool, not prefork: run_job spends nearly all its time asleep in
+        # ssh.poll() waiting on SLURM, so a slot costs a thread rather than a full
+        # Django process. Each task builds its own SlurmSSH client, so no paramiko
+        # state is shared across threads.
+        command: sh -c 'python -m celery -A yggdrasil worker --queues "$${RUNNER_QUEUES:-runner_prod}" --pool=threads --concurrency "$${RUNNER_CONCURRENCY:-32}" --loglevel=info'
         environment:
             PYTHONPATH: /app
         env_file:
@@ -96,7 +100,20 @@ services:
             - ${SLURM_SSH_KEY_HOST:-./secrets/slurm_ssh_key}:/run/secrets/slurm_ssh_key:ro
             # Paramiko rejects unknown hosts; pre-populate with ssh-keyscan for the cluster login node.
             - ${SLURM_KNOWN_HOSTS_HOST:-./secrets/slurm_known_hosts}:/root/.ssh/known_hosts:ro
-        network_mode: bridge
+        # SITE-SPECIFIC. On app-net, Docker's embedded resolver forwards to the
+        # host stub, which can drop a CNAME alias the login node is reachable by
+        # (here: ing.unimore.it resolves only via the site resolvers, while the
+        # canonical ing.unimo.it always does). secrets/slurm_known_hosts pins the
+        # alias and paramiko uses RejectPolicy, so the name must keep resolving.
+        # Override these for your site, or point SLURM_SSH_HOST at a name Docker's
+        # resolver handles and drop them.
+        dns:
+            - ${RUNNER_DNS_1:-155.185.1.2}
+            - ${RUNNER_DNS_2:-155.185.1.5}
+        dns_search:
+            - ${RUNNER_DNS_SEARCH:-ing.unimo.it}
+        networks:
+            - app-net
 
     db:
         image: mysql:8.0
