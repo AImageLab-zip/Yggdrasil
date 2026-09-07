@@ -4,10 +4,24 @@ from common.models import Project, ProjectAccess, SiteMaintenance
 
 
 def app_meta(request):
-    from common.demo import is_demo_guest
+    from common.demo import demo_domain_cards, is_demo_guest, landing_demo_url
+
+    user = getattr(request, 'user', None)
+    # `demo_url` is the "try it without an account" CTA, so it is only ever
+    # rendered to anonymous visitors -- landing and login both need it, which is
+    # why it lives here rather than in one view. Skipping the lookup when signed
+    # in keeps the query off every app page.
+    demo_url = None
+    demo_domains = []
+    if user is None or not getattr(user, 'is_authenticated', False):
+        demo_url = landing_demo_url()
+        if demo_url:
+            demo_domains = demo_domain_cards()
     return {
         'app_version': getattr(settings, 'APP_VERSION', ''),
-        'is_demo_guest': is_demo_guest(getattr(request, 'user', None)),
+        'is_demo_guest': is_demo_guest(user),
+        'demo_url': demo_url,
+        'demo_domains': demo_domains,
     }
 
 

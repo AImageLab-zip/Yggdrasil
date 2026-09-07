@@ -33,7 +33,14 @@ from django.urls import reverse
 from annotations.models import AnnotationSet, AnnotationTarget, SourceResource
 from common.admin import raw_lock_map
 from common.annotation_lock import raw_data_is_locked
-from common.models import FileRegistry, Job, Modality, ProcessingStep, Project
+from common.models import (
+    FileRegistry,
+    Job,
+    Modality,
+    ProcessingStep,
+    Project,
+    ProjectAccess,
+)
 from laparoscopy.models import (
     Folder as LaparoFolder,
     Patient as LaparoPatient,
@@ -513,8 +520,13 @@ class JobActionSafetyTests(TestCase):
         self.assertEqual(job.status, "dependency")
 
 
-class DemoSwitchTests(TestCase):
-    """``is_demo`` publishes a folder to anonymous readers; it has to ask."""
+class DemoPublicityTests(TestCase):
+    """Granting the guest a role publishes a project; the admin must say so.
+
+    Replaces the old folder-level ``publish_to_demo`` action: the demo is scoped
+    by ``ProjectAccess`` now, so the warning belongs on the project page where
+    that grant is made.
+    """
 
     def setUp(self):
         self.staff = User.objects.create_superuser(
@@ -522,27 +534,24 @@ class DemoSwitchTests(TestCase):
         )
         self.client.force_login(self.staff)
         self.project = _project("demo-switch")
-        self.folder = Folder.objects.create(name="F", project=self.project)
 
-    def test_publishing_requires_confirmation(self):
-        url = reverse("admin:maxillo_folder_changelist")
-        response = self.client.post(
-            url,
-            {"action": "publish_to_demo", "_selected_action": [str(self.folder.pk)]},
+    def _change_page(self):
+        return self.client.get(
+            reverse("admin:maxillo_maxilloproject_change", args=[self.project.pk])
         )
+
+    def test_private_project_says_so(self):
+        response = self._change_page()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Anyone on the internet")
-        self.folder.refresh_from_db()
-        self.assertFalse(self.folder.is_demo)
+        self.assertContains(response, "only users listed below can read it")
 
-        response = self.client.post(
-            url,
-            {
-                "action": "publish_to_demo",
-                "_selected_action": [str(self.folder.pk)],
-                "confirmed": "yes",
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-        self.folder.refresh_from_db()
-        self.assertTrue(self.folder.is_demo)
+    def test_guest_access_is_flagged_as_public(self):
+        from django.conf import settings
+        from django.contrib.auth import get_user_model
+
+        guest = get_user_model().objects.get(username=settings.DEMO_GUEST_USERNAME)
+        ProjectAccess.objects.create(user=guest, project=self.project, role="viewer")
+
+        response = self._change_page()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "readable by anyone on the")
