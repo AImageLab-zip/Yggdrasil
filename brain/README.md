@@ -6,7 +6,7 @@ export workflow as `maxillo/` under its own namespace and its own tables.
 
 ## What it owns
 
-- **Its own domain tables**: `Patient`, `Folder`, `FolderAccess`, `Dataset`,
+- **Its own domain tables**: `Patient`, `Folder`, `FolderAccess`,
   `Tag`, `VoiceCaption`, `Export` — mostly subclasses of the abstract bases in
   `common/base_models.py`, with `Patient` written for this domain.
 - **The brain modalities**: the MRI sequences T1, T1c, T2 and FLAIR plus the

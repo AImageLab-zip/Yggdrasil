@@ -329,6 +329,52 @@ class AdminStructureTests(TestCase):
         self.assertEqual(len(grouped), len(admin.site._registry))
         self.assertIn("auth.User", grouped)
 
+    def test_sections_spanning_domains_are_grouped_by_domain(self):
+        """Three domains each declare a Patient; the index says which is which.
+
+        The purpose-ordered index removed the app heading that used to tell them
+        apart, so a section drawing on several domains groups its rows instead.
+        """
+        staff = User.objects.create_superuser("group-admin", "g@example.invalid", "x")
+        request = RequestFactory().get("/admin/")
+        request.user = staff
+        sections = {app["name"]: app for app in admin.site.get_app_list(request)}
+
+        clinical = [entry["group"] for entry in sections["Clinical data"]["models"]]
+        # Every clinical model is declared by a domain, so every row is grouped.
+        self.assertNotIn(None, clinical)
+        # Each domain forms one contiguous run, in registry order.
+        runs = [g for i, g in enumerate(clinical) if i == 0 or clinical[i - 1] != g]
+        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy"])
+
+        # Shared models come first, before the per-domain runs.
+        access = [entry["group"] for entry in sections["Projects & access"]["models"]]
+        self.assertIsNone(access[0])
+        self.assertEqual(
+            [g for i, g in enumerate(access) if i == 0 or access[i - 1] != g],
+            [None, "Maxillo", "Brain", "Laparoscopy"],
+        )
+
+        # A section drawing on one app has nothing to disambiguate.
+        self.assertEqual(
+            {entry["group"] for entry in sections["Processing"]["models"]}, {None}
+        )
+
+    def test_the_index_draws_the_domain_sub_headings(self):
+        """The grouping only helps if the template renders it.
+
+        ``templates/admin/app_list.html`` overrides Django's copy for exactly
+        one reason: emitting a sub-heading row when ``model.group`` changes.
+        """
+        staff = User.objects.create_superuser("render-admin", "r@example.invalid", "x")
+        self.client.force_login(staff)
+        response = self.client.get(reverse("admin:index"))
+        self.assertContains(response, 'class="domain-group"')
+        for domain in ("Maxillo", "Brain", "Laparoscopy"):
+            self.assertContains(
+                response, f'<th colspan="3" scope="colgroup">{domain}</th>'
+            )
+
     def test_the_admin_is_not_called_django_administration(self):
         self.assertEqual(admin.site.site_header, "Yggdrasil administration")
         self.assertTrue(admin.site.index_title)

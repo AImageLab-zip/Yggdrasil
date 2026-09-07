@@ -119,7 +119,7 @@ def patient_list(request):
     except Exception:
         _Job = None
     
-    select_related_fields = ['dataset', 'uploaded_by', 'folder']
+    select_related_fields = ['uploaded_by', 'folder']
     if any(field.name == 'project' for field in Patient._meta.fields):
         select_related_fields.insert(0, 'project')
 
