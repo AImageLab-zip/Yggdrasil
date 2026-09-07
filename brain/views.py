@@ -255,7 +255,7 @@ def patient_detail(request, patient_id):
 
 @login_required
 def patient_list(request):
-    patients = Patient.objects.select_related("dataset", "uploaded_by").prefetch_related(
+    patients = Patient.objects.select_related("uploaded_by").prefetch_related(
         "voice_captions",
         "voice_captions__user",
         "tags",

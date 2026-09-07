@@ -5,7 +5,7 @@ and the one the shared machinery was extracted out of.
 
 ## What it owns
 
-- **Its own domain tables**: `Patient`, `Folder`, `FolderAccess`, `Dataset`,
+- **Its own domain tables**: `Patient`, `Folder`, `FolderAccess`,
   `Tag`, `VoiceCaption`, `Export`, `Classification` — most of them subclasses of
   the abstract bases in `common/base_models.py`, `Patient` written from scratch.
 - **The maxillo modalities**: CBCT, IOS (intraoral scans), intraoral photos,

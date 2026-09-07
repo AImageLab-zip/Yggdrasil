@@ -15,13 +15,11 @@ what changed is that the class list no longer claims otherwise.
 """
 
 from django.contrib import admin
-from django.db.models import Count
 
 from common.admin import DomainFolderAdmin, DomainProjectAdmin
 
 from .models import (
     Classification,
-    Dataset,
     Export,
     Folder,
     IntraoralToothSegmentation,
@@ -32,38 +30,18 @@ from .models import (
 )
 
 
-@admin.register(Dataset)
-class DatasetAdmin(admin.ModelAdmin):
-    # `scan_count` and `patient_count` are the same method body twice
-    # (maxillo/models.py) -- two identical COUNT queries per row for one number.
-    # One column, and it is annotated rather than counted per row.
-    list_display = ['name', 'patient_count', 'created_at', 'created_by']
-    list_filter = ['created_at']
-    list_select_related = ['created_by']
-    search_fields = ['name', 'description']
-    readonly_fields = ['created_at']
-    autocomplete_fields = ['created_by']
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).annotate(_patients=Count('patients'))
-
-    @admin.display(description="Patients", ordering="_patients")
-    def patient_count(self, obj):
-        return getattr(obj, "_patients", None) or obj.patients.count()
-
-
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
     # `project` is shown and filterable for the same reason as on FolderAdmin: a
     # patient in the wrong project is invisible in the app but looks fine here.
-    list_display = ['patient_id', 'name', 'project', 'folder', 'dataset', 'visibility', 'uploaded_at', 'uploaded_by']
-    list_filter = ['project', 'visibility', 'dataset', 'uploaded_at']
+    list_display = ['patient_id', 'name', 'project', 'folder', 'visibility', 'uploaded_at', 'uploaded_by']
+    list_filter = ['project', 'visibility', 'uploaded_at']
     # Every FK in list_display, in the one query that fetches the page. Without
     # it a 100-row page is 400 extra queries.
-    list_select_related = ['project', 'folder', 'dataset', 'uploaded_by']
+    list_select_related = ['project', 'folder', 'uploaded_by']
     search_fields = ['patient_id', 'name']
     readonly_fields = ['patient_id', 'uploaded_at']
-    autocomplete_fields = ['project', 'folder', 'dataset', 'uploaded_by']
+    autocomplete_fields = ['project', 'folder', 'uploaded_by']
     filter_horizontal = ['modalities', 'tags']
 
 

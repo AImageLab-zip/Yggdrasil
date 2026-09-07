@@ -16,12 +16,20 @@ still appears, under its own app heading, after the sections. Nothing here can
 hide a model: a registration missing from :data:`SECTIONS` falls through to the
 leftovers rather than disappearing.
 
+Within a section, models are clustered under the domain that declares them (see
+:func:`_group_by_domain`): grouping by purpose costs the app heading that used
+to distinguish maxillo's ``Patient`` from brain's, so the index renders a
+sub-heading per domain instead. ``templates/admin/app_list.html`` overrides
+Django's copy for that one row.
+
 The per-app index page (``/admin/common/``) is untouched; ``get_app_list`` only
 regroups when it is asked for the whole list.
 """
 
 from django.contrib.admin import AdminSite
 from django.urls import reverse
+
+from common.domains import DOMAIN_CHOICES
 
 SITE_HEADER = "Yggdrasil administration"
 SITE_TITLE = "Yggdrasil admin"
@@ -70,9 +78,6 @@ SECTIONS = (
             ("maxillo", "Export"),
             ("brain", "Export"),
             ("laparoscopy", "Export"),
-            ("maxillo", "Dataset"),
-            ("brain", "Dataset"),
-            ("laparoscopy", "Dataset"),
             ("maxillo", "Tag"),
             ("brain", "Tag"),
             ("laparoscopy", "Tag"),
@@ -126,6 +131,48 @@ SECTIONS = (
 )
 
 
+def _group_by_domain(models):
+    """Cluster a section's models under the domain that declares them.
+
+    Three domains declare their own ``Patient``, ``Folder``, ``Tag`` and so on,
+    so a section that draws from all three renders the same label several times
+    with nothing to tell the rows apart. Grouping restores the distinction the
+    purpose-ordered index removed, without renaming anything.
+
+    Entries are annotated with ``group`` (the domain's display name, or ``None``
+    for a shared model) and reordered so shared rows come first and each domain
+    forms one run, in registry order. A section drawing on fewer than two
+    domains is left exactly as declared -- there is nothing to disambiguate.
+    """
+    order = [slug for slug, _ in DOMAIN_CHOICES]
+    labels = dict(DOMAIN_CHOICES)
+
+    def domain_of(entry):
+        model = entry.get("model")
+        return model._meta.app_label if model is not None else None
+
+    if len({domain_of(e) for e in models} & set(order)) < 2:
+        for entry in models:
+            entry["group"] = None
+        return models
+
+    shared = []
+    buckets = {slug: [] for slug in order}
+    for entry in models:
+        slug = domain_of(entry)
+        if slug in buckets:
+            entry["group"] = labels[slug]
+            buckets[slug].append(entry)
+        else:
+            entry["group"] = None
+            shared.append(entry)
+
+    grouped = list(shared)
+    for slug in order:
+        grouped.extend(buckets[slug])
+    return grouped
+
+
 class YggdrasilAdminSite(AdminSite):
     """The default site, with a purpose-ordered index."""
 
@@ -174,13 +221,13 @@ class YggdrasilAdminSite(AdminSite):
                 sections.append(
                     {
                         "name": heading,
+                        "models": _group_by_domain(models),
                         "app_label": slug,
                         # A fragment, not "": the index template marks a section
                         # "current" when `app_url in request.path`, and the empty
                         # string is in every path.
                         "app_url": f"{self._index_url(request)}#{slug}",
                         "has_module_perms": True,
-                        "models": models,
                     }
                 )
 

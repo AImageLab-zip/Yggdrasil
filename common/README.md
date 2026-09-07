@@ -19,7 +19,7 @@ their own copy of a thing, it belongs here.
 - **Export** — `export_catalog.py`, `export_processing.py`, `export_share.py`,
   `export_ui.py`.
 - **Abstract bases the domains subclass** — `base_models.py`: `FolderBase`,
-  `FolderAccessBase`, `DatasetBase`, `TagBase`, `ClassificationBase`,
+  `FolderAccessBase`, `TagBase`, `ClassificationBase`,
   `ExportBase`, `VoiceCaptionBase`.
 - **Cross-cutting site services** — site maintenance modes, presence, activity,
   notifications, recently-viewed, user preferences, backups (`tasks.py`), the

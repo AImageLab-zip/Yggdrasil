@@ -73,14 +73,12 @@ class Command(BaseCommand):
             'brain_patient',
             'brain_tag',
             'brain_folder',
-            'brain_dataset',
             'maxillo_classification',
             'maxillo_voicecaption',
             'maxillo_export',
             'maxillo_patient',
             'maxillo_tag',
             'maxillo_folder',
-            'maxillo_dataset',
             'common_projectaccess',
             'common_project_modalities',
             'common_project',
@@ -154,17 +152,6 @@ class Command(BaseCommand):
 
         cursor.execute(
             f"""
-            INSERT INTO `{app}_dataset` (`id`, `name`, `description`, `created_at`, `created_by_id`)
-            SELECT DISTINCT d.`id`, d.`name`, d.`description`, d.`created_at`, d.`created_by_id`
-            FROM `{legacy_db}`.`scans_dataset` d
-            JOIN `{legacy_db}`.`scans_patient` p ON p.`dataset_id` = d.`id`
-            WHERE p.`project_id` = %s
-            """,
-            [project_id],
-        )
-
-        cursor.execute(
-            f"""
             INSERT INTO `{app}_folder` (`id`, `name`, `created_at`, `created_by_id`, `parent_id`)
             SELECT DISTINCT f.`id`, f.`name`, f.`created_at`, f.`created_by_id`, f.`parent_id`
             FROM `{legacy_db}`.`scans_folder` f
@@ -189,9 +176,9 @@ class Command(BaseCommand):
         cursor.execute(
             f"""
             INSERT INTO `{app}_patient`
-            (`patient_id`, `name`, `upper_scan_raw`, `lower_scan_raw`, `upper_scan_norm`, `lower_scan_norm`, `cbct`, `ios_processing_status`, `cbct_processing_status`, `visibility`, `uploaded_at`, `dataset_id`, `folder_id`, `uploaded_by_id`, `deleted`)
+            (`patient_id`, `name`, `upper_scan_raw`, `lower_scan_raw`, `upper_scan_norm`, `lower_scan_norm`, `cbct`, `ios_processing_status`, `cbct_processing_status`, `visibility`, `uploaded_at`, `folder_id`, `uploaded_by_id`, `deleted`)
             SELECT
-                `patient_id`, `name`, `upper_scan_raw`, `lower_scan_raw`, `upper_scan_norm`, `lower_scan_norm`, `cbct`, `ios_processing_status`, `cbct_processing_status`, `visibility`, `uploaded_at`, `dataset_id`, `folder_id`, `uploaded_by_id`, 0
+                `patient_id`, `name`, `upper_scan_raw`, `lower_scan_raw`, `upper_scan_norm`, `lower_scan_norm`, `cbct`, `ios_processing_status`, `cbct_processing_status`, `visibility`, `uploaded_at`, `folder_id`, `uploaded_by_id`, 0
             FROM `{legacy_db}`.`scans_patient`
             WHERE `project_id` = %s
             """,
