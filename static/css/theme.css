@@ -6,6 +6,7 @@
  * ygg-ui.css. This file keeps only:
  *   1. @font-face for the self-hosted IBM Plex families (GDPR: no CDN fonts).
  *   2. The fixed footer + 64px icon-rail app-shell layout.
+ *   3. The desktop-only gate shown at phone widths.
  * It MUST NOT restyle annotation viewers — viewer pages inherit this file.
  *
  * Bootstrap is gone as of the 2.0 rebuild; the chromatic overrides and the
@@ -147,4 +148,71 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
     body.has-rail .ygg-rail { transform: translateX(-100%); transition: transform .2s; }
     body.has-rail.rail-open .ygg-rail { transform: none; }
     body.has-rail .ygg-footer { left: 0; }
+}
+
+/* ==========================================================================
+ * Desktop-only gate — the honest counterpart to the rule above.
+ *
+ * Below phone width the rail is translated off-canvas and nothing reopens it,
+ * and the viewers were never laid out for a 390px column. Rather than serve a
+ * silently broken page, base.html carries an interstitial that is invisible at
+ * desktop widths and paints over everything here. No JS and no User-Agent
+ * sniffing: the media query IS the detection. Colours are all --ygg-* tokens,
+ * so it follows the data-theme stamp with no dark-mode rules of its own.
+ *
+ * The landscape clause catches a rotated phone (~850px wide, so a bare
+ * max-width would let it through); max-height keeps laptops out.
+ * ======================================================================== */
+.ygg-desktop-gate { display: none; }
+
+@media (max-width: 640px), (orientation: landscape) and (max-height: 480px) {
+    html, body { overflow: hidden; }
+    .ygg-desktop-gate {
+        display: flex;
+        position: fixed;
+        inset: 0;
+        /* Above the maintenance banner (2100), toasts (2000) and modals (1050). */
+        z-index: 3000;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        background: var(--ygg-surface-alt);
+    }
+    .ygg-desktop-gate__card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+        max-width: 22rem;
+        padding: 2rem 1.5rem 1.75rem;
+        border: 1px solid var(--ygg-border);
+        border-radius: var(--ygg-radius-lg);
+        background: var(--ygg-surface);
+        box-shadow: var(--ygg-shadow-card-light);
+        text-align: center;
+    }
+    .ygg-desktop-gate__logo {
+        width: 4.5rem;
+        height: auto;
+        animation: ygg-gate-float 3.2s ease-in-out infinite;
+    }
+    .ygg-desktop-gate__title {
+        margin-top: 0.5rem;
+        font-size: 1.125rem;
+        line-height: 1.4;
+    }
+    .ygg-desktop-gate__text {
+        margin: 0;
+        color: var(--ygg-text-muted);
+        font-size: 0.875rem;
+        line-height: 1.55;
+    }
+}
+
+@keyframes ygg-gate-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ygg-desktop-gate__logo { animation: none; }
 }

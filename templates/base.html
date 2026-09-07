@@ -81,6 +81,26 @@
        The old ygg-nav top bar was removed with the 3.0 release. {% endcomment %}
     {% block chrome %}{% endblock %}{# chrome #}
 
+    {% comment %} Desktop-only gate. Yggdrasil's working pages are Cornerstone3D
+       viewers and dense tables; below phone width the icon rail is off-canvas
+       with no way back, so instead of a silently broken page we paint an honest
+       interstitial. Pure CSS (theme.css) -- shown/hidden by media query alone,
+       and deliberately free of context variables so 500.html, which renders
+       without context processors, still gets it. {% endcomment %}
+    {% block mobile_gate %}
+    <div class="ygg-desktop-gate" role="alertdialog" aria-labelledby="ygg-gate-title">
+        <div class="ygg-desktop-gate__card">
+            <img class="ygg-desktop-gate__logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="">
+            {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
+            <h1 id="ygg-gate-title" class="ygg-desktop-gate__title">Best viewed on a bigger screen</h1>
+            <p class="ygg-desktop-gate__text">
+                Yggdrasil's imaging viewers need room to grow &mdash; open it on a
+                laptop or desktop and the tree will be waiting. &#127794;
+            </p>
+        </div>
+    </div>
+    {% endblock %}{# mobile_gate #}
+
     {% block messages %}
     {% if messages %}
         <script>
