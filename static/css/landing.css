@@ -355,48 +355,134 @@ main.landing {
 .landing-recents__name { display: block; font-size: 13px; font-weight: 600; }
 .landing-recents__proj { display: block; font-size: 11px; color: var(--ygg-text-muted); }
 
-/* ---- Guest gate -------------------------------------------------------- */
-.landing-gate {
-    background: var(--ygg-surface);
+/* ---- Anonymous entry: demo first, sign-in second ----------------------- */
+.landing-entry {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    max-width: 560px;
+}
+
+/* The demo CTA borrows the domain card's language (gradient rule, watermark
+   glyph, lift on hover) so it reads as the same family, one size up. */
+.landing-demo {
+    position: relative;
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    padding: 30px 34px 26px;
     border: 1px solid var(--ygg-border);
     border-radius: 18px;
-    padding: 38px 42px;
-    max-width: 400px;
-    width: 100%;
-    text-align: center;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    text-decoration: none;
     box-shadow: var(--ygg-shadow-card-light);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
-.landing-gate__icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
+.landing-demo:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--ygg-shadow-pop);
+    border-color: var(--ygg-primary);
+    color: var(--ygg-text);
+}
+.landing-demo:focus-visible {
+    outline: 2px solid var(--ygg-primary);
+    outline-offset: 3px;
+}
+.landing-demo__bar {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--ygg-maxillo), var(--ygg-brain), var(--ygg-laparoscopy));
+}
+.landing-demo__body { position: relative; z-index: 1; display: block; }
+.landing-demo__watermark {
+    position: absolute;
+    right: -18px;
+    bottom: -26px;
+    font-size: 150px;
+    opacity: .06;
+    pointer-events: none;
+}
+.landing-demo__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 10px;
+    border-radius: 999px;
     background: var(--ygg-accent-soft);
     color: var(--ygg-primary);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+.landing-demo__title {
+    display: block;
+    margin: 14px 0 8px;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.landing-demo__desc {
+    display: block;
+    max-width: 42ch;
+    color: var(--ygg-text-muted);
+    font-size: 13px;
+    line-height: 1.55;
+}
+.landing-demo__domains {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 18px 0 20px;
+}
+.landing-demo__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--ygg-border);
+    background: var(--ygg-surface-alt);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--accent, var(--ygg-primary));
+}
+.landing-demo__go {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 11px 20px;
+    border-radius: 10px;
+    background: var(--ygg-primary);
+    color: var(--ygg-on-primary);
+    font-size: 14px;
+    font-weight: 600;
+}
+.landing-demo:hover .landing-demo__go { background: var(--ygg-primary-hover); }
+
+/* Sign-in: deliberately one quiet line, not a competing card. */
+.landing-signin {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
-    margin: 0 auto 16px;
-}
-.landing-gate__title { margin: 0 0 8px; font-size: 19px; font-weight: 700; }
-.landing-gate__msg {
-    color: var(--ygg-text-muted);
+    flex-wrap: wrap;
+    gap: 12px;
     font-size: 13px;
-    margin: 0 0 22px;
-    line-height: 1.5;
-}
-.landing-gate__actions { display: flex; flex-direction: column; gap: 9px; }
-.landing-demo-cta {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 18px;
-    font-size: 12px;
     color: var(--ygg-text-muted);
-    text-decoration: none;
 }
-.landing-demo-cta:hover { color: var(--ygg-primary); }
+.landing-signin__label { color: var(--ygg-text-muted); }
+.landing-btn--sm { padding: 7px 14px; font-size: 13px; }
+.landing-signin__link { color: var(--ygg-text-muted); text-decoration: underline; }
+.landing-signin__link:hover { color: var(--ygg-primary); }
+
+@media (max-width: 560px) {
+    .landing-demo { padding: 24px 22px 22px; }
+    .landing-demo__title { font-size: 22px; }
+}
 
 /* ---- No-access banner -------------------------------------------------- */
 .landing-warn {
@@ -417,4 +503,6 @@ main.landing {
     .landing-glow { animation: none; }
     .domain { transition: none; }
     .domain:hover { transform: none; }
+    .landing-demo { transition: none; }
+    .landing-demo:hover { transform: none; }
 }

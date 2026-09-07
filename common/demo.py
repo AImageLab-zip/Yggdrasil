@@ -1,31 +1,30 @@
-"""Public guest demo (Phase 7).
+"""Public guest demo.
 
 Guests explore the *real* portal — the same interactive viewer logged-in users
-see — but strictly read-only and scoped to *curated* folders an admin flagged
-``is_demo=True`` (see ``common.base_models.FolderBase``). Rather than a bespoke
-UI, ``demo_index`` logs the visitor in as a shared low-privilege guest user and
-redirects into the real app; the existing ``@login_required`` views then work
-unchanged, with access narrowed by ``common.permissions`` (guest reads only
-``is_demo`` folders) and writes blocked by ``DemoGuestReadOnlyMiddleware``.
+see — but strictly read-only. Rather than a bespoke UI, ``demo_index`` logs the
+visitor in as a shared low-privilege guest user and drops them on the ordinary
+domain chooser; the existing ``@login_required`` views then work unchanged.
+
+What the guest may see is decided by ``ProjectAccess`` alone, exactly as for any
+other user: a project is in the public demo iff the guest holds ``viewer`` on
+it. This used to be a separate ``Folder.is_demo`` flag that *bypassed*
+``ProjectAccess`` for the guest, which meant granting the guest a role did
+nothing and the real control was invisible on the folder.
 
 Security invariants (keep these true):
-  * The guest holds a ``standard`` ProjectAccess and no FolderAccess, so
-    ``user_can_read_folder`` grants it only ``is_demo`` folders.
-  * The guest role must never be ``admin`` (that would bypass is_demo scoping).
-  * Every write is a non-safe HTTP method and is rejected for the guest by the
-    read-only middleware (logout excepted).
+  * The guest's role must never be more than ``viewer``. Granting it publishes a
+    project to anyone on the internet, since ``/demo/`` needs no password.
+  * Every write is a non-safe HTTP method and is rejected for the guest by
+    ``DemoGuestReadOnlyMiddleware`` (logout excepted).
 """
 
 import functools
 
-from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.core.cache import cache
 from django.http import Http404, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import redirect
-
-from .domains import DOMAINS
 
 # Per-IP fixed-window throttle. Uses the default cache (LocMemCache unless a
 # shared cache is configured — good enough to blunt scraping; not a hard quota
@@ -80,67 +79,51 @@ def is_demo_guest(user):
     )
 
 
-# --- querysets ------------------------------------------------------------
+def demo_is_published():
+    """True iff the guest account can actually show a visitor something.
 
-def _model(domain, name):
-    return apps.get_model(domain, name)
+    That is: the guest exists and holds a readable role on some active project.
+    Keeps the landing CTA hidden until an admin has published something.
+    """
+    from common.models import ProjectAccess
+    from common.permissions import READ_ROLES
 
-
-def _patient_uses_m2m_folders(patient_model):
-    return any(f.name == "folders" for f in patient_model._meta.get_fields())
-
-
-def demo_folders(domain):
-    """All ``is_demo`` folders for ``domain`` (empty if unknown domain)."""
-    if domain not in DOMAINS:
-        return None
-    return _model(domain, "Folder").objects.filter(is_demo=True)
-
-
-def demo_patients(domain):
-    """Active patients that live in at least one ``is_demo`` folder."""
-    Patient = _model(domain, "Patient")
-    qs = Patient.objects.all()
-    if _patient_uses_m2m_folders(Patient):
-        qs = qs.filter(folders__is_demo=True).distinct()
-    else:
-        qs = qs.filter(folder__is_demo=True)
-    # Exclude soft-deleted where the field exists (maxillo Patient.deleted).
-    if any(f.name == "deleted" for f in Patient._meta.get_fields()):
-        qs = qs.filter(deleted=False)
-    return qs
-
-
-def patient_in_demo(patient, domain):
-    """True iff ``patient`` is exposed by a demo folder in ``domain``."""
-    if patient is None or domain not in DOMAINS:
+    username = getattr(settings, "DEMO_GUEST_USERNAME", None)
+    if not username:
         return False
-    if getattr(patient, "deleted", False):
-        return False
-    Patient = _model(domain, "Patient")
-    if _patient_uses_m2m_folders(Patient):
-        return patient.folders.filter(is_demo=True).exists()
-    folder = getattr(patient, "folder", None)
-    return bool(folder and folder.is_demo)
+    return ProjectAccess.objects.filter(
+        user__username=username,
+        user__is_active=True,
+        project__is_active=True,
+        role__in=READ_ROLES,
+    ).exists()
 
 
-def _domains_with_demos():
-    out = []
-    for slug in DOMAINS:
-        folders = demo_folders(slug)
-        if folders is not None and folders.exists():
-            out.append(slug)
-    return out
+def demo_domain_cards():
+    """The domains the demo actually covers, for the landing CTA's chips.
+
+    Built from the guest's own access through ``landing_domain_cards``, so the
+    CTA advertises exactly what the visitor will find after clicking -- not a
+    fixed list of three.
+    """
+    from common.domains import landing_domain_cards
+
+    username = getattr(settings, "DEMO_GUEST_USERNAME", None)
+    if not username:
+        return []
+    guest = get_user_model().objects.filter(username=username, is_active=True).first()
+    if guest is None:
+        return []
+    return landing_domain_cards(guest)
 
 
 def landing_demo_url():
-    """Reverse of the demo index, but only when at least one demo folder exists
-    (so the landing CTA stays hidden until content is published). ``None`` if
-    nothing to show or the URLconf isn't ready."""
+    """Reverse of the demo index, or ``None`` when there is nothing to show (or
+    the URLconf isn't ready)."""
     from django.urls import reverse
 
     try:
-        return reverse("demo:index") if _domains_with_demos() else None
+        return reverse("demo:index") if demo_is_published() else None
     except Exception:
         return None
 
@@ -149,15 +132,15 @@ def landing_demo_url():
 
 def demo_index(request):
     """Public entry point. Logs the visitor in as the shared read-only guest
-    user, then redirects into the real portal at the first demo-enabled domain.
-    GET/HEAD only; keeps the per-IP throttle to blunt session-spam."""
+    user, then hands them the ordinary domain chooser so they can pick where to
+    start -- the demo may span several domains, and picking one for them hid the
+    rest. GET/HEAD only; keeps the per-IP throttle to blunt session-spam."""
     if request.method not in ("GET", "HEAD"):
         return HttpResponseNotAllowed(["GET", "HEAD"])
     if not _rate_ok(request):
         return HttpResponse("Too many requests", status=429)
 
-    domains = _domains_with_demos()
-    if not domains:
+    if not demo_is_published():
         raise Http404("No demo content is available")
 
     User = get_user_model()
@@ -167,4 +150,4 @@ def demo_index(request):
         raise Http404("Demo is not available")
 
     login(request, guest, backend="django.contrib.auth.backends.ModelBackend")
-    return redirect(f"/{domains[0]}/")
+    return redirect("home")

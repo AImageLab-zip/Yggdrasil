@@ -116,20 +116,40 @@
             </div>
         {% endif %}
     {% else %}
-        <!-- Guest -->
-        <div class="landing-gate">
-            <span class="landing-gate__icon"><i class="fas fa-lock" aria-hidden="true"></i></span>
-            <h3 class="landing-gate__title">Authentication required</h3>
-            <p class="landing-gate__msg">Please log in to access Yggdrasil clinical workspaces.</p>
-            <div class="landing-gate__actions">
-                <a href="{% url 'login' %}" class="landing-btn landing-btn--primary landing-btn--block">Login</a>
-                <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost landing-btn--block">Register</a>
-            </div>
+        {% comment %} Anonymous visitors: the live demo is the primary action -- it is what
+           someone arriving without an account can actually do. Signing in is the smaller
+           secondary line beneath it. {% endcomment %}
+        <div class="landing-entry">
             {% if demo_url %}
-            <a class="landing-demo-cta" href="{{ demo_url }}">
-                {% icon 'eye' %} Explore the public demo — no account needed <i class="fas fa-arrow-right" aria-hidden="true"></i>
+            <a class="landing-demo" href="{{ demo_url }}">
+                <span class="landing-demo__bar" aria-hidden="true"></span>
+                <span class="landing-demo__body">
+                    <span class="landing-demo__eyebrow">{% icon 'eye' %} No account needed</span>
+                    <span class="landing-demo__title">Enter the live demo</span>
+                    <span class="landing-demo__desc">
+                        Explore the real platform, read-only: the same viewers, patients and
+                        annotations the research teams use every day.
+                    </span>
+                    <span class="landing-demo__domains">
+                        {% for c in demo_domains %}
+                        <span class="landing-demo__chip domain--{{ c.slug }}">
+                            <i class="{{ c.icon }}" aria-hidden="true"></i>{{ c.name }}
+                        </span>
+                        {% endfor %}
+                    </span>
+                    <span class="landing-demo__go">Start exploring <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
+                </span>
+                <i class="fas fa-play landing-demo__watermark" aria-hidden="true"></i>
             </a>
             {% endif %}
+
+            <div class="landing-signin">
+                <span class="landing-signin__label">Already have an account?</span>
+                <a href="{% url 'login' %}" class="landing-btn landing-btn--ghost landing-btn--sm">
+                    {% icon 'sign-in-alt' %} Sign in
+                </a>
+                <a href="{% url 'register' %}" class="landing-signin__link">Register</a>
+            </div>
         </div>
     {% endif %}
 </div>

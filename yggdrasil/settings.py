@@ -265,9 +265,10 @@ LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
-# Shared read-only "guest" account the public demo auto-logs-in as. It holds a
-# standard ProjectAccess on every project but no FolderAccess, so it can only
-# read is_demo folders (see common.permissions) and can never write (see
+# Shared read-only "guest" account the public demo auto-logs-in as. It is scoped
+# like any other user: it reads exactly the projects it holds a `viewer`
+# ProjectAccess on (see common.permissions), so granting that role is what
+# publishes a project to the anonymous demo. It can never write (see
 # yggdrasil.middleware.DemoGuestReadOnlyMiddleware).
 DEMO_GUEST_USERNAME = config("DEMO_GUEST_USERNAME", default="guest")
 

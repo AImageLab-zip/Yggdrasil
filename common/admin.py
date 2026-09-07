@@ -19,6 +19,7 @@ from collections import defaultdict
 
 from django import forms
 from django.apps import apps
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin import helpers as admin_helpers
 from django.core.exceptions import ValidationError
@@ -296,16 +297,39 @@ class DomainProjectAdmin(admin.ModelAdmin):
     #: The domain slug this admin serves. Subclasses must set it.
     domain = None
 
-    list_display = ['name', 'slug', 'icon', 'is_active', 'created_at', 'created_by']
+    list_display = ['name', 'slug', 'icon', 'is_active', 'public_demo', 'created_at', 'created_by']
     list_filter = ['is_active', 'created_at']
     list_select_related = ['created_by']
     search_fields = ['name', 'description', 'slug']
     prepopulated_fields = {'slug': ('name',)}
     filter_horizontal = ['modalities', 'annotation_methods', 'disabled_steps']
-    readonly_fields = ['domain']
+    readonly_fields = ['domain', 'public_demo']
 
     def get_queryset(self, request):
         return super().get_queryset(request).filter(domain=self.domain)
+
+    @admin.display(description="Public demo")
+    def public_demo(self, obj):
+        """Whether this project is exposed to the anonymous demo, said plainly.
+
+        Giving the shared guest account a role in the inline below is what
+        publishes a project: /demo/ signs anyone in as that account with no
+        password. That is not obvious from a row reading "guest / viewer", so it
+        is spelled out here, on the page where the grant is made.
+        """
+        if obj is None or obj.pk is None:
+            return "—"
+        username = getattr(settings, "DEMO_GUEST_USERNAME", None)
+        if not username:
+            return "No"
+        access = obj.access_list.filter(user__username=username).first()
+        if access is None:
+            return "No — only users listed below can read it"
+        return format_html(
+            '<strong style="color:#b3261e;">Yes — readable by anyone on the '
+            'internet</strong> (guest account holds "{}")',
+            access.get_role_display(),
+        )
 
     def get_inlines(self, request, obj):
         # Access first: it is the thing you come to a project page to change,
@@ -476,7 +500,7 @@ class InvitationAdmin(admin.ModelAdmin):
 class FolderInlineBase(admin.TabularInline):
     """Folders shown inside their project. Model supplied by the subclass."""
 
-    fields = ["name", "is_demo", "created_by", "created_at"]
+    fields = ["name", "created_by", "created_at"]
     readonly_fields = ["created_at"]
     extra = 0
     show_change_link = True
@@ -512,23 +536,18 @@ class DomainFolderAdmin(admin.ModelAdmin):
     Creating folders is left to the app (``create_folder``, project admins
     only); this admin exists to see and repair mis-filed ones.
 
-    **``is_demo`` is not an inline checkbox.** It was in ``list_editable``, one
-    click and a Save away, and what it does is publish the folder's patients to
-    the *anonymous* public demo (``common.demo``). A grid checkbox is the wrong
-    shape for that: nothing on the row says what it means and nothing asks. It
-    is a pair of named actions with a confirmation page instead, still usable in
-    bulk, and it remains editable on the change form where the field's help text
-    is visible.
+    Publishing to the anonymous demo is not a folder-level control any more: a
+    project is public iff the shared guest account holds a role on it, which is
+    edited on the project (see ``common.demo``).
     """
 
     #: The domain slug this admin serves. Subclasses must set it.
     domain = None
 
-    list_display = ["name", "project", "parent", "is_demo", "created_at", "created_by"]
+    list_display = ["name", "project", "parent", "created_at", "created_by"]
     list_select_related = ["project", "parent", "created_by"]
-    list_filter = ["project", "is_demo", "created_at"]
+    list_filter = ["project", "created_at"]
     search_fields = ["name"]
-    actions = ["publish_to_demo", "withdraw_from_demo"]
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "project":
@@ -541,35 +560,6 @@ class DomainFolderAdmin(admin.ModelAdmin):
         if not change:
             _stamp_author(request, obj)
         super().save_model(request, obj, form, change)
-
-    @admin.action(description="Publish to the public demo")
-    def publish_to_demo(self, request, queryset):
-        queryset = queryset.filter(is_demo=False)
-        if not queryset.exists():
-            self.message_user(
-                request, "Every selected folder is already in the demo.", messages.INFO
-            )
-            return None
-        if not _is_confirmed(request):
-            return confirm_action(
-                self, request, queryset,
-                action_name="publish_to_demo",
-                title="Publish folders to the public demo?",
-                consequence=(
-                    "Anyone on the internet, signed in or not, will be able to "
-                    "read the patients in these folders."
-                ),
-                lead=f"{queryset.count()} folder(s) will become publicly readable:",
-                lines=[str(folder) for folder in queryset],
-                confirm_label="Yes, publish them",
-            )
-        count = queryset.update(is_demo=True)
-        self.message_user(request, f"Published {count} folder(s) to the public demo.")
-
-    @admin.action(description="Remove from the public demo")
-    def withdraw_from_demo(self, request, queryset):
-        count = queryset.filter(is_demo=True).update(is_demo=False)
-        self.message_user(request, f"Removed {count} folder(s) from the public demo.")
 
 
 # ---------------------------------------------------------------------------

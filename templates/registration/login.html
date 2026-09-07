@@ -33,6 +33,12 @@
         <p class="text-center text-sm text-content-muted mt-5">
             Don't have an account? <a href="{% url 'register' %}" class="font-medium">Register here</a>
         </p>
+
+        {% if demo_url %}
+        <p class="text-center text-sm text-content-muted mt-2">
+            Just looking? <a href="{{ demo_url }}" class="font-medium">Enter the live demo</a> — no account needed.
+        </p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

@@ -141,23 +141,61 @@ def project_admin_add_targets():
     return targets
 
 
-def landing_domain_cards():
-    """The landing page's three domain cards (one per domain, not per project).
+def accessible_project_ids(user):
+    """Ids of the active projects ``user`` may read, or None meaning "all".
+
+    None is the staff answer and lets callers skip the filter entirely rather
+    than materialize every id.
+    """
+    from common.models import Project, ProjectAccess
+    from common.permissions import READ_ROLES
+
+    if user is None or not getattr(user, "is_authenticated", False):
+        return []
+    if getattr(user, "is_staff", False):
+        return None
+    return list(
+        Project.objects.filter(
+            is_active=True,
+            id__in=ProjectAccess.objects.filter(
+                user=user, role__in=READ_ROLES
+            ).values_list("project_id", flat=True),
+        ).values_list("id", flat=True)
+    )
+
+
+def landing_domain_cards(user=None):
+    """The landing page's domain cards (one per domain, not per project).
 
     Projects are chosen inside the domain (patient-list sidebar), so the first
     screen stays a compact domain chooser. Stat = aggregate patient count for
     the domain; omitted when it cannot be computed.
+
+    Only domains ``user`` can actually enter get a card: the chooser used to
+    list all three unconditionally, so a card could lead straight to a "no
+    access" bounce. The count is scoped the same way, so the number on the card
+    is the number of patients this user will find behind it.
     """
     from django.apps import apps
+
+    project_ids = accessible_project_ids(user)
+    if project_ids is not None and not project_ids:
+        return []
 
     cards = []
     for slug, label in DOMAIN_CHOICES:
         count = None
         try:
             Patient = apps.get_model(slug, "Patient")
-            count = Patient.objects.filter(project__domain=slug).count()
+            patients = Patient.objects.filter(project__domain=slug)
+            if project_ids is not None:
+                patients = patients.filter(project_id__in=project_ids)
+            count = patients.count()
         except Exception:  # noqa: BLE001 - unknown/legacy domain, or table absent
             count = None
+        # A domain the user holds no project in is not a place they can go.
+        if project_ids is not None and not _domain_is_accessible(slug, project_ids):
+            continue
         if count is None:
             stat = ""
         elif count == 1:
@@ -174,3 +212,12 @@ def landing_domain_cards():
             }
         )
     return cards
+
+
+def _domain_is_accessible(slug, project_ids):
+    """Whether any of ``project_ids`` belongs to ``slug``."""
+    from common.models import Project
+
+    return Project.objects.filter(
+        domain=slug, is_active=True, id__in=project_ids
+    ).exists()
