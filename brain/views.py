@@ -35,6 +35,7 @@ from common.permissions import (
     filter_patients_for_user,
     user_can_delete_single_patient,
     user_can_edit_caption,
+    user_can_view_caption_content,
     user_can_write_patient_annotations,
     project_allows_annotation,
     user_has_project_access,
@@ -162,11 +163,15 @@ def patient_detail(request, patient_id):
         else:
             patient_files["other"].append(file_data)
 
+    # Viewers and admins see all captions; annotators see only their own (to
+    # avoid bias during annotation). Through the canonical helpers -- this used
+    # to inline "admin or author", which ghosted every caption for the
+    # project's own viewers, the public-demo guest among them.
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, patient.project)
     for caption in voice_captions:
-        caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
-        caption.can_edit_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.can_view_content = user_can_view_caption_content(request.user, caption)
+        caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
 
     allowed_modalities = list(Modality.objects.filter(projects__id=request.session.get("current_project_id"), is_active=True))

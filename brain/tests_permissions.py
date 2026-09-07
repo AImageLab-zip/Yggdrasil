@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.urls import reverse
 
 from brain.models import Folder, Patient, VoiceCaption
 from common.models import Project, ProjectAccess
@@ -65,3 +66,23 @@ class BrainProjectAclTests(TestCase):
         self.assertTrue(user_can_view_caption_content(viewer, caption, self.project))
         self.assertTrue(user_can_view_caption_content(pm, caption, self.project))
         self.assertFalse(user_can_view_caption_content(annotator, caption, self.project))
+
+    def test_brain_patient_detail_shows_caption_content_to_project_viewers(self):
+        """A viewer sees another user's caption content on the detail page.
+
+        The view used to inline "project admin or author", so every caption was
+        ghosted for the project's own viewers -- the public-demo guest included
+        -- while ``user_can_view_caption_content`` said otherwise.
+        """
+        owner = User.objects.create_user(username="brain_view_owner", password="x")
+        ProjectAccess.objects.create(user=owner, project=self.project, role="annotator")
+        VoiceCaption.objects.create(patient=self.patient, user=owner, duration=1.0)
+
+        self.client.force_login(self.viewer)
+        response = self.client.get(
+            reverse("brain:patient_detail", args=[self.patient.patient_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        rendered = response.context["voice_captions"]
+        self.assertTrue(all(c.can_view_content for c in rendered))
+        self.assertFalse(any(c.can_edit_content for c in rendered))
