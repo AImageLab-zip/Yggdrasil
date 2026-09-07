@@ -54,7 +54,8 @@
 
 .intraoral-error,
 .teleradiography-error,
-.panoramic-error {
+.panoramic-error,
+.panoramic-placeholder {
     min-height: 400px;
     display: flex;
     align-items: center;

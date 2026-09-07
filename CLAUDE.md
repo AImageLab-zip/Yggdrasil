@@ -101,4 +101,4 @@ green in every test while being wrong in production.
   (syntax errors and undefined names only). Widening it is its own PR.
 - Volumes are **NIfTI (`.nii.gz`)**. There is no DICOM path.
 - Bump `VERSION` and add a `CHANGELOG.md` section in the same PR as a release.
-- Development targets `release/3.0`.
+- Development targets `main`. Branch from it; `release/3.0` is closed.

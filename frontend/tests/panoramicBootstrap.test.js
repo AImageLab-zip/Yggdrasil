@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { GRID_READY_EVENT } from '../imaging/grid/bootstrap.js';
 import { ANNOUNCE_TYPE, OUTCOMES } from '../imaging/panoramic/savePayload.js';
 import { CONTROL_IDS } from '../imaging/panoramic/controls.js';
+import { PLACEHOLDER, PLACEHOLDER_TEXT } from '../imaging/panoramic/placeholder.js';
 import { bootstrapPanoramic } from '../imaging/panoramic/bootstrap.js';
 
 /**
@@ -83,25 +84,63 @@ function buildHarness({ source, canEdit = true, locked = false, globalsSet = fal
     const posted = [];
     const events = [];
     const saves = [];
+    const timers = [];
     const view = {
         ...(globalsSet ? { scanId: 4242, canEdit: true } : {}),
         Worker: class {},
         location: { origin: 'https://ygg.test' },
         CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
         dispatchEvent(event) { events.push(event.detail); return true; },
+        // A list per event, not one handler: the surface subscribes to the grid twice
+        // -- once to offer the Edit button, once to run the unattended pass -- and a fake
+        // that kept only the last would silently drop the first.
         listeners: new Map(),
-        addEventListener(name, handler) { view.listeners.set(name, handler); },
-        removeEventListener(name) { view.listeners.delete(name); },
+        addEventListener(name, handler) {
+            if (!view.listeners.has(name)) {
+                view.listeners.set(name, []);
+            }
+            view.listeners.get(name).push(handler);
+        },
+        removeEventListener(name, handler) {
+            const handlers = view.listeners.get(name) ?? [];
+            const at = handlers.indexOf(handler);
+            if (at >= 0) {
+                handlers.splice(at, 1);
+            }
+        },
+        // Recorded rather than run: the bounded wait for the grid is four minutes, and a
+        // test that meant to expire it says so.
+        setTimeout(fn, ms) { timers.push({ fn, ms, cleared: false }); return timers.length; },
+        clearTimeout(id) {
+            const timer = timers[id - 1];
+            if (timer) {
+                timer.cleared = true;
+            }
+        },
         parent: null,
         PanoramicViewer: { refreshAfterSave() {} },
     };
     view.parent = { postMessage: (payload) => posted.push(payload) };
+
+    // The two saved-panoramic panes, as `templates/maxillo/sections/panoramic_placeholder.html`
+    // renders them: the inline card in the CBCT tab and the standalone Panoramic tab.
+    const placeholders = [0, 1].map(() => {
+        const message = { textContent: '' };
+        const button = { hidden: true, dataset: {}, listeners: [], addEventListener(name, handler) { button.listeners.push({ name, handler }); } };
+        return {
+            message,
+            button,
+            querySelector: (selector) => (selector.includes('message') ? message : button),
+        };
+    });
 
     const doc = {
         defaultView: view,
         getElementById: (id) => elements.get(id) ?? null,
         querySelector: (selector) =>
             (selector.includes('csrfmiddlewaretoken') ? { value: 'csrf-token' } : null),
+        querySelectorAll: (selector) =>
+            (selector.includes('data-panoramic-placeholder') ? placeholders : []),
     };
     // The payload element, read as JSON by the bootstrap.
     elements.set('viewerGridData', { textContent: JSON.stringify(data) });
@@ -114,7 +153,32 @@ function buildHarness({ source, canEdit = true, locked = false, globalsSet = fal
     const mounts = [];
     const mount = mountImpl ?? defaultMount(mounts, saves);
 
-    return { doc, view, elements, events, posted, saves, mounts, mount, data };
+    /**
+     * The grid announcing that the CBCT is in the cache.
+     *
+     * Awaited, and it settles a microtask afterwards: the pass mounts asynchronously, and
+     * a test that drove the worker before `start()` had assigned `mounted` would be
+     * testing the harness rather than the surface.
+     */
+    const gridReady = async () => {
+        for (const handler of [...(view.listeners.get(GRID_READY_EVENT) ?? [])]) {
+            handler();
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    /** The grid never getting there -- a volume whose load failed announces nothing. */
+    const expireGridWait = () => {
+        for (const timer of timers) {
+            if (!timer.cleared) {
+                timer.fn();
+            }
+        }
+    };
+
+    return {
+        doc, view, elements, events, posted, saves, mounts, mount, data,
+        placeholders, timers, gridReady, expireGridWait,
+    };
 }
 
 /**
@@ -169,6 +233,11 @@ function defaultMount(mounts, saves) {
 /** Drive the worker through init and one arch reply, as the real one would. */
 function completeGeneration(mounted, { autoZ = 96, z = autoZ } = {}) {
     mounted.ready({ dimensions: { width: 2, height: 2, depth: 200 }, autoZ, flipZ: false });
+    replyWithArch(mounted, z);
+}
+
+/** One arch reply on its own: the worker is already up, as it is on a retry. */
+function replyWithArch(mounted, z = 96) {
     mounted.geometry({
         z,
         source: 'auto',
@@ -195,7 +264,9 @@ test('the editor is not shown on load when no panoramic exists', async () => {
     await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
 
     assert.equal(harness.elements.get(CONTROL_IDS.root).hidden, true);
-    // Hidden, but started: the silent pass is under way.
+    // Hidden, and waiting: the silent pass starts when the CBCT does.
+    assert.equal(harness.mounts.length, 0);
+    await harness.gridReady();
     assert.equal(harness.mounts.length, 1);
 });
 
@@ -251,6 +322,7 @@ test('a patient with no panoramic gets a MIP default from the automatic arch', a
     const surface = await bootstrapPanoramic({
         doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves),
     });
+    await harness.gridReady();
     const mounted = harness.mounts[0];
     completeGeneration(mounted);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -272,6 +344,7 @@ test('the editor stays hidden after an unattended save', async () => {
     const harness = buildHarness();
 
     await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+    await harness.gridReady();
     completeGeneration(harness.mounts[0]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -306,6 +379,8 @@ test('a missing segmentation is not reported as an error to the reader', async (
     });
 
     await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+    await harness.gridReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Most often the CBCT job is still running. The next visit tries again, and in the
     // meantime nothing on the patient page says anything went wrong.
@@ -313,6 +388,9 @@ test('a missing segmentation is not reported as an error to the reader', async (
     assert.notEqual(harness.elements.get(CONTROL_IDS.error).hidden, false);
     assert.equal(harness.saves.length, 0);
     assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.SKIPPED]);
+    // Not an error: the pane offers the reader the way to try again themselves.
+    assert.equal(harness.placeholders[0].message.textContent, PLACEHOLDER_TEXT[PLACEHOLDER.OFFER]);
+    assert.equal(harness.placeholders[0].button.hidden, false);
 });
 
 // ------------------------------------------------ what the port adds over it
@@ -348,6 +426,7 @@ test('the page decides who is looking, not a global that has not been set yet', 
         mount: harness.mount,
         fetchImpl: okFetch(harness.saves),
     });
+    await harness.gridReady();
 
     assert.equal(harness.mounts.length, 1, 'the unattended pass must run');
 });
@@ -373,6 +452,7 @@ test('a silent save that conflicts reports existing, not failed', async () => {
     const conflict = async () => ({ ok: false, status: 409, json: async () => ({ error: 'Stale' }) });
 
     await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: conflict });
+    await harness.gridReady();
     completeGeneration(harness.mounts[0]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -480,7 +560,7 @@ test('the Edit arch button waits for the CBCT, then appears', async () => {
     await bootstrapPanoramic({ mount: harness.mount, doc: harness.doc, fetchImpl: okFetch(harness.saves) });
     assert.equal(button.hidden, true, 'no way in while the grid is still loading');
 
-    harness.view.listeners.get(GRID_READY_EVENT)();
+    await harness.gridReady();
     assert.equal(button.hidden, false);
 });
 
@@ -502,6 +582,7 @@ test('a reader opening the editor sees the arch the unattended pass fitted', asy
     const surface = await bootstrapPanoramic({
         mount: harness.mount, doc: harness.doc, fetchImpl: okFetch(harness.saves),
     });
+    await harness.gridReady();
     const mounted = harness.mounts[0];
     completeGeneration(mounted);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -529,4 +610,111 @@ test('the entry re-measures both stages when they become visible', async () => {
     assert.match(entry, /renderingEngine\.resize\(true, true\)/, 'one call covers the shared engine');
     assert.match(entry, /arch\.reframe\(!sized\)/, 'the camera is refit only on the first real sizing');
     assert.match(entry, /cpr\.reframe\(\)/);
+});
+
+// --- the pass waits for the CBCT, and the pane says what it is waiting for ---------
+
+test('the unattended pass does not start before the CBCT is in the cache', async () => {
+    // The defect this pins. The pass used to run at `DOMContentLoaded`, where `mount()`
+    // reads the volume out of Cornerstone's cache and throws "The CBCT is still loading."
+    // -- swallowed by `autoMode`, announced as skipped. No patient page generated the
+    // default it is documented as generating, and the warm-up collected `skipped` for a
+    // whole folder while a reader was shown a warning triangle.
+    const harness = buildHarness();
+
+    await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+
+    assert.equal(harness.mounts.length, 0, 'nothing is mounted while the volume is arriving');
+    assert.deepEqual(harness.posted, [], 'and nothing is announced yet either');
+    for (const placeholder of harness.placeholders) {
+        assert.equal(placeholder.message.textContent, PLACEHOLDER_TEXT[PLACEHOLDER.WAITING]);
+        assert.equal(placeholder.button.hidden, true, 'nothing to offer until there is a volume');
+    }
+
+    await harness.gridReady();
+    completeGeneration(harness.mounts[0]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(harness.mounts.length, 1);
+    assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.CREATED]);
+});
+
+test('a grid that never finishes still announces, rather than stalling the warm-up', async () => {
+    // A volume whose load failed returns from `bootstrapVolumeGrid` before dispatching
+    // anything, so waiting on the event alone waits forever -- and the warm-up harness
+    // pays five minutes for it, per patient. The wait is bounded and its expiry speaks.
+    const harness = buildHarness();
+
+    await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+    harness.expireGridWait();
+
+    assert.equal(harness.mounts.length, 0);
+    assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.SKIPPED]);
+    assert.equal(harness.placeholders[0].message.textContent, PLACEHOLDER_TEXT[PLACEHOLDER.OFFER]);
+});
+
+test('the bounded wait is dropped once the grid arrives', async () => {
+    const harness = buildHarness();
+
+    await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+    await harness.gridReady();
+    harness.expireGridWait();
+    completeGeneration(harness.mounts[0]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // One outcome, not a `created` followed by a `skipped` that arrives four minutes
+    // later and tells the warm-up the wrong thing about a patient it has moved past.
+    assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.CREATED]);
+});
+
+test('a patient whose CBCT has no segmentation is told why, and offered nothing', async () => {
+    // The ordinary state of a patient uploaded five minutes ago: the job that produces
+    // the segmentation is still running, so there is nothing a button could do.
+    const harness = buildHarness({ source: { volumeFileId: 12, segmentationFileId: null } });
+
+    await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+
+    for (const placeholder of harness.placeholders) {
+        assert.match(placeholder.message.textContent, /once CBCT processing has finished/);
+        assert.equal(placeholder.button.hidden, true);
+    }
+});
+
+test('a reader without edit rights is not offered a Generate button', async () => {
+    const harness = buildHarness({ canEdit: false });
+
+    await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+
+    assert.equal(
+        harness.placeholders[0].message.textContent,
+        PLACEHOLDER_TEXT[PLACEHOLDER.UNAVAILABLE]
+    );
+    assert.equal(harness.placeholders[0].button.hidden, true);
+});
+
+test('the Generate button retries a pass that mounted and then failed', async () => {
+    // `start()` returns on `started`, so a retry that went back through it would do
+    // nothing at all -- the volume and the worker are already here, and re-fitting is
+    // the whole of it.
+    const harness = buildHarness();
+
+    await bootstrapPanoramic({ doc: harness.doc, mount: harness.mount, fetchImpl: okFetch(harness.saves) });
+    await harness.gridReady();
+    const mounted = harness.mounts[0];
+    mounted.ready({ dimensions: { width: 2, height: 2, depth: 200 }, autoZ: 96, flipZ: false });
+    mounted.fail(new Error('the worker gave up'), false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(harness.posted.map((entry) => entry.outcome), [OUTCOMES.FAILED]);
+    assert.equal(harness.placeholders[0].button.hidden, false, 'the way to try again');
+
+    const before = mounted.requests.length;
+    const click = harness.placeholders[0].button.listeners.find((entry) => entry.name === 'click');
+    click.handler();
+    replyWithArch(mounted);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(mounted.requests.length, before + 1, 'the arch is re-fitted, not re-mounted');
+    assert.equal(harness.mounts.length, 1);
+    assert.equal(harness.saves.length, 1);
 });
