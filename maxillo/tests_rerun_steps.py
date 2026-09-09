@@ -97,6 +97,48 @@ class RerunButtonStepsTests(MaxilloRerunStepsBase):
         self.assertNotContains(response, "human label map consumed")
 
 
+class RerunHeaderPickerTests(MaxilloRerunStepsBase):
+    """The detail-page Rerun button opens the same step picker as the list page."""
+
+    def _detail(self, patient):
+        return self.client.get(
+            reverse("maxillo:patient_detail", args=[patient.patient_id])
+        )
+
+    def test_detail_page_renders_picker_with_step_slugs_and_labels(self):
+        patient = self._ios_patient()
+
+        response = self._detail(patient)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="headerRerunBtn"')
+        self.assertContains(response, 'id="rerunProcessingModal"')
+        self.assertContains(response, 'id="confirmRerunBtn"')
+        self.assertContains(response, '"ios": "IOS Orientation"')
+        self.assertContains(response, '"ios-bite-classification": "IOS Bite Classification"')
+        content = response.content.decode()
+        self.assertIn('"ios","ios-landmarks","ios-bite-classification"', content)
+        # The picker replaced the old "rerun everything" confirm().
+        self.assertNotIn("Rerun processing for all modalities", content)
+
+    def test_pages_render_a_csrf_token_and_no_cookie_scraping(self):
+        # CSRF_USE_SESSIONS + CSRF_COOKIE_HTTPONLY: document.cookie carries no usable
+        # token, so a scripted POST that scrapes it sends the wrong value and Django
+        # answers 403 "CSRF token ... has incorrect length". base.html renders the tag.
+        patient = self._ios_patient()
+
+        for response in (self._detail(patient), self.client.get(reverse("maxillo:patient_list"))):
+            self.assertContains(response, 'name="csrfmiddlewaretoken"')
+            self.assertNotIn("document.cookie.match(/csrftoken=", response.content.decode())
+
+    def test_detail_page_without_steps_hides_the_button_and_modal(self):
+        patient = Patient.objects.create(name="Plain", project=self.project, folder=self.folder)
+
+        response = self._detail(patient)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="headerRerunBtn"')
+        self.assertNotContains(response, 'id="rerunProcessingModal"')
+
+
 @patch("common.signals.celery_app.send_task")
 class RerunProcessingCreatesJobsTests(MaxilloRerunStepsBase):
     def test_rerun_creates_missing_step_jobs_for_existing_patient(self, _send_task):

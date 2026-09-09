@@ -267,133 +267,36 @@ function initAdminActions() {
         });
     });
     
-    // Rerun processing handler with modal selection
-    const rerunModalEl = document.getElementById('rerunProcessingModal');
-    let rerunModal = null;
-    let rerunTargetScanId = null;
-    let rerunSelectedSlugs = [];
-    const rerunModalityOptionsEl = document.getElementById('rerunModalityOptions');
-    const rerunLabelsEl = document.getElementById('rerun-modality-labels');
-    let rerunModalityLabels = {};
-    if (rerunLabelsEl) {
-        try {
-            rerunModalityLabels = JSON.parse(rerunLabelsEl.textContent || '{}');
-        } catch (_err) {
-            rerunModalityLabels = {};
-        }
-    }
-    window.rerunModalityLabels = rerunModalityLabels;
-
-    function renderRerunOptions(modalitySlugs) {
-        if (!rerunModalityOptionsEl) return;
-        rerunModalityOptionsEl.innerHTML = '';
-        if (!modalitySlugs.length) {
-            rerunModalityOptionsEl.innerHTML = '<p class="modal-note">No rerunnable processing steps available for this patient.</p>';
-            return;
-        }
-
-        modalitySlugs.forEach((slug, index) => {
-            const safeSlug = String(slug || '').trim();
-            if (!safeSlug) return;
-            const wrapper = document.createElement('div');
-            wrapper.className = 'check-row';
-            const checkboxId = `rerunModality_${safeSlug}_${index}`;
-            const label = rerunModalityLabels[safeSlug] || safeSlug.replace(/_/g, ' ');
-            wrapper.innerHTML = `
-                <input class="rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
-                <label for="${checkboxId}">${label}</label>
-            `;
-            rerunModalityOptionsEl.appendChild(wrapper);
-        });
-    }
-
-    if (rerunModalEl && window.bootstrap) {
-        rerunModal = new window.bootstrap.Modal(rerunModalEl);
-    }
+    // Rerun processing: one row's button opens the shared picker
+    // (static/js/rerun_modal.js), which owns the modal and the POST.
     document.querySelectorAll('.btn-rerun-processing').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.preventDefault();
-            rerunTargetScanId = this.dataset.scanId;
-            const scanName = this.dataset.scanName || `Scan #${rerunTargetScanId}`;
-            const subtitle = document.getElementById('rerunScanSubtitle');
-            if (subtitle) subtitle.textContent = scanName;
-            rerunSelectedSlugs = (this.dataset.availableSteps || '')
-                .split(',')
-                .map(s => s.trim())
-                .filter(Boolean)
-                .filter((slug, idx, arr) => arr.indexOf(slug) === idx);
-            renderRerunOptions(rerunSelectedSlugs);
-            if (rerunModal) rerunModal.show();
-        });
-    });
-    const confirmRerunBtn = document.getElementById('confirmRerunBtn');
-    if (confirmRerunBtn) {
-        confirmRerunBtn.addEventListener('click', function() {
-            const jobs = Array.from(document.querySelectorAll('.rerun-modality-checkbox:checked')).map(el => el.value);
-            if (!jobs.length) {
-                showNotification('error', 'Select at least one job to rerun');
-                return;
-            }
-            const label = this.querySelector('.label');
-            const spinner = this.querySelector('.spinner');
-            this.disabled = true;
-            if (label) label.classList.add('hidden');
-            if (spinner) spinner.classList.remove('hidden');
-            secureFetch(`/${window.projectNamespace}/patient/${rerunTargetScanId}/rerun-processing/`, {
-                method: 'POST',
-                body: JSON.stringify({ jobs })
-            }).then(parseJsonResponse).then(data => {
-                if (data.success) {
-                    showNotification('success', data.message || 'Jobs set to pending');
-                    if (rerunModal) rerunModal.hide();
-                    // Update status indicators for this row based on selected jobs
-                    const row = document.querySelector(`.patient-row[data-scan-id="${rerunTargetScanId}"]`) || document.querySelector(`.scan-row[data-scan-id="${rerunTargetScanId}"]`);
-                    if (row) {
-                        jobs.forEach(slug => {
-                            const pill = row.querySelector(`.status-pill[data-modality-slug="${slug}"]`);
-                            if (!pill) return;
-                            pill.classList.remove('status-processed', 'status-failed', 'status-pending', 'status-absent');
-                            pill.classList.add('status-processing');
-                        });
-                    }
-                } else {
-                    showNotification('error', data.error || 'Failed to rerun jobs');
+            const scanId = this.dataset.scanId;
+            window.YggRerunModal.open({
+                patientId: scanId,
+                patientName: this.dataset.scanName || `Scan #${scanId}`,
+                steps: this.dataset.availableSteps,
+                onSuccess: (jobs) => {
+                    // Reflect the new state without a reload: the rerun rows are now queued.
+                    const row = document.querySelector(`.patient-row[data-scan-id="${scanId}"]`) || document.querySelector(`.scan-row[data-scan-id="${scanId}"]`);
+                    if (!row) return;
+                    jobs.forEach(slug => {
+                        const pill = row.querySelector(`.status-pill[data-modality-slug="${slug}"]`);
+                        if (!pill) return;
+                        pill.classList.remove('status-processed', 'status-failed', 'status-pending', 'status-absent');
+                        pill.classList.add('status-processing');
+                    });
                 }
-            }).catch(error => showNotification('error', error.message || 'Network error')).finally(() => {
-                confirmRerunBtn.disabled = false;
-                if (label) label.classList.remove('hidden');
-                if (spinner) spinner.classList.add('hidden');
             });
         });
-    }
-}
-
-// Utility function to get CSRF token with validation
-function getCookie(name) {
-    let cookieValue = null;
-    if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                break;
-            }
-        }
-    }
-    return cookieValue;
+    });
 }
 
 // SECURITY: Enhanced CSRF token validation
 function getCSRFToken() {
-    // When CSRF_USE_SESSIONS = True, token is in hidden form, not cookies
-    const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
-    if (csrfInput) {
-        return csrfInput.value;
-    }
-    
-    // Fallback to cookie method for backwards compatibility
-    const token = getCookie('csrftoken');
+    // Single reader for the whole app; base.html renders the tag it reads.
+    const token = window.yggCsrfToken();
     if (!token) {
         console.error('SECURITY: CSRF token not found. This may indicate a security issue.');
         showNotification('error', 'Security token missing. Please refresh the page.');
@@ -613,7 +516,7 @@ function initBulkSelection() {
             const wrapper = document.createElement('div');
             wrapper.className = 'check-row';
             const checkboxId = `bulkRerunModality_${safeSlug}_${index}`;
-            const label = (window.rerunModalityLabels && window.rerunModalityLabels[safeSlug]) || safeSlug.replace(/_/g, ' ');
+            const label = window.YggRerunModal.labels()[safeSlug] || safeSlug.replace(/_/g, ' ');
             wrapper.innerHTML = `
                 <input class="bulk-rerun-modality-checkbox" type="checkbox" value="${safeSlug}" id="${checkboxId}" data-modality-slug="${safeSlug}">
                 <label for="${checkboxId}">${label}</label>

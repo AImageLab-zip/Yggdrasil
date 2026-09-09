@@ -9,10 +9,10 @@
   on the page via plain querySelector and POSTs to update-name/) — this is now
   that one instance; scan_settings_section.html no longer renders its own.
 
-  Rerun/Delete reuse the same endpoints the patients list uses
-  (`patient/<id>/rerun-processing/`, `patient/<id>/delete/`), called directly
-  here rather than via patient_list.js's modal (that JS/modal pair is list-page
-  only) — kept intentionally simple: confirm(), then POST, then reload/redirect.
+  Rerun opens the same step picker the patients list uses — the modal partial plus
+  static/js/rerun_modal.js, shared by both pages — so a rerun here is a choice of
+  processing steps rather than "all of them". Delete stays a confirm() + POST to
+  `patient/<id>/delete/`.
   Per-patient Export is not built (not selected by the user).
 {% endcomment %}
 <div class="patient-header">
@@ -42,35 +42,29 @@
     </div>
     {% if user_profile.is_admin %}
     <div class="patient-header__actions">
+        {% comment %} No steps means no rerun endpoint worth calling (laparoscopy has none). {% endcomment %}
+        {% if rerunnable_step_slugs %}
         <button type="button" class="btn btn-secondary btn-sm" id="headerRerunBtn">
             <i class="fas fa-rotate" aria-hidden="true"></i>Rerun
         </button>
+        {% endif %}
         <button type="button" class="btn btn-danger btn-sm" id="headerDeleteBtn">
             <i class="fas fa-trash" aria-hidden="true"></i>Delete
         </button>
     </div>
     <script>
     (function () {
-        function csrf() {
-            var m = document.cookie.match(/csrftoken=([^;]+)/);
-            return m ? m[1] : '';
-        }
         var rerunBtn = document.getElementById('headerRerunBtn');
         var deleteBtn = document.getElementById('headerDeleteBtn');
         var patientId = {{ patient.patient_id }};
 
         if (rerunBtn) {
             rerunBtn.addEventListener('click', function () {
-                if (!confirm('Rerun processing for all modalities on this patient?')) return;
-                fetch('/' + window.projectNamespace + '/patient/' + patientId + '/rerun-processing/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
-                    body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
-                }).then(function (r) { return r.json(); }).then(function (data) {
-                    if (data.success) { window.location.reload(); }
-                    else if (window.appNotify) { window.appNotify('error', data.error || 'Failed to rerun jobs'); }
-                }).catch(function () {
-                    if (window.appNotify) window.appNotify('error', 'Network error');
+                window.YggRerunModal.open({
+                    patientId: patientId,
+                    patientName: '{{ patient.name|default:"Unnamed scan"|escapejs }}',
+                    steps: window.__patientHeaderStepSlugs || [],
+                    onSuccess: function () { window.location.reload(); }
                 });
             });
         }
@@ -79,7 +73,7 @@
                 if (!confirm('Delete this patient? This cannot be undone.')) return;
                 fetch('/' + window.projectNamespace + '/patient/' + patientId + '/delete/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.yggCsrfToken() },
                     body: JSON.stringify({})
                 }).then(function (r) { return r.json(); }).then(function (data) {
                     if (data.success) { window.location.href = '/' + window.projectNamespace + '/'; }
@@ -93,7 +87,7 @@
     </script>
     {% endif %}
 </div>
-{% comment %} Processing step slugs for the header's "rerun all" action (possible for this
+{% comment %} Processing steps offered by the header's Rerun picker (possible for this
 patient, computed in the patient_detail view; excludes nothing at the root,
 downstream steps included). {% endcomment %}
 <script>
@@ -101,3 +95,6 @@ window.__patientHeaderStepSlugs = [
 {% for s in rerunnable_step_slugs %}"{{ s }}"{% if not forloop.last %},{% endif %}{% endfor %}
 ];
 </script>
+{% if user_profile.is_admin and rerunnable_step_slugs %}
+{% include 'common/partials/rerun_modal.html' %}
+{% endif %}
