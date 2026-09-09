@@ -75,6 +75,12 @@
     </div>
     {% endif %}
 
+    {% comment %} CSRF_USE_SESSIONS is on and CSRF_COOKIE_HTTPONLY hides the cookie, so
+       document.cookie carries no usable token: every scripted POST reads this tag via
+       window.yggCsrfToken() (static/js/ygg-ui.js). Rendered once, here, because the
+       fetches that need it live in partials that no single page owns. {% endcomment %}
+    <form style="display:none;" aria-hidden="true">{% csrf_token %}</form>
+
     {% comment %} base.html carries no nav of its own: authenticated working
        pages get the rail + breadcrumb topbar via common/base_app.html, while
        landing/auth/error pages either bring their own chrome or blank it.
