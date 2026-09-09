@@ -173,7 +173,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] ?? '',
+                    'X-CSRFToken': window.yggCsrfToken(),
                 },
                 body: JSON.stringify({ language: lang }),
             }).catch(function () {/* non-critical */});

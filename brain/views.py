@@ -227,6 +227,8 @@ def patient_detail(request, patient_id):
             m["slug"] for m in patient_modalities
             if m.get("slug") not in ("rawzip", "braintumor-mri-seg")
         ],
+        # Checkbox labels for the shared rerun picker (common/partials/rerun_modal.html).
+        "rerun_step_labels": rerun_step_labels(patient_files, patient_modalities),
         "allowed_modalities": allowed_modalities,
         "allowed_modality_slugs": [m.slug for m in allowed_modalities],
         # report_language now provided globally by common.context_processors.user_prefs

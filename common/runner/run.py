@@ -33,12 +33,27 @@ _STORAGE_KEYS = (
 
 
 def iter_input_keys(input_files):
-    """Yield every object-storage key (string leaf) in the input_files structure."""
+    """Yield every object-storage key in the input_files structure.
+
+    A string leaf *is* a key, with one exception: the legacy file-descriptor dict
+    ``{"path": ..., "filename": ..., "content_type": ...}``. Jobs completed before
+    2026-07-29 stored ``output_files`` in that shape, and
+    :meth:`common.models.Job._pull_dependency_outputs` merges a dependency's
+    ``output_files`` into its dependents' ``input_files`` verbatim -- so those dicts
+    still reach the runner today. Walking one leaf-by-leaf would hand the cluster
+    ``lower_oriented.stl`` and ``model/stl`` as keys alongside the real path, and
+    ``ygg-stage pull`` fails the whole job on the first 404. Only ``path`` is a key.
+    """
     def walk(obj):
         if isinstance(obj, str):
             if obj:
                 yield obj
         elif isinstance(obj, dict):
+            path = obj.get("path")
+            if isinstance(path, str):
+                if path:
+                    yield path
+                return
             for v in obj.values():
                 yield from walk(v)
         elif isinstance(obj, (list, tuple)):
