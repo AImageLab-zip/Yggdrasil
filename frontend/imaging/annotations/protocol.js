@@ -40,6 +40,8 @@ export const MEASUREMENT_TOOLS = Object.freeze([
     'EllipticalROI',
     'CircleROI',
     'Probe',
+    'SplineROI',
+    'PlanarFreehandROI',
 ]);
 
 /**

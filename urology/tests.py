@@ -8,7 +8,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from common.models import FileRegistry, Modality, Project, ProjectAccess
-from urology.models import Folder, Patient, Tag, UrologyProject
+from urology.models import Folder, Patient, Tag, UrologyProject, VoiceCaption
 
 
 class UrologyDomainTests(TestCase):
@@ -527,4 +527,612 @@ class UrologyDomainTests(TestCase):
         resp = self.client.get("/urology/profile/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "urology_admin")
+
+    def test_urology_patient_detail_no_drag_into_window(self):
+        resp = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Drag onto a window:")
+        self.assertNotContains(resp, "modalityChipsContainer")
+        self.assertNotContains(resp, "drop-hint")
+        self.assertNotContains(resp, "Drop modality here")
+        # Modality switcher buttons are clean without bracketed text
+        self.assertContains(resp, 'id="urologyModeMriBtn"')
+        self.assertContains(resp, 'id="urologyModeWsiBtn"')
+        self.assertContains(resp, 'id="urologyModeConfocalBtn"')
+        self.assertNotContains(resp, "(mpMRI)")
+        self.assertNotContains(resp, "(Histopathology)")
+
+    def test_urology_annotations_mri_persistence(self):
+        mri_mod = Modality.objects.get(slug="urology-mri")
+        mri_file = FileRegistry.objects.create(
+            urology_patient=self.patient,
+            domain="urology",
+            modality=mri_mod,
+            file_type="urology_mri_raw",
+            file_path=f"urology/{self.patient.patient_id}/test_mri.nii.gz",
+            file_size=2048,
+            file_hash="hash_mri_test",
+        )
+
+        mri_payload = {
+            "fileId": mri_file.id,
+            "expectedRevision": 0,
+            "coordinateSystem": "patient_lps_mm",
+            "volumeDescriptor": {"shape": [64, 64, 32]},
+            "annotations": [
+                {
+                    "annotationUID": "temp-mri-len-1",
+                    "metadata": {
+                        "toolName": "Length",
+                        "FrameOfReferenceUID": "1.2.840.10008.1",
+                        "referencedImageId": "nifti:test_mri.nii.gz",
+                    },
+                    "data": {
+                        "handles": {"points": [[0.0, 0.0, 0.0], [15.0, 0.0, 0.0]]},
+                    },
+                }
+            ],
+        }
+
+        save_resp = self.client.post(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/",
+            data=mri_payload,
+            content_type="application/json",
+        )
+        self.assertEqual(save_resp.status_code, 200)
+        self.assertEqual(save_resp.json()["revision"], 1)
+
+        # Check persistence via measurements state API
+        state_resp = self.client.get(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/state/?fileId={mri_file.id}"
+        )
+        self.assertEqual(state_resp.status_code, 200)
+        state_data = state_resp.json()
+        self.assertEqual(state_data["revision"], 1)
+        self.assertEqual(len(state_data["annotations"]), 1)
+        self.assertEqual(state_data["annotations"][0]["metadata"]["toolName"], "Length")
+
+    def test_urology_annotations_wsi_persistence(self):
+        wsi_mod = Modality.objects.get(slug="urology-wsi")
+        wsi_file = FileRegistry.objects.create(
+            urology_patient=self.patient,
+            domain="urology",
+            modality=wsi_mod,
+            file_type="urology_wsi_raw",
+            file_path=f"urology/{self.patient.patient_id}/test_wsi.tiff",
+            file_size=4096,
+            file_hash="hash_wsi_test",
+        )
+
+        wsi_payload = {
+            "fileId": wsi_file.id,
+            "expectedRevision": 0,
+            "coordinateSystem": "image_pixel",
+            "volumeDescriptor": {
+                "shape": [2000, 2000],
+                "mpp_x": 0.25,
+                "mpp_y": 0.25,
+                "tile_size": 256,
+                "levels": 3,
+                "recorded_by": "wsi-viewer",
+            },
+            "annotations": [
+                {
+                    "annotationUID": "temp-wsi-len",
+                    "metadata": {"toolName": "Length"},
+                    "data": {"handles": {"points": [[10.0, 10.0], [60.0, 60.0]]}},
+                },
+                {
+                    "annotationUID": "temp-wsi-rect",
+                    "metadata": {"toolName": "RectangleROI"},
+                    "data": {"handles": {"points": [[100.0, 100.0], [200.0, 100.0], [100.0, 200.0], [200.0, 200.0]]}},
+                },
+                {
+                    "annotationUID": "temp-wsi-circle",
+                    "metadata": {"toolName": "CircleROI"},
+                    "data": {"handles": {"points": [[300.0, 300.0], [350.0, 300.0]]}},
+                },
+                {
+                    "annotationUID": "temp-wsi-spline",
+                    "metadata": {"toolName": "SplineROI"},
+                    "data": {"handles": {"points": [[400.0, 400.0], [450.0, 420.0], [430.0, 470.0]]}},
+                },
+                {
+                    "annotationUID": "temp-wsi-label",
+                    "metadata": {"toolName": "Label"},
+                    "data": {"handles": {"points": [[500.0, 500.0]]}, "label": "WSI Biopsy Focus"},
+                },
+            ],
+        }
+
+        save_resp = self.client.post(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/",
+            data=wsi_payload,
+            content_type="application/json",
+        )
+        self.assertEqual(save_resp.status_code, 200)
+        self.assertEqual(save_resp.json()["revision"], 1)
+
+        # Check persistence via patient detail reload
+        detail_resp = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(detail_resp.status_code, 200)
+        wsi_data = detail_resp.context["wsi_data"]
+        self.assertIsNotNone(wsi_data)
+        self.assertEqual(wsi_data["revision"], 1)
+        self.assertEqual(len(wsi_data["annotations"]), 5)
+        tools = [a["metadata"]["toolName"] for a in wsi_data["annotations"]]
+        self.assertIn("Length", tools)
+        self.assertIn("RectangleROI", tools)
+        self.assertIn("CircleROI", tools)
+        self.assertIn("SplineROI", tools)
+        self.assertIn("Label", tools)
+
+    def test_urology_annotations_confocal_persistence(self):
+        confocal_mod = Modality.objects.get(slug="urology-confocal")
+        confocal_file = FileRegistry.objects.create(
+            urology_patient=self.patient,
+            domain="urology",
+            modality=confocal_mod,
+            file_type="urology_confocal_raw",
+            file_path=f"urology/{self.patient.patient_id}/test_confocal.tiff",
+            file_size=4096,
+            file_hash="hash_confocal_test",
+        )
+
+        confocal_payload = {
+            "fileId": confocal_file.id,
+            "expectedRevision": 0,
+            "coordinateSystem": "image_pixel",
+            "volumeDescriptor": {
+                "shape": [1024, 1024],
+                "mpp_x": 0.5,
+                "mpp_y": 0.5,
+                "tile_size": 256,
+                "levels": 2,
+                "recorded_by": "wsi-viewer",
+            },
+            "annotations": [
+                {
+                    "annotationUID": "temp-confocal-spline",
+                    "metadata": {"toolName": "SplineROI"},
+                    "data": {"handles": {"points": [[50.0, 50.0], [150.0, 60.0], [120.0, 140.0]]}},
+                },
+                {
+                    "annotationUID": "temp-confocal-label",
+                    "metadata": {"toolName": "Label"},
+                    "data": {"handles": {"points": [[200.0, 200.0]]}, "label": "Atypical margin"},
+                },
+            ],
+        }
+
+        save_resp = self.client.post(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/",
+            data=confocal_payload,
+            content_type="application/json",
+        )
+        self.assertEqual(save_resp.status_code, 200)
+        self.assertEqual(save_resp.json()["revision"], 1)
+
+        # Check persistence via patient detail reload
+        detail_resp = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(detail_resp.status_code, 200)
+        confocal_data = detail_resp.context["confocal_data"]
+        self.assertIsNotNone(confocal_data)
+        self.assertEqual(confocal_data["revision"], 1)
+        self.assertEqual(len(confocal_data["annotations"]), 2)
+        tools = [a["metadata"]["toolName"] for a in confocal_data["annotations"]]
+        self.assertIn("SplineROI", tools)
+        self.assertIn("Label", tools)
+
+    def test_urology_annotations_multimodal_isolation_and_coexistence(self):
+        mri_mod = Modality.objects.get(slug="urology-mri")
+        wsi_mod = Modality.objects.get(slug="urology-wsi")
+        confocal_mod = Modality.objects.get(slug="urology-confocal")
+
+        mri_file = FileRegistry.objects.create(
+            urology_patient=self.patient,
+            domain="urology",
+            modality=mri_mod,
+            file_type="urology_mri_raw",
+            file_path=f"urology/{self.patient.patient_id}/iso_mri.nii.gz",
+            file_size=2048,
+            file_hash="hash_iso_mri",
+        )
+        wsi_file = FileRegistry.objects.create(
+            urology_patient=self.patient,
+            domain="urology",
+            modality=wsi_mod,
+            file_type="urology_wsi_raw",
+            file_path=f"urology/{self.patient.patient_id}/iso_wsi.tiff",
+            file_size=4096,
+            file_hash="hash_iso_wsi",
+        )
+        confocal_file = FileRegistry.objects.create(
+            urology_patient=self.patient,
+            domain="urology",
+            modality=confocal_mod,
+            file_type="urology_confocal_raw",
+            file_path=f"urology/{self.patient.patient_id}/iso_confocal.tiff",
+            file_size=4096,
+            file_hash="hash_iso_confocal",
+        )
+
+        # Step 1: Save MRI annotation
+        save_mri = self.client.post(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/",
+            data={
+                "fileId": mri_file.id,
+                "expectedRevision": 0,
+                "coordinateSystem": "patient_lps_mm",
+                "annotations": [
+                    {
+                        "annotationUID": "mri-ann-1",
+                        "metadata": {"toolName": "Length"},
+                        "data": {"handles": {"points": [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]}},
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(save_mri.status_code, 200)
+        rev1 = save_mri.json()["revision"]
+
+        # Detail check after Step 1: MRI has annotations, WSI and Confocal have 0
+        resp1 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(len(resp1.context["wsi_data"]["annotations"]), 0)
+        self.assertEqual(len(resp1.context["confocal_data"]["annotations"]), 0)
+
+        # Step 2: Save WSI annotation (replaces WSI group, carries forward MRI group)
+        save_wsi = self.client.post(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/",
+            data={
+                "fileId": wsi_file.id,
+                "expectedRevision": rev1,
+                "coordinateSystem": "image_pixel",
+                "annotations": [
+                    {
+                        "annotationUID": "wsi-ann-1",
+                        "metadata": {"toolName": "Length"},
+                        "data": {"handles": {"points": [[10.0, 10.0], [100.0, 100.0]]}},
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(save_wsi.status_code, 200)
+        rev2 = save_wsi.json()["revision"]
+
+        # Detail check after Step 2: WSI has 1, Confocal still has 0
+        resp2 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(len(resp2.context["wsi_data"]["annotations"]), 1)
+        self.assertEqual(len(resp2.context["confocal_data"]["annotations"]), 0)
+        # MRI state still has its annotation
+        mri_state = self.client.get(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/state/?fileId={mri_file.id}"
+        ).json()
+        self.assertEqual(len(mri_state["annotations"]), 1)
+
+        # Step 3: Save Confocal annotation (carries forward MRI and WSI groups)
+        save_confocal = self.client.post(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/",
+            data={
+                "fileId": confocal_file.id,
+                "expectedRevision": rev2,
+                "coordinateSystem": "image_pixel",
+                "annotations": [
+                    {
+                        "annotationUID": "confocal-ann-1",
+                        "metadata": {"toolName": "Length"},
+                        "data": {"handles": {"points": [[5.0, 5.0], [50.0, 50.0]]}},
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(save_confocal.status_code, 200)
+        rev3 = save_confocal.json()["revision"]
+
+        # Detail check after Step 3: All 3 modalities coexist without leaking
+        resp3 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(len(resp3.context["wsi_data"]["annotations"]), 1)
+        self.assertEqual(resp3.context["wsi_data"]["annotations"][0]["metadata"]["toolName"], "Length")
+        self.assertEqual(
+            resp3.context["wsi_data"]["annotations"][0]["data"]["handles"]["points"],
+            [[10.0, 10.0], [100.0, 100.0]],
+        )
+        self.assertEqual(len(resp3.context["confocal_data"]["annotations"]), 1)
+        self.assertEqual(resp3.context["confocal_data"]["annotations"][0]["metadata"]["toolName"], "Length")
+        self.assertEqual(
+            resp3.context["confocal_data"]["annotations"][0]["data"]["handles"]["points"],
+            [[5.0, 5.0], [50.0, 50.0]],
+        )
+
+        mri_state3 = self.client.get(
+            f"/urology/api/patients/{self.patient.patient_id}/measurements/state/?fileId={mri_file.id}"
+        ).json()
+        self.assertEqual(len(mri_state3["annotations"]), 1)
+        self.assertEqual(mri_state3["annotations"][0]["metadata"]["toolName"], "Length")
+        self.assertEqual(
+            mri_state3["annotations"][0]["data"]["handles"]["points"],
+            [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]],
+        )
+
+
+class UrologyTextCaptionTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin = User.objects.create_superuser(
+            username="uro_admin",
+            email="uro_admin@example.com",
+            password="pass",
+        )
+        self.annotator1 = User.objects.create_user(
+            username="uro_annotator1",
+            email="uro_annotator1@example.com",
+            password="pass",
+        )
+        self.annotator2 = User.objects.create_user(
+            username="uro_annotator2",
+            email="uro_annotator2@example.com",
+            password="pass",
+        )
+        self.viewer = User.objects.create_user(
+            username="uro_viewer",
+            email="uro_viewer@example.com",
+            password="pass",
+        )
+
+        call_command("setup_urology_modalities")
+        self.project = Project.objects.get(slug="urology")
+
+        ProjectAccess.objects.create(user=self.admin, project=self.project, role="admin")
+        ProjectAccess.objects.create(user=self.annotator1, project=self.project, role="annotator")
+        ProjectAccess.objects.create(user=self.annotator2, project=self.project, role="annotator")
+        ProjectAccess.objects.create(user=self.viewer, project=self.project, role="viewer")
+
+        self.folder = Folder.objects.create(
+            name="Caption Test Folder", project=self.project, created_by=self.admin
+        )
+        self.patient = Patient.objects.create(
+            name="Caption Test Patient",
+            folder=self.folder,
+            project=self.project,
+            uploaded_by=self.admin,
+        )
+
+    def test_text_caption_minimum_characters_validation(self):
+        self.client.login(username="uro_annotator1", password="pass")
+        url = reverse("urology:upload_text_caption", kwargs={"patient_id": self.patient.patient_id})
+
+        # Under 10 characters -> blocked with HTTP 400
+        resp_short = self.client.post(
+            url,
+            data={"text": "Short", "modality": "urology-mri"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_short.status_code, 400)
+        self.assertIn("at least 10 characters", resp_short.json()["error"])
+        self.assertEqual(VoiceCaption.objects.count(), 0)
+
+        # Empty or spaces only -> blocked with HTTP 400
+        resp_empty = self.client.post(
+            url,
+            data={"text": "      ", "modality": "urology-mri"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_empty.status_code, 400)
+        self.assertEqual(VoiceCaption.objects.count(), 0)
+
+        # Exactly 10 characters -> accepted with HTTP 200
+        resp_valid = self.client.post(
+            url,
+            data={"text": "1234567890", "modality": "urology-mri"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_valid.status_code, 200)
+        self.assertEqual(VoiceCaption.objects.count(), 1)
+        caption = VoiceCaption.objects.first()
+        self.assertEqual(caption.text_caption, "1234567890")
+        self.assertEqual(caption.original_text_caption, "1234567890")
+        self.assertEqual(caption.modality, "urology-mri")
+        self.assertEqual(caption.processing_status, "completed")
+
+    def test_text_caption_modalities_assignment(self):
+        self.client.login(username="uro_annotator1", password="pass")
+        url = reverse("urology:upload_text_caption", kwargs={"patient_id": self.patient.patient_id})
+
+        # WSI text caption
+        resp_wsi = self.client.post(
+            url,
+            data={"text": "Histopathology Gleason 3+4 observed in left lobe", "modality": "urology-wsi"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_wsi.status_code, 200)
+        data_wsi = resp_wsi.json()["caption"]
+        self.assertEqual(data_wsi["modality"], "urology-wsi")
+        self.assertEqual(data_wsi["display_duration"], "Text")
+        self.assertIsNone(data_wsi["audio_url"])
+
+        # Confocale text caption
+        resp_conf = self.client.post(
+            url,
+            data={"text": "Fluorescence confocal slice shows cellular density", "modality": "urology-confocal"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_conf.status_code, 200)
+        data_conf = resp_conf.json()["caption"]
+        self.assertEqual(data_conf["modality"], "urology-confocal")
+
+    def test_update_voice_caption_modality(self):
+        self.client.login(username="uro_annotator1", password="pass")
+        caption = VoiceCaption.objects.create(
+            patient=self.patient,
+            user=self.annotator1,
+            modality="urology-mri",
+            duration=0.0,
+            text_caption="Valid test caption text",
+            original_text_caption="Valid test caption text",
+            processing_status="completed",
+        )
+
+        url = reverse(
+            "urology:update_voice_caption_modality",
+            kwargs={"patient_id": self.patient.patient_id, "caption_id": caption.id},
+        )
+
+        # Update to valid modality
+        resp = self.client.post(
+            url,
+            data={"modality": "urology-confocal"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        caption.refresh_from_db()
+        self.assertEqual(caption.modality, "urology-confocal")
+
+        # Invalid modality
+        resp_invalid = self.client.post(
+            url,
+            data={"modality": "invalid-modality-xyz"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_invalid.status_code, 400)
+
+    def test_edit_and_revert_voice_caption(self):
+        self.client.login(username="uro_annotator1", password="pass")
+        caption = VoiceCaption.objects.create(
+            patient=self.patient,
+            user=self.annotator1,
+            modality="urology-wsi",
+            duration=0.0,
+            text_caption="Original pathology note",
+            original_text_caption="Original pathology note",
+            processing_status="completed",
+        )
+
+        url = reverse(
+            "urology:edit_voice_caption_transcription",
+            kwargs={"patient_id": self.patient.patient_id, "caption_id": caption.id},
+        )
+
+        # Edit caption
+        edit_resp = self.client.post(
+            url,
+            data={"action": "edit", "text": "Corrected pathology note with details"},
+            content_type="application/json",
+        )
+        self.assertEqual(edit_resp.status_code, 200)
+        caption.refresh_from_db()
+        self.assertTrue(caption.is_edited)
+        self.assertEqual(caption.text_caption, "Corrected pathology note with details")
+        self.assertEqual(caption.original_text_caption, "Original pathology note")
+
+        # Revert caption
+        rev_resp = self.client.post(
+            url,
+            data={"action": "revert"},
+            content_type="application/json",
+        )
+        self.assertEqual(rev_resp.status_code, 200)
+        caption.refresh_from_db()
+        self.assertFalse(caption.is_edited)
+        self.assertEqual(caption.text_caption, "Original pathology note")
+
+    def test_caption_permissions_viewer_and_bias_protection(self):
+        caption1 = VoiceCaption.objects.create(
+            patient=self.patient,
+            user=self.annotator1,
+            modality="urology-mri",
+            duration=0.0,
+            text_caption="Annotator 1 clinical finding",
+            original_text_caption="Annotator 1 clinical finding",
+            processing_status="completed",
+        )
+
+        # 1. Owner annotator views detail: can view content, not ghost
+        self.client.login(username="uro_annotator1", password="pass")
+        resp1 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(resp1.status_code, 200)
+        c1 = next(c for c in resp1.context["voice_captions"] if c.id == caption1.id)
+        self.assertTrue(c1.can_view_content)
+        self.assertFalse(c1.is_ghost)
+        self.assertContains(resp1, "Annotator 1 clinical finding")
+
+        # 2. Peer annotator views detail: content hidden for bias protection
+        self.client.login(username="uro_annotator2", password="pass")
+        resp2 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(resp2.status_code, 200)
+        c2 = next(c for c in resp2.context["voice_captions"] if c.id == caption1.id)
+        self.assertFalse(c2.can_view_content)
+        self.assertTrue(c2.is_ghost)
+        self.assertContains(resp2, "Caption content hidden")
+
+        # 3. Viewer views detail: can see all captions
+        self.client.login(username="uro_viewer", password="pass")
+        resp3 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(resp3.status_code, 200)
+        c3 = next(c for c in resp3.context["voice_captions"] if c.id == caption1.id)
+        self.assertTrue(c3.can_view_content)
+        self.assertFalse(c3.is_ghost)
+        self.assertContains(resp3, "Annotator 1 clinical finding")
+
+        # 4. Admin views detail: can view and edit all
+        self.client.login(username="uro_admin", password="pass")
+        resp4 = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(resp4.status_code, 200)
+        c4 = next(c for c in resp4.context["voice_captions"] if c.id == caption1.id)
+        self.assertTrue(c4.can_view_content)
+        self.assertTrue(c4.can_edit_content)
+        self.assertFalse(c4.is_ghost)
+
+    def test_delete_voice_caption_permissions(self):
+        caption = VoiceCaption.objects.create(
+            patient=self.patient,
+            user=self.annotator1,
+            modality="urology-mri",
+            duration=0.0,
+            text_caption="Caption to be deleted",
+            original_text_caption="Caption to be deleted",
+            processing_status="completed",
+        )
+        url = reverse(
+            "urology:delete_voice_caption",
+            kwargs={"patient_id": self.patient.patient_id, "caption_id": caption.id},
+        )
+
+        # Non-owner annotator cannot delete
+        self.client.login(username="uro_annotator2", password="pass")
+        resp_denied = self.client.delete(url)
+        self.assertEqual(resp_denied.status_code, 403)
+        self.assertEqual(resp_denied.json()["code"], "not_owner")
+
+        # Admin deleting someone else's caption requires admin confirmation
+        self.client.login(username="uro_admin", password="pass")
+        resp_conf_req = self.client.delete(url)
+        self.assertEqual(resp_conf_req.status_code, 403)
+        self.assertEqual(resp_conf_req.json()["code"], "admin_confirmation_required")
+
+        # Admin with confirmation succeeds
+        resp_admin_del = self.client.delete(
+            url,
+            data={"admin_confirmed": True},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_admin_del.status_code, 200)
+        self.assertFalse(VoiceCaption.objects.filter(id=caption.id).exists())
+
+    def test_allowed_modalities_labels_in_patient_detail(self):
+        self.client.login(username="uro_admin", password="pass")
+        resp = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
+        self.assertEqual(resp.status_code, 200)
+
+        modalities = resp.context["allowed_modalities"]
+        names = [m["name"] for m in modalities]
+        self.assertIn("MRI", names)
+        self.assertIn("WSI", names)
+        self.assertIn("Confocale", names)
+        # Verify no awkward prefixes like 'Urology MRI'
+        for name in names:
+            self.assertFalse(name.startswith("Urology "))
+
 

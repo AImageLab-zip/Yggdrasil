@@ -49,6 +49,7 @@ from common.permissions import (
     user_can_delete_caption,
     user_can_delete_single_patient,
     user_can_edit_caption,
+    user_can_view_caption_content,
     user_can_write_annotations,
     user_can_write_patient_annotations,
     user_has_project_access,
@@ -594,7 +595,8 @@ def patient_detail(request, patient_id):
             for img in images:
                 if isinstance(img, dict) and img.get("fileId") == slide_file.id:
                     return expected_revision, img.get("annotations") or []
-        if payload.data.get("fileId") == slide_file.id or "fileId" not in payload.data:
+            return expected_revision, []
+        if payload.data.get("fileId") == slide_file.id:
             return expected_revision, payload.data.get("annotations") or []
         return expected_revision, []
 
@@ -645,24 +647,31 @@ def patient_detail(request, patient_id):
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, patient.project)
     for caption in voice_captions:
-        caption.can_view_content = bool(
-            is_admin_user or caption.user_id == request.user.id
+        caption.can_view_content = user_can_view_caption_content(
+            request.user, caption
         )
-        caption.can_edit_content = bool(
-            is_admin_user or caption.user_id == request.user.id
+        caption.can_edit_content = user_can_edit_caption(
+            request.user, caption
         )
         caption.is_ghost = not caption.can_view_content
 
-    allowed_modalities = list(
+    raw_allowed_modalities = list(
         Modality.objects.filter(
             projects__id=request.session.get("current_project_id"),
             is_active=True,
         )
     )
-    if not allowed_modalities:
-        allowed_modalities = list(
+    if not raw_allowed_modalities:
+        raw_allowed_modalities = list(
             Modality.objects.filter(domain="urology", is_active=True)
         )
+    allowed_modalities = [
+        {
+            "slug": m.slug,
+            "name": getattr(m, "label", "") or m.name.replace("Urology ", ""),
+        }
+        for m in raw_allowed_modalities
+    ]
 
     _raw_lock_reasons = annotation_lock_reasons(patient)
 
@@ -704,7 +713,9 @@ def patient_detail(request, patient_id):
             m["slug"] for m in patient_modalities if m.get("slug") != "rawzip"
         ],
         "allowed_modalities": allowed_modalities,
-        "allowed_modality_slugs": [m.slug for m in allowed_modalities],
+        "allowed_modality_slugs": [
+            m["slug"] if isinstance(m, dict) else m.slug for m in allowed_modalities
+        ],
     }
 
     allowed_annotations = []
@@ -1661,6 +1672,10 @@ def upload_text_caption(request, patient_id):
 
         if not text_content:
             return JsonResponse({"error": "Text content cannot be empty"}, status=400)
+        if len(text_content) < 10:
+            return JsonResponse(
+                {"error": "Caption must be at least 10 characters"}, status=400
+            )
 
         voice_caption = VoiceCaption.objects.create(
             patient=patient,
