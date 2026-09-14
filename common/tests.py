@@ -101,3 +101,4 @@ class UrlSmokeTests(TestCase):
         self.client.login(username="smoke-admin", password="pw")
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Confocale")

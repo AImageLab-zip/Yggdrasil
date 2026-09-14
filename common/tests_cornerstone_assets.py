@@ -49,13 +49,14 @@ class CommittedBundleTests(SimpleTestCase):
             self.assertIsNotNone(path, name)
             self.assertTrue((static_dir / path).is_file(), f"{name} -> {path}")
 
-    #: The five per-surface bundles. Phases 3, 4, 6, 7 and 10 each own one.
+    #: The per-surface bundles. Phases 3, 4, 6, 7 and 10 each own one, plus wsi-viewer.
     SURFACE_ENTRIES = [
         "mesh-landmarks",
         "panoramic-cpr",
         "photo-stack",
         "video-annotate",
         "volume-grid",
+        "wsi-viewer",
     ]
 
     def test_the_five_surfaces_the_roadmap_names_are_exactly_the_entries(self):

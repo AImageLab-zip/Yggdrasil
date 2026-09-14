@@ -21,6 +21,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Created project: {project.name}"))
         else:
             self.stdout.write(self.style.WARNING(f"Project already exists: {project.name}"))
+            project.description = "Urological oncology project with MRI, WSI, and Confocale modalities"
+            project.save()
 
         modalities_data = [
             {

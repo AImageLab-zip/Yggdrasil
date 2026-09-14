@@ -60,7 +60,7 @@ _DOMAIN_BLURBS = {
     "maxillo": "Dental & maxillofacial imaging — bite classification, IOS, CBCT and panoramic extraction.",
     "brain": "Brain tumor MRI — multi-sequence review with AI-assisted captioning.",
     "laparoscopy": "Surgical video annotation — frame-accurate segmentation and tagging.",
-    "urology": "Urological oncology — whole slide imaging (WSI) digital pathology and multiparametric magnetic resonance (MRI).",
+    "urology": "Urological oncology — MRI, WSI digital pathology, and Confocale microscopy.",
 }
 
 # Default glyph per domain when Project.icon is blank.
@@ -76,7 +76,7 @@ _DOMAIN_TAGS = {
     "maxillo": ["CBCT", "IOS", "Panoramic"],
     "brain": ["MRI T1/T2", "FLAIR", "AI Voice"],
     "laparoscopy": ["Video", "Keyframes", "Segmentation"],
-    "urology": ["WSI", "MRI"],
+    "urology": ["MRI", "WSI", "Confocale"],
 }
 
 # Domain specialty overline
