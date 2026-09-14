@@ -252,18 +252,62 @@ export function createWsiViewport({
                     const tileSlideY = row * lvlTileSlideSize;
                     const [screenX, screenY] = slideToScreen(tileSlideX, tileSlideY);
 
+                    const tileSlideW = Math.min(slideWidth - tileSlideX, lvlTileSlideSize);
+                    const tileSlideH = Math.min(slideHeight - tileSlideY, lvlTileSlideSize);
+                    const tileScreenW = tileSlideW * zoom;
+                    const tileScreenH = tileSlideH * zoom;
+
                     const tileKey = `${fileId}:${levelInfo.level}:${col}_${row}`;
                     const cached = globalWsiTileCache.get(tileKey);
 
                     if (cached?.bitmap) {
-                        const tileSlideW = Math.min(slideWidth - tileSlideX, lvlTileSlideSize);
-                        const tileSlideH = Math.min(slideHeight - tileSlideY, lvlTileSlideSize);
-                        const tileScreenW = tileSlideW * zoom;
-                        const tileScreenH = tileSlideH * zoom;
                         ctx.drawImage(cached.bitmap, screenX, screenY, tileScreenW, tileScreenH);
                     } else {
-                        // Fetch tile asynchronously with debounced batching
-                        scheduleFetchTile(tileKey, levelInfo.level, col, row, false);
+                        // Hierarchical LOD Fallback: immediately draw nearest cached parent level (e.g. 20x or 10x)
+                        // scaled into this tile's exact footprint to eliminate blank/blurry stutter
+                        for (let a = levelInfo.level + 1; a < levels.length; a += 1) {
+                            const ancLvl = levels[a];
+                            const ancTileSlideSize = tileSize * ancLvl.downsample;
+                            const ancCol = Math.floor(tileSlideX / ancTileSlideSize);
+                            const ancRow = Math.floor(tileSlideY / ancTileSlideSize);
+                            const ancKey = `${fileId}:${ancLvl.level}:${ancCol}_${ancRow}`;
+                            const cachedAnc = globalWsiTileCache.get(ancKey);
+                            if (cachedAnc?.bitmap) {
+                                const ancSlideX = ancCol * ancTileSlideSize;
+                                const ancSlideY = ancRow * ancTileSlideSize;
+                                const srcX = Math.max(0, ((tileSlideX - ancSlideX) / ancTileSlideSize) * tileSize);
+                                const srcY = Math.max(0, ((tileSlideY - ancSlideY) / ancTileSlideSize) * tileSize);
+                                const srcW = Math.min(tileSize - srcX, (tileSlideW / ancTileSlideSize) * tileSize);
+                                const srcH = Math.min(tileSize - srcY, (tileSlideH / ancTileSlideSize) * tileSize);
+                                ctx.drawImage(
+                                    cachedAnc.bitmap,
+                                    srcX, srcY, srcW, srcH,
+                                    screenX, screenY, tileScreenW, tileScreenH
+                                );
+                                break;
+                            }
+                        }
+
+                        // Schedule fetch with Euclidean distance priority to viewport center
+                        const cX = tileSlideX + tileSlideW / 2;
+                        const cY = tileSlideY + tileSlideH / 2;
+                        const distToCenter = Math.hypot(cX - centerX, cY - centerY) / lvlTileSlideSize;
+                        scheduleFetchTile(tileKey, levelInfo.level, col, row, false, distToCenter);
+                    }
+                }
+            }
+
+            // 1-tile prefetch margin around viewport at lower priority for seamless panning
+            const marginColStart = Math.max(0, colStart - 1);
+            const marginColEnd = Math.min(levelInfo.cols - 1, colEnd + 1);
+            const marginRowStart = Math.max(0, rowStart - 1);
+            const marginRowEnd = Math.min(levelInfo.rows - 1, rowEnd + 1);
+            for (let mr = marginRowStart; mr <= marginRowEnd; mr += 1) {
+                for (let mc = marginColStart; mc <= marginColEnd; mc += 1) {
+                    if (mc >= colStart && mc <= colEnd && mr >= rowStart && mr <= rowEnd) continue;
+                    const mKey = `${fileId}:${levelInfo.level}:${mc}_${mr}`;
+                    if (!hasTile(mKey)) {
+                        scheduleFetchTile(mKey, levelInfo.level, mc, mr, false, 9999);
                     }
                 }
             }
@@ -285,8 +329,11 @@ export function createWsiViewport({
         renderAnnotations();
     }
 
+    const MAX_CONCURRENT_FETCHES = 6;
+    let activeFetchesCount = 0;
+    const fetchQueue = []; // array of { tileKey, level, col, row, isBase, priority }
     const inFlightFetches = new Map(); // tileKey -> AbortController
-    const pendingFetches = new Map(); // tileKey -> { level, col, row, isBase }
+    const pendingFetches = new Map(); // tileKey -> { tileKey, level, col, row, isBase, priority }
     let fetchDebounceTimer = null;
 
     function hasTile(tileKey) {
@@ -314,13 +361,13 @@ export function createWsiViewport({
         });
     }
 
-    function scheduleFetchTile(tileKey, level, col, row, isBase = false) {
+    function scheduleFetchTile(tileKey, level, col, row, isBase = false, priority = 0) {
         if (hasTile(tileKey) || inFlightFetches.has(tileKey)) return;
-        pendingFetches.set(tileKey, { level, col, row, isBase });
+        pendingFetches.set(tileKey, { tileKey, level, col, row, isBase, priority });
         if (isBase) {
             flushPendingFetches();
         } else if (!fetchDebounceTimer) {
-            fetchDebounceTimer = setTimeout(flushPendingFetches, 40);
+            fetchDebounceTimer = setTimeout(flushPendingFetches, 30);
         }
     }
 
@@ -331,25 +378,52 @@ export function createWsiViewport({
         }
         if (pendingFetches.size === 0) return;
 
-        const toFetch = new Map(pendingFetches);
-        pendingFetches.clear();
-
-        // Abort in-flight requests that are from other levels and not the base level
         const currentLevel = choosePyramidLevel().level;
         const baseLevel = levels[levels.length - 1].level;
+
+        // Abort in-flight requests that are from other levels and not the base level
         for (const [key, controller] of inFlightFetches.entries()) {
             const parts = key.split(':');
             const reqLevel = Number(parts[1]);
             if (reqLevel !== currentLevel && reqLevel !== baseLevel) {
                 controller.abort();
                 inFlightFetches.delete(key);
+                activeFetchesCount = Math.max(0, activeFetchesCount - 1);
             }
         }
 
-        for (const [tileKey, info] of toFetch.entries()) {
+        // Add pending fetches to queue, avoiding duplicates
+        for (const item of pendingFetches.values()) {
+            if (!hasTile(item.tileKey) && !inFlightFetches.has(item.tileKey)) {
+                const existingIdx = fetchQueue.findIndex((q) => q.tileKey === item.tileKey);
+                if (existingIdx !== -1) {
+                    fetchQueue[existingIdx].priority = item.priority;
+                } else {
+                    fetchQueue.push(item);
+                }
+            }
+        }
+        pendingFetches.clear();
+
+        // Sort queue: base tiles first, then center-out priority ascending
+        fetchQueue.sort((a, b) => {
+            if (a.isBase !== b.isBase) return a.isBase ? -1 : 1;
+            return a.priority - b.priority;
+        });
+
+        pumpFetchQueue();
+    }
+
+    function pumpFetchQueue() {
+        while (activeFetchesCount < MAX_CONCURRENT_FETCHES && fetchQueue.length > 0) {
+            const info = fetchQueue.shift();
+            const { tileKey } = info;
             if (hasTile(tileKey) || inFlightFetches.has(tileKey)) continue;
+
             const controller = new AbortController();
             inFlightFetches.set(tileKey, controller);
+            activeFetchesCount += 1;
+
             const url = wsiTileUrl({ fileId, level: info.level, col: info.col, row: info.row, namespace });
 
             fetch(url, { credentials: 'same-origin', signal: controller.signal })
@@ -360,14 +434,18 @@ export function createWsiViewport({
                 .then((blob) => decodeBlobToBitmap(blob))
                 .then((bitmap) => {
                     inFlightFetches.delete(tileKey);
+                    activeFetchesCount = Math.max(0, activeFetchesCount - 1);
                     globalWsiTileCache.set(tileKey, { bitmap });
                     render();
+                    pumpFetchQueue();
                 })
                 .catch((err) => {
                     inFlightFetches.delete(tileKey);
+                    activeFetchesCount = Math.max(0, activeFetchesCount - 1);
                     if (err.name !== 'AbortError') {
                         console.error('Tile fetch failed:', url, err);
                     }
+                    pumpFetchQueue();
                 });
         }
     }

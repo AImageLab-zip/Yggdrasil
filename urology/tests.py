@@ -3,6 +3,7 @@ from django.core.management import call_command
 from django.test import TestCase, Client
 from django.urls import reverse
 
+import os
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
@@ -228,6 +229,56 @@ class UrologyDomainTests(TestCase):
         resp = self.client.get(f"/urology/api/wsi/{fr.id}/thumbnail/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "image/jpeg")
+
+    def test_urology_wsi_disk_and_frame_cache(self):
+        """Verify on-disk tile cache and in-memory frame cache functionality."""
+        from urology.wsi_views import WSI_TILES_DIR, _TILE_CACHE, _TILE_CACHE_LOCK
+        from urology.wsi_reader import _FRAME_CACHE, _FRAME_CACHE_LOCK, get_wsi_tile
+        from PIL import Image
+
+        # Create a small synthetic image for test
+        img = Image.new("RGB", (512, 512), (120, 150, 180))
+        buf = BytesIO()
+        img.save(buf, format="TIFF")
+        buf.seek(0)
+
+        # 1. Test get_wsi_tile with slide_key caches frame
+        slide_key = "test_slide_key_123"
+        tile1 = get_wsi_tile(buf, level=0, col=0, row=0, tile_size=256, slide_key=slide_key)
+        self.assertGreater(len(tile1), 0)
+
+        with _FRAME_CACHE_LOCK:
+            self.assertIn((slide_key, 0), _FRAME_CACHE)
+
+        # Slicing next tile uses frame cache
+        tile2 = get_wsi_tile(buf, level=0, col=1, row=0, tile_size=256, slide_key=slide_key)
+        self.assertGreater(len(tile2), 0)
+
+        # 2. Test disk tile cache in wsi_tile_api
+        wsi_modality = Modality.objects.get(slug="urology-wsi")
+        fr = FileRegistry.objects.create(
+            domain="urology",
+            urology_patient=self.patient,
+            modality=wsi_modality,
+            file_type="urology_wsi_raw",
+            file_path="urology/disk_test.tiff",
+            file_size=1024,
+            file_hash="test_disk_hash",
+            metadata={"original_filename": "disk_test.tiff"},
+        )
+        slide_dir = os.path.join(WSI_TILES_DIR, fr.file_hash)
+        os.makedirs(slide_dir, exist_ok=True)
+        disk_tile_path = os.path.join(slide_dir, "0_0_0.jpg")
+        with open(disk_tile_path, "wb") as f:
+            f.write(b"cached_disk_jpeg_data")
+
+        # Clear in-memory tile cache to force disk hit
+        with _TILE_CACHE_LOCK:
+            _TILE_CACHE.clear()
+
+        resp = self.client.get(f"/urology/api/wsi/{fr.id}/tile/0/0_0.jpg")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, b"cached_disk_jpeg_data")
 
     def test_urology_measurements_state_and_save(self):
         # 1. State should be empty initially

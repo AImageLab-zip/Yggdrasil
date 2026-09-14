@@ -205,7 +205,7 @@ class TileCache {
     }
 }
 
-export const globalWsiTileCache = new TileCache(500);
+export const globalWsiTileCache = new TileCache(1500);
 
 /**
  * Create the WSI image loader for imageLoader.registerImageLoader(WSI_IMAGE_SCHEME, loader).

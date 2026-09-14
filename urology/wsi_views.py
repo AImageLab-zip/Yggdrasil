@@ -19,9 +19,10 @@ from .wsi_reader import get_wsi_metadata, get_wsi_thumbnail, get_wsi_tile
 
 logger = logging.getLogger(__name__)
 
-# Local slide disk cache to prevent downloading multi-megabyte slides from MinIO S3 on every tile
+# Local slide and tile disk cache to eliminate repeated S3 downloads and TIFF decompression
 WSI_CACHE_DIR = os.path.join(tempfile.gettempdir(), "ygg_wsi_cache")
-os.makedirs(WSI_CACHE_DIR, exist_ok=True)
+WSI_TILES_DIR = os.path.join(WSI_CACHE_DIR, "tiles")
+os.makedirs(WSI_TILES_DIR, exist_ok=True)
 
 # In-memory LRU tile cache for sub-millisecond tile serving
 _TILE_CACHE = OrderedDict()
@@ -111,11 +112,12 @@ def wsi_tile_api(request, file_id: int, level: int, col: int, row: int):
     img_format = "PNG" if is_png else "JPEG"
     content_type = "image/png" if is_png else "image/jpeg"
 
-    etag = f'"{file_obj.file_hash}_{level}_{col}_{row}"'
+    safe_hash = file_obj.file_hash or f"file_{file_obj.id}"
+    etag = f'"{safe_hash}_{level}_{col}_{row}"'
     if request.headers.get("If-None-Match") == etag:
         return HttpResponse(status=304)
 
-    cache_key = f"{file_obj.file_hash}_{level}_{col}_{row}_{img_format}"
+    cache_key = f"{safe_hash}_{level}_{col}_{row}_{img_format}"
     cached_bytes = _get_cached_tile(cache_key)
     if cached_bytes:
         response = HttpResponse(cached_bytes, content_type=content_type)
@@ -123,12 +125,43 @@ def wsi_tile_api(request, file_id: int, level: int, col: int, row: int):
         response["Cache-Control"] = "public, max-age=604800, immutable"
         return response
 
+    ext = "png" if is_png else "jpg"
+    slide_tile_dir = os.path.join(WSI_TILES_DIR, safe_hash)
+    disk_tile_path = os.path.join(slide_tile_dir, f"{level}_{col}_{row}.{ext}")
+
+    if os.path.exists(disk_tile_path):
+        try:
+            with open(disk_tile_path, "rb") as tf:
+                tile_bytes = tf.read()
+            _set_cached_tile(cache_key, tile_bytes)
+            response = HttpResponse(tile_bytes, content_type=content_type)
+            response["ETag"] = etag
+            response["Cache-Control"] = "public, max-age=604800, immutable"
+            return response
+        except Exception:
+            pass
+
     try:
         slide_path = _get_local_slide_path(file_obj)
         with open(slide_path, "rb") as fp:
             tile_bytes = get_wsi_tile(
-                fp, level=level, col=col, row=row, tile_size=256, image_format=img_format
+                fp,
+                level=level,
+                col=col,
+                row=row,
+                tile_size=256,
+                image_format=img_format,
+                slide_key=safe_hash,
             )
+
+        try:
+            os.makedirs(slide_tile_dir, exist_ok=True)
+            tmp_tile_path = f"{disk_tile_path}.{os.getpid()}.tmp"
+            with open(tmp_tile_path, "wb") as f_out:
+                f_out.write(tile_bytes)
+            os.replace(tmp_tile_path, disk_tile_path)
+        except Exception as write_err:
+            logger.debug("Failed saving tile to disk cache: %s", write_err)
 
         _set_cached_tile(cache_key, tile_bytes)
 
@@ -149,14 +182,37 @@ def wsi_thumbnail_api(request, file_id: int):
     if error_resp:
         return error_resp
 
-    etag = f'"{file_obj.file_hash}_thumb"'
+    safe_hash = file_obj.file_hash or f"file_{file_obj.id}"
+    etag = f'"{safe_hash}_thumb"'
     if request.headers.get("If-None-Match") == etag:
         return HttpResponse(status=304)
+
+    slide_tile_dir = os.path.join(WSI_TILES_DIR, safe_hash)
+    disk_thumb_path = os.path.join(slide_tile_dir, "thumbnail.jpg")
+    if os.path.exists(disk_thumb_path):
+        try:
+            with open(disk_thumb_path, "rb") as tf:
+                thumb_bytes = tf.read()
+            response = HttpResponse(thumb_bytes, content_type="image/jpeg")
+            response["ETag"] = etag
+            response["Cache-Control"] = "public, max-age=86400"
+            return response
+        except Exception:
+            pass
 
     try:
         slide_path = _get_local_slide_path(file_obj)
         with open(slide_path, "rb") as fp:
             thumb_bytes = get_wsi_thumbnail(fp, max_dim=512, image_format="JPEG")
+
+        try:
+            os.makedirs(slide_tile_dir, exist_ok=True)
+            tmp_thumb_path = f"{disk_thumb_path}.{os.getpid()}.tmp"
+            with open(tmp_thumb_path, "wb") as f_out:
+                f_out.write(thumb_bytes)
+            os.replace(tmp_thumb_path, disk_thumb_path)
+        except Exception as write_err:
+            logger.debug("Failed saving thumbnail to disk cache: %s", write_err)
 
         response = HttpResponse(thumb_bytes, content_type="image/jpeg")
         response["ETag"] = etag
