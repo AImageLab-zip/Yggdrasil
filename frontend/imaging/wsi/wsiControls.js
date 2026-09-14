@@ -12,6 +12,7 @@ export function wireWsiControls({
     initialRevision = 0,
     csrfToken,
     namespace = 'urology',
+    controlsPrefix = 'urologyWsi',
 }) {
     let currentRevision = initialRevision;
     let isDirty = false;
@@ -19,12 +20,12 @@ export function wireWsiControls({
 
     // Tool switching
     const toolButtons = {
-        Pan: document.getElementById('urologyWsiToolPan'),
-        Length: document.getElementById('urologyWsiToolLength'),
-        RectangleROI: document.getElementById('urologyWsiToolRect'),
-        CircleROI: document.getElementById('urologyWsiToolCircle'),
-        SplineROI: document.getElementById('urologyWsiToolSpline'),
-        Label: document.getElementById('urologyWsiToolLabel'),
+        Pan: document.getElementById(`${controlsPrefix}ToolPan`),
+        Length: document.getElementById(`${controlsPrefix}ToolLength`),
+        RectangleROI: document.getElementById(`${controlsPrefix}ToolRect`),
+        CircleROI: document.getElementById(`${controlsPrefix}ToolCircle`),
+        SplineROI: document.getElementById(`${controlsPrefix}ToolSpline`),
+        Label: document.getElementById(`${controlsPrefix}ToolLabel`),
     };
 
     function setActiveTool(toolName) {
@@ -48,12 +49,12 @@ export function wireWsiControls({
 
     // Magnification buttons
     const magButtons = [
-        { id: 'urologyWsiMag1', mag: 1.25 },
-        { id: 'urologyWsiMag2', mag: 2.5 },
-        { id: 'urologyWsiMag5', mag: 5.0 },
-        { id: 'urologyWsiMag10', mag: 10.0 },
-        { id: 'urologyWsiMag20', mag: 20.0 },
-        { id: 'urologyWsiMag40', mag: 40.0 },
+        { id: `${controlsPrefix}Mag1`, mag: 1.25 },
+        { id: `${controlsPrefix}Mag2`, mag: 2.5 },
+        { id: `${controlsPrefix}Mag5`, mag: 5.0 },
+        { id: `${controlsPrefix}Mag10`, mag: 10.0 },
+        { id: `${controlsPrefix}Mag20`, mag: 20.0 },
+        { id: `${controlsPrefix}Mag40`, mag: 40.0 },
     ];
 
     for (const item of magButtons) {
@@ -68,7 +69,7 @@ export function wireWsiControls({
         });
     }
 
-    const fitBtn = document.getElementById('urologyWsiFit');
+    const fitBtn = document.getElementById(`${controlsPrefix}Fit`);
     if (fitBtn) {
         fitBtn.addEventListener('click', () => {
             viewport.fitToScreen();
@@ -79,10 +80,10 @@ export function wireWsiControls({
     }
 
     // Actions
-    const saveBtn = document.getElementById('urologyWsiSaveBtn');
-    const clearBtn = document.getElementById('urologyWsiClearBtn');
-    const toggleBtn = document.getElementById('urologyWsiToggleVisibilityBtn');
-    const statusEl = document.getElementById('urologyWsiStatus');
+    const saveBtn = document.getElementById(`${controlsPrefix}SaveBtn`);
+    const clearBtn = document.getElementById(`${controlsPrefix}ClearBtn`);
+    const toggleBtn = document.getElementById(`${controlsPrefix}ToggleVisibilityBtn`);
+    const statusEl = document.getElementById(`${controlsPrefix}Status`);
 
     function updateStatus(msg, isError = false) {
         if (!statusEl) return;
@@ -98,7 +99,8 @@ export function wireWsiControls({
 
     if (clearBtn) {
         clearBtn.addEventListener('click', () => {
-            if (window.confirm('Clear all WSI annotations?')) {
+            const label = controlsPrefix.toLowerCase().includes('confocal') ? 'Confocale' : 'WSI';
+            if (window.confirm(`Clear all ${label} annotations?`)) {
                 viewport.clearAnnotations();
                 isDirty = true;
                 updateStatus('Annotations cleared (unsaved)');

@@ -347,6 +347,7 @@ def upload_patient(request):
         urology_upload_fields = {
             "urology-mri",
             "urology-wsi",
+            "urology-confocal",
         }
         is_xhr = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         has_upload = any(
@@ -414,8 +415,9 @@ def upload_patient(request):
             uploaded_modalities = []
             processing_job_ids = []
             urology_modalities = {
-                "urology-mri": "Urology MRI",
-                "urology-wsi": "Digital Pathology WSI",
+                "urology-mri": "MRI",
+                "urology-wsi": "WSI",
+                "urology-confocal": "Confocale",
             }
 
             for slug, display_name in urology_modalities.items():
@@ -559,30 +561,63 @@ def patient_detail(request, patient_id):
         .order_by("-created_at")
         .first()
     )
+    # Prepare Confocale Microscopy data
+    confocal_file = (
+        patient.files.filter(modality__slug="urology-confocal").order_by("-created_at").first()
+        or patient.files.filter(
+            file_type__in=["urology_confocal_raw", "urology_confocal_processed"]
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    latest_set = (
+        AnnotationSet.objects.filter(
+            urology_patient=patient, kind="measurements"
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    def _extract_slide_annotations(slide_file):
+        if not slide_file or not latest_set:
+            return 0, []
+        rev = latest_set.revisions.order_by("-revision_number").first()
+        if not rev:
+            return 0, []
+        expected_revision = rev.revision_number
+        payload = rev.payloads.filter(format=PayloadFormat.CORNERSTONE_STATE).first()
+        if not payload or not isinstance(payload.data, dict):
+            return expected_revision, []
+        images = payload.data.get("images")
+        if isinstance(images, list):
+            for img in images:
+                if isinstance(img, dict) and img.get("fileId") == slide_file.id:
+                    return expected_revision, img.get("annotations") or []
+        if payload.data.get("fileId") == slide_file.id or "fileId" not in payload.data:
+            return expected_revision, payload.data.get("annotations") or []
+        return expected_revision, []
+
     wsi_data = None
     if wsi_file:
-        latest_set = (
-            AnnotationSet.objects.filter(
-                urology_patient=patient, kind="measurements"
-            )
-            .order_by("-created_at")
-            .first()
-        )
-        expected_revision = 0
-        annotations_list = []
-        if latest_set:
-            rev = latest_set.revisions.order_by("-revision_number").first()
-            if rev:
-                expected_revision = rev.revision_number
-                payload = rev.payloads.filter(format=PayloadFormat.CORNERSTONE_STATE).first()
-                if payload and isinstance(payload.data, dict):
-                    annotations_list = payload.data.get("annotations") or []
-
+        wsi_rev, wsi_annots = _extract_slide_annotations(wsi_file)
         wsi_data = {
             "patientId": patient.patient_id,
             "fileId": wsi_file.id,
-            "revision": expected_revision,
-            "annotations": annotations_list,
+            "revision": wsi_rev,
+            "annotations": wsi_annots,
+            "csrfToken": get_token(request),
+            "namespace": "urology",
+        }
+
+    confocal_data = None
+    if confocal_file:
+        confocal_rev, confocal_annots = _extract_slide_annotations(confocal_file)
+        confocal_data = {
+            "patientId": patient.patient_id,
+            "fileId": confocal_file.id,
+            "revision": confocal_rev,
+            "annotations": confocal_annots,
             "csrfToken": get_token(request),
             "namespace": "urology",
         }
@@ -642,9 +677,11 @@ def patient_detail(request, patient_id):
         "patient_modalities": patient_modalities,
         "has_mri": bool(mri_file),
         "has_wsi": bool(wsi_file),
+        "has_confocal": bool(confocal_file),
         "mri_file": mri_file,
         "wsi_file": wsi_file,
-        "default_modality_slug": "urology-mri" if mri_file else ("urology-wsi" if wsi_file else None),
+        "confocal_file": confocal_file,
+        "default_modality_slug": "urology-mri" if mri_file else ("urology-wsi" if wsi_file else ("urology-confocal" if confocal_file else None)),
         "django_data": {
             "canEdit": bool(can_modify),
             "scanId": patient.patient_id,
@@ -652,10 +689,11 @@ def patient_detail(request, patient_id):
             "hasCBCT": False,
             "isCBCTProcessed": False,
             "modalities": patient_modalities,
-            "defaultModality": "urology-mri" if mri_file else ("urology-wsi" if wsi_file else None),
+            "defaultModality": "urology-mri" if mri_file else ("urology-wsi" if wsi_file else ("urology-confocal" if confocal_file else None)),
         },
         "viewer_grid_data": viewer_grid_data,
         "wsi_data": wsi_data,
+        "confocal_data": confocal_data,
         "patient_files": patient_files,
         "raw_data_locked": bool(_raw_lock_reasons),
         "raw_lock_message": lock_message(_raw_lock_reasons),
@@ -1892,9 +1930,11 @@ def _bulk_upload_one_urology(request, project, folder, forced_modality, allowed_
     modality = forced_modality
     if modality is None:
         fn_lower = filename.lower()
-        if any(fn_lower.endswith(ext) for ext in (".svs", ".ndpi", ".tif", ".tiff", ".mrxs", ".dz", ".dzi")):
+        if "confocal" in fn_lower:
+            modality = next((m for m in allowed_modalities if "confocal" in m.slug), None)
+        if modality is None and any(fn_lower.endswith(ext) for ext in (".svs", ".ndpi", ".tif", ".tiff", ".mrxs", ".dz", ".dzi")):
             modality = next((m for m in allowed_modalities if "wsi" in m.slug), None)
-        elif any(fn_lower.endswith(ext) for ext in (".nii", ".nii.gz")):
+        elif modality is None and any(fn_lower.endswith(ext) for ext in (".nii", ".nii.gz")):
             modality = next((m for m in allowed_modalities if "mri" in m.slug), None)
         if modality is None:
             modality = allowed_modalities[0] if allowed_modalities else None

@@ -8,6 +8,7 @@ import { wireWsiControls } from './wsiControls.js';
 export async function bootstrapWsiViewer({
     dataElementId = 'urologyWsiData',
     stageElementId = 'urologyWsiStage',
+    controlsPrefix = 'urologyWsi',
 } = {}) {
     const dataEl = document.getElementById(dataElementId);
     if (!dataEl) {
@@ -85,6 +86,7 @@ export async function bootstrapWsiViewer({
         initialRevision: revision,
         csrfToken,
         namespace,
+        controlsPrefix,
     });
 
     return { viewport };

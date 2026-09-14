@@ -42,15 +42,32 @@ export async function mountWsiViewer(options) {
 }
 
 /**
- * Auto-start on load if #urologyWsiData is present.
+ * Auto-start on load if #urologyWsiData or #urologyConfocalData is present.
  */
-const started = bootstrapWsiViewer().catch((err) => {
+const startedWsi = bootstrapWsiViewer({
+    dataElementId: 'urologyWsiData',
+    stageElementId: 'urologyWsiStage',
+    controlsPrefix: 'urologyWsi',
+}).catch((err) => {
     console.error('The WSI viewer failed to start:', err);
     return null;
 });
 
+const startedConfocal = bootstrapWsiViewer({
+    dataElementId: 'urologyConfocalData',
+    stageElementId: 'urologyConfocalStage',
+    controlsPrefix: 'urologyConfocal',
+}).catch((err) => {
+    console.error('The Confocale viewer failed to start:', err);
+    return null;
+});
+
+const started = Promise.all([startedWsi, startedConfocal]);
+
 export {
     started,
+    startedWsi,
+    startedConfocal,
     bootstrapWsiViewer,
     createWsiViewport,
     mountWsiViewer as default,

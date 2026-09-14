@@ -3,7 +3,7 @@ from common.models import AnnotationMethod, Modality, Project
 
 
 class Command(BaseCommand):
-    help = "Create Urology project and register urology modalities (MRI and WSI)"
+    help = "Create Urology project and register urology modalities (MRI, WSI, and Confocale)"
 
     def handle(self, *args, **options):
         project, project_created = Project.objects.get_or_create(
@@ -11,7 +11,7 @@ class Command(BaseCommand):
             defaults={
                 "slug": "urology",
                 "domain": "urology",
-                "description": "Urological oncology project with MRI and WSI modalities",
+                "description": "Urological oncology project with MRI, WSI, and Confocale modalities",
                 "icon": "fas fa-microscope",
                 "is_active": True,
             },
@@ -41,6 +41,17 @@ class Command(BaseCommand):
                 "description": "Digital Pathology Whole Slide Images (.svs, .ndpi, .mrxs, .tiff, .tif, .dz)",
                 "icon": "fas fa-microscope",
                 "label": "WSI",
+                "supported_extensions": [".svs", ".ndpi", ".mrxs", ".tiff", ".tif", ".dz"],
+                "requires_multiple_files": False,
+                "is_active": True,
+            },
+            {
+                "name": "Urology Confocale",
+                "slug": "urology-confocal",
+                "domain": "urology",
+                "description": "Confocale Microscopy Images (.svs, .ndpi, .mrxs, .tiff, .tif, .dz)",
+                "icon": "fas fa-eye",
+                "label": "Confocale",
                 "supported_extensions": [".svs", ".ndpi", ".mrxs", ".tiff", ".tif", ".dz"],
                 "requires_multiple_files": False,
                 "is_active": True,

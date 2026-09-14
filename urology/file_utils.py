@@ -10,6 +10,7 @@ from django.utils import timezone
 UROLOGY_NO_PROCESSING_MODALITIES = {
     "urology-mri",
     "urology-wsi",
+    "urology-confocal",
 }
 
 

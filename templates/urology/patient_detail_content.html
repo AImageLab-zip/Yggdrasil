@@ -69,6 +69,9 @@
 {% if wsi_data %}
 {{ wsi_data|json_script:"urologyWsiData" }}
 {% endif %}
+{% if confocal_data %}
+{{ confocal_data|json_script:"urologyConfocalData" }}
+{% endif %}
 
 {% include 'common/sections/patient_header_section.html' %}
 
@@ -76,23 +79,31 @@
 <div class="urology-multimodal-bar">
     <span class="text-white small fw-bold me-2"><i class="fas fa-layer-group me-1"></i>Modality View:</span>
     <div class="btn-group" role="group" aria-label="Viewer Modality">
-        <button type="button" class="btn btn-sm btn-outline-primary active" id="urologyModeMriBtn" title="View Prostate mpMRI">
-            <i class="fas fa-magnet me-1"></i>MRI (mpMRI)
+        <button type="button" class="btn btn-sm btn-outline-primary active" id="urologyModeMriBtn" title="View MRI">
+            <i class="fas fa-magnet me-1"></i>MRI
         </button>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="urologyModeWsiBtn" title="View Digital Pathology WSI">
-            <i class="fas fa-microscope me-1"></i>WSI (Histopathology)
+        <button type="button" class="btn btn-sm btn-outline-primary" id="urologyModeWsiBtn" title="View WSI">
+            <i class="fas fa-microscope me-1"></i>WSI
         </button>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="urologyModeSplitBtn" title="Side-by-side Radiologic-Pathologic Correlation">
-            <i class="fas fa-columns me-1"></i>Split Correlation View
+        <button type="button" class="btn btn-sm btn-outline-primary" id="urologyModeConfocalBtn" title="View Confocale">
+            <i class="fas fa-eye me-1"></i>Confocale
         </button>
     </div>
     <span class="text-muted small ms-auto" id="urologyModeNotice">
-        {% if has_mri and has_wsi %}
-            mpMRI &amp; Digital Pathology available
+        {% if has_mri and has_wsi and has_confocal %}
+            MRI, WSI &amp; Confocale available
+        {% elif has_mri and has_wsi %}
+            MRI &amp; WSI available
+        {% elif has_mri and has_confocal %}
+            MRI &amp; Confocale available
+        {% elif has_wsi and has_confocal %}
+            WSI &amp; Confocale available
         {% elif has_mri %}
-            mpMRI volume available
+            MRI volume available
         {% elif has_wsi %}
-            Digital Pathology slide available
+            WSI slide available
+        {% elif has_confocal %}
+            Confocale slide available
         {% else %}
             Upload scans to view
         {% endif %}
@@ -138,8 +149,9 @@
                 </div>
             </div>
 
-            <!-- WSI Stage (CornerstoneJS Digital Pathology Multi-resolution Pyramid) -->
+            <!-- WSI Stage (Digital Pathology Multi-resolution Pyramid) -->
             <div class="urology-stage-panel is-hidden" id="urologyWsiStagePanel">
+                {% if has_wsi %}
                 <!-- WSI Toolbar -->
                 <div class="wsi-toolbar">
                     <!-- Navigation & Annotation Tools -->
@@ -156,7 +168,7 @@
                         <button type="button" class="btn btn-dark" id="urologyWsiToolCircle" title="Circle ROI">
                             <i class="fas fa-circle"></i> Circle
                         </button>
-                        <button type="button" class="btn btn-dark" id="urologyWsiToolSpline" title="Spline / Boundary (Gleason / Tumor Outline)">
+                        <button type="button" class="btn btn-dark" id="urologyWsiToolSpline" title="Spline / Boundary (Outline)">
                             <i class="fas fa-draw-polygon"></i> Spline
                         </button>
                         <button type="button" class="btn btn-dark" id="urologyWsiToolLabel" title="Point Marker & Name">
@@ -192,6 +204,77 @@
 
                 <!-- Host for WSI tiled canvas, SVG layer, minimap -->
                 <div class="wsi-canvas-host" id="urologyWsiStage"></div>
+                {% else %}
+                <div class="d-flex flex-column align-items-center justify-content-center h-100 p-5 text-center text-muted">
+                    <i class="fas fa-microscope fa-3x mb-3 text-secondary"></i>
+                    <h5 class="text-light">No WSI Slide Uploaded</h5>
+                    <p class="small">Upload a digital pathology slide (.tiff, .svs) for this patient to view it here.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Confocale Stage (Confocale Microscopy Multi-resolution Pyramid) -->
+            <div class="urology-stage-panel is-hidden" id="urologyConfocalStagePanel">
+                {% if has_confocal %}
+                <!-- Confocale Toolbar -->
+                <div class="wsi-toolbar">
+                    <!-- Navigation & Annotation Tools -->
+                    <div class="btn-group me-2" role="group" aria-label="Confocale Tools">
+                        <button type="button" class="btn btn-dark active" id="urologyConfocalToolPan" title="Pan / Navigate">
+                            <i class="fas fa-hand"></i> Pan
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalToolLength" title="Calibrated Ruler (µm / mm)">
+                            <i class="fas fa-ruler"></i> Ruler
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalToolRect" title="Rectangle ROI (Area)">
+                            <i class="fas fa-vector-square"></i> Rect
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalToolCircle" title="Circle ROI">
+                            <i class="fas fa-circle"></i> Circle
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalToolSpline" title="Spline / Boundary (Outline)">
+                            <i class="fas fa-draw-polygon"></i> Spline
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalToolLabel" title="Point Marker & Name">
+                            <i class="fas fa-tag"></i> Label
+                        </button>
+                    </div>
+
+                    <!-- Magnification Controls -->
+                    <div class="btn-group me-2" role="group" aria-label="Magnification">
+                        <button type="button" class="btn btn-dark" id="urologyConfocalFit" title="Fit Slide to Window">Fit</button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalMag1">1.25x</button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalMag2">2.5x</button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalMag5">5x</button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalMag10">10x</button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalMag20">20x</button>
+                        <button type="button" class="btn btn-dark" id="urologyConfocalMag40">40x</button>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="ms-auto d-flex align-items-center gap-2">
+                        <span id="urologyConfocalStatus" class="small text-muted me-1"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="urologyConfocalToggleVisibilityBtn" title="Toggle Annotations">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="urologyConfocalClearBtn" title="Clear Annotations">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success" id="urologyConfocalSaveBtn" title="Save Annotations">
+                            <i class="fas fa-floppy-disk"></i> Save
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Host for Confocale tiled canvas, SVG layer, minimap -->
+                <div class="wsi-canvas-host" id="urologyConfocalStage"></div>
+                {% else %}
+                <div class="d-flex flex-column align-items-center justify-content-center h-100 p-5 text-center text-muted">
+                    <i class="fas fa-eye fa-3x mb-3 text-secondary"></i>
+                    <h5 class="text-light">No Confocale Slide Uploaded</h5>
+                    <p class="small">Upload a confocal microscopy slide (.tiff, .svs) for this patient to view it here.</p>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -233,35 +316,42 @@
 document.addEventListener('DOMContentLoaded', () => {
     const mriBtn = document.getElementById('urologyModeMriBtn');
     const wsiBtn = document.getElementById('urologyModeWsiBtn');
-    const splitBtn = document.getElementById('urologyModeSplitBtn');
+    const confocalBtn = document.getElementById('urologyModeConfocalBtn');
 
     const mriStage = document.getElementById('urologyMriStage');
     const wsiStagePanel = document.getElementById('urologyWsiStagePanel');
+    const confocalStagePanel = document.getElementById('urologyConfocalStagePanel');
 
     function setViewMode(mode) {
         mriBtn?.classList.remove('active');
         wsiBtn?.classList.remove('active');
-        splitBtn?.classList.remove('active');
+        confocalBtn?.classList.remove('active');
+
+        mriStage?.classList.add('is-hidden');
+        wsiStagePanel?.classList.add('is-hidden');
+        confocalStagePanel?.classList.add('is-hidden');
 
         if (mode === 'mri') {
             mriBtn?.classList.add('active');
             mriStage?.classList.remove('is-hidden');
-            wsiStagePanel?.classList.add('is-hidden');
         } else if (mode === 'wsi') {
             wsiBtn?.classList.add('active');
-            mriStage?.classList.add('is-hidden');
             wsiStagePanel?.classList.remove('is-hidden');
-        } else if (mode === 'split') {
-            splitBtn?.classList.add('active');
-            mriStage?.classList.remove('is-hidden');
-            wsiStagePanel?.classList.remove('is-hidden');
+        } else if (mode === 'confocal') {
+            confocalBtn?.classList.add('active');
+            confocalStagePanel?.classList.remove('is-hidden');
         }
 
         // Trigger window resize and WSI viewport adaptation
         setTimeout(() => {
             window.dispatchEvent(new Event('resize'));
-            if (mode === 'wsi' || mode === 'split') {
+            if (mode === 'wsi') {
                 const stage = document.getElementById('urologyWsiStage');
+                if (stage && stage.__wsiViewport) {
+                    stage.__wsiViewport.resize();
+                }
+            } else if (mode === 'confocal') {
+                const stage = document.getElementById('urologyConfocalStage');
                 if (stage && stage.__wsiViewport) {
                     stage.__wsiViewport.resize();
                 }
@@ -271,11 +361,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     mriBtn?.addEventListener('click', () => setViewMode('mri'));
     wsiBtn?.addEventListener('click', () => setViewMode('wsi'));
-    splitBtn?.addEventListener('click', () => setViewMode('split'));
+    confocalBtn?.addEventListener('click', () => setViewMode('confocal'));
 
-    // If patient has only WSI, start in WSI mode
+    // Initial view mode based on available scans
     {% if not has_mri and has_wsi %}
     setViewMode('wsi');
+    {% elif not has_mri and not has_wsi and has_confocal %}
+    setViewMode('confocal');
+    {% else %}
+    setViewMode('mri');
     {% endif %}
 });
 </script>

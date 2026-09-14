@@ -301,6 +301,14 @@ _UROLOGY_ARTIFACTS = [
         "urology-wsi.processed", "urology-wsi", "Processed WSI", BUCKET_PROCESSED,
         file_types=["urology_wsi_processed"],
     ),
+    Artifact(
+        "urology-confocal.raw", "urology-confocal", "Uploaded Confocale", BUCKET_RAW,
+        file_types=["urology_confocal_raw"],
+    ),
+    Artifact(
+        "urology-confocal.processed", "urology-confocal", "Processed Confocale", BUCKET_PROCESSED,
+        file_types=["urology_confocal_processed"],
+    ),
 ]
 
 ARTIFACTS_BY_DOMAIN = {

@@ -36,10 +36,11 @@ class UrologyDomainTests(TestCase):
         self.client.login(username="urology_admin", password="password123")
 
     def test_setup_urology_modalities(self):
-        self.assertEqual(self.project.modalities.count(), 2)
+        self.assertEqual(self.project.modalities.count(), 3)
         slugs = set(self.project.modalities.values_list("slug", flat=True))
         self.assertIn("urology-mri", slugs)
         self.assertIn("urology-wsi", slugs)
+        self.assertIn("urology-confocal", slugs)
 
     def test_urology_root_redirect(self):
         response = self.client.get("/urology/")
@@ -52,6 +53,7 @@ class UrologyDomainTests(TestCase):
         self.assertContains(response, "Test Patient 1")
         self.assertContains(response, "Urology MRI")
         self.assertContains(response, "Urology WSI")
+        self.assertContains(response, "Urology Confocale")
 
     def test_urology_filter_by_folder(self):
         response = self.client.get(f"/urology/patients/?folder={self.folder.id}")
@@ -62,8 +64,9 @@ class UrologyDomainTests(TestCase):
         upload_resp = self.client.get("/urology/upload/")
         self.assertEqual(upload_resp.status_code, 200)
         self.assertContains(upload_resp, "Upload patient data")
-        self.assertContains(upload_resp, "Urology MRI")
-        self.assertContains(upload_resp, "Digital Pathology WSI")
+        self.assertContains(upload_resp, "<h3>MRI</h3>")
+        self.assertContains(upload_resp, "<h3>WSI</h3>")
+        self.assertContains(upload_resp, "<h3>Confocale</h3>")
 
     def test_urology_upload_post(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -71,6 +74,7 @@ class UrologyDomainTests(TestCase):
 
         mri_file = SimpleUploadedFile("mri_scan.nii.gz", b"FAKE_NIFTI_DATA", content_type="application/gzip")
         wsi_file = SimpleUploadedFile("histology.tiff", b"FAKE_TIFF_DATA", content_type="image/tiff")
+        confocal_file = SimpleUploadedFile("confocal_slice.tiff", b"FAKE_CONFOCAL_TIFF", content_type="image/tiff")
 
         post_data = {
             "name": "Uploaded Urology Patient",
@@ -79,6 +83,7 @@ class UrologyDomainTests(TestCase):
             "tags_text": "upload-test, biopsy",
             "urology-mri": mri_file,
             "urology-wsi": wsi_file,
+            "urology-confocal": confocal_file,
         }
 
         resp = self.client.post("/urology/upload/", data=post_data, follow=True)
@@ -90,16 +95,19 @@ class UrologyDomainTests(TestCase):
         self.assertIn("biopsy", patient.tag_names())
 
         files = FileRegistry.objects.filter(domain="urology", urology_patient=patient)
-        self.assertEqual(files.count(), 2)
+        self.assertEqual(files.count(), 3)
         mri_fr = files.filter(modality__slug="urology-mri").first()
         wsi_fr = files.filter(modality__slug="urology-wsi").first()
+        confocal_fr = files.filter(modality__slug="urology-confocal").first()
         self.assertIsNotNone(mri_fr)
         self.assertIsNotNone(wsi_fr)
+        self.assertIsNotNone(confocal_fr)
         self.assertEqual(mri_fr.file_type, "urology_mri_raw")
         self.assertEqual(wsi_fr.file_type, "urology_wsi_raw")
+        self.assertEqual(confocal_fr.file_type, "urology_confocal_raw")
 
         jobs = Job.objects.filter(domain="urology", urology_patient=patient)
-        self.assertEqual(jobs.count(), 2)
+        self.assertEqual(jobs.count(), 3)
 
     def test_urology_patient_detail(self):
         detail_resp = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
@@ -109,6 +117,10 @@ class UrologyDomainTests(TestCase):
         self.assertContains(detail_resp, "urology-multimodal-bar")
         self.assertContains(detail_resp, "urologyMriStage")
         self.assertContains(detail_resp, "urologyWsiStagePanel")
+        self.assertContains(detail_resp, "urologyConfocalStagePanel")
+        self.assertNotContains(detail_resp, "Split Correlation View")
+        self.assertNotContains(detail_resp, "MRI (mpMRI)")
+        self.assertNotContains(detail_resp, "WSI (Histopathology)")
 
         # Verify Captions menu/tab is active by default instead of Files
         self.assertContains(detail_resp, 'class="side-tab is-active" data-tab-target="captions"')

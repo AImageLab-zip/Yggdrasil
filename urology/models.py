@@ -223,6 +223,10 @@ class Patient(models.Model):
     def urology_wsi_job_status(self):
         return self._processing_status("urology-wsi")
 
+    @property
+    def urology_confocal_job_status(self):
+        return self._processing_status("urology-confocal")
+
 
 class VoiceCaption(VoiceCaptionBase):
     user = models.ForeignKey(

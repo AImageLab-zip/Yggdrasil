@@ -71,11 +71,11 @@ Cornerstone3D (v2.0+) includes a `WSIViewport` class. However, `WSIViewport` doe
 ## 3. Step 1: Upload & Storage Ingestion
 
 ### A. User Interaction on `/urology/upload/`
-1. The user navigates to `/urology/upload/` and opens the **Histopathology (WSI)** upload section.
-2. The UI renders the dropzone configured in `templates/common/upload/modalities/urology-wsi.html` with:
-   - Modality slug: `urology-wsi`
-   - Accepted file extensions: `.tif`, `.tiff`, `.svs`, `.ndpi`
-   - Input name: `urology-wsi`
+1. The user navigates to `/urology/upload/` and opens the **WSI** or **Confocale** upload section.
+2. The UI renders the dropzones configured in `templates/common/upload/modalities/urology-wsi.html` and `urology-confocal.html` with:
+   - Modality slugs: `urology-wsi`, `urology-confocal`
+   - Accepted file extensions: `.tif`, `.tiff`, `.svs`, `.ndpi`, `.mrxs`, `.dz`
+   - Input names: `urology-wsi`, `urology-confocal`
 
 ### B. Upload Submission & Server Processing
 1. When the user clicks **Upload and Process**, the browser submits a `multipart/form-data` POST request to `/urology/upload/`.
@@ -223,6 +223,7 @@ When the user zooms into 40× (Level 0):
 | Path | Purpose |
 |---|---|
 | `templates/common/upload/modalities/urology-wsi.html` | WSI upload dropzone template |
+| `templates/common/upload/modalities/urology-confocal.html` | Confocale upload dropzone template |
 | `urology/views.py` | Ingestion, SHA-256 computation, and `FileRegistry` persistence |
 | `urology/wsi_reader.py` | IFD parsing, virtual downsampling, MPP calibration, in-memory frame cache (`_FRAME_CACHE`) |
 | `urology/wsi_views.py` | Tile & metadata API endpoints, permission checks, disk tile cache (`WSI_TILES_DIR`) |
@@ -231,5 +232,5 @@ When the user zooms into 40× (Level 0):
 | `frontend/imaging/wsi/wsiViewport.js` | Canvas 2D scene renderer, hierarchical LOD fallback, center-out prioritized queue |
 | `frontend/imaging/wsi/wsiControls.js` | UI toolbar event bindings (Pan, Ruler, Magnifications, Save) |
 | `frontend/imaging/wsi/wsiMeasurements.js` | Annotation payload formatting and persistence adapter |
-| `templates/urology/patient_detail_content.html` | Stage layout and modality switcher (`mri`, `wsi`, `split`) |
+| `templates/urology/patient_detail_content.html` | Stage layout and modality switcher (`mri`, `wsi`, `confocal`) |
 | `docs/wsi_viewer_process.md` | Full architectural reference and operational manual |
