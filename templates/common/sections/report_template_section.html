@@ -117,149 +117,167 @@
                 {# ===================== UROLOGY ===================== #}
                 <div class="report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}">
                     <!-- MRI -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
-                        <span class="report-modality-title">Multiparametric Magnetic Resonance</span>
+                    <div class="report-urology-modality" data-urology-modality="mri">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
+                            <span class="report-modality-title">Multiparametric Magnetic Resonance</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Prostate Volume and PSA Density</summary><p>Volumetric measurement of the prostate gland (in cc or ml) and PSA density calculation.</p></details></li>
+                            <li><details><summary>Index Lesion Location and Sector</summary><p>Anatomical site according to the 39-sector map (peripheral zone, transition zone, anterior fibromuscular stroma; apex, mid-gland, base; left or right).</p></details></li>
+                            <li><details><summary>Lesion Dimensions</summary><p>Maximal diameter of the primary target lesion, specifying axial and longitudinal dimensions in millimeters.</p></details></li>
+                            <li><details><summary>PI-RADS Score</summary><p>Overall risk category (1 to 5) assigned to the index lesion and secondary foci according to PI-RADS v2.1 criteria.</p></details></li>
+                            <li><details><summary>T2 Signal and Diffusion Restriction (ADC)</summary><p>Degree of hypointensity on T2 sequences and severity of restricted diffusion on the ADC map and high b-value images.</p></details></li>
+                            <li><details><summary>Dynamic Contrast Enhancement</summary><p>Assessment of contrast enhancement: presence or absence of early and focal wash-in/wash-out compared to normal parenchyma.</p></details></li>
+                            <li><details><summary>Extraprostatic Extension</summary><p>Evidence of capsule transgression: length of capsular contact, bulging, asymmetry, or frank cortical breach.</p></details></li>
+                            <li><details><summary>Seminal Vesicle Invasion</summary><p>Unilateral or bilateral involvement of the base or tubular architecture of the seminal vesicles.</p></details></li>
+                            <li><details><summary>Neurovascular Bundle and Bladder Neck</summary><p>Assessment of contact with or abutment of left/right neurovascular bundles, bladder neck, and external urethral sphincter.</p></details></li>
+                            <li><details><summary>Regional Lymph Nodes and Pelvic Skeleton</summary><p>Presence of suspicious lymphadenopathy in obturator and iliac chains, and any pelvic bone alterations.</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-3 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Prostate Volume and PSA Density</summary><p>Volumetric measurement of the prostate gland (in cc or ml) and PSA density calculation.</p></details></li>
-                        <li><details><summary>Index Lesion Location and Sector</summary><p>Anatomical site according to the 39-sector map (peripheral zone, transition zone, anterior fibromuscular stroma; apex, mid-gland, base; left or right).</p></details></li>
-                        <li><details><summary>Lesion Dimensions</summary><p>Maximal diameter of the primary target lesion, specifying axial and longitudinal dimensions in millimeters.</p></details></li>
-                        <li><details><summary>PI-RADS Score</summary><p>Overall risk category (1 to 5) assigned to the index lesion and secondary foci according to PI-RADS v2.1 criteria.</p></details></li>
-                        <li><details><summary>T2 Signal and Diffusion Restriction (ADC)</summary><p>Degree of hypointensity on T2 sequences and severity of restricted diffusion on the ADC map and high b-value images.</p></details></li>
-                        <li><details><summary>Dynamic Contrast Enhancement</summary><p>Assessment of contrast enhancement: presence or absence of early and focal wash-in/wash-out compared to normal parenchyma.</p></details></li>
-                        <li><details><summary>Extraprostatic Extension</summary><p>Evidence of capsule transgression: length of capsular contact, bulging, asymmetry, or frank cortical breach.</p></details></li>
-                        <li><details><summary>Seminal Vesicle Invasion</summary><p>Unilateral or bilateral involvement of the base or tubular architecture of the seminal vesicles.</p></details></li>
-                        <li><details><summary>Neurovascular Bundle and Bladder Neck</summary><p>Assessment of contact with or abutment of left/right neurovascular bundles, bladder neck, and external urethral sphincter.</p></details></li>
-                        <li><details><summary>Regional Lymph Nodes and Pelvic Skeleton</summary><p>Presence of suspicious lymphadenopathy in obturator and iliac chains, and any pelvic bone alterations.</p></details></li>
-                    </ul>
 
                     <!-- Confocale -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
-                        <span class="report-modality-title">Fluorescence Confocal Microscopy</span>
+                    <div class="report-urology-modality" data-urology-modality="confocal">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
+                            <span class="report-modality-title">Fluorescence Confocal Microscopy</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Specimen Adequacy and Core Cellularity</summary><p>Assessment of tissue adequacy, cellularity, and target representation prior to downstream processing.</p></details></li>
+                            <li><details><summary>Glandular Architecture and Acinar Packing</summary><p>Optical evaluation of gland crowding, fused or cribriform acinar structures, and lumen preservation in fresh tissue.</p></details></li>
+                            <li><details><summary>Nuclear Atypia and Cellular Pleomorphism</summary><p>Fluorescence confocal detection of nuclear enlargement, hyperchromasia, prominent nucleoli, and loss of polarity.</p></details></li>
+                            <li><details><summary>Basal Cell Layer Integrity</summary><p>Assessment of basal cell layer preservation versus complete disruption, a key hallmark distinguishing benign glands from carcinoma.</p></details></li>
+                            <li><details><summary>Stromal Infiltration and Desmoplasia</summary><p>Identification of infiltrating neoplastic cords or isolated malignant cells disrupting the fibromuscular stroma.</p></details></li>
+                            <li><details><summary>Real-Time Surgical Margin Status (NeuroSAFE)</summary><p>Intraoperative fresh-tissue margin evaluation for neurovascular bundle-sparing prostatectomy (margin positive vs negative).</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-3 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Specimen Adequacy and Core Cellularity</summary><p>Assessment of tissue adequacy, cellularity, and target representation prior to downstream processing.</p></details></li>
-                        <li><details><summary>Glandular Architecture and Acinar Packing</summary><p>Optical evaluation of gland crowding, fused or cribriform acinar structures, and lumen preservation in fresh tissue.</p></details></li>
-                        <li><details><summary>Nuclear Atypia and Cellular Pleomorphism</summary><p>Fluorescence confocal detection of nuclear enlargement, hyperchromasia, prominent nucleoli, and loss of polarity.</p></details></li>
-                        <li><details><summary>Basal Cell Layer Integrity</summary><p>Assessment of basal cell layer preservation versus complete disruption, a key hallmark distinguishing benign glands from carcinoma.</p></details></li>
-                        <li><details><summary>Stromal Infiltration and Desmoplasia</summary><p>Identification of infiltrating neoplastic cords or isolated malignant cells disrupting the fibromuscular stroma.</p></details></li>
-                        <li><details><summary>Real-Time Surgical Margin Status (NeuroSAFE)</summary><p>Intraoperative fresh-tissue margin evaluation for neurovascular bundle-sparing prostatectomy (margin positive vs negative).</p></details></li>
-                    </ul>
 
                     <!-- WSI -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
-                        <span class="report-modality-title">Digital Histopathology</span>
+                    <div class="report-urology-modality" data-urology-modality="wsi">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
+                            <span class="report-modality-title">Digital Histopathology</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Tumor Histotype</summary><p>Histological classification of the neoplasm (usual acinar adenocarcinoma, ductal, mucinous, signet-ring, or neuroendocrine variant).</p></details></li>
+                            <li><details><summary>Gleason Score and ISUP Grade Group</summary><p>Primary and secondary architectural pattern (e.g. 3+4=7 or 4+3=7) and assigned ISUP Grade Group (1 to 5).</p></details></li>
+                            <li><details><summary>Pattern 4 or 5 Percentage and Cribriform Architecture</summary><p>Quantification of poorly differentiated tumor components and presence of cribriform pattern (adverse prognostic factor).</p></details></li>
+                            <li><details><summary>Intraductal Carcinoma</summary><p>Presence or absence of malignant proliferation within pre-existing ducts or acini with preserved basal cells.</p></details></li>
+                            <li><details><summary>Perineural and Vascular Invasion</summary><p>Identification of tumor cells along perineural nerve sheaths and lymphovascular space invasion.</p></details></li>
+                            <li><details><summary>Tumor Extent in Specimen and Surgical Margins</summary><p>Linear millimeters and percentage of tumor tissue per biopsy core; if radical prostatectomy, surgical margin status (R0 negative or R1 positive with extent).</p></details></li>
+                            <li><details><summary>Non-Tumor Parenchyma and Concomitant Lesions</summary><p>Benign or pre-neoplastic findings in surrounding tissue (benign prostatic hyperplasia, prostatitis, atrophy, atypical small acinar proliferation, or high-grade PIN).</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Tumor Histotype</summary><p>Histological classification of the neoplasm (usual acinar adenocarcinoma, ductal, mucinous, signet-ring, or neuroendocrine variant).</p></details></li>
-                        <li><details><summary>Gleason Score and ISUP Grade Group</summary><p>Primary and secondary architectural pattern (e.g. 3+4=7 or 4+3=7) and assigned ISUP Grade Group (1 to 5).</p></details></li>
-                        <li><details><summary>Pattern 4 or 5 Percentage and Cribriform Architecture</summary><p>Quantification of poorly differentiated tumor components and presence of cribriform pattern (adverse prognostic factor).</p></details></li>
-                        <li><details><summary>Intraductal Carcinoma</summary><p>Presence or absence of malignant proliferation within pre-existing ducts or acini with preserved basal cells.</p></details></li>
-                        <li><details><summary>Perineural and Vascular Invasion</summary><p>Identification of tumor cells along perineural nerve sheaths and lymphovascular space invasion.</p></details></li>
-                        <li><details><summary>Tumor Extent in Specimen and Surgical Margins</summary><p>Linear millimeters and percentage of tumor tissue per biopsy core; if radical prostatectomy, surgical margin status (R0 negative or R1 positive with extent).</p></details></li>
-                        <li><details><summary>Non-Tumor Parenchyma and Concomitant Lesions</summary><p>Benign or pre-neoplastic findings in surrounding tissue (benign prostatic hyperplasia, prostatitis, atrophy, atypical small acinar proliferation, or high-grade PIN).</p></details></li>
-                    </ul>
                 </div>
 
                 <div class="report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}">
                     <!-- MRI -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
-                        <span class="report-modality-title">Risonanza Magnetica Multiparametrica</span>
+                    <div class="report-urology-modality" data-urology-modality="mri">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
+                            <span class="report-modality-title">Risonanza Magnetica Multiparametrica</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Volume Prostatico e Densità del PSA</summary><p>Misurazione volumetrica della ghiandola (in cc o ml) e calcolo correlato della densità del PSA (PSA density).</p></details></li>
+                            <li><details><summary>Sede e Settore della Lesione Indice</summary><p>Localizzazione anatomica secondo la mappa a 39 settori (zona periferica, zona di transizione, stroma fibromuscolare anteriore; apice, medio-ghiandola, base; lato destro o sinistro).</p></details></li>
+                            <li><details><summary>Dimensioni della Lesione</summary><p>Diametro massimo della lesione target principale, espresso in millimetri (dimensione assiale e longitudinale).</p></details></li>
+                            <li><details><summary>Punteggio PI-RADS</summary><p>Categoria di rischio globale (da 1 a 5) assegnata alla lesione indice ed eventuali focolai secondari secondo i criteri PI-RADS v2.1.</p></details></li>
+                            <li><details><summary>Intensità T2 e Restrizione in Diffusione (ADC)</summary><p>Morfologia e grado di ipointensità nelle sequenze T2 (focale, lenticolare o cuneiforme) e intensità della restrizione nella mappa ADC ad alto b-value.</p></details></li>
+                            <li><details><summary>Impregnazione di Contrasto Dinamica</summary><p>Valutazione della perfusione con gadolinio: presenza o assenza di enhancement precoce e focale (wash-in/wash-out) rispetto al parenchima di fondo.</p></details></li>
+                            <li><details><summary>Estensione Extracapsulare</summary><p>Segni di invasione della capsula prostatica: ampiezza del contatto capsulare, bulging, asimmetria o franche interruzioni della corticale.</p></details></li>
+                            <li><details><summary>Invasione delle Vescicole Seminali</summary><p>Coinvolgimento mono o bilaterale della base o della struttura tubulare delle vescicole seminali.</p></details></li>
+                            <li><details><summary>Rapporti con Fasci Neurovascolari e Collo Vescicale</summary><p>Valutazione del contatto o inglobamento dei fasci neurovascolari destro e sinistro, del collo vescicale e dello sfintere uretrale striato.</p></details></li>
+                            <li><details><summary>Linfonodi Regionali e Scheletro del Bacino</summary><p>Presenza di linfoadenopatie sospette nelle stazioni otturatorie e iliache, ed eventuali alterazioni ossee del bacino.</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-3 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Volume Prostatico e Densità del PSA</summary><p>Misurazione volumetrica della ghiandola (in cc o ml) e calcolo correlato della densità del PSA (PSA density).</p></details></li>
-                        <li><details><summary>Sede e Settore della Lesione Indice</summary><p>Localizzazione anatomica secondo la mappa a 39 settori (zona periferica, zona di transizione, stroma fibromuscolare anteriore; apice, medio-ghiandola, base; lato destro o sinistro).</p></details></li>
-                        <li><details><summary>Dimensioni della Lesione</summary><p>Diametro massimo della lesione target principale, espresso in millimetri (dimensione assiale e longitudinale).</p></details></li>
-                        <li><details><summary>Punteggio PI-RADS</summary><p>Categoria di rischio globale (da 1 a 5) assegnata alla lesione indice ed eventuali focolai secondari secondo i criteri PI-RADS v2.1.</p></details></li>
-                        <li><details><summary>Intensità T2 e Restrizione in Diffusione (ADC)</summary><p>Morfologia e grado di ipointensità nelle sequenze T2 (focale, lenticolare o cuneiforme) e intensità della restrizione nella mappa ADC ad alto b-value.</p></details></li>
-                        <li><details><summary>Impregnazione di Contrasto Dinamica</summary><p>Valutazione della perfusione con gadolinio: presenza o assenza di enhancement precoce e focale (wash-in/wash-out) rispetto al parenchima di fondo.</p></details></li>
-                        <li><details><summary>Estensione Extracapsulare</summary><p>Segni di invasione della capsula prostatica: ampiezza del contatto capsulare, bulging, asimmetria o franche interruzioni della corticale.</p></details></li>
-                        <li><details><summary>Invasione delle Vescicole Seminali</summary><p>Coinvolgimento mono o bilaterale della base o della struttura tubulare delle vescicole seminali.</p></details></li>
-                        <li><details><summary>Rapporti con Fasci Neurovascolari e Collo Vescicale</summary><p>Valutazione del contatto o inglobamento dei fasci neurovascolari destro e sinistro, del collo vescicale e dello sfintere uretrale striato.</p></details></li>
-                        <li><details><summary>Linfonodi Regionali e Scheletro del Bacino</summary><p>Presenza di linfoadenopatie sospette nelle stazioni otturatorie e iliache, ed eventuali alterazioni ossee del bacino.</p></details></li>
-                    </ul>
 
                     <!-- Confocale -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
-                        <span class="report-modality-title">Microscopia Confocale Real-Time</span>
+                    <div class="report-urology-modality" data-urology-modality="confocal">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
+                            <span class="report-modality-title">Microscopia Confocale Real-Time</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Adeguatezza del Prelievo e Rappresentatività</summary><p>Valutazione dell'adeguatezza del campione, cellularità e reale rappresentatività del tessuto bersaglio prima del processamento definitivo.</p></details></li>
+                            <li><details><summary>Architettura Ghiandolare ed Orientamento Acinare</summary><p>Valutazione ottica dell'affollamento ghiandolare, presenza di acini fusi o cribriformi e preservazione del lume su tessuto fresco.</p></details></li>
+                            <li><details><summary>Morfologia Nucleare ed Atipia Cellulare</summary><p>Riconoscimento confocale a fluorescenza di ingrandimento nucleare, ipercromasia, nucleoli prominenti e perdita della polarità.</p></details></li>
+                            <li><details><summary>Integrità dello Strato di Cellule Basali</summary><p>Verifica della presenza continua o dell'interruzione/perdita dello strato di cellule basali, criterio cardine di malignità.</p></details></li>
+                            <li><details><summary>Infiltrazione Stromale e Reazione Desmoplastica</summary><p>Identificazione di cordoni neoplastici infiltranti o singole cellule tumorali nello stroma fibromuscolare prostatico.</p></details></li>
+                            <li><details><summary>Margini Chirurgici in Tempo Reale (NeuroSAFE)</summary><p>Valutazione intraoperatoria su tessuto fresco dei margini di resezione per il risparmio dei fasci neurovascolari (margine negativo o positivo).</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-3 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Adeguatezza del Prelievo e Rappresentatività</summary><p>Valutazione dell'adeguatezza del campione, cellularità e reale rappresentatività del tessuto bersaglio prima del processamento definitivo.</p></details></li>
-                        <li><details><summary>Architettura Ghiandolare ed Orientamento Acinare</summary><p>Valutazione ottica dell'affollamento ghiandolare, presenza di acini fusi o cribriformi e preservazione del lume su tessuto fresco.</p></details></li>
-                        <li><details><summary>Morfologia Nucleare ed Atipia Cellulare</summary><p>Riconoscimento confocale a fluorescenza di ingrandimento nucleare, ipercromasia, nucleoli prominenti e perdita della polarità.</p></details></li>
-                        <li><details><summary>Integrità dello Strato di Cellule Basali</summary><p>Verifica della presenza continua o dell'interruzione/perdita dello strato di cellule basali, criterio cardine di malignità.</p></details></li>
-                        <li><details><summary>Infiltrazione Stromale e Reazione Desmoplastica</summary><p>Identificazione di cordoni neoplastici infiltranti o singole cellule tumorali nello stroma fibromuscolare prostatico.</p></details></li>
-                        <li><details><summary>Margini Chirurgici in Tempo Reale (NeuroSAFE)</summary><p>Valutazione intraoperatoria su tessuto fresco dei margini di resezione per il risparmio dei fasci neurovascolari (margine negativo o positivo).</p></details></li>
-                    </ul>
 
                     <!-- WSI -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
-                        <span class="report-modality-title">Istopatologia Digitale</span>
+                    <div class="report-urology-modality" data-urology-modality="wsi">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
+                            <span class="report-modality-title">Istopatologia Digitale</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Istotipo Tumorale</summary><p>Classificazione istologica della neoplasia (adenocarcinoma acinare usuale, variante duttale, mucinosa, a cellule ad anello con castone o neuroendocrina).</p></details></li>
+                            <li><details><summary>Gleason Score e Grade Group ISUP</summary><p>Definizione del pattern primario e secondario (es. 3+4=7 o 4+3=7) e assegnazione del rispettivo Grade Group ISUP da 1 a 5.</p></details></li>
+                            <li><details><summary>Percentuale Pattern 4 o 5 e Architettura Cribriforme</summary><p>Quantificazione percentuale delle componenti tumorali scarsamente differenziate e riscontro di pattern cribriforme, importante indicatore prognostico.</p></details></li>
+                            <li><details><summary>Carcinoma Intraduttale</summary><p>Presenza o assenza di proliferazione maligna all'interno di dotti o acini preesistenti con parziale conservazione dello strato basale.</p></details></li>
+                            <li><details><summary>Invasione Perineurale e Vascolare</summary><p>Rilevamento di cellule neoplastiche lungo i tronchi nervosi perineurali e angioinvasione nei vasi ematici o linfatici.</p></details></li>
+                            <li><details><summary>Estensione Tumorale nel Prelievo e Margini Chirurgici</summary><p>Millimetri lineari e percentuale di tessuto tumorale per carota bioptica; in caso di pezzo operatorio, stato dei margini chirurgici (R0 negativo o R1 positivo con sede ed estensione).</p></details></li>
+                            <li><details><summary>Parenchima Non Tumorale e Lesioni Concomitanti</summary><p>Reperti benigni o preneoplastici nel tessuto circostante (iperplasia prostatica benigna, prostatite, atrofia, atipia a piccoli acini o PIN di alto grado).</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Istotipo Tumorale</summary><p>Classificazione istologica della neoplasia (adenocarcinoma acinare usuale, variante duttale, mucinosa, a cellule ad anello con castone o neuroendocrina).</p></details></li>
-                        <li><details><summary>Gleason Score e Grade Group ISUP</summary><p>Definizione del pattern primario e secondario (es. 3+4=7 o 4+3=7) e assegnazione del rispettivo Grade Group ISUP da 1 a 5.</p></details></li>
-                        <li><details><summary>Percentuale Pattern 4 o 5 e Architettura Cribriforme</summary><p>Quantificazione percentuale delle componenti tumorali scarsamente differenziate e riscontro di pattern cribriforme, importante indicatore prognostico.</p></details></li>
-                        <li><details><summary>Carcinoma Intraduttale</summary><p>Presenza o assenza di proliferazione maligna all'interno di dotti o acini preesistenti con parziale conservazione dello strato basale.</p></details></li>
-                        <li><details><summary>Invasione Perineurale e Vascolare</summary><p>Rilevamento di cellule neoplastiche lungo i tronchi nervosi perineurali e angioinvasione nei vasi ematici o linfatici.</p></details></li>
-                        <li><details><summary>Estensione Tumorale nel Prelievo e Margini Chirurgici</summary><p>Millimetri lineari e percentuale di tessuto tumorale per carota bioptica; in caso di pezzo operatorio, stato dei margini chirurgici (R0 negativo o R1 positivo con sede ed estensione).</p></details></li>
-                        <li><details><summary>Parenchima Non Tumorale e Lesioni Concomitanti</summary><p>Reperti benigni o preneoplastici nel tessuto circostante (iperplasia prostatica benigna, prostatite, atrofia, atipia a piccoli acini o PIN di alto grado).</p></details></li>
-                    </ul>
                 </div>
 
                 <div class="report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}">
                     <!-- MRI -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
-                        <span class="report-modality-title">Multiparametrische Magnetresonanztomographie</span>
+                    <div class="report-urology-modality" data-urology-modality="mri">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
+                            <span class="report-modality-title">Multiparametrische Magnetresonanztomographie</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Prostatavolumen und PSA-Dichte</summary><p>Volumetrische Messung der Prostata (in cm³ oder ml) und Berechnung der PSA-Dichte.</p></details></li>
+                            <li><details><summary>Lage und Sektor der Indexläsion</summary><p>Anatomische Lokalisation gemäß 39-Sektoren-Karte (periphere Zone, Transitionszone, anteriores fibromuskuläres Stroma; Apex, Mitteldrüse, Basis; links oder rechts).</p></details></li>
+                            <li><details><summary>Läsionsabmessungen</summary><p>Maximaler Durchmesser der Hauptläsion mit Angabe der axialen und longitudinalen Maße in Millimetern.</p></details></li>
+                            <li><details><summary>PI-RADS-Score</summary><p>Gesamtrisikokategorie (1 bis 5) für die Indexläsion und sekundäre Herde gemäß PI-RADS v2.1.</p></details></li>
+                            <li><details><summary>T2-Signal und Diffusionsrestriktion (ADC)</summary><p>Grad der Hypointensität auf T2-Sequenzen und Ausmaß der Diffusionsrestriktion auf der ADC-Karte.</p></details></li>
+                            <li><details><summary>Dynamische Kontrastmittelanreicherung</summary><p>Beurteilung der Kontrastmittelperfusion: Vorhandensein oder Fehlen einer frühzeitigen fokalen Anreicherung.</p></details></li>
+                            <li><details><summary>Extraprostatische Ausbreitung</summary><p>Kapselüberschreitung: Kapselkontaktlänge, Bulging, Asymmetrie oder Kapseldurchbruch.</p></details></li>
+                            <li><details><summary>Samenblaseninvagination</summary><p>Ein- oder beidseitige Infiltration der Basis oder tubulären Architektur der Samenblasen.</p></details></li>
+                            <li><details><summary>Gefäß-Nerven-Bündel und Blasenhals</summary><p>Verhältnis zum rechten/linken neurovaskulären Bündel, Blasenhals und äußeren Harnröhrensphinkter.</p></details></li>
+                            <li><details><summary>Regionale Lymphknoten und Beckenskelett</summary><p>Verdächtige Lymphknoten in Obturator- und Iliakalstationen sowie eventuelle ossäre Läsionen.</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-3 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Prostatavolumen und PSA-Dichte</summary><p>Volumetrische Messung der Prostata (in cm³ oder ml) und Berechnung der PSA-Dichte.</p></details></li>
-                        <li><details><summary>Lage und Sektor der Indexläsion</summary><p>Anatomische Lokalisation gemäß 39-Sektoren-Karte (periphere Zone, Transitionszone, anteriores fibromuskuläres Stroma; Apex, Mitteldrüse, Basis; links oder rechts).</p></details></li>
-                        <li><details><summary>Läsionsabmessungen</summary><p>Maximaler Durchmesser der Hauptläsion mit Angabe der axialen und longitudinalen Maße in Millimetern.</p></details></li>
-                        <li><details><summary>PI-RADS-Score</summary><p>Gesamtrisikokategorie (1 bis 5) für die Indexläsion und sekundäre Herde gemäß PI-RADS v2.1.</p></details></li>
-                        <li><details><summary>T2-Signal und Diffusionsrestriktion (ADC)</summary><p>Grad der Hypointensität auf T2-Sequenzen und Ausmaß der Diffusionsrestriktion auf der ADC-Karte.</p></details></li>
-                        <li><details><summary>Dynamische Kontrastmittelanreicherung</summary><p>Beurteilung der Kontrastmittelperfusion: Vorhandensein oder Fehlen einer frühzeitigen fokalen Anreicherung.</p></details></li>
-                        <li><details><summary>Extraprostatische Ausbreitung</summary><p>Kapselüberschreitung: Kapselkontaktlänge, Bulging, Asymmetrie oder Kapseldurchbruch.</p></details></li>
-                        <li><details><summary>Samenblaseninvagination</summary><p>Ein- oder beidseitige Infiltration der Basis oder tubulären Architektur der Samenblasen.</p></details></li>
-                        <li><details><summary>Gefäß-Nerven-Bündel und Blasenhals</summary><p>Verhältnis zum rechten/linken neurovaskulären Bündel, Blasenhals und äußeren Harnröhrensphinkter.</p></details></li>
-                        <li><details><summary>Regionale Lymphknoten und Beckenskelett</summary><p>Verdächtige Lymphknoten in Obturator- und Iliakalstationen sowie eventuelle ossäre Läsionen.</p></details></li>
-                    </ul>
 
                     <!-- Confocale -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
-                        <span class="report-modality-title">Fluoreszenz-Konfokalmikroskopie</span>
+                    <div class="report-urology-modality" data-urology-modality="confocal">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
+                            <span class="report-modality-title">Fluoreszenz-Konfokalmikroskopie</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Probenadäquanz und Zellularität</summary><p>Beurteilung der Gewebeadäquanz, Zellularität und Repräsentativität des Zielgewebes vor der definitiven Aufarbeitung.</p></details></li>
+                            <li><details><summary>Drüsenarchitektur und Azinusformation</summary><p>Optische Beurteilung von Drüsendichte, fusionierten oder kribriformen Azinusstrukturen und Lumenerhalt am Frischgewebe.</p></details></li>
+                            <li><details><summary>Zellkernatypien und Pleomorphie</summary><p>Fluoreszenz-konfokaler Nachweis von Kernvergrößerung, Hyperchromasie, prominenten Nukleolen und Polaritätsverlust.</p></details></li>
+                            <li><details><summary>Integrität der Basalzellschicht</summary><p>Überprüfung auf Erhalt oder Unterbrechung/Verlust der Basalzellschicht als zentrales Malignitätskriterium.</p></details></li>
+                            <li><details><summary>Stromainfiltration und desmoplastische Reaktion</summary><p>Nachweis infiltrierender Tumorzellstränge oder Einzelzellen im fibromuskulären Prostatastroma.</p></details></li>
+                            <li><details><summary>Intraoperative Schnittrandbeurteilung (NeuroSAFE)</summary><p>Intraoperative Schnellschnitt-orientierte Beurteilung der Resektionsränder zum Erhalt des Gefäß-Nerven-Bündels (negativ vs. positiv).</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-3 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Probenadäquanz und Zellularität</summary><p>Beurteilung der Gewebeadäquanz, Zellularität und Repräsentativität des Zielgewebes vor der definitiven Aufarbeitung.</p></details></li>
-                        <li><details><summary>Drüsenarchitektur und Azinusformation</summary><p>Optische Beurteilung von Drüsendichte, fusionierten oder kribriformen Azinusstrukturen und Lumenerhalt am Frischgewebe.</p></details></li>
-                        <li><details><summary>Zellkernatypien und Pleomorphie</summary><p>Fluoreszenz-konfokaler Nachweis von Kernvergrößerung, Hyperchromasie, prominenten Nukleolen und Polaritätsverlust.</p></details></li>
-                        <li><details><summary>Integrität der Basalzellschicht</summary><p>Überprüfung auf Erhalt oder Unterbrechung/Verlust der Basalzellschicht als zentrales Malignitätskriterium.</p></details></li>
-                        <li><details><summary>Stromainfiltration und desmoplastische Reaktion</summary><p>Nachweis infiltrierender Tumorzellstränge oder Einzelzellen im fibromuskulären Prostatastroma.</p></details></li>
-                        <li><details><summary>Intraoperative Schnittrandbeurteilung (NeuroSAFE)</summary><p>Intraoperative Schnellschnitt-orientierte Beurteilung der Resektionsränder zum Erhalt des Gefäß-Nerven-Bündels (negativ vs. positiv).</p></details></li>
-                    </ul>
 
                     <!-- WSI -->
-                    <div class="report-modality-header">
-                        <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
-                        <span class="report-modality-title">Digitale Histopathologie</span>
+                    <div class="report-urology-modality" data-urology-modality="wsi">
+                        <div class="report-modality-header">
+                            <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
+                            <span class="report-modality-title">Digitale Histopathologie</span>
+                        </div>
+                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
+                            <li><details><summary>Tumorhistotyp</summary><p>Histologische Tumorklassifikation (azinäres Adenokarzinom, duktale Variante, muzinös oder neuroendokrin).</p></details></li>
+                            <li><details><summary>Gleason-Score und ISUP-Gradgruppe</summary><p>Primäres und sekundäres Wachstumsmuster (z.B. 3+4=7) und ISUP-Gradgruppe (1 bis 5).</p></details></li>
+                            <li><details><summary>Anteil Pattern 4 oder 5 und kribriforme Architektur</summary><p>Prozentualer Anteil schlecht differenzierter Muster und Nachweis kribriformer Formationen.</p></details></li>
+                            <li><details><summary>Intraduktales Karzinom</summary><p>Vorhandensein oder Fehlen maligner Proliferation in präexistenten Gängen mit erhaltenen Basalzellen.</p></details></li>
+                            <li><details><summary>Perineurale und Vaskuläre Invasion</summary><p>Infiltration perineuraler Spalträume und Nachweis von Angioinvasion in Blut- oder Lymphgefäßen.</p></details></li>
+                            <li><details><summary>Tumorausdehnung im Präparat und Resektionsränder</summary><p>Tumorbefall in Millimetern und Prozent pro Stanzbiopsie; bei Prostatektomie Resektionsrandstatus (R0 oder R1).</p></details></li>
+                            <li><details><summary>Nicht-tumoröses Parenchym und Begleitbefunde</summary><p>Gutartige oder prämaligne Veränderungen (benigne Prostatahyperplasie, Prostatitis, Atrophie, ASAP oder High-Grade-PIN).</p></details></li>
+                        </ul>
                     </div>
-                    <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                        <li><details><summary>Tumorhistotyp</summary><p>Histologische Tumorklassifikation (azinäres Adenokarzinom, duktale Variante, muzinös oder neuroendokrin).</p></details></li>
-                        <li><details><summary>Gleason-Score und ISUP-Gradgruppe</summary><p>Primäres und sekundäres Wachstumsmuster (z.B. 3+4=7) und ISUP-Gradgruppe (1 bis 5).</p></details></li>
-                        <li><details><summary>Anteil Pattern 4 oder 5 und kribriforme Architektur</summary><p>Prozentualer Anteil schlecht differenzierter Muster und Nachweis kribriformer Formationen.</p></details></li>
-                        <li><details><summary>Intraduktales Karzinom</summary><p>Vorhandensein oder Fehlen maligner Proliferation in präexistenten Gängen mit erhaltenen Basalzellen.</p></details></li>
-                        <li><details><summary>Perineurale und Vaskuläre Invasion</summary><p>Infiltration perineuraler Spalträume und Nachweis von Angioinvasion in Blut- oder Lymphgefäßen.</p></details></li>
-                        <li><details><summary>Tumorausdehnung im Präparat und Resektionsränder</summary><p>Tumorbefall in Millimetern und Prozent pro Stanzbiopsie; bei Prostatektomie Resektionsrandstatus (R0 oder R1).</p></details></li>
-                        <li><details><summary>Nicht-tumoröses Parenchym und Begleitbefunde</summary><p>Gutartige oder prämaligne Veränderungen (benigne Prostatahyperplasie, Prostatitis, Atrophie, ASAP oder High-Grade-PIN).</p></details></li>
-                    </ul>
                 </div>
 
                 {% else %}

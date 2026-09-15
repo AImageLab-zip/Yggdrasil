@@ -41,6 +41,8 @@ class UrologyDomainTests(TestCase):
         self.assertIn("urology-mri", slugs)
         self.assertIn("urology-wsi", slugs)
         self.assertIn("urology-confocal", slugs)
+        mri_mod = self.project.modalities.get(slug="urology-mri")
+        self.assertEqual(mri_mod.icon, "fas fa-magnet")
 
     def test_urology_root_redirect(self):
         response = self.client.get("/urology/")
@@ -54,6 +56,8 @@ class UrologyDomainTests(TestCase):
         self.assertContains(response, "Urology MRI")
         self.assertContains(response, "Urology WSI")
         self.assertContains(response, "Urology Confocale")
+        # MRI icon in patient list matches patient view
+        self.assertContains(response, "fa-magnet")
 
     def test_urology_filter_by_folder(self):
         response = self.client.get(f"/urology/patients/?folder={self.folder.id}")
@@ -558,6 +562,14 @@ class UrologyDomainTests(TestCase):
         self.assertContains(resp, 'id="urologyModeConfocalBtn"')
         self.assertNotContains(resp, "(mpMRI)")
         self.assertNotContains(resp, "(Histopathology)")
+        # Top right available images notice removed
+        self.assertNotContains(resp, 'id="urologyModeNotice"')
+        # Appropriate empty state for missing MRI
+        self.assertContains(resp, "No MRI Scan Uploaded")
+        # Report template voices divided per modality
+        self.assertContains(resp, 'data-urology-modality="mri"')
+        self.assertContains(resp, 'data-urology-modality="confocal"')
+        self.assertContains(resp, 'data-urology-modality="wsi"')
 
     def test_urology_annotations_mri_persistence(self):
         mri_mod = Modality.objects.get(slug="urology-mri")

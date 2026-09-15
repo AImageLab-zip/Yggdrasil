@@ -30,7 +30,7 @@ class Command(BaseCommand):
                 "slug": "urology-mri",
                 "domain": "urology",
                 "description": "Urology Magnetic Resonance Imaging (.nii, .nii.gz)",
-                "icon": "fas fa-file-waveform",
+                "icon": "fas fa-magnet",
                 "label": "MRI",
                 "supported_extensions": [".nii", ".nii.gz"],
                 "requires_multiple_files": False,

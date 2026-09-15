@@ -60,7 +60,7 @@ _DOMAIN_BLURBS = {
     "maxillo": "Dental & maxillofacial imaging — bite classification, IOS, CBCT and panoramic extraction.",
     "brain": "Brain tumor MRI — multi-sequence review with AI-assisted captioning.",
     "laparoscopy": "Surgical video annotation — frame-accurate segmentation and tagging.",
-    "urology": "Urological oncology — MRI, WSI digital pathology, and Confocale microscopy.",
+    "urology": "Urological oncology — MRI, WSI digital pathology and Confocale microscopy.",
 }
 
 # Default glyph per domain when Project.icon is blank.

@@ -186,10 +186,11 @@ def patient_list(request):
                 jobs_by_modality.get(slug, []),
                 bool(files_by_modality.get(slug)),
             )
+            icon = modality.icon or ("fas fa-magnet" if slug == "urology-mri" else "")
             modality_status_list.append({
                 "slug": slug,
                 "name": modality.name,
-                "icon": modality.icon or "",
+                "icon": icon,
                 "label": modality.label or "",
                 "status": status,
             })
@@ -281,7 +282,7 @@ def patient_list(request):
             {
                 "slug": m.slug,
                 "name": m.name,
-                "icon": m.icon or "",
+                "icon": m.icon or ("fas fa-magnet" if m.slug == "urology-mri" else ""),
                 "label": m.label or "",
                 "value": status_filters.get(m.slug, ""),
             }

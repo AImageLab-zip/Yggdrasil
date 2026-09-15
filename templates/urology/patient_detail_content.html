@@ -62,6 +62,34 @@
     min-height: 480px;
     overflow: hidden;
 }
+.urology-empty-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 400px;
+    padding: 3rem 1.5rem;
+    text-align: center;
+}
+.urology-empty-stage i {
+    margin-bottom: 1rem;
+}
+.urology-empty-stage h5 {
+    color: #f8fafc;
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    display: block;
+    width: 100%;
+}
+.urology-empty-stage p {
+    color: #94a3b8;
+    font-size: 0.875rem;
+    margin: 0;
+    display: block;
+    width: 100%;
+}
 </style>
 
 <!-- JSON Script Payloads -->
@@ -89,25 +117,6 @@
             <i class="fas fa-eye me-1"></i>Confocale
         </button>
     </div>
-    <span class="text-muted small ms-auto" id="urologyModeNotice">
-        {% if has_mri and has_wsi and has_confocal %}
-            MRI, WSI &amp; Confocale available
-        {% elif has_mri and has_wsi %}
-            MRI &amp; WSI available
-        {% elif has_mri and has_confocal %}
-            MRI &amp; Confocale available
-        {% elif has_wsi and has_confocal %}
-            WSI &amp; Confocale available
-        {% elif has_mri %}
-            MRI volume available
-        {% elif has_wsi %}
-            WSI slide available
-        {% elif has_confocal %}
-            Confocale slide available
-        {% else %}
-            Upload scans to view
-        {% endif %}
-    </span>
 </div>
 
 <div class="patient-view-grid">
@@ -116,6 +125,7 @@
         <div class="urology-stage-container" id="urologyStageContainer">
             <!-- MRI Stage (Cornerstone3D Volume Grid) -->
             <div class="urology-stage-panel" id="urologyMriStage">
+                {% if has_mri %}
                 <!-- MRI Toolbar -->
                 <div class="viewer-toolbar">
                     <div class="viewer-toolbar__group" id="cbctControls">
@@ -127,6 +137,13 @@
                 <div class="viewer-grid" style="flex: 1; min-height: 480px; display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr; width: 100%; height: 100%;">
                     <div class="viewer-window" data-window-index="0"></div>
                 </div>
+                {% else %}
+                <div class="urology-empty-stage">
+                    <i class="fas fa-magnet fa-3x text-secondary"></i>
+                    <h5>No MRI Scan Uploaded</h5>
+                    <p>Upload an MRI volume (.nii, .nii.gz, .dcm) for this patient to view it here.</p>
+                </div>
+                {% endif %}
             </div>
 
             <!-- WSI Stage (Digital Pathology Multi-resolution Pyramid) -->
@@ -185,10 +202,10 @@
                 <!-- Host for WSI tiled canvas, SVG layer, minimap -->
                 <div class="wsi-canvas-host" id="urologyWsiStage"></div>
                 {% else %}
-                <div class="d-flex flex-column align-items-center justify-content-center h-100 p-5 text-center text-muted">
-                    <i class="fas fa-microscope fa-3x mb-3 text-secondary"></i>
-                    <h5 class="text-light">No WSI Slide Uploaded</h5>
-                    <p class="small">Upload a digital pathology slide (.tiff, .svs) for this patient to view it here.</p>
+                <div class="urology-empty-stage">
+                    <i class="fas fa-microscope fa-3x text-secondary"></i>
+                    <h5>No WSI Slide Uploaded</h5>
+                    <p>Upload a digital pathology slide (.tiff, .svs) for this patient to view it here.</p>
                 </div>
                 {% endif %}
             </div>
@@ -249,10 +266,10 @@
                 <!-- Host for Confocale tiled canvas, SVG layer, minimap -->
                 <div class="wsi-canvas-host" id="urologyConfocalStage"></div>
                 {% else %}
-                <div class="d-flex flex-column align-items-center justify-content-center h-100 p-5 text-center text-muted">
-                    <i class="fas fa-eye fa-3x mb-3 text-secondary"></i>
-                    <h5 class="text-light">No Confocale Slide Uploaded</h5>
-                    <p class="small">Upload a confocal microscopy slide (.tiff, .svs) for this patient to view it here.</p>
+                <div class="urology-empty-stage">
+                    <i class="fas fa-eye fa-3x text-secondary"></i>
+                    <h5>No Confocale Slide Uploaded</h5>
+                    <p>Upload a confocal microscopy slide (.tiff, .svs) for this patient to view it here.</p>
                 </div>
                 {% endif %}
             </div>
@@ -320,6 +337,20 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (mode === 'confocal') {
             confocalBtn?.classList.add('active');
             confocalStagePanel?.classList.remove('is-hidden');
+        }
+
+        // Show only the report template voices for the active modality
+        document.querySelectorAll('.report-urology-modality').forEach(el => {
+            if (el.dataset.urologyModality === mode) {
+                el.classList.remove('d-none');
+            } else {
+                el.classList.add('d-none');
+            }
+        });
+
+        const modIndicator = document.getElementById('modalityIndicator');
+        if (modIndicator) {
+            modIndicator.textContent = mode === 'wsi' ? 'WSI' : (mode === 'confocal' ? 'Confocale' : 'MRI');
         }
 
         // Trigger window resize and WSI viewport adaptation
