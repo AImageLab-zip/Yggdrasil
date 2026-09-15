@@ -161,6 +161,10 @@ class IosSurfaceRenderTests(TestCase):
             "landmarkSizeRange",
             "toggleAxis",
             "toggleWhiteBackground",
+            "iosUpperJawColor",
+            "iosUpperJawColorHex",
+            "iosLowerJawColor",
+            "iosLowerJawColorHex",
         ):
             self.assertIn(f'id="{element_id}"', html, element_id)
 
@@ -251,6 +255,8 @@ class IosSurfaceRenderTests(TestCase):
         self.assertIn('id="toggleWhiteBackground"', html)
         self.assertIn('id="toggleAxis"', html)
         self.assertIn('id="landmarkSizeRange"', html)
+        self.assertIn('id="iosUpperJawColor"', html)
+        self.assertIn('id="iosLowerJawColor"', html)
         # The annotation half is gated, and stays gated.
         self.assertNotIn('id="toggleLandmarkMode"', html)
         self.assertNotIn('id="saveLandmarks"', html)
