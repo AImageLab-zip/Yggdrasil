@@ -132,7 +132,12 @@ class UrologyDomainTests(TestCase):
         detail_resp = self.client.get(f"/urology/patient/{self.patient.patient_id}/")
         self.assertEqual(detail_resp.status_code, 200)
 
-        # Verify key Italian Urology report voices are rendered
+        # Verify modality section headers in Italian
+        self.assertContains(detail_resp, "Risonanza Magnetica Multiparametrica")
+        self.assertContains(detail_resp, "Microscopia Confocale Real-Time")
+        self.assertContains(detail_resp, "Istopatologia Digitale")
+
+        # Verify 1. MRI report voices
         self.assertContains(detail_resp, "Volume Prostatico e Densità del PSA")
         self.assertContains(detail_resp, "Sede e Settore della Lesione Indice")
         self.assertContains(detail_resp, "Dimensioni della Lesione")
@@ -143,6 +148,16 @@ class UrologyDomainTests(TestCase):
         self.assertContains(detail_resp, "Invasione delle Vescicole Seminali")
         self.assertContains(detail_resp, "Rapporti con Fasci Neurovascolari e Collo Vescicale")
         self.assertContains(detail_resp, "Linfonodi Regionali e Scheletro del Bacino")
+
+        # Verify 2. Confocale report voices
+        self.assertContains(detail_resp, "Adeguatezza del Prelievo e Rappresentatività")
+        self.assertContains(detail_resp, "Architettura Ghiandolare ed Orientamento Acinare")
+        self.assertContains(detail_resp, "Morfologia Nucleare ed Atipia Cellulare")
+        self.assertContains(detail_resp, "Integrità dello Strato di Cellule Basali")
+        self.assertContains(detail_resp, "Infiltrazione Stromale e Reazione Desmoplastica")
+        self.assertContains(detail_resp, "Margini Chirurgici in Tempo Reale (NeuroSAFE)")
+
+        # Verify 3. WSI report voices
         self.assertContains(detail_resp, "Istotipo Tumorale")
         self.assertContains(detail_resp, "Gleason Score e Grade Group ISUP")
         self.assertContains(detail_resp, "Percentuale Pattern 4 o 5 e Architettura Cribriforme")
@@ -150,7 +165,9 @@ class UrologyDomainTests(TestCase):
         self.assertContains(detail_resp, "Invasione Perineurale e Vascolare")
         self.assertContains(detail_resp, "Estensione Tumorale nel Prelievo e Margini Chirurgici")
         self.assertContains(detail_resp, "Parenchima Non Tumorale e Lesioni Concomitanti")
-        self.assertContains(detail_resp, "Correlazione Radio-Patologica e Reperti Conclusivi")
+
+        # Verify multimodal section 4 is removed
+        self.assertNotContains(detail_resp, "Correlazione Radio-Patologica e Reperti Conclusivi")
 
         # Verify no repeated acronym clutter in report section
         self.assertNotContains(detail_resp, "(RM)")
