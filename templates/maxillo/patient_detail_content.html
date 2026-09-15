@@ -69,6 +69,28 @@
                                 <span>White background</span>
                             </label>
                         </div>
+                        {% comment %}
+                        Jaw colour is per-session and deliberately not saved: it is a
+                        reading aid for one scan on one screen, not a property of the
+                        study, and a reload returns both arches to the defaults in
+                        `JAW_COLORS`. The picker and the hex field are two views of one
+                        value -- each writes the other -- because the people who want a
+                        specific colour have it written down as hex, and the people who
+                        just want "greener" want to drag.
+                        {% endcomment %}
+                        <div class="ios-vis-menu__section">
+                            <span class="ios-vis-menu__label">Jaw colour</span>
+                            <div class="ios-vis-menu__row ios-vis-menu__color">
+                                <span class="ios-vis-menu__color-name">Upper</span>
+                                <input type="color" id="iosUpperJawColor" aria-label="Upper jaw colour">
+                                <input type="text" id="iosUpperJawColorHex" class="ios-vis-menu__hex" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Upper jaw colour, hex">
+                            </div>
+                            <div class="ios-vis-menu__row ios-vis-menu__color">
+                                <span class="ios-vis-menu__color-name">Lower</span>
+                                <input type="color" id="iosLowerJawColor" aria-label="Lower jaw colour">
+                                <input type="text" id="iosLowerJawColorHex" class="ios-vis-menu__hex" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Lower jaw colour, hex">
+                            </div>
+                        </div>
                         <div class="ios-vis-menu__section">
                             <span class="ios-vis-menu__label">Landmark types</span>
                             <div class="ios-landmark-vis-grid" id="iosLandmarkVisibilityWorkbench" aria-label="Landmark type visibility"></div>

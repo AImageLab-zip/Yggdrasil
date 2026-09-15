@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { bootstrapMeshLandmarks, readMeshData } from '../imaging/mesh/bootstrap.js';
+import { hexColor } from '../imaging/mesh/meshControls.js';
+import { JAW_COLORS } from '../imaging/mesh/meshViewport.js';
 
 /**
  * The editor, end to end, against a fake viewport.
@@ -63,6 +65,8 @@ function fakeDocument(payload = PAYLOAD, { ids = null } = {}) {
         'landmarkPlaceTool', 'landmarkSelectTool',
         'undoLandmark', 'redoLandmark', 'deleteLandmark', 'saveLandmarks',
         'landmarkSizeRange', 'toggleAxis', 'toggleWhiteBackground',
+        'iosUpperJawColor', 'iosUpperJawColorHex',
+        'iosLowerJawColor', 'iosLowerJawColorHex',
     ];
     for (const id of known) elements.set(id, element(id));
 
@@ -87,7 +91,9 @@ function fakeDocument(payload = PAYLOAD, { ids = null } = {}) {
 
 /** A viewport that records what it was asked to draw. */
 function fakeViewport() {
-    const calls = { markers: [], cameras: [], visibility: { upper: true, lower: true } };
+    const calls = {
+        markers: [], cameras: [], visibility: { upper: true, lower: true }, jawColors: {},
+    };
     return {
         calls,
         async load() { calls.loaded = true; },
@@ -95,6 +101,7 @@ function fakeViewport() {
         setJawVisible(jaw, visible) { calls.visibility[jaw] = visible; },
         jawVisibility: () => ({ ...calls.visibility }),
         setWireframe(on) { calls.wireframe = on; },
+        setJawColor(jaw, rgb) { calls.jawColors[jaw] = rgb; },
         setAxesVisible(on) { calls.axes = on; },
         setBackground(name) { calls.background = name; },
         setCamera(name) { calls.cameras.push(name); return null; },
@@ -317,6 +324,48 @@ test('the background follows the page theme, and White overrides it', async () =
     box.checked = false;
     box.fire('change');
     assert.equal(viewport.calls.background, 'light', 'it returned to the theme, not to dark');
+});
+
+test('each jaw colour control seeds from the defaults and drives its own arch', async () => {
+    const { doc, viewport } = await mountFixture();
+    // Seeded at mount, so the picker, the hex field and the arch agree before anything is
+    // touched -- the template ships no `value`, because `JAW_COLORS` is the only place the
+    // defaults are written.
+    assert.deepEqual(viewport.calls.jawColors.upper, [...JAW_COLORS.upper]);
+    assert.equal(doc.get('iosUpperJawColor').value, hexColor(JAW_COLORS.upper));
+    assert.equal(doc.get('iosLowerJawColorHex').value, hexColor(JAW_COLORS.lower));
+
+    const picker = doc.get('iosUpperJawColor');
+    picker.value = '#00ff00';
+    picker.fire('input');
+    assert.deepEqual(viewport.calls.jawColors.upper, [0, 255, 0]);
+    assert.equal(doc.get('iosUpperJawColorHex').value, '#00ff00', 'the hex field followed');
+    // The other arch was not touched: one control per jaw, and they must not share.
+    assert.deepEqual(viewport.calls.jawColors.lower, [...JAW_COLORS.lower]);
+});
+
+test('a typed hex recolours, and junk reverts the field instead of the arch', async () => {
+    const { doc, viewport } = await mountFixture();
+    const field = doc.get('iosLowerJawColorHex');
+
+    field.value = '#123456';
+    field.fire('change');
+    assert.deepEqual(viewport.calls.jawColors.lower, [0x12, 0x34, 0x56]);
+    assert.equal(doc.get('iosLowerJawColor').value, '#123456', 'the picker followed');
+
+    // The case the `null` from `parseHexColor` exists for: the arch keeps the colour it
+    // has and the field is rewritten, rather than the jaw going black on a typo.
+    field.value = 'not a colour';
+    field.fire('change');
+    assert.deepEqual(viewport.calls.jawColors.lower, [0x12, 0x34, 0x56]);
+    assert.equal(field.value, '#123456');
+});
+
+test('a page without the colour controls still mounts', async () => {
+    // Same contract as every other control here: absent means degraded, never thrown.
+    const doc = fakeDocument(PAYLOAD, { ids: ['scan-viewer'] });
+    const { viewport } = await mountFixture({ doc });
+    assert.equal(viewport.calls.loaded, true);
 });
 
 test('the landmark switches report their state', async () => {

@@ -373,6 +373,25 @@ export function createMeshViewport({
         );
     }
 
+    /**
+     * Recolour one arch.
+     *
+     * The actor's property, never a reload. `loadJaw` passes the colour as
+     * `geometryData.color`, but that is read once while the STL is being parsed and the
+     * result is cached under `geometryId` -- so asking the loader for the same mesh in a
+     * new colour returns the cached geometry in the old one, and evicting the cache to
+     * force a re-parse would re-download the scan to change three numbers.
+     *
+     * Takes 0-255, like `JAW_COLORS`, and converts here: vtk properties are 0-1 and this
+     * is the only place that mismatch has to be known about.
+     */
+    function setJawColor(jaw, [red, green, blue]) {
+        const entry = meshes.get(jaw);
+        if (!entry) return;
+        entry.actor.getProperty().setColor(red / 255, green / 255, blue / 255);
+        viewport.render();
+    }
+
     function setWireframe(on) {
         for (const { actor } of meshes.values()) {
             actor.getProperty().setRepresentation(on ? 1 : 2);
@@ -470,6 +489,7 @@ export function createMeshViewport({
         setAxesVisible,
         setJawVisible,
         jawVisibility,
+        setJawColor,
         setWireframe,
         setBackground,
         setCamera,
