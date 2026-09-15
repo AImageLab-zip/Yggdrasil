@@ -37,7 +37,7 @@ def rerun_processing(request, patient_id):
             data = {}
 
         requested_jobs = data.get("jobs")
-        if requested_jobs is None:
+        if requested_jobs is None or (isinstance(requested_jobs, list) and not requested_jobs):
             # Default to all modalities if not specified
             requested_jobs = list(get_modality_slugs())
 

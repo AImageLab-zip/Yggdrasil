@@ -907,18 +907,69 @@ def bulk_purge_patients(request):
 @login_required
 @require_POST
 def rerun_processing(request, patient_id):
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        user_is_project_admin(request.user, patient.project)
+        or (patient.folder and user_can_write_patient_annotations(request.user, patient))
+    ):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+
+    try:
+        data = _json.loads(request.body) if request.body else {}
+    except _json.JSONDecodeError:
+        data = {}
+
+    requested_jobs = data.get("jobs")
+    if not requested_jobs:
+        requested_jobs = list(patient.modalities.values_list("slug", flat=True))
+
+    from common.models import Job
+    jobs = Job.objects.filter(domain="urology", urology_patient=patient)
+    if requested_jobs:
+        jobs = jobs.filter(modality_slug__in=requested_jobs)
+
+    updated = jobs.update(
+        status="pending", started_at=None, completed_at=None, worker_id="", error_logs=""
+    )
     return JsonResponse(
-        {"success": False, "error": "Urology processing rerun is not configured."},
-        status=400,
+        {
+            "success": True,
+            "message": f"Reprocessing queued for {updated} job(s)." if updated else "No existing jobs to rerun.",
+        }
     )
 
 
 @login_required
 @require_POST
 def bulk_rerun_processing(request):
+    try:
+        data = _json.loads(request.body) if request.body else {}
+    except _json.JSONDecodeError:
+        data = {}
+
+    scan_ids = data.get("scan_ids", [])
+    if not isinstance(scan_ids, list) or not scan_ids:
+        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
+
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    for p in patients:
+        if not user_is_project_admin(request.user, p.project):
+            return JsonResponse({"success": False, "error": f"Permission denied for patient {p.patient_id}"}, status=403)
+
+    from common.models import Job
+    jobs = Job.objects.filter(domain="urology", urology_patient__in=patients)
+    requested_jobs = data.get("jobs")
+    if requested_jobs and isinstance(requested_jobs, list):
+        jobs = jobs.filter(modality_slug__in=requested_jobs)
+
+    updated = jobs.update(
+        status="pending", started_at=None, completed_at=None, worker_id="", error_logs=""
+    )
     return JsonResponse(
-        {"success": False, "error": "Urology bulk processing rerun is not configured."},
-        status=400,
+        {
+            "success": True,
+            "message": f"Reprocessing queued for {updated} job(s) across {len(patients)} scan(s)." if updated else "No jobs updated.",
+        }
     )
 
 

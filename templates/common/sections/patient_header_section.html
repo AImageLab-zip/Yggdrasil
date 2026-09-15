@@ -41,7 +41,14 @@
         </div>
     </div>
     {% if user_profile.is_admin %}
-    <div class="patient-header__actions">
+    {% firstof request.resolver_match.namespace 'maxillo' as ns %}
+    {% with rerun_url_name=ns|add:':rerun_processing' delete_url_name=ns|add:':delete_patient' list_url_name=ns|add:':patient_list' %}
+    <div class="patient-header__actions"
+         data-rerun-url="{% url rerun_url_name patient.patient_id %}"
+         data-delete-url="{% url delete_url_name patient.patient_id %}"
+         data-list-url="{% url list_url_name %}"
+         data-csrf="{{ csrf_token }}">
+        {% csrf_token %}
         <button type="button" class="btn btn-secondary btn-sm" id="headerRerunBtn">
             <i class="fas fa-rotate" aria-hidden="true"></i>Rerun
         </button>
@@ -49,43 +56,86 @@
             <i class="fas fa-trash" aria-hidden="true"></i>Delete
         </button>
     </div>
+    {% endwith %}
     <script>
     (function () {
+        var actionsEl = document.querySelector('.patient-header__actions');
+        var patientId = {{ patient.patient_id|default:0 }};
+        var ns = window.projectNamespace || 'maxillo';
+        var rerunUrl = (actionsEl && actionsEl.dataset.rerunUrl) || ('/' + ns + '/patient/' + patientId + '/rerun-processing/');
+        var deleteUrl = (actionsEl && actionsEl.dataset.deleteUrl) || ('/' + ns + '/patient/' + patientId + '/delete/');
+        var listUrl = (actionsEl && actionsEl.dataset.listUrl) || ('/' + ns + '/');
+
         function csrf() {
+            if (actionsEl && actionsEl.dataset.csrf && actionsEl.dataset.csrf.length >= 32) return actionsEl.dataset.csrf;
+            var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+            if (input && input.value && input.value.length >= 32) return input.value;
+            var token = '{{ csrf_token }}';
+            if (token && token.length >= 32) return token;
             var m = document.cookie.match(/csrftoken=([^;]+)/);
-            return m ? m[1] : '';
+            return (m && m[1] && m[1].length >= 32) ? m[1] : '';
+        }
+        function notify(type, msg) {
+            if (window.appNotify) {
+                window.appNotify(type, msg);
+            } else if (window.showNotification) {
+                window.showNotification(type, msg);
+            } else {
+                alert((type === 'error' ? 'Error: ' : '') + msg);
+            }
         }
         var rerunBtn = document.getElementById('headerRerunBtn');
         var deleteBtn = document.getElementById('headerDeleteBtn');
-        var patientId = {{ patient.patient_id }};
 
         if (rerunBtn) {
             rerunBtn.addEventListener('click', function () {
                 if (!confirm('Rerun processing for all modalities on this patient?')) return;
-                fetch('/' + window.projectNamespace + '/patient/' + patientId + '/rerun-processing/', {
+                rerunBtn.disabled = true;
+                fetch(rerunUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
                     body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
-                }).then(function (r) { return r.json(); }).then(function (data) {
-                    if (data.success) { window.location.reload(); }
-                    else if (window.appNotify) { window.appNotify('error', data.error || 'Failed to rerun jobs'); }
-                }).catch(function () {
-                    if (window.appNotify) window.appNotify('error', 'Network error');
+                }).then(function (r) {
+                    return r.json().catch(function () {
+                        return { success: false, error: 'Server returned ' + r.status + ' (' + r.statusText + ')' };
+                    });
+                }).then(function (data) {
+                    if (data.success) {
+                        notify('success', data.message || 'Processing queued');
+                        setTimeout(function () { window.location.reload(); }, 500);
+                    } else {
+                        notify('error', data.error || 'Failed to rerun jobs');
+                    }
+                }).catch(function (err) {
+                    notify('error', err.message || 'Network error');
+                }).finally(function () {
+                    rerunBtn.disabled = false;
                 });
             });
         }
         if (deleteBtn) {
             deleteBtn.addEventListener('click', function () {
                 if (!confirm('Delete this patient? This cannot be undone.')) return;
-                fetch('/' + window.projectNamespace + '/patient/' + patientId + '/delete/', {
+                deleteBtn.disabled = true;
+                fetch(deleteUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
                     body: JSON.stringify({})
-                }).then(function (r) { return r.json(); }).then(function (data) {
-                    if (data.success) { window.location.href = '/' + window.projectNamespace + '/'; }
-                    else if (window.appNotify) { window.appNotify('error', data.error || 'Failed to delete patient'); }
-                }).catch(function () {
-                    if (window.appNotify) window.appNotify('error', 'Network error');
+                }).then(function (r) {
+                    return r.json().catch(function () {
+                        return { success: false, error: 'Server returned ' + r.status + ' (' + r.statusText + ')' };
+                    });
+                }).then(function (data) {
+                    if (data.success) {
+                        notify('success', data.message || 'Patient deleted');
+                        window.location.href = listUrl;
+                    } else {
+                        notify('error', data.error || 'Failed to delete patient');
+                    }
+                }).catch(function (err) {
+                    notify('error', err.message || 'Network error');
+                }).finally(function () {
+                    deleteBtn.disabled = false;
                 });
             });
         }
