@@ -12,8 +12,8 @@ from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 from PIL import Image, ImageOps, TiffImagePlugin
 
-# Disable PIL decompression bomb limit for high-resolution pathology slides (e.g. >89M pixels)
-Image.MAX_IMAGE_PIXELS = None
+# Set a safe high ceiling (250 megapixels) for high-resolution pathology slides while protecting against decompression bombs
+Image.MAX_IMAGE_PIXELS = 250_000_000
 
 # Register missing BigTIFF pixel modes in Pillow's TiffImagePlugin table
 for byte_order in (b"II", b"MM"):

@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ("annotations", "0004_event_value_text"),
         ("brain", "0021_patient_project_required"),
-        ("common", "0053_fileregistry_urology_patient_and_more"),
+        ("common", "0049_backfill_modality_domain"),
         ("laparoscopy", "0013_patient_project_required"),
         ("maxillo", "0029_patient_project_required"),
     ]

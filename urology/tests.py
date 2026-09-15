@@ -1165,3 +1165,307 @@ class UrologyTextCaptionTests(TestCase):
             self.assertFalse(name.startswith("Urology "))
 
 
+class UrologyAuditRemediationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        call_command("setup_urology_modalities")
+        self.project1 = Project.objects.get(slug="urology")
+        self.project2 = Project.objects.create(
+            name="Urology Project Two",
+            slug="urology-two",
+            domain="urology",
+            is_active=True,
+        )
+
+        self.admin_user = User.objects.create_superuser(
+            username="remediation_admin",
+            email="rem_admin@example.com",
+            password="pass",
+        )
+        self.proj1_admin = User.objects.create_user(
+            username="proj1_admin",
+            email="p1_admin@example.com",
+            password="pass",
+        )
+        self.proj2_admin = User.objects.create_user(
+            username="proj2_admin",
+            email="p2_admin@example.com",
+            password="pass",
+        )
+        self.plain_user = User.objects.create_user(
+            username="plain_user",
+            email="plain@example.com",
+            password="pass",
+        )
+
+        ProjectAccess.objects.create(user=self.proj1_admin, project=self.project1, role="admin")
+        ProjectAccess.objects.create(user=self.proj2_admin, project=self.project2, role="admin")
+        ProjectAccess.objects.create(user=self.plain_user, project=self.project1, role="annotator")
+
+        self.folder1 = Folder.objects.create(
+            name="Folder 1", project=self.project1, created_by=self.admin_user
+        )
+        self.folder2 = Folder.objects.create(
+            name="Folder 2", project=self.project2, created_by=self.admin_user
+        )
+
+        self.patient1 = Patient.objects.create(
+            name="Patient 1",
+            folder=self.folder1,
+            project=self.project1,
+            uploaded_by=self.admin_user,
+        )
+        self.patient2 = Patient.objects.create(
+            name="Patient 2",
+            folder=self.folder2,
+            project=self.project2,
+            uploaded_by=self.admin_user,
+        )
+
+    def test_save_urology_modality_file_unique_keys(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from urology.file_utils import save_urology_modality_file
+
+        f1 = SimpleUploadedFile("scan.nii.gz", b"DATA1", content_type="application/gzip")
+        f2 = SimpleUploadedFile("scan.nii.gz", b"DATA2", content_type="application/gzip")
+
+        reg1, _ = save_urology_modality_file(self.patient1, "urology-mri", f1)
+        reg2, _ = save_urology_modality_file(self.patient1, "urology-mri", f2)
+
+        self.assertNotEqual(reg1.file_path, reg2.file_path)
+        self.assertIn("urology-mri_patient_", reg1.file_path)
+        self.assertIn("urology-mri_patient_", reg2.file_path)
+
+    def test_raw_data_locking_add_raw_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.login(username="remediation_admin", password="pass")
+
+        VoiceCaption.objects.create(
+            patient=self.patient1,
+            user=self.admin_user,
+            text_caption="Locked by caption",
+            processing_status="completed",
+            duration=0.0,
+        )
+
+        test_file = SimpleUploadedFile("new_scan.nii.gz", b"DATA", content_type="application/gzip")
+        url = reverse("urology:add_raw_file", kwargs={"patient_id": self.patient1.patient_id})
+        resp = self.client.post(url, data={"modality": "urology-mri", "file": test_file})
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("voice captions", resp.json()["error"].lower())
+
+    def test_raw_data_locking_delete_raw_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from urology.file_utils import save_urology_modality_file
+
+        f = SimpleUploadedFile("scan.nii.gz", b"DATA", content_type="application/gzip")
+        reg, _ = save_urology_modality_file(self.patient1, "urology-mri", f)
+
+        VoiceCaption.objects.create(
+            patient=self.patient1,
+            user=self.admin_user,
+            text_caption="Locked by caption",
+            processing_status="completed",
+            duration=0.0,
+        )
+
+        self.client.login(username="remediation_admin", password="pass")
+        url = reverse(
+            "urology:delete_raw_file",
+            kwargs={"patient_id": self.patient1.patient_id, "file_id": reg.id},
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("voice captions", resp.json()["error"].lower())
+
+    def test_raw_data_locking_bulk_purge(self):
+        VoiceCaption.objects.create(
+            patient=self.patient1,
+            user=self.admin_user,
+            text_caption="Locked by caption",
+            processing_status="completed",
+            duration=0.0,
+        )
+
+        self.client.login(username="remediation_admin", password="pass")
+        url = reverse("urology:bulk_purge_patients")
+        resp = self.client.post(
+            url,
+            data={"scan_ids": [self.patient1.patient_id]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("is locked by existing annotations", resp.json()["error"])
+
+    def test_project_aware_permissions_folders(self):
+        # proj1_admin should not be able to rename folder2 in project2
+        self.client.login(username="proj1_admin", password="pass")
+        rename_url = reverse("urology:rename_folder", kwargs={"folder_id": self.folder2.id})
+        resp = self.client.post(
+            rename_url,
+            data={"name": "Hacked Name"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # proj1_admin cannot move patient2 (project2) into folder1
+        move_url = reverse("urology:move_patients_to_folder")
+        resp = self.client.post(
+            move_url,
+            data={"scan_ids": [self.patient2.patient_id], "folder_id": self.folder1.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # proj1_admin cannot bulk delete patient2
+        del_url = reverse("urology:bulk_delete_patients")
+        resp = self.client.post(
+            del_url,
+            data={"scan_ids": [self.patient2.patient_id]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # proj1_admin CAN bulk delete patient1
+        resp_ok = self.client.post(
+            del_url,
+            data={"scan_ids": [self.patient1.patient_id]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_ok.status_code, 200)
+        self.patient1.refresh_from_db()
+        self.assertTrue(self.patient1.deleted)
+
+    def test_upload_patient_respects_form_cleaned_project(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.login(username="remediation_admin", password="pass")
+
+        # Set session to project1
+        session = self.client.session
+        session["current_project_id"] = self.project1.id
+        session.save()
+
+        mri_file = SimpleUploadedFile("mri.nii.gz", b"NIFTI_BYTES", content_type="application/gzip")
+        post_data = {
+            "name": "Cross Project Patient",
+            "project": self.project2.id,  # Explicitly select project2
+            "folder": self.folder2.id,
+            "urology-mri": mri_file,
+        }
+
+        resp = self.client.post("/urology/upload/", data=post_data, follow=True)
+        self.assertEqual(resp.status_code, 200)
+
+        created_patient = Patient.objects.get(name="Cross Project Patient")
+        self.assertEqual(created_patient.project, self.project2)
+        self.assertEqual(created_patient.folder, self.folder2)
+
+    def test_create_folder_project_aware(self):
+        # proj2_admin creates folder in project2 explicitly
+        self.client.login(username="proj2_admin", password="pass")
+        create_url = reverse("urology:create_folder")
+        resp = self.client.post(
+            create_url,
+            data={"name": "P2 Folder", "project_id": self.project2.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        folder = Folder.objects.get(name="P2 Folder")
+        self.assertEqual(folder.project, self.project2)
+
+        # proj1_admin cannot create folder in project2
+        self.client.login(username="proj1_admin", password="pass")
+        resp = self.client.post(
+            create_url,
+            data={"name": "Hacked Folder", "project_id": self.project2.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # proj1_admin without explicit project_id creates in entry project (project1)
+        resp = self.client.post(
+            create_url,
+            data={"name": "P1 Folder"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        p1_folder = Folder.objects.get(name="P1 Folder")
+        self.assertEqual(p1_folder.project, self.project1)
+
+    def test_add_and_remove_patients_from_folder_project_aware(self):
+        self.client.login(username="proj1_admin", password="pass")
+
+        # Cannot add patient2 (project2) to folder1
+        add_url = reverse("urology:add_patients_to_folder")
+        resp = self.client.post(
+            add_url,
+            data={"scan_ids": [self.patient2.patient_id], "folder_id": self.folder1.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # Cannot remove patient2 (project2) from folder2
+        rem_url = reverse("urology:remove_patients_from_folder")
+        resp = self.client.post(
+            rem_url,
+            data={"scan_ids": [self.patient2.patient_id], "folder_id": self.folder2.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_bulk_purge_patients_project_aware(self):
+        self.client.login(username="proj1_admin", password="pass")
+        purge_url = reverse("urology:bulk_purge_patients")
+
+        # proj1_admin cannot purge patient2 in project2
+        resp = self.client.post(
+            purge_url,
+            data={"scan_ids": [self.patient2.patient_id]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # proj1_admin can purge patient1 in project1
+        resp = self.client.post(
+            purge_url,
+            data={"scan_ids": [self.patient1.patient_id]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Patient.objects.filter(patient_id=self.patient1.patient_id).exists())
+
+    def test_patient_list_can_delete_is_project_aware(self):
+        self.client.login(username="proj1_admin", password="pass")
+        resp = self.client.get(reverse("urology:patient_list"))
+        self.assertEqual(resp.status_code, 200)
+        page_obj = resp.context["page_obj"]
+        can_delete_map = {
+            item["patient"].patient_id: item["can_delete"]
+            for item in page_obj.object_list
+        }
+        self.assertTrue(can_delete_map.get(self.patient1.patient_id))
+        # patient2 is in project2: proj1_admin must NOT have can_delete for it
+        if self.patient2.patient_id in can_delete_map:
+            self.assertFalse(can_delete_map[self.patient2.patient_id])
+
+    def test_wsi_reader_decompression_bomb_protection(self):
+        import warnings
+        from PIL import Image
+        import urology.wsi_reader  # noqa: F401
+
+        self.assertEqual(Image.MAX_IMAGE_PIXELS, 250_000_000)
+        # Verify Pillow issues DecompressionBombWarning when exceeding ceiling
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            Image._decompression_bomb_check((20_000, 20_000))  # 400M pixels > 250M ceiling
+            self.assertTrue(
+                any(issubclass(w.category, Image.DecompressionBombWarning) for w in caught_warnings)
+            )
+
+        # Verify Pillow raises DecompressionBombError beyond 2x ceiling
+        with self.assertRaises(Image.DecompressionBombError):
+            Image._decompression_bomb_check((30_000, 30_000))  # 900M pixels > 2 * 250M
+
+
+
+

@@ -212,7 +212,7 @@ def patient_list(request):
                 patient_files, modality_status_list, patient=patient
             ),
             "can_delete": bool(
-                is_admin
+                user_is_project_admin(request.user, patient.project)
                 or (
                     patient.folder
                     and user_can_delete_single_patient(
@@ -406,8 +406,12 @@ def upload_patient(request):
                         },
                     )
 
-            if project:
+            form_project = patient_upload_form.cleaned_data.get("project")
+            if form_project:
+                patient.project = form_project
+            elif project:
                 patient.project = project
+                patient_upload_form.cleaned_data["project"] = project
             if folder:
                 patient.folder = folder
             patient.save()
@@ -805,21 +809,23 @@ def bulk_delete_patients(request):
             {"success": False, "error": "scan_ids list is required"}, status=400
         )
 
-    if not user_is_project_admin(request.user, "urology"):
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "You do not have permission to bulk delete scans.",
-            },
-            status=403,
-        )
-
-    deleted_count = Patient.objects.filter(patient_id__in=scan_ids).update(deleted=True)
-    if not deleted_count:
+    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not patients.exists():
         return JsonResponse(
             {"success": False, "error": "No valid scans found to delete"}, status=404
         )
 
+    for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "You do not have permission to bulk delete scans.",
+                },
+                status=403,
+            )
+
+    deleted_count = patients.update(deleted=True)
     return JsonResponse(
         {
             "success": True,
@@ -845,21 +851,31 @@ def bulk_purge_patients(request):
             {"success": False, "error": "scan_ids list is required"}, status=400
         )
 
-    if not user_is_project_admin(request.user, "urology"):
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "You do not have permission to permanently delete scans.",
-            },
-            status=403,
-        )
-
     patients = Patient.objects.filter(patient_id__in=scan_ids)
     found_ids = list(patients.values_list("patient_id", flat=True))
     if not found_ids:
         return JsonResponse(
             {"success": False, "error": "No valid scans found to delete"}, status=404
         )
+
+    for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "You do not have permission to permanently delete scans.",
+                },
+                status=403,
+            )
+        reasons = annotation_lock_reasons(patient)
+        if reasons:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": f"Patient {patient.patient_id} is locked by existing annotations ({', '.join(reasons)}) and cannot be purged.",
+                },
+                status=409,
+            )
 
     storage = get_object_storage()
     file_paths = list(
@@ -915,22 +931,28 @@ def user_profile(request, username=None):
 @require_POST
 def create_folder(request):
     try:
-        if not user_is_project_admin(request.user, "urology"):
-            return JsonResponse({"error": "Permission denied"}, status=403)
-
         data = _json.loads(request.body) if request.body else request.POST
         name = (data.get("name") or "").strip()
         if not name:
             return JsonResponse({"error": "Folder name is required"}, status=400)
 
-        current_project_id = request.session.get("current_project_id")
+        project_id = (
+            data.get("project_id")
+            or data.get("project")
+            or request.session.get("current_project_id")
+        )
         project = None
-        if current_project_id:
+        if project_id:
             project = Project.objects.filter(
-                id=current_project_id, domain="urology"
+                id=project_id, domain="urology", is_active=True
             ).first()
         if not project:
-            project = Project.objects.filter(domain="urology").first()
+            from common.permissions import entry_project_for
+
+            project = entry_project_for(request.user, "urology")
+
+        if not project or not user_is_project_admin(request.user, project):
+            return JsonResponse({"error": "Permission denied"}, status=403)
 
         folder, created = Folder.objects.get_or_create(
             name=name,
@@ -969,7 +991,8 @@ def folder_stats(request, folder_id):
 @login_required
 @require_POST
 def rename_folder(request, folder_id):
-    if not user_is_project_admin(request.user, "urology"):
+    folder = get_object_or_404(Folder, id=folder_id)
+    if not user_is_project_admin(request.user, folder.project):
         return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     try:
         data = _json.loads(request.body) if request.body else request.POST
@@ -982,7 +1005,6 @@ def rename_folder(request, folder_id):
         return JsonResponse(
             {"success": False, "error": "Folder name is required"}, status=400
         )
-    folder = get_object_or_404(Folder, id=folder_id)
     folder.name = name
     folder.parent = None
     folder.save(update_fields=["name", "parent"])
@@ -1023,12 +1045,15 @@ def move_patients_to_folder(request):
         return JsonResponse(
             {"success": False, "error": "scan_ids list is required"}, status=400
         )
-    if not user_is_project_admin(request.user, "urology"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = None
     if folder_id and folder_id not in ("root", "all"):
         folder = get_object_or_404(Folder, id=folder_id)
+        if not user_is_project_admin(request.user, folder.project):
+            return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     patients = Patient.objects.filter(patient_id__in=scan_ids)
+    for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     updated = 0
     for patient in patients:
         patient.folder = folder
@@ -1058,10 +1083,13 @@ def add_patients_to_folder(request):
         return JsonResponse(
             {"success": False, "error": "A specific folder_id is required"}, status=400
         )
-    if not user_is_project_admin(request.user, "urology"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     patients = Patient.objects.filter(patient_id__in=scan_ids)
+    for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     updated = 0
     for patient in patients:
         patient.folder = folder
@@ -1090,10 +1118,13 @@ def remove_patients_from_folder(request):
         return JsonResponse(
             {"success": False, "error": "A specific folder_id is required"}, status=400
         )
-    if not user_is_project_admin(request.user, "urology"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     patients = Patient.objects.filter(patient_id__in=scan_ids)
+    for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     updated = 0
     for patient in patients:
         if patient.folder_id != folder.id:
@@ -1909,7 +1940,7 @@ def bulk_upload_patients(request):
                 "folders": folders,
                 "allowed_modalities": allowed_modalities,
                 "ns": "urology",
-                "accept_attribute": ".nii,.nii.gz,.svs,.ndpi,.tif,.tiff,.mrxs,.dz,.dzi",
+                "accept_attribute": ".nii,.nii.gz,.svs,.tiff,.tif",
             },
         )
 
@@ -1948,7 +1979,7 @@ def _bulk_upload_one_urology(request, project, folder, forced_modality, allowed_
         fn_lower = filename.lower()
         if "confocal" in fn_lower:
             modality = next((m for m in allowed_modalities if "confocal" in m.slug), None)
-        if modality is None and any(fn_lower.endswith(ext) for ext in (".svs", ".ndpi", ".tif", ".tiff", ".mrxs", ".dz", ".dzi")):
+        if modality is None and any(fn_lower.endswith(ext) for ext in (".svs", ".tiff", ".tif")) :
             modality = next((m for m in allowed_modalities if "wsi" in m.slug), None)
         elif modality is None and any(fn_lower.endswith(ext) for ext in (".nii", ".nii.gz")):
             modality = next((m for m in allowed_modalities if "mri" in m.slug), None)
@@ -2029,6 +2060,10 @@ def add_raw_file(request, patient_id):
     ):
         return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
 
+    reasons = annotation_lock_reasons(patient)
+    if reasons:
+        return JsonResponse({"ok": False, "error": lock_message(reasons)}, status=409)
+
     modality_slug = request.POST.get("modality") or request.POST.get("modality_slug")
     if not modality_slug:
         return JsonResponse({"ok": False, "error": "Modality is required"}, status=400)
@@ -2067,6 +2102,10 @@ def delete_raw_file(request, patient_id, file_id):
         or user_can_write_patient_annotations(request.user, patient)
     ):
         return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
+
+    reasons = annotation_lock_reasons(patient)
+    if reasons:
+        return JsonResponse({"ok": False, "error": lock_message(reasons)}, status=409)
 
     file_obj = get_object_or_404(patient.files, id=file_id)
     try:

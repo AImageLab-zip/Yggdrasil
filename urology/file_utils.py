@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import uuid
 
 from common.models import FileRegistry, Job, Modality
 from common.object_storage import get_object_storage
@@ -72,7 +73,9 @@ def save_urology_modality_file(patient, modality_slug: str, uploaded_file):
     """Save a Urology modality file and record it in FileRegistry and Job."""
     original_name = uploaded_file.name
     extension, file_format = _detect_extension_and_format(original_name.lower())
-    filename = f"{modality_slug}_patient_{patient.patient_id}{extension}"
+    ts = timezone.now().strftime("%Y%m%d%H%M%S")
+    rand_suffix = uuid.uuid4().hex[:6]
+    filename = f"{modality_slug}_patient_{patient.patient_id}_{ts}_{rand_suffix}{extension}"
     key = f"urology/patients/{patient.patient_id}/raw/{modality_slug}/{filename}"
     key, file_size, file_hash = _upload_uploaded_file_to_storage(key, uploaded_file)
 

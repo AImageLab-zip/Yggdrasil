@@ -555,6 +555,7 @@ def tooth_segmentation_state_api(request, patient_id):
         "maxillo": "patient",
         "brain": "brain_patient",
         "laparoscopy": "laparoscopy_patient",
+        "urology": "urology_patient",
     }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
 
     state = tooth_segmentation_state(patient, domain_field=domain_field)
@@ -712,6 +713,7 @@ def ios_landmarks_state_api(request, patient_id):
         "maxillo": "patient",
         "brain": "brain_patient",
         "laparoscopy": "laparoscopy_patient",
+        "urology": "urology_patient",
     }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
 
     state = ios_landmarks_state(patient, domain_field=domain_field)

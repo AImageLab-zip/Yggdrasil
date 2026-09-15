@@ -19,6 +19,7 @@ S3-compatible object storage, Cornerstone3D viewers). Everything runs in Docker.
 | `maxillo/` | Dental / maxillofacial imaging (`/maxillo/`) — and, historically, the shared auth, admin and runner-API surfaces |
 | `brain/` | Brain-tumour MRI (`/brain/`) |
 | `laparoscopy/` | Surgical video (`/laparoscopy/`) |
+| `urology/` | Urology imaging: MRI, digital pathology / WSI, confocal laser endomicroscopy (`/urology/`) |
 
 Each app has its own `README.md` stating what it owns, what it must not own, and
 where its boundary with `common/` runs — read the relevant one before adding a
@@ -28,7 +29,7 @@ model or a view.
 `common/` must never import a domain app or `annotations`; where it needs domain
 data it goes through `common/domains.py` or `apps.get_model(...)`.
 
-`maxillo`, `brain` and `laparoscopy` are *domains*, registered in exactly one
+`maxillo`, `brain`, `laparoscopy`, and `urology` are *domains*, registered in exactly one
 place (`common/domains.py`). Behaviour derives from that registry — never add an
 `if domain == "…"` branch.
 

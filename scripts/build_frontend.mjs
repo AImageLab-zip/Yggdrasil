@@ -51,7 +51,12 @@ function computeBuildId() {
     for (const file of inputs.sort()) {
         hash.update(relative(ROOT, file).split(sep).join('/'));
         hash.update('\0');
-        hash.update(readFileSync(file));
+        const buf = readFileSync(file);
+        // Normalize CRLF to LF so line-ending differences across environments do not change the hash
+        const content = buf.includes(0x0d)
+            ? Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8')
+            : buf;
+        hash.update(content);
         hash.update('\0');
     }
     return hash.digest('hex').slice(0, 8);
