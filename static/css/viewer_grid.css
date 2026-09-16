@@ -253,7 +253,6 @@
   display: none;
 }
 
-.viewer-window--render .orientation-menu,
 .viewer-window--render .slice-counter,
 .viewer-window--render .measurement-overlay {
   display: none !important;
@@ -591,41 +590,6 @@
     cursor: crosshair;
 }
 
-/* Orientation Menu */
-.orientation-menu {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    display: flex;
-    gap: 4px;
-    z-index: 20;
-}
-
-.orientation-btn {
-    width: 40px;
-    height: 40px;
-    border: none;
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.6);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.orientation-btn:hover {
-    background: rgba(0, 0, 0, 0.8);
-}
-
-.orientation-btn.active {
-    background: #0d6efd;
-}
-
-.orientation-btn.active:hover {
-    background: #0b5ed7;
-}
-
 /* Free Scroll Button */
 .free-scroll-btn {
     width: 40px;
@@ -948,6 +912,58 @@
   right: 0.35rem;
   top: 50%;
   transform: translateY(-50%);
+}
+
+/* -------------------------------------------------------------------------
+ * The per-window plane switcher (brain only -- see `controls.js`).
+ *
+ * Sits above `.ygg-overlay` and, unlike it, takes pointer events: it is the one
+ * thing drawn over the viewport that is meant to be clicked. Deliberately small
+ * -- it covers image, and the NiiVue viewer's 40px version that this replaces
+ * took a visible bite out of a 2D view.
+ * ------------------------------------------------------------------------- */
+
+.ygg-orient {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  gap: 2px;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+.ygg-orient__btn {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ygg-orient__btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+}
+
+.ygg-orient__btn.is-active {
+  background: #0d6efd;
+  color: #fff;
+}
+
+/* These are keyboard-reachable, and they sit on an image whose brightness the user
+   controls -- an outline that only shows on focus-visible is the one ring that is
+   legible against both a black slice and a blown-out one. */
+.ygg-orient__btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
 }
 
 /* The viewport element Cornerstone renders into has to establish a containing block

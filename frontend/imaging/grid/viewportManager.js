@@ -310,6 +310,10 @@ export function createVolumeGrid({
             // grid it is whatever was last dropped here, and four unlabelled MRIs are
             // indistinguishable without it.
             modality: window.modality,
+            // The plane this window is on. Constant on the CBCT grid, where it rewrites
+            // the panel label with the string already there; on the brain grid it is
+            // what makes the label follow the plane switcher.
+            orientation: window.orientation,
             utilities: orientationUtilities,
         });
     };
@@ -367,9 +371,17 @@ export function createVolumeGrid({
         /** Which windows currently share one window/level, for the caller to assert on. */
         refreshVoiSync,
 
-        /** Point a window at a different plane, rebuilding its viewport. */
-        setWindowOrientation: (windowIndex, orientation) =>
-            setWindowOrientation({ renderingEngine, state, windowIndex, orientation, elements, toolGroups }),
+        /** Point a window at a different slice plane. */
+        setWindowOrientation: (windowIndex, orientation) => {
+            const switched = setWindowOrientation({ renderingEngine, state, windowIndex, orientation });
+            // Both of these are rebuilt from state rather than remembered, so calling
+            // them after a switch is how the plane the window is on stays the plane the
+            // rest of the grid thinks it is on: the overlay prints the panel label, and
+            // the VOI synchroniser's membership is derived, not incremental.
+            refreshVoiSync();
+            refreshOverlay(windowIndex);
+            return switched;
+        },
 
         /** Bind one primary tool to the left mouse button across the 2D group. */
         setPrimaryTool: (toolName) =>
@@ -926,43 +938,61 @@ function orientationWarningFor(geometry) {
 
 
 /**
- * Rebuild one window's viewport for a different plane.
+ * Point one window at a different slice plane.
  *
- * `setViewports` rather than mutating the existing viewport: an orthographic and a
- * volume3d viewport are different objects, so switching between a slice and the 3D
- * render is a rebuild whichever way it is expressed. Doing it uniformly means the
- * slice-to-slice case cannot drift from the slice-to-3D one.
+ * **`viewport.setOrientation`, not a rebuild.** This used to call
+ * `renderingEngine.enableElement` for every transition, on the reasoning that a slice
+ * and a 3D render are different viewport objects so a rebuild is needed anyway, and
+ * that doing it uniformly stops the two cases drifting. That is why the function had no
+ * callers: the rebuild *destroys the state a slice-to-slice switch has to keep*. It
+ * re-enables the element without re-calling `setVolumesForViewports`, so the window
+ * comes back with no actor and renders black; Cornerstone's `ELEMENT_DISABLED` handler
+ * drops the viewport from its tool group, and the old code only re-added it when the
+ * group *changed* -- which between two slice planes is never -- so the window silently
+ * lost pan, zoom, scroll, window/level and its measurements; and the VOI, the camera
+ * and any segmentation representation went with it.
+ *
+ * `setOrientation` moves the camera instead and keeps all of it.
+ *
+ * **Slice planes only.** Bringing up the 3D render genuinely is a rebuild, and
+ * {@link enable3DWindow} is that path -- it re-attaches the volume and the tool group,
+ * which is exactly what this function no longer does. Asking for `render` here is a
+ * programming error rather than a user-visible one, so it throws.
+ *
+ * @returns {boolean} true once the window is on the requested plane.
  */
-function setWindowOrientation({ renderingEngine, state, windowIndex, orientation, elements, toolGroups }) {
+function setWindowOrientation({ renderingEngine, state, windowIndex, orientation }) {
     const previous = windowAt(state, windowIndex).orientation;
     if (previous === orientation) {
-        return;
+        return isSliceOrientation(orientation);
     }
-    setOrientation(state, windowIndex, orientation);
+    if (!isSliceOrientation(previous) || !isSliceOrientation(orientation)) {
+        throw new Error(
+            `Cannot switch window ${windowIndex} from '${previous}' to '${orientation}'. ` +
+                'Only the slice planes switch in place; the 3D render is enable3DWindow.'
+        );
+    }
 
     const id = viewportId(windowIndex);
-    const spec = viewportSpecFor(orientation);
-    renderingEngine.enableElement({
-        viewportId: id,
-        type: spec.type,
-        element: elements[windowIndex],
-        defaultOptions: spec.orientation ? { orientation: spec.orientation } : {},
-    });
-
-    // The viewport may have moved between tool groups -- 2D tools do not belong to a
-    // volume render, and vice versa.
-    const previousGroup = toolGroups[toolGroupIdFor(previous)];
-    const nextGroup = toolGroups[toolGroupIdFor(orientation)];
-    if (previousGroup !== nextGroup) {
-        previousGroup.removeViewports(RENDERING_ENGINE_ID, id);
-        nextGroup.addViewport(id, RENDERING_ENGINE_ID);
+    const viewport = renderingEngine.getViewport(id);
+    if (typeof viewport?.setOrientation !== 'function') {
+        throw new Error(`Window ${windowIndex} has no viewport to reorient.`);
     }
 
-    const { volumeId } = windowAt(state, windowIndex);
-    if (volumeId) {
+    // Cornerstone first, state second. A `setOrientation` that throws must leave the
+    // window where it was *and* leave the state saying so, because the plane switcher
+    // reads its active button back out of the state -- a state updated ahead of a failed
+    // call is a viewer claiming to show a plane it is not showing.
+    viewport.setOrientation(viewportSpecFor(orientation).orientation);
+    setOrientation(state, windowIndex, orientation);
+
+    // An empty window is reoriented too, and deliberately: brain opens with four empty
+    // windows, and picking a plane before dropping a series has to be the same gesture
+    // as picking one after. There is nothing to draw until then.
+    if (windowAt(state, windowIndex).volumeId) {
         renderingEngine.renderViewports([id]);
     }
-    return isSliceOrientation(orientation);
+    return true;
 }
 
 /**

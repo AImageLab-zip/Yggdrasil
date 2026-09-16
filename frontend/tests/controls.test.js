@@ -8,9 +8,13 @@ import {
     SAVED_MESSAGE,
     applyAnnotationMode,
     bindControls,
+    bindOrientationControls,
     controlPlan,
     isAnnotationModeOn,
+    ORIENTATION_CHOICES,
+    createOrientationControl,
     loadingIndicator,
+    markActiveOrientation,
     markActiveTool,
 } from '../imaging/grid/controls.js';
 
@@ -535,4 +539,173 @@ test('a clear that fails is reported rather than looking like a success', async 
     await button.handlers.click({});
 
     assert.deepEqual(toasts, [['danger', 'Could not clear the measurements: no viewport']]);
+});
+
+/* ---------------------------------------------------------------------------
+ * The per-window plane switcher.
+ * ------------------------------------------------------------------------- */
+
+/** One DOM node, with the handful of surfaces `createOrientationControl` touches. */
+function fakeNode() {
+    const node = {
+        className: '',
+        textContent: '',
+        type: '',
+        title: '',
+        dataset: {},
+        attributes: {},
+        children: [],
+        handlers: {},
+        classes: new Set(),
+        removed: false,
+        addEventListener(type, handler) {
+            (node.handlers[type] ??= []).push(handler);
+        },
+        setAttribute(name, value) {
+            node.attributes[name] = value;
+        },
+        getAttribute(name) {
+            return node.attributes[name];
+        },
+        appendChild(child) {
+            node.children.push(child);
+            return child;
+        },
+        querySelector: () => null,
+        remove() {
+            node.removed = true;
+        },
+    };
+    node.classList = {
+        toggle(name, on) {
+            if (on) {
+                node.classes.add(name);
+            } else {
+                node.classes.delete(name);
+            }
+            return Boolean(on);
+        },
+    };
+    return node;
+}
+
+/** A document whose `createElement` hands back real-enough nodes. */
+function orientationDoc() {
+    return { createElement: () => fakeNode() };
+}
+
+/** `count` grid windows, each an appendable element. */
+function fakeWindows(count = 4) {
+    return Array.from({ length: count }, () => fakeNode());
+}
+
+test('createOrientationControl builds one button per slice plane', () => {
+    const doc = orientationDoc();
+    const element = fakeNode();
+
+    const control = createOrientationControl(element, { doc });
+
+    assert.deepEqual(
+        control.buttons.map((button) => button.dataset.yggOrientation),
+        ['axial', 'sagittal', 'coronal']
+    );
+    assert.deepEqual(control.buttons.map((button) => button.textContent), ['A', 'S', 'C']);
+    // Not the 3D render: `enable3DWindow` is that path, and offering a button here
+    // would be offering a transition the switcher cannot complete.
+    assert.equal(control.buttons.length, ORIENTATION_CHOICES.length);
+    assert.equal(control.buttons.length, 3);
+    // Appended to the window itself, so it survives `createOverlay` rebuilding its root.
+    assert.equal(element.children.length, 1);
+    assert.equal(element.children[0], control.root);
+    assert.equal(control.root.attributes.role, 'group');
+});
+
+test('markActiveOrientation presses exactly one button', () => {
+    const control = createOrientationControl(fakeNode(), { doc: orientationDoc() });
+
+    markActiveOrientation(control.buttons, 'coronal');
+
+    assert.deepEqual(
+        control.buttons.map((button) => button.getAttribute('aria-pressed')),
+        ['false', 'false', 'true']
+    );
+    assert.deepEqual(
+        control.buttons.map((button) => button.classes.has('is-active')),
+        [false, false, true]
+    );
+});
+
+test('a click switches the window it belongs to, and only that one', async () => {
+    const calls = [];
+    const planes = ['axial', 'axial', 'axial', 'axial'];
+    const grid = {
+        setWindowOrientation(windowIndex, orientation) {
+            calls.push([windowIndex, orientation]);
+            planes[windowIndex] = orientation;
+        },
+    };
+    const elements = fakeWindows();
+    const { controls } = bindOrientationControls({
+        grid,
+        elements,
+        doc: orientationDoc(),
+        windowOrientation: (index) => planes[index],
+    });
+
+    // The sagittal button of window 2.
+    await controls.get(2).buttons[1].handlers.click[0]();
+
+    assert.deepEqual(calls, [[2, 'sagittal']]);
+    assert.deepEqual(planes, ['axial', 'axial', 'sagittal', 'axial']);
+    assert.equal(controls.get(2).buttons[1].getAttribute('aria-pressed'), 'true');
+    // Every other window's buttons are untouched.
+    assert.equal(controls.get(1).buttons[0].getAttribute('aria-pressed'), 'true');
+    assert.equal(controls.get(1).buttons[1].getAttribute('aria-pressed'), 'false');
+});
+
+test('a switch that fails leaves the buttons showing the plane the window is still on', async () => {
+    const planes = ['axial'];
+    const messages = [];
+    const grid = {
+        setWindowOrientation() {
+            throw new Error('no viewport');
+        },
+    };
+    const { controls } = bindOrientationControls({
+        grid,
+        elements: fakeWindows(1),
+        doc: orientationDoc(),
+        setStatus: (message) => messages.push(message),
+        windowOrientation: (index) => planes[index],
+    });
+
+    await controls.get(0).buttons[1].handlers.click[0]();
+
+    // Read back from the state, not from the button that was clicked: a viewer must not
+    // claim to be showing a plane it never reached.
+    assert.equal(controls.get(0).buttons[0].getAttribute('aria-pressed'), 'true');
+    assert.equal(controls.get(0).buttons[1].getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(messages, ['View plane failed: no viewport']);
+});
+
+test('the control swallows the mouse events Cornerstone would read as a drag', () => {
+    const control = createOrientationControl(fakeNode(), { doc: orientationDoc() });
+
+    for (const type of ['mousedown', 'pointerdown']) {
+        let stopped = false;
+        control.root.handlers[type][0]({ stopPropagation: () => { stopped = true; } });
+        // Without this a press on `S` also starts a window/level drag on the image
+        // underneath, because Cornerstone's handlers are bound to the window element
+        // this control sits inside.
+        assert.equal(stopped, true, `${type} must not reach the viewport`);
+    }
+
+    let stopped = false;
+    let defaulted = false;
+    control.root.handlers.contextmenu[0]({
+        stopPropagation: () => { stopped = true; },
+        preventDefault: () => { defaulted = true; },
+    });
+    assert.equal(stopped, true);
+    assert.equal(defaulted, true);
 });
