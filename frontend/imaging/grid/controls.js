@@ -24,6 +24,7 @@
  * rendered markup inverts every click after it, which is the other half of the same bug.
  */
 
+import { ORIENTATIONS } from './layout.js';
 import { NAVIGATION_TOOL } from './measurements.js';
 
 /** Element ids the template provides, and what each is for. */
@@ -359,4 +360,173 @@ export function loadingIndicator(element) {
             root.remove();
         },
     };
+}
+
+/**
+ * The per-window plane switcher: three buttons that repoint one window.
+ *
+ * **Only the brain grid has these.** maxillo pins its four windows to axial, sagittal,
+ * coronal and the render (`FIXED_CBCT_LAYOUT`) and shows all of them at once, so there
+ * is nothing there to switch between; brain's four windows are all axial so that four
+ * series can be compared, and without this a sagittal view of a series is unreachable.
+ * The gate is `fixedMode` in the viewer payload -- see `bootstrap.js`.
+ *
+ * Unlike the toolbar above, these are **built here rather than rendered by a template**.
+ * There is one control per window and the window elements are already discovered from
+ * the DOM; a template loop would put the count in a second place, and a grid whose
+ * markup listed three switchers for four windows would fail silently on the fourth.
+ */
+
+/** Selector for the plane buttons. */
+export const ORIENTATION_BUTTON_SELECTOR = '[data-ygg-orientation]';
+
+/** Class names the stylesheet keys off, in the live `ygg-` convention. */
+export const ORIENTATION_CLASSES = Object.freeze({
+    root: 'ygg-orient',
+    button: 'ygg-orient__btn',
+});
+
+/**
+ * The planes offered, in the order they are shown.
+ *
+ * The three slice planes and **not** `render`: the brain layout pins no 3D window, and
+ * bringing one up is `enable3DWindow`, which has preconditions of its own. Offering a
+ * fourth button here would be offering a transition this control cannot complete.
+ */
+export const ORIENTATION_CHOICES = Object.freeze([
+    Object.freeze({ orientation: ORIENTATIONS.AXIAL, letter: 'A', title: 'Axial view' }),
+    Object.freeze({ orientation: ORIENTATIONS.SAGITTAL, letter: 'S', title: 'Sagittal view' }),
+    Object.freeze({ orientation: ORIENTATIONS.CORONAL, letter: 'C', title: 'Coronal view' }),
+]);
+
+/**
+ * Show which plane a window is on.
+ *
+ * `aria-pressed` as well as a class, for the same reason as {@link markActiveTool}.
+ *
+ * @param {HTMLElement[]} buttons
+ * @param {string} orientation
+ */
+export function markActiveOrientation(buttons, orientation) {
+    for (const button of buttons) {
+        const isActive = button.dataset.yggOrientation === orientation;
+        button.setAttribute('aria-pressed', String(isActive));
+        button.classList?.toggle('is-active', isActive);
+    }
+}
+
+/**
+ * Build one window's plane switcher.
+ *
+ * Appended to the `.viewer-window` as a **sibling of the overlay, never a child**: the
+ * overlay root is `pointer-events: none` so it cannot swallow a drag on the image
+ * (`viewportOverlay.js`), and `createOverlay` removes and rebuilds that root on every
+ * mount, which would take a control nested inside it with it.
+ *
+ * @param {HTMLElement} element the `.viewer-window`.
+ * @param {object} [options]
+ * @param {Document} [options.doc]
+ * @returns {{root: HTMLElement, buttons: HTMLElement[]}|null}
+ */
+export function createOrientationControl(element, { doc = element?.ownerDocument } = {}) {
+    if (!element || !doc) {
+        return null;
+    }
+    // Same reset as `createOverlay`: mounting twice must not stack two switchers.
+    element.querySelector?.(`.${ORIENTATION_CLASSES.root}`)?.remove?.();
+
+    const root = doc.createElement('div');
+    root.className = ORIENTATION_CLASSES.root;
+    root.setAttribute('role', 'group');
+    root.setAttribute('aria-label', 'View plane');
+
+    const buttons = ORIENTATION_CHOICES.map((choice) => {
+        const button = doc.createElement('button');
+        button.type = 'button';
+        button.className = ORIENTATION_CLASSES.button;
+        button.dataset.yggOrientation = choice.orientation;
+        button.title = choice.title;
+        button.setAttribute('aria-label', choice.title);
+        button.textContent = choice.letter;
+        root.appendChild(button);
+        return button;
+    });
+
+    // **Do not delete these.** Cornerstone binds its mouse handlers to the very element
+    // this control sits inside, so without stopping the bubble a press on `S` also
+    // starts a window/level drag -- the button works and the image changes brightness
+    // under it. `contextmenu` is stopped *and* defaulted away because the right button
+    // is a zoom drag on the image and a browser menu over a 24px button is neither.
+    for (const name of ['mousedown', 'pointerdown']) {
+        root.addEventListener(name, (event) => event.stopPropagation());
+    }
+    root.addEventListener('contextmenu', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+    });
+
+    element.appendChild(root);
+    return { root, buttons };
+}
+
+/**
+ * Bind a plane switcher to every window of a grid.
+ *
+ * @param {object} options
+ * @param {object} options.grid the handle from `createVolumeGrid`.
+ * @param {HTMLElement[]} options.elements the `.viewer-window` elements, by index.
+ * @param {Document} [options.doc]
+ * @param {(message: string) => void} [options.setStatus] the toolbar's status line.
+ * @param {(windowIndex: number) => string} options.windowOrientation reads the plane a
+ *   window is actually on. Injected rather than tracked here -- see below.
+ * @returns {{controls: Map<number, object>, refresh: (windowIndex: number) => void}}
+ */
+export function bindOrientationControls({
+    grid,
+    elements = [],
+    doc = globalThis.document,
+    setStatus = () => {},
+    windowOrientation,
+}) {
+    const controls = new Map();
+
+    /** Repaint one window's buttons from the grid's state. */
+    const refresh = (windowIndex) => {
+        const control = controls.get(windowIndex);
+        if (control) {
+            markActiveOrientation(control.buttons, windowOrientation(windowIndex));
+        }
+    };
+
+    for (const [windowIndex, element] of elements.entries()) {
+        const control = createOrientationControl(element, { doc });
+        if (!control) {
+            continue;
+        }
+        controls.set(windowIndex, control);
+        // Seeded from the grid, not from the markup: the buttons are built here, so the
+        // only thing that knows which plane this window opened on is the state.
+        refresh(windowIndex);
+
+        for (const button of control.buttons) {
+            const orientation = button.dataset.yggOrientation;
+            // Not `guarded`: that reports the failure and stops, and here the buttons
+            // have to be repainted either way.
+            button.addEventListener('click', async () => {
+                try {
+                    await grid.setWindowOrientation(windowIndex, orientation);
+                    setStatus('');
+                } catch (error) {
+                    setStatus(`View plane failed: ${error.message}`);
+                }
+                // **Read the plane back from the state, never from the clicked button.**
+                // A switch that threw leaves the window where it was, and a control that
+                // marked the button anyway would be a viewer claiming to show a plane it
+                // is not showing. Same lesson as `isAnnotationModeOn`.
+                refresh(windowIndex);
+            });
+        }
+    }
+
+    return { controls, refresh };
 }

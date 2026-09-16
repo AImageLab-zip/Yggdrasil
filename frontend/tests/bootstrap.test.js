@@ -47,6 +47,11 @@ function fakeDoc({ data = {}, windows = 4, measurable = true } = {}) {
                 className: '',
                 textContent: '',
                 children: [],
+                // Real elements always carry these two, and the brain grid's plane
+                // switcher builds its buttons here: it stamps `data-ygg-orientation`
+                // and binds a click to each one.
+                dataset: {},
+                addEventListener() {},
                 setAttribute() {},
                 appendChild(child) {
                     this.children.push(child);

@@ -193,11 +193,23 @@ export function createOverlay(element, { orientation }) {
  * @param {number} [state.sliceCount]
  * @param {string} [state.windowText] the window/level readout.
  * @param {string} [state.modality] the modality slug this window is showing.
+ * @param {string} [state.orientation] the plane this window is on. Optional, and left
+ *   alone when absent: a grid whose planes are fixed never sends it, and the panel label
+ *   {@link createOverlay} wrote at mount is already right there.
  * @param {object} state.utilities Cornerstone's orientation helpers.
  */
-export function updateOverlay(nodes, { camera, sliceIndex, sliceCount, windowText, modality, utilities }) {
+export function updateOverlay(
+    nodes,
+    { camera, sliceIndex, sliceCount, windowText, modality, orientation, utilities }
+) {
     if (!nodes) {
         return;
+    }
+    // The panel label is the plane's name, so on a grid where a window can be repointed
+    // it has to be refreshed with everything else. Written here rather than by the
+    // switcher so there is one place the label comes from and it cannot go stale.
+    if (orientation !== undefined && nodes.panel) {
+        nodes.panel.textContent = PANEL_LABELS[orientation] ?? '';
     }
     const labels = edgeLabels(camera, utilities);
     for (const edge of ['top', 'bottom', 'left', 'right']) {

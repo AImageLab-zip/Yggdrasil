@@ -172,3 +172,26 @@ test('an unknown orientation gets no panel name rather than "undefined"', () => 
     const nodes = createOverlay(fakeElement(), { orientation: 'oblique' });
     assert.equal(nodes.panel.textContent, '');
 });
+
+test('the panel label follows a window that is repointed at another plane', () => {
+    const nodes = createOverlay(fakeElement(), { orientation: 'axial' });
+    assert.equal(nodes.panel.textContent, 'Ax');
+
+    updateOverlay(nodes, {
+        camera: PRESETS.sagittal,
+        orientation: 'sagittal',
+        utilities: UTILITIES,
+    });
+
+    assert.equal(nodes.panel.textContent, PANEL_LABELS.sagittal);
+});
+
+test('an update that names no orientation leaves the panel label alone', () => {
+    // The CBCT grid's planes are fixed, so it never sends one. Pinned because the label
+    // it wrote at mount is the only one it will ever have.
+    const nodes = createOverlay(fakeElement(), { orientation: 'coronal' });
+
+    updateOverlay(nodes, { camera: PRESETS.coronal, utilities: UTILITIES });
+
+    assert.equal(nodes.panel.textContent, 'Cor');
+});

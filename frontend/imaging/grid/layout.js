@@ -135,6 +135,15 @@ export const FREE_LAYOUT = Object.freeze(
  * tool that cannot act is worse than a left mouse button bound to nothing, because it
  * looks like it is working.
  *
+ * **This is a question about the layout the grid was built with, and runtime plane
+ * changes deliberately do not reopen it.** A brain user who switches one window to
+ * sagittal has, on paper, made the grid eligible -- but `navigationTool` is decided once
+ * at mount, so the tool is not in the 2D group and cannot be made active. Adding it
+ * would mean a toolbar button that appears and disappears as the user rearranges planes,
+ * and a tool centre recomputed on every switch. Brain therefore keeps window/level on
+ * the left button whatever the planes end up being. Revisit it as its own change, not as
+ * a side effect of the switcher.
+ *
  * @param {object[]} layout entries of `{window, orientation, lazy}`.
  * @returns {boolean}
  */
