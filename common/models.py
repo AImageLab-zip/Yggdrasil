@@ -757,6 +757,7 @@ class FileRegistry(DomainFKAccessorMixin, models.Model):
 		('urology_wsi_processed', 'Urology WSI Processed'),
 		('urology_confocal_raw', 'Urology Confocale Raw'),
 		('urology_confocal_processed', 'Urology Confocale Processed'),
+		('urology_segmentation', 'Urology Segmentation (GeoJSON)'),
 		# Dense annotation artifacts. Sparse annotations are MySQL rows (decision #20);
 		# a labelmap is not sparse, and the governing rule already says dense segmentation
 		# is a file artifact in object storage. Addressed by an AnnotationPayload, never

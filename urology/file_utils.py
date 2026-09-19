@@ -1,12 +1,17 @@
 """Urology-specific file handling helpers."""
 
 import hashlib
+import json
+import logging
 import os
 import uuid
+from typing import Optional
 
 from common.models import FileRegistry, Job, Modality
 from common.object_storage import get_object_storage
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 UROLOGY_NO_PROCESSING_MODALITIES = {
     "urology-mri",
@@ -32,6 +37,8 @@ def _detect_extension_and_format(filename_lower: str):
         return ".mrxs", "mrxs"
     if filename_lower.endswith(".dz"):
         return ".dz", "deepzoom"
+    if filename_lower.endswith(".geojson") or filename_lower.endswith(".json"):
+        return os.path.splitext(filename_lower)[1], "geojson"
     return os.path.splitext(filename_lower)[1] or ".bin", "unknown"
 
 
@@ -120,3 +127,76 @@ def save_urology_modality_file(patient, modality_slug: str, uploaded_file):
         create_step_jobs(job)
 
     return file_registry, job
+
+
+def save_urology_segmentation_file(
+    patient,
+    modality_slug: str,
+    uploaded_file,
+    parent_file: Optional[FileRegistry] = None,
+):
+    """Save a Urology segmentation GeoJSON/JSON file and link to parent slide if provided."""
+    original_name = getattr(uploaded_file, "name", "segmentation.geojson")
+    extension, file_format = _detect_extension_and_format(original_name.lower())
+
+    uploaded_file.seek(0)
+    content = uploaded_file.read()
+    uploaded_file.seek(0)
+    feature_count = 0
+    classes = []
+    try:
+        geo_data = json.loads(content.decode("utf-8"))
+        features = geo_data.get("features", []) if isinstance(geo_data, dict) else []
+        feature_count = len(features)
+        seen_classes = {}
+        for feat in features:
+            cls_info = (feat.get("properties") or {}).get("classification")
+            if isinstance(cls_info, dict):
+                cname = cls_info.get("name", "Unknown")
+                color = cls_info.get("colorRGB") or cls_info.get("color")
+                if cname not in seen_classes:
+                    seen_classes[cname] = color
+        classes = [{"name": name, "color": color} for name, color in seen_classes.items()]
+    except Exception as exc:
+        logger.debug("Could not parse GeoJSON details: %s", exc)
+
+    ts = timezone.now().strftime("%Y%m%d%H%M%S")
+    rand_suffix = uuid.uuid4().hex[:6]
+    filename = f"{modality_slug}_seg_patient_{patient.patient_id}_{ts}_{rand_suffix}{extension}"
+    key = f"urology/patients/{patient.patient_id}/raw/{modality_slug}/{filename}"
+    key, file_size, file_hash = _upload_uploaded_file_to_storage(key, uploaded_file)
+
+    parent_file_id = parent_file.id if parent_file else None
+    metadata = {
+        "original_filename": original_name,
+        "uploaded_at": timezone.now().isoformat(),
+        "file_format": "geojson",
+        "modality_slug": modality_slug,
+        "associated_image_file_id": parent_file_id,
+        "feature_count": feature_count,
+        "classes": classes,
+    }
+    modality = Modality.objects.filter(slug=modality_slug).first()
+    file_registry = FileRegistry.objects.create(
+        domain="urology",
+        urology_patient=patient,
+        file_type="urology_segmentation",
+        file_path=key,
+        file_size=file_size,
+        file_hash=file_hash,
+        modality=modality,
+        metadata=metadata,
+    )
+
+    job = Job.objects.create(
+        domain="urology",
+        urology_patient=patient,
+        modality_slug=modality_slug,
+        input_files={"input": key},
+        status="completed",
+        output_files={"input_format": "geojson", "file_path": key},
+        started_at=timezone.now(),
+        completed_at=timezone.now(),
+    )
+    return file_registry, job
+

@@ -1466,6 +1466,64 @@ class UrologyAuditRemediationTests(TestCase):
         with self.assertRaises(Image.DecompressionBombError):
             Image._decompression_bomb_check((30_000, 30_000))  # 900M pixels > 2 * 250M
 
+    def test_save_urology_segmentation_file_and_api(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        from urology.file_utils import save_urology_modality_file, save_urology_segmentation_file
+
+        self.client.login(username="proj1_admin", password="pass")
+
+        # 1. Create a dummy TIFF slide file
+        buf = BytesIO()
+        im = Image.new("RGB", (100, 100), color="blue")
+        im.save(buf, format="TIFF")
+        buf.seek(0)
+        slide_file = SimpleUploadedFile("biopsy.tiff", buf.getvalue(), content_type="image/tiff")
+        slide_reg, _ = save_urology_modality_file(self.patient1, "urology-wsi", slide_file)
+
+        # 2. Test segmentation file saving
+        geo_content = b'{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]},"properties":{"classification":{"name":"Tumor","color":[200,0,0]}}}]}'
+        seg_file = SimpleUploadedFile("biopsy.geojson", geo_content, content_type="application/geo+json")
+        seg_reg, _ = save_urology_segmentation_file(self.patient1, "urology-wsi", seg_file, parent_file=slide_reg)
+
+        self.assertEqual(seg_reg.file_type, "urology_segmentation")
+        self.assertEqual(seg_reg.metadata.get("file_format"), "geojson")
+        self.assertEqual(seg_reg.metadata.get("associated_image_file_id"), slide_reg.id)
+        self.assertEqual(seg_reg.metadata.get("feature_count"), 1)
+
+        # 3. Test wsi_segmentation_api
+        url = reverse("urology:wsi_segmentation", kwargs={"file_id": slide_reg.id})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["hasSegmentation"])
+        self.assertEqual(data["featureCount"], 1)
+        self.assertEqual(data["classes"][0]["name"], "Tumor")
+        self.assertEqual(data["geojson"]["type"], "FeatureCollection")
+
+    def test_wsi_segmentation_api_none_when_no_segmentation(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        from urology.file_utils import save_urology_modality_file
+
+        self.client.login(username="proj1_admin", password="pass")
+
+        buf = BytesIO()
+        im = Image.new("RGB", (50, 50), color="green")
+        im.save(buf, format="TIFF")
+        buf.seek(0)
+        slide_file = SimpleUploadedFile("noseg.tiff", buf.getvalue(), content_type="image/tiff")
+        slide_reg, _ = save_urology_modality_file(self.patient1, "urology-confocal", slide_file)
+
+        url = reverse("urology:wsi_segmentation", kwargs={"file_id": slide_reg.id})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data["hasSegmentation"])
+        self.assertEqual(data["featureCount"], 0)
+        self.assertIsNone(data["geojson"])
+
+
 
 
 

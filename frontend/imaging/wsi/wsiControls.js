@@ -118,6 +118,19 @@ export function wireWsiControls({
         });
     }
 
+    const toggleSegBtn = document.getElementById(`${controlsPrefix}ToggleSegBtn`);
+    let isSegVisible = true;
+
+    if (toggleSegBtn) {
+        toggleSegBtn.addEventListener('click', () => {
+            isSegVisible = !isSegVisible;
+            viewport.setSegmentationVisible(isSegVisible);
+            toggleSegBtn.classList.toggle('active', isSegVisible);
+            toggleSegBtn.setAttribute('aria-pressed', isSegVisible ? 'true' : 'false');
+            toggleSegBtn.title = isSegVisible ? 'Hide Segmentation Overlay' : 'Show Segmentation Overlay';
+        });
+    }
+
     if (saveBtn) {
         saveBtn.addEventListener('click', async () => {
             const annots = viewport.getAnnotations();

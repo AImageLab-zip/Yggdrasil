@@ -1,6 +1,7 @@
 """Urology WSI tile, metadata, and file serving API views."""
 
 import io
+import json
 import logging
 import mimetypes
 import os
@@ -248,3 +249,78 @@ def serve_file(request, file_id: int, filename: str = None, bundle_key: str = No
         filename=original_name or "file.nii.gz",
         as_attachment=False,
     )
+
+
+@login_required
+@require_http_methods(["GET"])
+def wsi_segmentation_api(request, file_id: int):
+    """Return GeoJSON segmentation data for a slide or its linked segmentation file."""
+    file_obj, error_resp = _get_authorized_file(request, file_id)
+    if error_resp:
+        return error_resp
+
+    seg_obj = None
+    if file_obj.file_type == "urology_segmentation":
+        seg_obj = file_obj
+    else:
+        # 1. By associated_image_file_id in metadata
+        seg_obj = FileRegistry.objects.filter(
+            domain="urology",
+            file_type="urology_segmentation",
+            metadata__associated_image_file_id=file_obj.id,
+        ).first()
+
+        # 2. If not found, match by stem on same patient
+        if not seg_obj and file_obj.urology_patient:
+            orig_name = file_obj.metadata.get("original_filename", "")
+            orig_stem = os.path.splitext(orig_name)[0].lower()
+            if orig_stem.startswith("copia di "):
+                orig_stem = orig_stem[9:].strip()
+
+            candidates = FileRegistry.objects.filter(
+                domain="urology",
+                file_type="urology_segmentation",
+                urology_patient=file_obj.urology_patient,
+            )
+            for cand in candidates:
+                cand_name = cand.metadata.get("original_filename", "")
+                cand_stem = os.path.splitext(cand_name)[0].lower()
+                if cand_stem.startswith("copia di "):
+                    cand_stem = cand_stem[9:].strip()
+                if orig_stem and (orig_stem == cand_stem or cand_stem in orig_stem or orig_stem in cand_stem):
+                    seg_obj = cand
+                    break
+
+    if not seg_obj:
+        return JsonResponse({"hasSegmentation": False, "featureCount": 0, "classes": [], "geojson": None})
+
+    try:
+        body, _ = open_binary(seg_obj.file_path)
+        content = body.read()
+        geo_data = json.loads(content.decode("utf-8"))
+        features = geo_data.get("features", []) if isinstance(geo_data, dict) else []
+        feature_count = len(features)
+        classes = seg_obj.metadata.get("classes", [])
+        if not classes:
+            seen_classes = {}
+            for feat in features:
+                cls_info = (feat.get("properties") or {}).get("classification")
+                if isinstance(cls_info, dict):
+                    cname = cls_info.get("name", "Unknown")
+                    color = cls_info.get("colorRGB") or cls_info.get("color")
+                    if cname not in seen_classes:
+                        seen_classes[cname] = color
+            classes = [{"name": name, "color": color} for name, color in seen_classes.items()]
+
+        return JsonResponse({
+            "hasSegmentation": True,
+            "fileId": seg_obj.id,
+            "filename": seg_obj.metadata.get("original_filename", "") if isinstance(seg_obj.metadata, dict) else "",
+            "featureCount": feature_count,
+            "classes": classes,
+            "geojson": geo_data,
+        })
+    except Exception as exc:
+        logger.exception("Error loading segmentation for file %s: %s", file_id, exc)
+        return JsonResponse({"hasSegmentation": False, "error": str(exc)}, status=500)
+

@@ -12,6 +12,20 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 
+class CrossOriginIsolationMiddleware(MiddlewareMixin):
+    """Enable cross-origin isolation for WebAssembly SharedArrayBuffer / multi-threading.
+
+    Required by wasm-vips (and Cornerstone/ITK-Wasm) so browsers expose SharedArrayBuffer
+    and allow WebAssembly pthread workers to instantiate without stalling.
+    """
+
+    def process_response(self, request, response):
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        return response
+
+
 class RequestLoggingMiddleware(MiddlewareMixin):
     """Request/response access logging.
 

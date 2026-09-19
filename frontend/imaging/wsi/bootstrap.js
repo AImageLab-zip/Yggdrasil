@@ -72,6 +72,16 @@ export async function bootstrapWsiViewer({
         metadata: slideMetadata,
         fileId,
         namespace,
+        onSegmentationLoaded: (data) => {
+            const toggleSegBtn = document.getElementById(`${controlsPrefix}ToggleSegBtn`);
+            if (toggleSegBtn && data && data.hasSegmentation) {
+                toggleSegBtn.style.display = 'inline-flex';
+                const labelSpan = toggleSegBtn.querySelector('span');
+                if (labelSpan && data.featureCount) {
+                    labelSpan.textContent = `Seg (${data.featureCount})`;
+                }
+            }
+        },
     });
 
     if (Array.isArray(annotations) && annotations.length) {

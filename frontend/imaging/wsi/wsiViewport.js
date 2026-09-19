@@ -15,6 +15,7 @@ export function createWsiViewport({
     fileId,
     namespace = 'urology',
     onAnnotationsChanged = () => {},
+    onSegmentationLoaded = () => {},
 }) {
     element.innerHTML = '';
     element.style.position = 'relative';
@@ -33,7 +34,7 @@ export function createWsiViewport({
     element.appendChild(canvas);
     const ctx = canvas.getContext('2d');
 
-    // 2. Vector annotation layer (SVG)
+    // 2. Vector annotation & segmentation layers (SVG)
     const svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svgOverlay.style.position = 'absolute';
     svgOverlay.style.left = '0';
@@ -42,6 +43,14 @@ export function createWsiViewport({
     svgOverlay.style.height = '100%';
     svgOverlay.style.pointerEvents = 'none';
     element.appendChild(svgOverlay);
+
+    const segmentationGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    segmentationGroup.setAttribute('class', 'wsi-segmentation-layer');
+    svgOverlay.appendChild(segmentationGroup);
+
+    const annotationGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    annotationGroup.setAttribute('class', 'wsi-annotation-layer');
+    svgOverlay.appendChild(annotationGroup);
 
     // 3. Floating Minimap container
     const minimapContainer = document.createElement('div');
@@ -113,6 +122,11 @@ export function createWsiViewport({
     let currentTool = 'Pan';
     let activeDrawing = null;
     let annotationsVisible = true;
+
+    // Segmentation overlay
+    let segmentationData = null;
+    let segmentationVisible = true;
+    let segmentationOpacity = 0.35;
 
     function resize() {
         const rect = element.getBoundingClientRect();
@@ -325,8 +339,9 @@ export function createWsiViewport({
         // 5. Update Scale bar
         updateScaleBar();
 
-        // 6. Draw annotations
+        // 6. Draw annotations & segmentation
         renderAnnotations();
+        renderSegmentation();
     }
 
     const MAX_CONCURRENT_FETCHES = 6;
@@ -675,7 +690,7 @@ export function createWsiViewport({
     }
 
     function renderAnnotations() {
-        svgOverlay.innerHTML = '';
+        annotationGroup.innerHTML = '';
         if (!annotationsVisible) return;
 
         const allToRender = [...annotations];
@@ -716,7 +731,7 @@ export function createWsiViewport({
                 line.setAttribute('y2', p1y);
                 line.setAttribute('stroke', color);
                 line.setAttribute('stroke-width', '2');
-                svgOverlay.appendChild(line);
+                annotationGroup.appendChild(line);
 
                 // Calibrated length
                 const distPx = Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]);
@@ -732,7 +747,7 @@ export function createWsiViewport({
                 text.setAttribute('font-weight', 'bold');
                 text.setAttribute('filter', 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))');
                 text.textContent = labelText;
-                svgOverlay.appendChild(text);
+                annotationGroup.appendChild(text);
             } else if (toolName === 'RectangleROI' && points.length >= 4) {
                 // points: bottomLeft, bottomRight, topLeft, topRight
                 const [tlX, tlY] = slideToScreen(points[2][0], points[2][1]);
@@ -748,7 +763,7 @@ export function createWsiViewport({
                 rectEl.setAttribute('stroke', color);
                 rectEl.setAttribute('stroke-width', '2');
                 rectEl.setAttribute('fill', annot.isActive ? 'rgba(245, 158, 11, 0.15)' : 'rgba(56, 189, 248, 0.15)');
-                svgOverlay.appendChild(rectEl);
+                annotationGroup.appendChild(rectEl);
 
                 // Area
                 const slideW = Math.abs(points[1][0] - points[0][0]);
@@ -765,7 +780,7 @@ export function createWsiViewport({
                 text.setAttribute('font-weight', 'bold');
                 text.setAttribute('filter', 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))');
                 text.textContent = areaText;
-                svgOverlay.appendChild(text);
+                annotationGroup.appendChild(text);
             } else if (toolName === 'CircleROI' && points.length >= 2) {
                 const [c0x, c0y] = slideToScreen(points[0][0], points[0][1]);
                 const [c1x, c1y] = slideToScreen(points[1][0], points[1][1]);
@@ -778,7 +793,7 @@ export function createWsiViewport({
                 circleEl.setAttribute('stroke', color);
                 circleEl.setAttribute('stroke-width', '2');
                 circleEl.setAttribute('fill', 'rgba(56, 189, 248, 0.15)');
-                svgOverlay.appendChild(circleEl);
+                annotationGroup.appendChild(circleEl);
             } else if (toolName === 'SplineROI' && points.length >= 2) {
                 const screenPoints = points.map((p) => slideToScreen(p[0], p[1]));
                 const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
@@ -786,7 +801,7 @@ export function createWsiViewport({
                 poly.setAttribute('stroke', color);
                 poly.setAttribute('stroke-width', '2');
                 poly.setAttribute('fill', 'rgba(236, 72, 153, 0.2)');
-                svgOverlay.appendChild(poly);
+                annotationGroup.appendChild(poly);
             } else if (toolName === 'Label' && points.length >= 1) {
                 const [lx, ly] = slideToScreen(points[0][0], points[0][1]);
                 const circleEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -794,7 +809,7 @@ export function createWsiViewport({
                 circleEl.setAttribute('cy', ly);
                 circleEl.setAttribute('r', '5');
                 circleEl.setAttribute('fill', '#ef4444');
-                svgOverlay.appendChild(circleEl);
+                annotationGroup.appendChild(circleEl);
 
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', lx + 8);
@@ -805,8 +820,94 @@ export function createWsiViewport({
                 text.setAttribute('font-weight', 'bold');
                 text.setAttribute('filter', 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))');
                 text.textContent = annot.data?.label || 'Point';
-                svgOverlay.appendChild(text);
+                annotationGroup.appendChild(text);
             }
+        }
+    }
+
+    function renderSegmentation() {
+        segmentationGroup.innerHTML = '';
+        if (!segmentationVisible || !segmentationData) return;
+
+        const features = Array.isArray(segmentationData.features)
+            ? segmentationData.features
+            : (segmentationData.type === 'Feature' ? [segmentationData] : []);
+
+        for (const feat of features) {
+            const geom = feat.geometry;
+            if (!geom) continue;
+
+            const classification = feat.properties?.classification;
+            let cname = 'Segmentation';
+            let rgb = [220, 38, 38];
+
+            if (classification && typeof classification === 'object') {
+                if (classification.name) cname = classification.name;
+                if (Array.isArray(classification.colorRGB)) {
+                    rgb = classification.colorRGB;
+                } else if (Array.isArray(classification.color)) {
+                    rgb = classification.color;
+                } else if (typeof classification.color === 'number') {
+                    const c = classification.color;
+                    rgb = [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+                }
+            }
+
+            const strokeColor = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+            const fillColor = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${segmentationOpacity})`;
+
+            const renderRings = (rings) => {
+                if (!Array.isArray(rings) || !rings.length) return;
+                const outer = rings[0];
+                if (!Array.isArray(outer) || outer.length < 3) return;
+
+                const pointsStr = outer.map((coord) => {
+                    const [sx, sy] = slideToScreen(coord[0], coord[1]);
+                    return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+                }).join(' ');
+
+                const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                poly.setAttribute('points', pointsStr);
+                poly.setAttribute('stroke', strokeColor);
+                poly.setAttribute('stroke-width', '2');
+                poly.setAttribute('stroke-linejoin', 'round');
+                poly.setAttribute('fill', fillColor);
+                poly.style.pointerEvents = 'auto';
+                poly.style.cursor = 'pointer';
+
+                const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                title.textContent = cname;
+                poly.appendChild(title);
+
+                segmentationGroup.appendChild(poly);
+            };
+
+            if (geom.type === 'Polygon' && Array.isArray(geom.coordinates)) {
+                renderRings(geom.coordinates);
+            } else if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates)) {
+                for (const polyCoords of geom.coordinates) {
+                    renderRings(polyCoords);
+                }
+            }
+        }
+    }
+
+    async function loadSegmentation(fid) {
+        if (!fid) return;
+        try {
+            const resp = await fetch(`/${namespace}/api/wsi/${fid}/segmentation/`, { credentials: 'same-origin' });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.hasSegmentation && data.geojson) {
+                    segmentationData = data.geojson;
+                    renderSegmentation();
+                    if (onSegmentationLoaded) {
+                        onSegmentationLoaded(data);
+                    }
+                }
+            }
+        } catch (err) {
+            console.debug('Failed to load segmentation:', err);
         }
     }
 
@@ -814,6 +915,7 @@ export function createWsiViewport({
     resizeObserver.observe(element);
     window.addEventListener('resize', resize);
     fitToScreen();
+    loadSegmentation(fileId);
 
     const api = {
         fitToScreen,
@@ -846,6 +948,28 @@ export function createWsiViewport({
             annotationsVisible = visible;
             render();
         },
+        setSegmentation(geojson) {
+            segmentationData = geojson;
+            renderSegmentation();
+        },
+        getSegmentation() {
+            return segmentationData;
+        },
+        setSegmentationVisible(visible) {
+            segmentationVisible = visible;
+            renderSegmentation();
+        },
+        isSegmentationVisible() {
+            return segmentationVisible;
+        },
+        setSegmentationOpacity(op) {
+            segmentationOpacity = Math.max(0, Math.min(1, op));
+            renderSegmentation();
+        },
+        getSegmentationOpacity() {
+            return segmentationOpacity;
+        },
+        loadSegmentation,
         destroy() {
             if (fetchDebounceTimer) {
                 clearTimeout(fetchDebounceTimer);

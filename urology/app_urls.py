@@ -173,6 +173,11 @@ urlpatterns = [
         name="wsi_thumbnail",
     ),
     path(
+        "api/wsi/<int:file_id>/segmentation/",
+        wsi_views.wsi_segmentation_api,
+        name="wsi_segmentation",
+    ),
+    path(
         "api/patients/<int:patient_id>/measurements/",
         annotations_views.save_measurements_api,
         name="api_save_measurements",

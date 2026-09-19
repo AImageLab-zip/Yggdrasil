@@ -441,6 +441,14 @@ def upload_patient(request):
                         uploaded_modalities.append(display_name)
                         if job:
                             processing_job_ids.append(job.id)
+
+                        # Check for optional segmentation file
+                        seg_file = request.FILES.get(f"{slug}-segmentation")
+                        if seg_file:
+                            from .file_utils import save_urology_segmentation_file
+                            save_urology_segmentation_file(
+                                patient, slug, seg_file, parent_file=file_registry
+                            )
                 except Exception as exc:
                     logger.exception("Error saving %s", display_name)
                     messages.error(request, f"Error saving {display_name}: {exc}")
@@ -2013,13 +2021,63 @@ def bulk_upload_patients(request):
     if forced_slug:
         forced_modality = next((m for m in allowed_modalities if m.slug == forced_slug), None)
 
+    image_files = []
+    seg_files = []
+    for f in uploaded_files:
+        fn_lower = (getattr(f, "name", "") or "").lower()
+        if fn_lower.endswith(".geojson") or fn_lower.endswith(".json"):
+            seg_files.append(f)
+        else:
+            image_files.append(f)
+
     results = []
-    for uploaded_file in uploaded_files:
-        results.append(
-            _bulk_upload_one_urology(
-                request, project, folder, forced_modality, allowed_modalities, uploaded_file
-            )
+    patient_image_map = {}
+
+    for uploaded_file in image_files:
+        res, pat_obj, file_reg, mod_slug = _bulk_upload_one_urology(
+            request, project, folder, forced_modality, allowed_modalities, uploaded_file
         )
+        results.append(res)
+        if pat_obj and file_reg:
+            fn = getattr(uploaded_file, "name", "")
+            stem = os.path.splitext(fn)[0].lower()
+            patient_image_map[stem] = (pat_obj, file_reg, mod_slug)
+            # Normalize common prefixes like "copia di "
+            if stem.startswith("copia di "):
+                patient_image_map[stem[9:].strip()] = (pat_obj, file_reg, mod_slug)
+
+    for seg_file in seg_files:
+        fn = getattr(seg_file, "name", "") or "segmentation.geojson"
+        raw_stem = os.path.splitext(fn)[0].lower()
+        matched = patient_image_map.get(raw_stem)
+        if not matched and raw_stem.startswith("copia di "):
+            matched = patient_image_map.get(raw_stem[9:].strip())
+        if not matched:
+            # Fallback: check if any registered stem is contained or vice versa
+            for s_stem, s_tuple in patient_image_map.items():
+                if s_stem in raw_stem or raw_stem in s_stem:
+                    matched = s_tuple
+                    break
+
+        if matched:
+            pat_obj, parent_file, mod_slug = matched
+            try:
+                from .file_utils import save_urology_segmentation_file
+                seg_reg, _ = save_urology_segmentation_file(pat_obj, mod_slug, seg_file, parent_file=parent_file)
+                results.append({
+                    "file": fn,
+                    "ok": True,
+                    "patient_id": pat_obj.patient_id,
+                    "patient_name": pat_obj.name,
+                    "modality": "segmentation",
+                    "note": f"Linked to {parent_file.metadata.get('original_filename', 'slide')}",
+                })
+            except Exception as s_err:
+                logger.warning("Failed linking segmentation %s: %s", fn, s_err)
+                results.append({"file": fn, "ok": False, "error": str(s_err)})
+        else:
+            results.append({"file": fn, "ok": False, "error": "No matching slide found for segmentation"})
+
     return _bulk_urology_response(request, results)
 
 
@@ -2038,7 +2096,7 @@ def _bulk_upload_one_urology(request, project, folder, forced_modality, allowed_
             modality = allowed_modalities[0] if allowed_modalities else None
 
     if modality is None:
-        return {"file": filename, "ok": False, "error": "Could not infer modality for file"}
+        return {"file": filename, "ok": False, "error": "Could not infer modality for file"}, None, None, None
 
     try:
         with transaction.atomic():
@@ -2057,7 +2115,7 @@ def _bulk_upload_one_urology(request, project, folder, forced_modality, allowed_
             file_reg, job = save_urology_modality_file(patient, modality.slug, uploaded_file)
     except Exception as exc:
         logger.warning(f"Bulk upload failed for {filename}: {exc}", exc_info=True)
-        return {"file": filename, "ok": False, "error": str(exc)}
+        return {"file": filename, "ok": False, "error": str(exc)}, None, None, None
 
     return {
         "file": filename,
@@ -2066,7 +2124,7 @@ def _bulk_upload_one_urology(request, project, folder, forced_modality, allowed_
         "patient_name": patient.name,
         "modality": modality.slug,
         "job_id": job.id if job else None,
-    }
+    }, patient, file_reg, modality.slug
 
 
 def _bulk_urology_response(request, results, error=None):

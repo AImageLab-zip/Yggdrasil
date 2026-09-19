@@ -104,6 +104,7 @@ WHISPER_CONNECT_TIMEOUT = config("WHISPER_CONNECT_TIMEOUT", default=10, cast=int
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    "yggdrasil.middleware.CrossOriginIsolationMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
