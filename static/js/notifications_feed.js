@@ -17,10 +17,6 @@
     var empty = bell.querySelector('[data-notif-empty]');
     var markAll = bell.querySelector('[data-notif-mark-all]');
 
-    function csrf() {
-        var m = document.cookie.match(/csrftoken=([^;]+)/);
-        return m ? m[1] : '';
-    }
 
     var LEVEL_ICON = {
         success: 'fa-circle-check',
@@ -69,7 +65,7 @@
         if (!window.YGG_NOTIF_MARK) return;
         fetch(window.YGG_NOTIF_MARK, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.yggCsrfToken() },
             body: JSON.stringify(id ? { id: id } : {}),
         }).then(function () { refresh(); }).catch(function () {});
     }

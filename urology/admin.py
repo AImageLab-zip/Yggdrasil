@@ -2,21 +2,13 @@ from django.contrib import admin
 
 from common.admin import DomainFolderAdmin, DomainProjectAdmin
 
-from .models import Dataset, Export, Folder, Patient, Tag, UrologyProject, VoiceCaption
+from .models import Export, Folder, Patient, Tag, UrologyProject, VoiceCaption
 
 
 @admin.register(UrologyProject)
 class UrologyProjectAdmin(DomainProjectAdmin):
     """Urology projects, shown under the Urology admin section (domain forced)."""
     domain = "urology"
-
-
-@admin.register(Dataset)
-class DatasetAdmin(admin.ModelAdmin):
-    list_display = ["name", "created_at", "created_by"]
-    list_select_related = ["created_by"]
-    search_fields = ["name", "description"]
-    autocomplete_fields = ["created_by"]
 
 
 @admin.register(Folder)
@@ -43,9 +35,9 @@ class PatientAdmin(admin.ModelAdmin):
         "uploaded_by",
     ]
     list_filter = ["project", "visibility", "uploaded_at"]
-    list_select_related = ["project", "folder", "dataset", "uploaded_by"]
+    list_select_related = ["project", "folder", "uploaded_by"]
     search_fields = ["patient_id", "name"]
-    autocomplete_fields = ["project", "folder", "dataset", "uploaded_by"]
+    autocomplete_fields = ["project", "folder", "uploaded_by"]
     filter_horizontal = ["modalities", "tags"]
 
 

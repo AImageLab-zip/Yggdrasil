@@ -35,6 +35,12 @@ export const MESH_CONTROL_IDS = Object.freeze({
     viewUpper: 'viewUpper',
     viewLower: 'viewLower',
 
+    // Per-arch colour: a native picker and the same value as typed hex, each way round.
+    upperColor: 'iosUpperJawColor',
+    upperColorHex: 'iosUpperJawColorHex',
+    lowerColor: 'iosLowerJawColor',
+    lowerColorHex: 'iosLowerJawColorHex',
+
     // The landmark workbench.
     landmarkMode: 'toggleLandmarkMode',
     workbench: 'iosLandmarkWorkbench',
@@ -97,6 +103,40 @@ export function instructionFor({ canEdit, tooth, type, active }) {
     if (!tooth) return 'Select an FDI tooth';
     if (!type) return `Tooth ${tooth} · Select a landmark type`;
     return `Tooth ${tooth} · ${type} · Shift + left-click to place`;
+}
+
+/**
+ * `[r, g, b]` 0-255 to `#rrggbb`.
+ *
+ * Jaw colours are 0-255 triples (`JAW_COLORS`), and `<input type="color">` speaks only
+ * lowercase `#rrggbb` -- it silently keeps its previous value when handed anything else,
+ * so seeding the pickers from the defaults has to go through here.
+ *
+ * Not `landmarkMarkers.cssColor`: that takes a packed `0xRRGGBB` landmark *type* out of
+ * `TYPE_COLORS`, which is a different palette in a different representation.
+ */
+export function hexColor(rgb) {
+    return `#${rgb.map((channel) => clampChannel(channel).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function clampChannel(value) {
+    return Math.max(0, Math.min(255, Math.round(Number(value) || 0)));
+}
+
+/**
+ * `#rrggbb` to `[r, g, b]` 0-255, or `null` when the text is not a colour.
+ *
+ * The `null` is the point: the hex field is free text, and a caller that cannot tell
+ * "not a colour yet" from black would paint an arch black halfway through a typed value.
+ * A leading `#` is optional and the case is free, because both are what people type.
+ * Three-digit shorthand is accepted and expanded -- `#f00` is a colour, and rejecting it
+ * would look like a bug rather than a rule.
+ */
+export function parseHexColor(text) {
+    const value = String(text ?? '').trim().replace(/^#/, '');
+    const full = value.length === 3 ? value.replace(/./g, (digit) => digit + digit) : value;
+    if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
+    return [0, 2, 4].map((offset) => parseInt(full.slice(offset, offset + 2), 16));
 }
 
 /**

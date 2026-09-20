@@ -4,8 +4,12 @@ Access is granted per Project via ``ProjectAccess`` with roles
 ``viewer`` / ``annotator`` / ``admin``. Patients and folders live inside a
 project, so every check resolves the patient's/folder's project and consults
 ``ProjectAccess``. The legacy ``FolderAccess`` tables are kept for data
-preservation but are no longer read for authorization; the ``is_demo`` flag
-that governs the public guest demo still lives on ``Folder``.
+preservation but are no longer read for authorization.
+
+The public-demo guest is an ordinary user here: it sees a project because it
+holds a ``viewer`` ``ProjectAccess`` on it, through the same code path as
+everyone else. Granting that role is therefore what publishes a project to the
+anonymous demo -- there is no separate demo flag.
 """
 
 from django.apps import apps
@@ -101,16 +105,27 @@ def user_has_project_access(user, project_or_app_context):
     return bool(access and access.role in READ_ROLES)
 
 
+def _project_for_folder(folder, project_or_app_context):
+    """The project whose ACL decides access to ``folder``.
+
+    A folder's own project is authoritative whenever it has one. The context
+    argument is only a fallback for a missing folder, because resolving it can
+    answer with a *different* project: given a request or a namespace it returns
+    the session's current project (``_project_from_context``). Preferring it
+    meant a folder was checked against whichever project the user happened to be
+    working in -- so holding access to project A authorized reading a folder in
+    project B, for every caller that passes ``request`` or a domain slug.
+    """
+    project = getattr(folder, "project", None)
+    if project is not None:
+        return project
+    if project_or_app_context is not None:
+        return _project_from_context(project_or_app_context)
+    return None
+
+
 def user_can_read_folder(user, folder, project_or_app_context=None):
-    from common.demo import is_demo_guest
-    if is_demo_guest(user):
-        # The public-demo guest can read a folder iff it is flagged is_demo.
-        return bool(folder and getattr(folder, "is_demo", False))
-    project = (
-        _project_from_context(project_or_app_context)
-        if project_or_app_context is not None
-        else getattr(folder, "project", None)
-    )
+    project = _project_for_folder(folder, project_or_app_context)
     if user_is_project_admin(user, project):
         return True
     access = _access_for(user, project)
@@ -118,14 +133,12 @@ def user_can_read_folder(user, folder, project_or_app_context=None):
 
 
 def user_can_write_annotations(user, folder, project_or_app_context=None):
+    # A viewer is refused below anyway; this is the cheap guard for the day
+    # someone grants the shared guest account a writing role by mistake.
     from common.demo import is_demo_guest
     if is_demo_guest(user):
         return False
-    project = (
-        _project_from_context(project_or_app_context)
-        if project_or_app_context is not None
-        else getattr(folder, "project", None)
-    )
+    project = _project_for_folder(folder, project_or_app_context)
     if user_is_project_admin(user, project):
         return True
     access = _access_for(user, project)
@@ -180,11 +193,7 @@ def user_can_create_export(user, folder, project_or_app_context=None):
     from common.demo import is_demo_guest
     if is_demo_guest(user):
         return False
-    project = (
-        _project_from_context(project_or_app_context)
-        if project_or_app_context is not None
-        else getattr(folder, "project", None)
-    )
+    project = _project_for_folder(folder, project_or_app_context)
     if user_is_project_admin(user, project):
         return True
     access = _access_for(user, project)
@@ -236,9 +245,6 @@ def user_can_delete_caption(user, caption):
 
 
 def filter_folders_for_user(user, folders_qs, app_label):
-    from common.demo import is_demo_guest
-    if is_demo_guest(user):
-        return folders_qs.filter(is_demo=True)
     if user and user.is_staff:
         return folders_qs
     project_ids = ProjectAccess.objects.filter(user=user).values_list(
@@ -248,10 +254,6 @@ def filter_folders_for_user(user, folders_qs, app_label):
 
 
 def filter_patients_for_user(user, patients_qs, app_label):
-    from common.demo import demo_patients, is_demo_guest
-    if is_demo_guest(user):
-        patient_ids = list(demo_patients(app_label).values_list("pk", flat=True))
-        return patients_qs.filter(pk__in=patient_ids)
     if user and user.is_staff:
         return patients_qs
     project_ids = ProjectAccess.objects.filter(user=user).values_list(

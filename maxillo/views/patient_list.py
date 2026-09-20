@@ -8,7 +8,6 @@ from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import bulk_upload_url_for, redirect_with_namespace, render_with_fallback
-from common.demo import landing_demo_url
 from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.modality_config import (
     modality_status,
@@ -80,13 +79,12 @@ def home(request):
         
         return render(request, 'common/landing.html', {
             'projects': projects,
-            'landing_cards': landing_domain_cards(),
+            'landing_cards': landing_domain_cards(request.user),
             'current_project_id': current_project_id,
             'current_project_name': current_project_name,
             'continue_url': continue_url,
-            'demo_url': landing_demo_url(),
         })
-    return render(request, 'common/landing.html', {'demo_url': landing_demo_url()})
+    return render(request, 'common/landing.html', {})
 
 
 @login_required
@@ -119,7 +117,7 @@ def patient_list(request):
     except Exception:
         _Job = None
     
-    select_related_fields = ['dataset', 'uploaded_by', 'folder']
+    select_related_fields = ['uploaded_by', 'folder']
     if any(field.name == 'project' for field in Patient._meta.fields):
         select_related_fields.insert(0, 'project')
 

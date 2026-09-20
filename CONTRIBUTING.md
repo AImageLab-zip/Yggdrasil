@@ -303,6 +303,6 @@ Consequently:
 
 ## Branch conventions
 
-- Development targets `release/3.0`. Open issues and pull requests against it.
+- Development targets `main`. Open issues and pull requests against it.
 - Dependency pins: `requirements.txt` is fully pinned; a pip-tools lockfile is
   possible future work.

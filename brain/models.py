@@ -9,7 +9,6 @@ import logging
 from common.models import Modality, Project
 from common.base_models import (
     ActivePatientManager,
-    DatasetBase,
     FolderAccessBase,
     FolderBase,
     TagBase,
@@ -19,19 +18,6 @@ from common.base_models import (
 
 
 logger = logging.getLogger(__name__)
-
-
-class Dataset(DatasetBase):
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='brain_datasets_created',
-    )
-
-    class Meta:
-        db_table = 'brain_dataset'
-        ordering = ['name']
 
 
 class BrainProject(Project):
@@ -101,7 +87,6 @@ class Patient(models.Model):
 
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
-    dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     modalities = models.ManyToManyField(
         Modality,
         blank=True,

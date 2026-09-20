@@ -2,7 +2,7 @@ from django import forms
 
 from common.models import Project, ProjectAccess
 from common.permissions import filter_folders_for_user
-from .models import Classification, Dataset, Folder, Patient, Tag
+from .models import Classification, Folder, Patient, Tag
 
 LAPAROSCOPY_DOMAIN = 'laparoscopy'
 
@@ -129,23 +129,19 @@ class PatientManagementForm(forms.ModelForm):
 
     class Meta:
         model = Patient
-        fields = ['name', 'visibility', 'dataset', 'folder']
+        fields = ['name', 'visibility', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Patient name'}),
             'visibility': forms.Select(attrs={'class': 'form-select form-select-sm'}),
-            'dataset': forms.Select(attrs={'class': 'form-select form-select-sm'}),
         }
         labels = {
             'name': 'Name',
             'visibility': 'Visibility',
-            'dataset': 'Dataset',
             'folder': 'Folder',
         }
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['dataset'].empty_label = 'No Dataset'
-        self.fields['dataset'].required = False
         if self.instance and self.instance.pk:
             self.fields['tags_text'].initial = ', '.join(self.instance.tag_names())
 
@@ -178,13 +174,3 @@ class PatientManagementForm(forms.ModelForm):
                 tags.append(tag)
             instance.tags.set(tags)
         return instance
-
-
-class DatasetForm(forms.ModelForm):
-    class Meta:
-        model = Dataset
-        fields = ['name', 'description']
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Dataset name'}),
-            'description': forms.Textarea(attrs={'class': 'form-control form-control-sm', 'rows': 2, 'placeholder': 'Optional description'}),
-        }

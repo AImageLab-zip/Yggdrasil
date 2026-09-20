@@ -33,7 +33,14 @@ from django.urls import reverse
 from annotations.models import AnnotationSet, AnnotationTarget, SourceResource
 from common.admin import raw_lock_map
 from common.annotation_lock import raw_data_is_locked
-from common.models import FileRegistry, Job, Modality, ProcessingStep, Project
+from common.models import (
+    FileRegistry,
+    Job,
+    Modality,
+    ProcessingStep,
+    Project,
+    ProjectAccess,
+)
 from laparoscopy.models import (
     Folder as LaparoFolder,
     Patient as LaparoPatient,
@@ -329,6 +336,52 @@ class AdminStructureTests(TestCase):
         self.assertEqual(len(grouped), len(admin.site._registry))
         self.assertIn("auth.User", grouped)
 
+    def test_sections_spanning_domains_are_grouped_by_domain(self):
+        """Three domains each declare a Patient; the index says which is which.
+
+        The purpose-ordered index removed the app heading that used to tell them
+        apart, so a section drawing on several domains groups its rows instead.
+        """
+        staff = User.objects.create_superuser("group-admin", "g@example.invalid", "x")
+        request = RequestFactory().get("/admin/")
+        request.user = staff
+        sections = {app["name"]: app for app in admin.site.get_app_list(request)}
+
+        clinical = [entry["group"] for entry in sections["Clinical data"]["models"]]
+        # Every clinical model is declared by a domain, so every row is grouped.
+        self.assertNotIn(None, clinical)
+        # Each domain forms one contiguous run, in registry order.
+        runs = [g for i, g in enumerate(clinical) if i == 0 or clinical[i - 1] != g]
+        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy"])
+
+        # Shared models come first, before the per-domain runs.
+        access = [entry["group"] for entry in sections["Projects & access"]["models"]]
+        self.assertIsNone(access[0])
+        self.assertEqual(
+            [g for i, g in enumerate(access) if i == 0 or access[i - 1] != g],
+            [None, "Maxillo", "Brain", "Laparoscopy"],
+        )
+
+        # A section drawing on one app has nothing to disambiguate.
+        self.assertEqual(
+            {entry["group"] for entry in sections["Processing"]["models"]}, {None}
+        )
+
+    def test_the_index_draws_the_domain_sub_headings(self):
+        """The grouping only helps if the template renders it.
+
+        ``templates/admin/app_list.html`` overrides Django's copy for exactly
+        one reason: emitting a sub-heading row when ``model.group`` changes.
+        """
+        staff = User.objects.create_superuser("render-admin", "r@example.invalid", "x")
+        self.client.force_login(staff)
+        response = self.client.get(reverse("admin:index"))
+        self.assertContains(response, 'class="domain-group"')
+        for domain in ("Maxillo", "Brain", "Laparoscopy"):
+            self.assertContains(
+                response, f'<th colspan="3" scope="colgroup">{domain}</th>'
+            )
+
     def test_the_admin_is_not_called_django_administration(self):
         self.assertEqual(admin.site.site_header, "Yggdrasil administration")
         self.assertTrue(admin.site.index_title)
@@ -467,8 +520,13 @@ class JobActionSafetyTests(TestCase):
         self.assertEqual(job.status, "dependency")
 
 
-class DemoSwitchTests(TestCase):
-    """``is_demo`` publishes a folder to anonymous readers; it has to ask."""
+class DemoPublicityTests(TestCase):
+    """Granting the guest a role publishes a project; the admin must say so.
+
+    Replaces the old folder-level ``publish_to_demo`` action: the demo is scoped
+    by ``ProjectAccess`` now, so the warning belongs on the project page where
+    that grant is made.
+    """
 
     def setUp(self):
         self.staff = User.objects.create_superuser(
@@ -476,27 +534,24 @@ class DemoSwitchTests(TestCase):
         )
         self.client.force_login(self.staff)
         self.project = _project("demo-switch")
-        self.folder = Folder.objects.create(name="F", project=self.project)
 
-    def test_publishing_requires_confirmation(self):
-        url = reverse("admin:maxillo_folder_changelist")
-        response = self.client.post(
-            url,
-            {"action": "publish_to_demo", "_selected_action": [str(self.folder.pk)]},
+    def _change_page(self):
+        return self.client.get(
+            reverse("admin:maxillo_maxilloproject_change", args=[self.project.pk])
         )
+
+    def test_private_project_says_so(self):
+        response = self._change_page()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Anyone on the internet")
-        self.folder.refresh_from_db()
-        self.assertFalse(self.folder.is_demo)
+        self.assertContains(response, "only users listed below can read it")
 
-        response = self.client.post(
-            url,
-            {
-                "action": "publish_to_demo",
-                "_selected_action": [str(self.folder.pk)],
-                "confirmed": "yes",
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-        self.folder.refresh_from_db()
-        self.assertTrue(self.folder.is_demo)
+    def test_guest_access_is_flagged_as_public(self):
+        from django.conf import settings
+        from django.contrib.auth import get_user_model
+
+        guest = get_user_model().objects.get(username=settings.DEMO_GUEST_USERNAME)
+        ProjectAccess.objects.create(user=guest, project=self.project, role="viewer")
+
+        response = self._change_page()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "readable by anyone on the")

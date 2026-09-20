@@ -23,7 +23,7 @@ permissions and job routing derive from that registry, so adding a domain is a
 registry entry plus per-domain FK columns on the three shared tables — never a
 new `if domain == …` branch. See [new-project-type.md](new-project-type.md).
 
-Each domain app owns its own `Patient`, `Folder`, `FolderAccess`, `Dataset`,
+Each domain app owns its own `Patient`, `Folder`, `FolderAccess`,
 `Tag`, `VoiceCaption` and `Export` tables, most of them subclasses of the
 abstract bases in `common/base_models.py`. `Patient` is deliberately *not*
 based on a shared abstract model: it is the most domain-specific model in the

@@ -7,7 +7,7 @@ namespace and database tables.
 
 ## What it owns
 
-- **Its own domain tables**: `Patient`, `Folder`, `Tag`, `Dataset`, `VoiceCaption`,
+- **Its own domain tables**: `Patient`, `Folder`, `Tag`, `VoiceCaption`,
   `Export`, `UrologyProject` — subclasses of the abstract bases in
   `common/base_models.py`, with `Patient` tailored for urological imaging workflows.
 - **The urology modalities**:

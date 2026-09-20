@@ -316,6 +316,28 @@ test('the 3D render neither broadcasts nor receives', () => {
     assert.ok(!syncTargets(state, 0).includes(3), 'and none to receive');
 });
 
+test('repointing a window moves it between orientation groups at once', () => {
+    // What the brain plane switcher relies on. `orientationGroup` is derived on every
+    // call rather than maintained alongside the window states -- the mutable
+    // `synchronizationGroups` index it replaced could disagree with them -- so a window
+    // that changes plane joins its new group and leaves its old one with no bookkeeping
+    // of its own. A cached membership would strand a repointed window in the group of a
+    // plane it is no longer showing.
+    const state = loadedGrid();
+    assert.deepEqual(orientationGroup(state, ORIENTATIONS.AXIAL), [0]);
+    assert.deepEqual(orientationGroup(state, ORIENTATIONS.SAGITTAL), [1]);
+
+    setOrientation(state, 1, ORIENTATIONS.AXIAL);
+
+    assert.deepEqual(orientationGroup(state, ORIENTATIONS.AXIAL), [0, 1], 'joined immediately');
+    assert.deepEqual(orientationGroup(state, ORIENTATIONS.SAGITTAL), [], 'and left immediately');
+
+    // Slice sync is deliberately *not* grouped by plane -- `syncTargets` is every loaded
+    // slice window -- so a switch does not change who scrolls with whom. Pinned so the
+    // switcher is not later blamed for it.
+    assert.deepEqual(syncTargets(state, 0), [1, 2]);
+});
+
 test('free scroll opts a window out in BOTH directions', () => {
     // One-directional opt-out reads as a bug the first time a user scrolls a "free"
     // window and watches the others follow.

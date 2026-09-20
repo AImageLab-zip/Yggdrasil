@@ -281,6 +281,23 @@
         initTooltips(document);
     });
 
+    /* ---------------------------------------------------------------- csrf */
+
+    /**
+     * The page's CSRF token, for scripted POSTs.
+     *
+     * Settings turn on CSRF_USE_SESSIONS and CSRF_COOKIE_HTTPONLY, so the token lives
+     * in the session and the cookie is unreadable from JS. Call sites that scraped
+     * `document.cookie` sent whatever unrelated value the regex happened to match and
+     * Django rejected it with "CSRF token ... has incorrect length" -- a 403 that only
+     * showed up on the buttons nobody clicked in a test. base.html renders the tag on
+     * every page; this is the one place that reads it.
+     */
+    window.yggCsrfToken = function () {
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        return input ? input.value : '';
+    };
+
     /* ------------------------------------------------------------- exports */
 
     window.YggUI = {

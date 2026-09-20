@@ -26,21 +26,6 @@ class ActivePatientManager(models.Manager):
         return super().get_queryset().filter(deleted=False)
 
 
-class DatasetBase(models.Model):
-    """Shared Dataset fields. ``created_by`` stays on subclasses (its
-    ``related_name`` drifts per app), as does any app-specific count helper."""
-
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return self.name
-
-
 class FolderBase(models.Model):
     """Shared Folder tree fields/behavior. ``created_by`` stays on subclasses."""
 
@@ -49,13 +34,6 @@ class FolderBase(models.Model):
         'self', on_delete=models.CASCADE, null=True, blank=True, related_name='children'
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    is_demo = models.BooleanField(
-        default=False,
-        help_text=(
-            'Expose this folder (and its patients) in the anonymous public demo '
-            'at /demo/<domain>/. Only anonymized or synthetic studies may be flagged.'
-        ),
-    )
 
     class Meta:
         abstract = True

@@ -1665,7 +1665,7 @@
    visibility. In the toolbar rather than the annotation workbench, because every one of
    them changes what a *reader* sees and none needs annotation rights. */
 .ygg-dropdown-menu--visualization {
-    min-width: 250px;
+    min-width: 268px;
     padding: 10px;
 }
 .ios-vis-menu__section + .ios-vis-menu__section {
@@ -1701,6 +1701,44 @@
     font-family: var(--ygg-font-mono);
     font-size: 10px;
     text-align: center;
+}
+/* Per-arch colour: a name, the native swatch, and the same value as typed hex. The hex
+   field borrows the mono chip from `.ios-vis-menu__row output` above, so the two numbers
+   in this menu read as the same kind of thing. */
+.ios-vis-menu__color + .ios-vis-menu__color {
+    margin-top: 6px;
+}
+.ios-vis-menu__color-name {
+    flex: 0 0 42px;
+    color: var(--ygg-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+.ios-vis-menu__color input[type="color"] {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--ygg-border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+}
+.ios-vis-menu__hex {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 3px 6px;
+    border: 1px solid var(--ygg-border);
+    border-radius: 6px;
+    background: var(--ygg-surface-alt);
+    color: var(--ygg-text);
+    font-family: var(--ygg-font-mono);
+    font-size: 10px;
+    text-transform: lowercase;
+}
+.ios-vis-menu__hex:focus {
+    outline: none;
+    border-color: var(--ygg-primary);
 }
 .ios-vis-menu__check {
     display: flex;

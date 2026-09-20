@@ -7,7 +7,6 @@ from common.annotation_lock import raw_data_is_locked
 
 from .models import (
     Classification,
-    Dataset,
     Export,
     Folder,
     LaparoscopyProject,
@@ -35,14 +34,6 @@ class LaparoscopyProjectAdmin(DomainProjectAdmin):
     domain = 'laparoscopy'
 
 
-@admin.register(Dataset)
-class DatasetAdmin(admin.ModelAdmin):
-    list_display = ['name', 'created_at', 'created_by']
-    list_select_related = ['created_by']
-    search_fields = ['name', 'description']
-    autocomplete_fields = ['created_by']
-
-
 @admin.register(Folder)
 class FolderAdmin(DomainFolderAdmin):
     """Laparoscopy folders (project picker scoped to the laparoscopy domain)."""
@@ -60,9 +51,9 @@ class PatientAdmin(admin.ModelAdmin):
     # See maxillo.PatientAdmin: `project` is shown so a mis-filed patient is visible.
     list_display = ['patient_id', 'name', 'project', 'visibility', 'folder', 'raw_locked', 'uploaded_at', 'uploaded_by']
     list_filter = ['project', 'visibility', 'uploaded_at']
-    list_select_related = ['project', 'folder', 'dataset', 'uploaded_by']
+    list_select_related = ['project', 'folder', 'uploaded_by']
     search_fields = ['patient_id', 'name']
-    autocomplete_fields = ['project', 'folder', 'dataset', 'uploaded_by']
+    autocomplete_fields = ['project', 'folder', 'uploaded_by']
     filter_horizontal = ['modalities', 'tags']
     inlines = [QuadrantClassificationMarkerInline]
 

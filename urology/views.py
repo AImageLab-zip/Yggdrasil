@@ -89,7 +89,7 @@ def select_project(request, project_id):
 @login_required
 def patient_list(request):
     patients = (
-        Patient.objects.select_related("dataset", "uploaded_by")
+        Patient.objects.select_related("uploaded_by")
         .prefetch_related(
             "voice_captions",
             "voice_captions__user",

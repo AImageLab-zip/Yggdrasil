@@ -54,3 +54,23 @@ class BrainPatientListTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Add at least one file before uploading.")
         self.assertFalse(Patient.objects.filter(name="Empty brain").exists())
+
+    def test_xhr_upload_answers_in_json(self):
+        """The uploader navigates on JSON and treats anything else as failure.
+
+        `static/js/cbct_upload.js` posts with this header and reads
+        `{"ok": true, "redirect": ...}`. Brain used to answer with a 302 the XHR
+        followed to the patient-list HTML, so a *successful* upload surfaced as
+        "Upload failed (HTTP 200)" and the page never moved.
+        """
+        response = self.client.post(
+            reverse("brain:upload_patient"),
+            {"name": "Empty brain", "project": str(self.project.id), "folder": str(self.folder.id)},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response["Content-Type"], "application/json")
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("Add at least one file", payload["error"])

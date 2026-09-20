@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from common.activity import log_activity
 from common.models import Project, ProjectAccess
 from common.permissions import filter_folders_for_user, user_is_project_admin
+from common.view_helpers import patient_list_response, upload_error_response, wants_json
 from .domain import get_domain_forms, get_domain_models
 from .helpers import bulk_upload_url_for, redirect_with_namespace
 
@@ -223,13 +224,11 @@ def upload_patient(request):
                         video_error = 'Video file could not be saved (storage may be unavailable).'
                 except Exception as e:
                     video_error = f"Error saving Video: {e}"
-            is_xhr = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-
-            if is_xhr:
-                if cbct_error:
-                    return JsonResponse({'ok': False, 'error': cbct_error}, status=400)
-                if video_error:
-                    return JsonResponse({'ok': False, 'error': video_error}, status=400)
+            for upload_error in (cbct_error, video_error):
+                if upload_error:
+                    failed = upload_error_response(request, upload_error)
+                    if failed is not None:
+                        return failed
 
             if video_error:
                 messages.error(request, video_error)
@@ -249,16 +248,7 @@ def upload_patient(request):
             else:
                 messages.success(request, 'Patient uploaded successfully!')
 
-            if is_xhr:
-                from django.urls import reverse, NoReverseMatch
-                ns = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-                try:
-                    redirect_url = reverse(f"{ns}:patient_list")
-                except NoReverseMatch:
-                    redirect_url = reverse('maxillo:patient_list')
-                return JsonResponse({'ok': True, 'redirect': redirect_url})
-
-            return redirect_with_namespace(request, 'patient_list')
+            return patient_list_response(request)
     else:
         patient_form = PatientForm()
         patient_upload_form = PatientUploadForm(user=request.user, current_project=current_project, domain=namespace)
@@ -405,7 +395,7 @@ def bulk_upload_patients(request):
     # it is administrators only (the single-patient upload stays open to annotators).
     if not current_project or not user_is_project_admin(request.user, current_project):
         message = 'Bulk upload is restricted to project administrators.'
-        if _wants_json(request):
+        if wants_json(request):
             return JsonResponse({'ok': False, 'error': message}, status=403)
         messages.error(request, message)
         return redirect_with_namespace(request, 'patient_list')
@@ -517,16 +507,13 @@ def _bulk_upload_one(
     }
 
 
-def _wants_json(request):
-    return request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-
 
 def _bulk_response(request, results, error=None):
     """JSON for the XHR uploader, messages + redirect for the plain form."""
     created = [item for item in results if item.get('ok')]
     failed = [item for item in results if not item.get('ok')]
 
-    if _wants_json(request):
+    if wants_json(request):
         if error:
             return JsonResponse({'ok': False, 'error': error, 'results': results}, status=400)
         return JsonResponse(

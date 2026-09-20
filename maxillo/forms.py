@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from datetime import timedelta
 from django.utils import timezone
 from .models import (
-    Patient, Classification, Dataset
+    Patient, Classification
 )
 from common.models import Invitation, Project, ProjectAccess
 from common.permissions import filter_folders_for_user
@@ -198,21 +198,17 @@ class PatientManagementForm(forms.ModelForm):
     tags_text = forms.CharField(required=False, help_text='Comma-separated tags', widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'e.g. caseA, urgent'}))
     class Meta:
         model = Patient
-        fields = ['name', 'dataset', 'folder']
+        fields = ['name', 'folder']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Scan name'}),
-            'dataset': forms.Select(attrs={'class': 'form-select form-select-sm'}),
         }
         labels = {
             'name': 'Name',
-            'dataset': 'Dataset',
             'folder': 'Folder',
         }
     
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['dataset'].empty_label = "No Dataset"
-        self.fields['dataset'].required = False
         # Folders must belong to the patient's project.
         scope_project_id = getattr(self.instance, 'project_id', None)
         if user:
@@ -233,7 +229,6 @@ class PatientManagementForm(forms.ModelForm):
         
         # Only validate the fields we care about for management
         name = cleaned_data.get('name')
-        dataset = cleaned_data.get('dataset')
         
         # Basic validation for management fields
         if name and len(name.strip()) == 0:
@@ -253,16 +248,6 @@ class PatientManagementForm(forms.ModelForm):
                 tags.append(tag)
             instance.tags.set(tags)
         return instance
-
-
-class DatasetForm(forms.ModelForm):
-    class Meta:
-        model = Dataset
-        fields = ['name', 'description']
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Dataset name'}),
-            'description': forms.Textarea(attrs={'class': 'form-control form-control-sm', 'rows': 2, 'placeholder': 'Optional description'}),
-        }
 
 
 class InvitationForm(forms.ModelForm):

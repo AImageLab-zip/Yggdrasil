@@ -18,7 +18,6 @@ from django.contrib.auth.views import redirect_to_login
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
-from common.demo import landing_demo_url
 from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
@@ -36,6 +35,7 @@ from common.permissions import (
     filter_patients_for_user,
     user_can_delete_single_patient,
     user_can_edit_caption,
+    user_can_view_caption_content,
     user_can_write_patient_annotations,
     project_allows_annotation,
     user_has_project_access,
@@ -53,6 +53,7 @@ from common.export_processing import (
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
+from common.view_helpers import patient_list_response, upload_error_response
 from .helpers import redirect_with_namespace, render_with_fallback
 from .models import Export, Folder, Patient, Tag
 
@@ -73,13 +74,12 @@ def home(request):
         ordered_projects = order_projects_for_landing(projects)
         return render(request, "common/landing.html", {
             "projects": ordered_projects,
-            "landing_cards": landing_domain_cards(),
+            "landing_cards": landing_domain_cards(request.user),
             "current_project_id": current_project_id,
             "current_project_name": current_project_name,
             "continue_url": "/brain/" if current_project_name else None,
-            "demo_url": landing_demo_url(),
         })
-    return render(request, "common/landing.html", {"demo_url": landing_demo_url()})
+    return render(request, "common/landing.html", {})
 
 
 @login_required
@@ -163,11 +163,15 @@ def patient_detail(request, patient_id):
         else:
             patient_files["other"].append(file_data)
 
+    # Viewers and admins see all captions; annotators see only their own (to
+    # avoid bias during annotation). Through the canonical helpers -- this used
+    # to inline "admin or author", which ghosted every caption for the
+    # project's own viewers, the public-demo guest among them.
     voice_captions = patient.voice_captions.all()
     is_admin_user = user_is_project_admin(request.user, patient.project)
     for caption in voice_captions:
-        caption.can_view_content = bool(is_admin_user or caption.user_id == request.user.id)
-        caption.can_edit_content = bool(is_admin_user or caption.user_id == request.user.id)
+        caption.can_view_content = user_can_view_caption_content(request.user, caption)
+        caption.can_edit_content = user_can_edit_caption(request.user, caption)
         caption.is_ghost = not caption.can_view_content
 
     allowed_modalities = list(Modality.objects.filter(projects__id=request.session.get("current_project_id"), is_active=True))
@@ -223,6 +227,8 @@ def patient_detail(request, patient_id):
             m["slug"] for m in patient_modalities
             if m.get("slug") not in ("rawzip", "braintumor-mri-seg")
         ],
+        # Checkbox labels for the shared rerun picker (common/partials/rerun_modal.html).
+        "rerun_step_labels": rerun_step_labels(patient_files, patient_modalities),
         "allowed_modalities": allowed_modalities,
         "allowed_modality_slugs": [m.slug for m in allowed_modalities],
         # report_language now provided globally by common.context_processors.user_prefs
@@ -255,7 +261,7 @@ def patient_detail(request, patient_id):
 
 @login_required
 def patient_list(request):
-    patients = Patient.objects.select_related("dataset", "uploaded_by").prefetch_related(
+    patients = Patient.objects.select_related("uploaded_by").prefetch_related(
         "voice_captions",
         "voice_captions__user",
         "tags",
@@ -423,6 +429,17 @@ def patient_list(request):
     return render_with_fallback(request, "patient_list", context)
 
 
+def _first_form_error(form):
+    """One line for the uploader's toast: the first error the form reported."""
+    for message in form.non_field_errors():
+        return message
+    for field, errors in form.errors.items():
+        if errors:
+            label = form.fields[field].label if field in form.fields else field
+            return f"{label}: {errors[0]}"
+    return "Upload failed. Please check the form and try again."
+
+
 @login_required
 def upload_patient(request):
     user_profile = request.user.profile
@@ -444,6 +461,7 @@ def upload_patient(request):
         .order_by("name"),
         namespace,
     )
+    project = None
     allowed_modalities = []
     if current_project_id:
         try:
@@ -472,9 +490,12 @@ def upload_patient(request):
             patient_upload_form.add_error(None, "Add at least one file before uploading.")
             form_is_valid = False
 
-        if not form_is_valid and is_xhr:
-            error_msg = "Add at least one file before uploading." if not has_upload else "Please fix the errors in the form."
-            return JsonResponse({"ok": False, "error": error_msg}, status=400)
+        if not form_is_valid:
+            # A re-rendered form is HTML with status 200, which the XHR uploader
+            # cannot tell from success; give it the first error as JSON instead.
+            failed = upload_error_response(request, _first_form_error(patient_upload_form))
+            if failed is not None:
+                return failed
 
         if form_is_valid:
             patient = patient_upload_form.save(commit=False)
@@ -490,7 +511,11 @@ def upload_patient(request):
                     ).values_list("id", flat=True)
                 )
                 if folder.id not in allowed_folder_ids:
-                    messages.error(request, "You do not have permission to upload to the selected folder.")
+                    denied = "You do not have permission to upload to the selected folder."
+                    failed = upload_error_response(request, denied, status=403)
+                    if failed is not None:
+                        return failed
+                    messages.error(request, denied)
                     allowed_folders = filter_folders_for_user(
                         request.user,
                         Folder.objects.filter(parent__isnull=True).order_by("name"),
@@ -503,17 +528,15 @@ def upload_patient(request):
                         "allowed_modalities": allowed_modalities,
                     })
 
-            patient.save()
-            patient_upload_form.instance = patient
-            patient_upload_form.save(commit=True)
-
-            # Project scope is mandatory: assign the current project + folder.
-            project = Project.objects.filter(id=current_project_id).first() if current_project_id else None
+            # Project scope is mandatory: assign it before the first save rather
+            # than saving the patient twice with an unscoped row in between.
             if project:
                 patient.project = project
             if folder:
                 patient.folder = folder
             patient.save()
+            patient_upload_form.instance = patient
+            patient_upload_form.save(commit=True)
 
             uploaded_modalities = []
             processing_job_ids = []
@@ -554,15 +577,7 @@ def upload_patient(request):
             else:
                 messages.success(request, "Patient uploaded successfully!")
 
-            if is_xhr:
-                from django.urls import reverse, NoReverseMatch
-                try:
-                    redirect_url = reverse(f"{namespace}:patient_list")
-                except NoReverseMatch:
-                    redirect_url = reverse("patient_list")
-                return JsonResponse({"ok": True, "redirect": redirect_url})
-
-            return redirect_with_namespace(request, "patient_list")
+            return patient_list_response(request)
     else:
         patient_form = PatientForm()
         patient_upload_form = PatientUploadForm(user=request.user, current_project=project)
@@ -780,18 +795,35 @@ def user_profile(request, username=None):
 @login_required
 @require_POST
 def create_folder(request):
+    """Create a folder inside the current project (single-level only).
+
+    Mirrors ``maxillo.views.folders_tags.create_folder``. ``Folder.project`` is
+    non-nullable and was omitted here, so every call raised IntegrityError and
+    came back as a 500 -- Brain could not create folders at all.
+    """
     try:
         if not user_is_project_admin(request.user, "brain"):
             return JsonResponse({"error": "Permission denied"}, status=403)
+
+        current_project_id = request.session.get("current_project_id")
+        project = (
+            Project.objects.filter(id=current_project_id, is_active=True).first()
+            if current_project_id
+            else None
+        )
+        if project is None:
+            return JsonResponse({"error": "No project selected"}, status=400)
 
         data = _json.loads(request.body) if request.body else request.POST
         name = (data.get("name") or "").strip()
         if not name:
             return JsonResponse({"error": "Folder name is required"}, status=400)
 
+        # Matches unique_together ("project", "name", "parent").
         folder, created = Folder.objects.get_or_create(
             name=name,
             parent=None,
+            project=project,
             defaults={"created_by": request.user},
         )
         return JsonResponse(

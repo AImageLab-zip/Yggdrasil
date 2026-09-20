@@ -728,14 +728,17 @@ def patient_detail(request, patient_id):
 
     # Processing steps possible for this patient's rerun ("Rerun" header action).
     try:
-        from common.modality_config import rerunnable_steps_for_patient
+        from common.modality_config import rerun_step_labels, rerunnable_steps_for_patient
         _rerunnable = rerunnable_steps_for_patient(patient_file_rows, [], patient=patient)
         rerunnable_step_slugs = [step['slug'] for step in _rerunnable]
+        # Checkbox labels for the shared rerun picker (common/partials/rerun_modal.html).
+        rerun_step_labels_map = rerun_step_labels(patient_file_rows, patient_modalities)
     except Exception:
         logger.warning("Failed to compute rerunnable steps for patient %s", patient.patient_id, exc_info=True)
         rerunnable_step_slugs = [
             m.get('slug') for m in patient_modalities if m.get('slug') != 'rawzip'
         ]
+        rerun_step_labels_map = {}
 
     # Raw inputs freeze once annotation work exists; the panoramic freezes on
     # everything except its own state (see common.annotation_lock).
@@ -770,6 +773,7 @@ def patient_detail(request, patient_id):
         'can_create_caption': can_create_caption,
         'modality_files': modality_files,
         'rerunnable_step_slugs': rerunnable_step_slugs,
+        'rerun_step_labels': rerun_step_labels_map,
         'viewer_grid_data': viewer_grid_data,
     }
     # Allowed modalities for current project (to conditionally show upload controls)

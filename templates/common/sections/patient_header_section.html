@@ -9,10 +9,10 @@
   on the page via plain querySelector and POSTs to update-name/) — this is now
   that one instance; scan_settings_section.html no longer renders its own.
 
-  Rerun/Delete reuse the same endpoints the patients list uses
-  (`patient/<id>/rerun-processing/`, `patient/<id>/delete/`), called directly
-  here rather than via patient_list.js's modal (that JS/modal pair is list-page
-  only) — kept intentionally simple: confirm(), then POST, then reload/redirect.
+  Rerun opens the same step picker the patients list uses — the modal partial plus
+  static/js/rerun_modal.js, shared by both pages — so a rerun here is a choice of
+  processing steps rather than "all of them". Delete stays a confirm() + POST to
+  `patient/<id>/delete/`.
   Per-patient Export is not built (not selected by the user).
 {% endcomment %}
 <div class="patient-header">
@@ -49,9 +49,11 @@
          data-list-url="{% url list_url_name %}"
          data-csrf="{{ csrf_token }}">
         {% csrf_token %}
+        {% if rerunnable_step_slugs %}
         <button type="button" class="btn btn-secondary btn-sm" id="headerRerunBtn">
             <i class="fas fa-rotate" aria-hidden="true"></i>Rerun
         </button>
+        {% endif %}
         <button type="button" class="btn btn-danger btn-sm" id="headerDeleteBtn">
             <i class="fas fa-trash" aria-hidden="true"></i>Delete
         </button>
@@ -62,11 +64,14 @@
         var actionsEl = document.querySelector('.patient-header__actions');
         var patientId = {{ patient.patient_id|default:0 }};
         var ns = window.projectNamespace || 'maxillo';
-        var rerunUrl = (actionsEl && actionsEl.dataset.rerunUrl) || ('/' + ns + '/patient/' + patientId + '/rerun-processing/');
         var deleteUrl = (actionsEl && actionsEl.dataset.deleteUrl) || ('/' + ns + '/patient/' + patientId + '/delete/');
         var listUrl = (actionsEl && actionsEl.dataset.listUrl) || ('/' + ns + '/');
 
         function csrf() {
+            if (typeof window.yggCsrfToken === 'function') {
+                var t = window.yggCsrfToken();
+                if (t && t.length >= 32) return t;
+            }
             if (actionsEl && actionsEl.dataset.csrf && actionsEl.dataset.csrf.length >= 32) return actionsEl.dataset.csrf;
             var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
             if (input && input.value && input.value.length >= 32) return input.value;
@@ -89,28 +94,38 @@
 
         if (rerunBtn) {
             rerunBtn.addEventListener('click', function () {
-                if (!confirm('Rerun processing for all modalities on this patient?')) return;
-                rerunBtn.disabled = true;
-                fetch(rerunUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
-                    body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
-                }).then(function (r) {
-                    return r.json().catch(function () {
-                        return { success: false, error: 'Server returned ' + r.status + ' (' + r.statusText + ')' };
+                if (window.YggRerunModal && typeof window.YggRerunModal.open === 'function') {
+                    window.YggRerunModal.open({
+                        patientId: patientId,
+                        patientName: '{{ patient.name|default:"Unnamed scan"|escapejs }}',
+                        steps: window.__patientHeaderStepSlugs || [],
+                        onSuccess: function () { window.location.reload(); }
                     });
-                }).then(function (data) {
-                    if (data.success) {
-                        notify('success', data.message || 'Processing queued');
-                        setTimeout(function () { window.location.reload(); }, 500);
-                    } else {
-                        notify('error', data.error || 'Failed to rerun jobs');
-                    }
-                }).catch(function (err) {
-                    notify('error', err.message || 'Network error');
-                }).finally(function () {
-                    rerunBtn.disabled = false;
-                });
+                } else {
+                    if (!confirm('Rerun processing for all modalities on this patient?')) return;
+                    rerunBtn.disabled = true;
+                    var rerunUrl = (actionsEl && actionsEl.dataset.rerunUrl) || ('/' + ns + '/patient/' + patientId + '/rerun-processing/');
+                    fetch(rerunUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+                        body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
+                    }).then(function (r) {
+                        return r.json().catch(function () {
+                            return { success: false, error: 'Server returned ' + r.status + ' (' + r.statusText + ')' };
+                        });
+                    }).then(function (data) {
+                        if (data.success) {
+                            notify('success', data.message || 'Processing queued');
+                            setTimeout(function () { window.location.reload(); }, 500);
+                        } else {
+                            notify('error', data.error || 'Failed to rerun jobs');
+                        }
+                    }).catch(function (err) {
+                        notify('error', err.message || 'Network error');
+                    }).finally(function () {
+                        rerunBtn.disabled = false;
+                    });
+                }
             });
         }
         if (deleteBtn) {
@@ -143,7 +158,7 @@
     </script>
     {% endif %}
 </div>
-{% comment %} Processing step slugs for the header's "rerun all" action (possible for this
+{% comment %} Processing steps offered by the header's Rerun picker (possible for this
 patient, computed in the patient_detail view; excludes nothing at the root,
 downstream steps included). {% endcomment %}
 <script>
@@ -151,3 +166,6 @@ window.__patientHeaderStepSlugs = [
 {% for s in rerunnable_step_slugs %}"{{ s }}"{% if not forloop.last %},{% endif %}{% endfor %}
 ];
 </script>
+{% if user_profile.is_admin and rerunnable_step_slugs %}
+{% include 'common/partials/rerun_modal.html' %}
+{% endif %}

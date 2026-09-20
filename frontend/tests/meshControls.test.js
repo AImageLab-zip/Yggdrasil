@@ -10,7 +10,9 @@ import { emptyDocument, place } from '../imaging/mesh/landmarkDocument.js';
 import {
     MESH_CONTROL_IDS,
     controlPlan,
+    hexColor,
     instructionFor,
+    parseHexColor,
     setEyeIcon,
     setPressed,
 } from '../imaging/mesh/meshControls.js';
@@ -182,4 +184,51 @@ test('the two arches separate by lightness, not only by hue', () => {
         const spread = Math.max(red, green, blue) - Math.min(red, green, blue);
         assert.ok(spread <= 110, `${jaw} is too saturated for a clinical surface`);
     }
+});
+
+
+// ---------------------------------------------------------------------------
+// Jaw colour: the hex the controls speak, and the triples the viewport takes
+// ---------------------------------------------------------------------------
+
+test('every jaw default survives the round trip through hex', () => {
+    // `<input type="color">` only accepts `#rrggbb`, so the defaults reach the picker
+    // through `hexColor` and come back through `parseHexColor` on the first drag. A lossy
+    // trip would shift both arches the moment the menu was opened.
+    for (const jaw of Object.keys(JAW_COLORS)) {
+        assert.deepEqual(parseHexColor(hexColor(JAW_COLORS[jaw])), [...JAW_COLORS[jaw]]);
+    }
+});
+
+test('hex is lowercase and zero-padded, which is the only form the picker accepts', () => {
+    // A channel below 16 is where a missing pad shows up: `#0f8` is five digits, and the
+    // input silently keeps its old value rather than reporting anything.
+    assert.equal(hexColor([0, 15, 136]), '#000f88');
+});
+
+test('a typed hex is read with or without the hash, in either case', () => {
+    assert.deepEqual(parseHexColor('#4E70A0'), [78, 112, 160]);
+    assert.deepEqual(parseHexColor('4e70a0'), [78, 112, 160]);
+    assert.deepEqual(parseHexColor('  #4e70a0  '), [78, 112, 160]);
+});
+
+test('three-digit shorthand expands', () => {
+    assert.deepEqual(parseHexColor('#f00'), [255, 0, 0]);
+});
+
+test('text that is not a colour is null, never black', () => {
+    // The distinction the hex field is built on: `null` means "leave the arch alone and
+    // put the old value back", and returning [0,0,0] here would paint a jaw black on a
+    // typo or halfway through typing.
+    for (const junk of ['', '#', 'blue', '#12', '#12345', '#1234567', '#gggggg', null]) {
+        assert.equal(parseHexColor(junk), null, JSON.stringify(junk));
+    }
+});
+
+test('the colour controls are registered so the template ids cannot drift', () => {
+    // `maxillo/tests_ios_surface.py` asserts the other half of this pair.
+    assert.equal(MESH_CONTROL_IDS.upperColor, 'iosUpperJawColor');
+    assert.equal(MESH_CONTROL_IDS.upperColorHex, 'iosUpperJawColorHex');
+    assert.equal(MESH_CONTROL_IDS.lowerColor, 'iosLowerJawColor');
+    assert.equal(MESH_CONTROL_IDS.lowerColorHex, 'iosLowerJawColorHex');
 });

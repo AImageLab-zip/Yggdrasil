@@ -19,7 +19,7 @@ docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py startapp endo
 Give it the same shape as `brain/`/`laparoscopy/`:
 
 - `apps.py` — standard `AppConfig`
-- `models.py` — your own `Patient`, `VoiceCaption`, `Export`, `Dataset`, `Folder`, `FolderAccess`, `Tag`, and (optionally) `Classification`. **Subclass the abstract bases in `common/base_models.py`** instead of copy-pasting fields/methods — copy `brain/models.py` as a starting point since it already does this. Each subclass only needs to carry:
+- `models.py` — your own `Patient`, `VoiceCaption`, `Export`, `Folder`, `FolderAccess`, `Tag`, and (optionally) `Classification`. **Subclass the abstract bases in `common/base_models.py`** instead of copy-pasting fields/methods — copy `brain/models.py` as a starting point since it already does this. Each subclass only needs to carry:
   - the fields that legitimately differ per app (the `user`/`created_by`/`annotator` `related_name`, `db_table`, any domain-specific fields, and per-app `help_text` drift),
   - its own `class Meta` (always set `db_table = 'endo_<model>'`),
   - `__str__` where it differs from the base.

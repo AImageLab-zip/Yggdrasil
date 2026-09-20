@@ -206,6 +206,35 @@ class RunHelperTests(SimpleTestCase):
         self.assertEqual(set(keys), {"p/u.stl", "p/l.stl", "p/f.stl"})
         self.assertEqual(len(keys), 3)  # de-duplicated
 
+    def test_iter_input_keys_legacy_descriptor_yields_only_path(self):
+        # Shape of a pre-2026-07-29 `ios` job's output_files, merged in as this job's
+        # input by Job._pull_dependency_outputs. `filename`/`content_type` are not keys.
+        keys = list(run_mod.iter_input_keys({
+            "ios": {
+                "lower": {
+                    "path": "maxillo/processed/ios/job_20269/lower_oriented.stl",
+                    "filename": "lower_oriented.stl",
+                    "content_type": "model/stl",
+                },
+                "upper": {
+                    "path": "maxillo/processed/ios/job_20269/upper_oriented.stl",
+                    "filename": "upper_oriented.stl",
+                    "content_type": "model/stl",
+                },
+            }
+        }))
+        self.assertEqual(keys, [
+            "maxillo/processed/ios/job_20269/lower_oriented.stl",
+            "maxillo/processed/ios/job_20269/upper_oriented.stl",
+        ])
+
+    def test_iter_input_keys_mixes_descriptor_and_plain_dependencies(self):
+        keys = list(run_mod.iter_input_keys({
+            "ios": {"upper": {"path": "p/u.stl", "filename": "u.stl", "content_type": "model/stl"}},
+            "cbct": {"segmentation_nifti": "p/seg.nii.gz"},
+        }))
+        self.assertEqual(set(keys), {"p/u.stl", "p/seg.nii.gz"})
+
     def test_render_creds_env_has_storage_and_io(self):
         body = run_mod.render_creds_env(["p/a.stl", "p/b.stl"], "proj/processed/ios/job_5")
         self.assertIn("export OBJECT_STORAGE_ENDPOINT_URL=", body)

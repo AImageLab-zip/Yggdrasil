@@ -5,7 +5,7 @@ volumetric — its unit of work is a frame, not a voxel.
 
 ## What it owns
 
-- **Its own domain tables**: `Patient`, `Folder`, `FolderAccess`, `Dataset`,
+- **Its own domain tables**: `Patient`, `Folder`, `FolderAccess`,
   `Tag`, `VoiceCaption`, `Export`, `Classification`.
 - **The video vocabulary**: `RegionType` and `QuadrantType` (the label schemes),
   `RegionTypeUserColor` / `QuadrantTypeUserColor` (per-project, per-user colour

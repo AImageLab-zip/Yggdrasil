@@ -11,6 +11,48 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-09-07
+
+The public demo becomes a real feature, and Brain upload stops crying wolf.
+
+### Added
+- **A live public demo.** Anyone can now explore Yggdrasil without an account.
+  The front page leads with it: one button opens the real platform — the same
+  viewers, patients and annotations the research teams use — strictly read-only.
+  Nothing can be uploaded, edited or exported from the demo.
+- **Publishing to the demo is a project decision.** A project appears in the
+  public demo when the shared `guest` account is given the Viewer role on it,
+  granted on the project page like any other person's access. The project page
+  states plainly, for each project, whether it is readable by anyone on the
+  internet.
+
+### Changed
+- **The demo opens on the domain chooser** instead of dropping visitors into
+  whichever domain happened to come first, so a demo spanning several domains
+  shows all of them.
+- **The front page only offers domains you can actually open.** Cards for
+  domains you hold no project in are no longer shown, and the patient count on
+  each card now counts the patients you will actually find behind it.
+
+### Fixed
+- **Uploading a patient in Brain no longer reports a failure that did not
+  happen.** A successful upload showed a red "Upload failed" message and left
+  you on the form, even though the patient had been created; the page now goes
+  to the patient list as it does elsewhere. Real upload problems are reported
+  with the actual reason instead of a status code.
+- **Creating a folder in Brain works.** It previously failed with a server
+  error every time.
+- **The upload page in Brain no longer errors when no project is selected.**
+- **Access is judged by the project a folder belongs to.** Access to one project
+  could allow reading, and in some places annotating, a folder belonging to a
+  different project while you had the first one open.
+
+### Removed
+- **The per-folder "is demo" checkbox.** Demo access is decided by project
+  access now. As part of this upgrade the shared `guest` account's existing
+  project access is cleared and must be granted again deliberately, so nothing
+  is published to the internet by accident.
+
 ## [3.0.0] - 2026-09-02
 
 The imaging release: every viewer rebuilt on one engine, and annotations turned

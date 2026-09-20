@@ -2,21 +2,13 @@ from django.contrib import admin
 
 from common.admin import DomainFolderAdmin, DomainProjectAdmin
 
-from .models import BrainProject, Dataset, Export, Folder, Patient, Tag, VoiceCaption
+from .models import BrainProject, Export, Folder, Patient, Tag, VoiceCaption
 
 
 @admin.register(BrainProject)
 class BrainProjectAdmin(DomainProjectAdmin):
     """Brain projects, shown under the Brain admin section (domain forced)."""
     domain = 'brain'
-
-
-@admin.register(Dataset)
-class DatasetAdmin(admin.ModelAdmin):
-    list_display = ['name', 'created_at', 'created_by']
-    list_select_related = ['created_by']
-    search_fields = ['name', 'description']
-    autocomplete_fields = ['created_by']
 
 
 @admin.register(Folder)
@@ -36,9 +28,9 @@ class PatientAdmin(admin.ModelAdmin):
     # See maxillo.PatientAdmin: `project` is shown so a mis-filed patient is visible.
     list_display = ['patient_id', 'name', 'project', 'folder', 'visibility', 'uploaded_at', 'uploaded_by']
     list_filter = ['project', 'visibility', 'uploaded_at']
-    list_select_related = ['project', 'folder', 'dataset', 'uploaded_by']
+    list_select_related = ['project', 'folder', 'uploaded_by']
     search_fields = ['patient_id', 'name']
-    autocomplete_fields = ['project', 'folder', 'dataset', 'uploaded_by']
+    autocomplete_fields = ['project', 'folder', 'uploaded_by']
     filter_horizontal = ['modalities', 'tags']
 
 

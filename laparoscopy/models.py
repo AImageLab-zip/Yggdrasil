@@ -9,7 +9,6 @@ import logging
 from common.models import Modality, Project
 from common.base_models import (
     ActivePatientManager,
-    DatasetBase,
     FolderAccessBase,
     FolderBase,
     TagBase,
@@ -32,19 +31,6 @@ def laparoscopy_normalized_scan_path(instance, filename):
 
 def laparoscopy_cbct_upload_path(instance, filename):
     return f"laparoscopy/patient_{instance.patient_id}/cbct/{filename}"
-
-
-class Dataset(DatasetBase):
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='laparoscopy_datasets_created',
-    )
-
-    class Meta:
-        db_table = 'laparoscopy_dataset'
-        ordering = ['name']
 
 
 class LaparoscopyProject(Project):
@@ -121,7 +107,6 @@ class Patient(models.Model):
 
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
-    dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     modalities = models.ManyToManyField(
         Modality,
         blank=True,

@@ -28,6 +28,7 @@ import {
     CLEARED_MESSAGE,
     SAVED_MESSAGE,
     bindControls,
+    bindOrientationControls,
     loadingIndicator,
     markActiveTool,
 } from './controls.js';
@@ -561,6 +562,28 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     // layout -- a grid of parallel planes has no crosshair -- so it comes from the grid
     // and is not spelled here.
     markActiveTool(controls.plan.tools, grid.navigationTool);
+
+    // The per-window plane switcher, on the grids whose planes are not already fixed.
+    // maxillo shows axial, sagittal, coronal and the render side by side
+    // (`FIXED_CBCT_LAYOUT`), so there is nothing there to switch between; brain's four
+    // windows are all axial so that four series can be compared, which leaves a sagittal
+    // view of any of them unreachable. `fixedMode` is the flag that already chose the
+    // layout a dozen lines up, so it gates the switcher too -- a second flag for the same
+    // distinction is a second thing that can disagree with the layout it describes.
+    if (!data.fixedMode) {
+        bindOrientationControls({
+            grid,
+            elements,
+            doc,
+            // Shares the toolbar's status line, so a switch that fails reports where
+            // every other control failure on this page reports.
+            setStatus: controls.setStatus,
+            // Optional-chained: a window the state has not reached yet has no plane, and
+            // no button is pressed until it does. Reading it as a hard property would
+            // make an empty grid a TypeError during binding.
+            windowOrientation: (windowIndex) => windowAt(grid.state, windowIndex)?.orientation,
+        });
+    }
 
     // The window/level readout now lives in each viewport's own overlay rather than in
     // the toolbar: it belongs to the image it describes, and the toolbar `<output>` it

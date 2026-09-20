@@ -10,7 +10,6 @@ from django.utils.text import slugify
 from common.models import Modality, Project, ProjectAccess, Job, FileRegistry, Invitation
 from common.base_models import (
     ActivePatientManager,
-    DatasetBase,
     FolderAccessBase,
     FolderBase,
     TagBase,
@@ -24,16 +23,6 @@ logger = logging.getLogger(__name__)
 
 # MaxilloUserProfile has been removed - user permissions are now handled via common.ProjectAccess
 # Users get ProjectAccess entries when they accept an invitation or are granted access by an admin
-
-
-class Dataset(DatasetBase):
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-
-    def scan_count(self):
-        return self.patients.count()
-
-    def patient_count(self):
-        return self.patients.count()
 
 
 class MaxilloProject(Project):
@@ -105,7 +94,6 @@ class Patient(models.Model):
     
     patient_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, blank=True)
-    dataset = models.ForeignKey(Dataset, on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     modalities = models.ManyToManyField(Modality, blank=True, related_name='patients', help_text='Modalities available for this patient')
     folder = models.ForeignKey('Folder', on_delete=models.SET_NULL, null=True, blank=True, related_name='patients')
     # Mandatory project scope (backfilled by the folder->project migration,

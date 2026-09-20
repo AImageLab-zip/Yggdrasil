@@ -20,7 +20,6 @@
   be rendered once.
 {% endcomment %}
 <!-- Hidden CSRF token for AJAX usage -->
-<form style="display:none;">{% csrf_token %}</form>
 
 <div class="patients-page">
 
@@ -303,35 +302,7 @@ granularity the system has never had.{% endcomment %}
 </div>
 {% endif %}
 
-<div class="modal" id="rerunProcessingModal" tabindex="-1" aria-labelledby="rerunProcessingModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="rerunProcessingModalLabel">Rerun processing</h5>
-        <button type="button" class="btn-close" data-ygg-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-sub" id="rerunScanSubtitle"></p>
-        <div id="rerunModalityOptions"></div>
-        <p class="modal-note">Select the processing steps to re-run. Missing pipeline jobs are created automatically.</p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="ygg-btn ygg-btn--ghost" data-ygg-dismiss="modal">Cancel</button>
-        <button type="button" class="ygg-btn ygg-btn--primary" id="confirmRerunBtn">
-          <span class="label">Rerun selected</span>
-          <span class="spinner hidden"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i></span>
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-{% comment %} Slug -> human label map consumed by patient_list.js (window.rerunModalityLabels).
-Labels are ProcessingStep names (admin/common/processingstep), falling back to modality
-labels when a domain declares no processing steps. {% endcomment %}
-<script id="rerun-modality-labels" type="application/json">{
-{% for slug, label in rerun_step_labels.items %}"{{ slug }}": "{{ label }}"{% if not forloop.last %},{% endif %}{% endfor %}
-}</script>
+{% include 'common/partials/rerun_modal.html' %}
 
 <div class="modal" id="bulkRerunProcessingModal" tabindex="-1" aria-labelledby="bulkRerunProcessingModalLabel" aria-hidden="true">
   <div class="modal-dialog">

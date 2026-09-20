@@ -13,6 +13,7 @@
 
 import {
     EDITABLE_TYPES,
+    JAWS,
     LANDMARK_TYPES,
     TYPE_LABELS,
     cloneDocument,
@@ -44,13 +45,16 @@ import {
     SAVED_MESSAGE,
     UNSAVED_MESSAGE,
     controlPlan,
+    hexColor,
     instructionFor,
     onClick,
+    parseHexColor,
     setDisabled,
     setEyeIcon,
     setPressed,
     setSwitch,
 } from './meshControls.js';
+import { JAW_COLORS } from './meshViewport.js';
 import { renderToothGrid, toothButtons } from '../photos/toothGrid.js';
 import { DEFAULT_GRID_SIZE, createOverlay, drawGrid, resizeOverlay } from './screenGrid.js';
 import { isPlacementEvent, isSelectionEvent } from './pickMath.js';
@@ -135,6 +139,7 @@ export async function bootstrapMeshLandmarks({
         gridSize: 0,
         wireframe: false,
         whiteBackground: false,
+        jawColors: { ...JAW_COLORS },
         dirty: false,
         canEdit: Boolean(data.canModify),
     };
@@ -480,6 +485,7 @@ export async function bootstrapMeshLandmarks({
         }
         applyBackground();
         watchTheme();
+        bindJawColors();
 
         onClick(controls.landmarkMode, () => {
             state.active = !state.active;
@@ -520,6 +526,52 @@ export async function bootstrapMeshLandmarks({
         // already use, and it fires once on observe, so a stage that already had a size
         // is picked up too.
         unobserveSize = observeSize(controls.viewport, onResize);
+    }
+
+    /**
+     * The two arch-colour controls.
+     *
+     * Per-session only: `state.jawColors` starts as a copy of `JAW_COLORS` and nothing
+     * writes it anywhere, so a reload is the reset. That is the whole feature -- a reading
+     * aid for one scan on one screen, not a property of the study.
+     *
+     * The picker and the hex field are one value shown twice, so every accepted change
+     * goes through `apply` and writes *both* of them. Letting each control own its own
+     * display is how you get a swatch and a hex string sitting side by side disagreeing
+     * about what colour the jaw is.
+     *
+     * `input` on the picker, so dragging recolours live like `landmarkSizeRange` does;
+     * `change` on the text field, so a half-typed `#ff` is not parsed on every keystroke.
+     * An unparseable hex reverts the field to the colour in hand rather than applying
+     * anything -- `parseHexColor` returns `null` precisely so that "not a colour" is
+     * distinguishable from black.
+     */
+    function bindJawColors() {
+        for (const jaw of JAWS) {
+            const picker = controls[`${jaw}Color`];
+            const field = controls[`${jaw}ColorHex`];
+
+            const apply = (rgb) => {
+                state.jawColors[jaw] = rgb;
+                const hex = hexColor(rgb);
+                if (picker) picker.value = hex;
+                if (field) field.value = hex;
+                viewport.setJawColor(jaw, rgb);
+            };
+
+            // Once at mount, so the controls show the colour the arch actually loaded in
+            // -- the template ships no `value`, because `JAW_COLORS` is the only place the
+            // defaults are written down.
+            apply(state.jawColors[jaw]);
+
+            picker?.addEventListener?.('input', () => {
+                const rgb = parseHexColor(picker.value);
+                if (rgb) apply(rgb);
+            });
+            field?.addEventListener?.('change', () => {
+                apply(parseHexColor(field.value) ?? state.jawColors[jaw]);
+            });
+        }
     }
 
     /**
