@@ -51,7 +51,11 @@ self.onmessage = async function (event) {
 
         self.postMessage({ type: 'PROGRESS', percent: 25, message: 'Reading gigapixel scan...' });
         var timestamp = Date.now();
-        var inputName = 'input_' + timestamp + '.jpg';
+        var ext = '.jpg';
+        if (data.filename && data.filename.lastIndexOf('.') !== -1) {
+            ext = data.filename.substring(data.filename.lastIndexOf('.')).toLowerCase();
+        }
+        var inputName = 'input_' + timestamp + ext;
         var outputName = 'output_' + timestamp + '.tif';
 
         vips.FS.writeFile(inputName, new Uint8Array(data.buffer));

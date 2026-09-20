@@ -78,6 +78,14 @@ def _get_authorized_file(request, file_id: int):
             error,
         )
         return None, JsonResponse({"error": error}, status=status)
+
+    if file_obj.file_type == "urology_segmentation":
+        parent_id = file_obj.metadata.get("associated_image_file_id") if file_obj.metadata else None
+        if parent_id:
+            parent_file = FileRegistry.objects.filter(id=parent_id, domain="urology").first()
+            if parent_file:
+                return parent_file, None
+
     return file_obj, None
 
 
@@ -91,8 +99,7 @@ def wsi_metadata_api(request, file_id: int):
 
     try:
         slide_path = _get_local_slide_path(file_obj)
-        with open(slide_path, "rb") as fp:
-            metadata = get_wsi_metadata(fp, cache_key=f"urology_wsi_{file_id}_{file_obj.file_hash}")
+        metadata = get_wsi_metadata(slide_path, cache_key=f"urology_wsi_{file_id}_{file_obj.file_hash}")
         metadata["fileId"] = file_obj.id
         metadata["filename"] = file_obj.metadata.get("original_filename", "") or ""
         return JsonResponse(metadata)
@@ -144,16 +151,15 @@ def wsi_tile_api(request, file_id: int, level: int, col: int, row: int):
 
     try:
         slide_path = _get_local_slide_path(file_obj)
-        with open(slide_path, "rb") as fp:
-            tile_bytes = get_wsi_tile(
-                fp,
-                level=level,
-                col=col,
-                row=row,
-                tile_size=256,
-                image_format=img_format,
-                slide_key=safe_hash,
-            )
+        tile_bytes = get_wsi_tile(
+            slide_path,
+            level=level,
+            col=col,
+            row=row,
+            tile_size=256,
+            image_format=img_format,
+            slide_key=safe_hash,
+        )
 
         try:
             os.makedirs(slide_tile_dir, exist_ok=True)
@@ -203,8 +209,7 @@ def wsi_thumbnail_api(request, file_id: int):
 
     try:
         slide_path = _get_local_slide_path(file_obj)
-        with open(slide_path, "rb") as fp:
-            thumb_bytes = get_wsi_thumbnail(fp, max_dim=512, image_format="JPEG")
+        thumb_bytes = get_wsi_thumbnail(slide_path, max_dim=512, image_format="JPEG")
 
         try:
             os.makedirs(slide_tile_dir, exist_ok=True)

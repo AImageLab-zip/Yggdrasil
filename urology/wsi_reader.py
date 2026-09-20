@@ -1,7 +1,7 @@
 """Whole Slide Image (WSI) multi-resolution pyramidal TIFF reader.
 
 Extracts IFD metadata, levels, tile dimensions, MPP calibration, and individual
-pyramidal tiles on demand using Pillow.
+pyramidal tiles on demand with high-performance direct byte slicing.
 """
 
 import io
@@ -28,11 +28,16 @@ logger = logging.getLogger(__name__)
 # Cache parsed metadata in-process to avoid re-scanning IFD tables on every tile
 _METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
-# In-memory frame cache for instantaneous tile slicing (up to 100M pixels per frame, e.g. ~300MB uncompressed)
-MAX_CACHED_FRAME_PIXELS = 100_000_000
-_MAX_CACHED_FRAMES = 8
+# Tiled TIFF descriptor cache: slide_key -> {level_idx: tile_info_dict}
+_TIFF_TILES_CACHE: Dict[str, Dict[int, Dict[str, Any]]] = {}
+_TIFF_TILES_LOCK = threading.Lock()
+
+# In-memory frame cache for instantaneous tile slicing of untiled / decoded frames
+MAX_CACHED_FRAME_PIXELS = 250_000_000
+_MAX_CACHED_FRAMES = 2
 _FRAME_CACHE: OrderedDict[Tuple[str, int], Image.Image] = OrderedDict()
 _FRAME_CACHE_LOCK = threading.Lock()
+_HEAVY_DECODE_SEMAPHORE = threading.Semaphore(1)
 
 
 def _extract_mpp(img: Image.Image) -> Optional[float]:
@@ -51,14 +56,77 @@ def _extract_mpp(img: Image.Image) -> Optional[float]:
             val = float(x_res[0]) / float(x_res[1]) if isinstance(x_res, tuple) else float(x_res)
             if val > 0:
                 if unit == 3:  # pixels per cm -> microns per pixel
-                    # 1 cm = 10,000 microns
                     return round(10000.0 / val, 4)
                 elif unit == 2:  # pixels per inch -> microns per pixel
-                    # 1 inch = 25,400 microns
                     return round(25400.0 / val, 4)
     except Exception as exc:
         logger.debug("Could not parse MPP from TIFF tags: %s", exc)
     return None
+
+
+def _get_or_build_tiff_tile_info(file_source: Any, slide_key: Optional[str]) -> Optional[Dict[int, Dict[str, Any]]]:
+    """Read and cache tile offsets and JPEG tables for each pyramid level."""
+    if slide_key:
+        with _TIFF_TILES_LOCK:
+            if slide_key in _TIFF_TILES_CACHE:
+                return _TIFF_TILES_CACHE[slide_key]
+
+    try:
+        with Image.open(file_source) as img:
+            tile_info_by_level: Dict[int, Dict[str, Any]] = {}
+            n_frames = getattr(img, "n_frames", 1)
+
+            for frame_idx in range(n_frames):
+                img.seek(frame_idx)
+                w, h = img.size
+                tag_v2 = getattr(img, "tag_v2", {})
+                tile_width = tag_v2.get(322)
+                tile_length = tag_v2.get(323)
+                offsets = tag_v2.get(324)
+                byte_counts = tag_v2.get(325)
+                compression = tag_v2.get(259)
+
+                is_tiled = bool(tile_width and offsets and byte_counts and len(offsets) > 0)
+                if not is_tiled:
+                    continue
+
+                tw = int(tile_width)
+                th = int(tile_length or tile_width)
+                cols = (w + tw - 1) // tw
+                rows = (h + th - 1) // th
+
+                clean_tables = b""
+                if compression == 7:  # JPEG compression
+                    tables = tag_v2.get(347)
+                    if tables:
+                        if tables.startswith(b"\xff\xd8") and tables.endswith(b"\xff\xd9"):
+                            clean_tables = tables[2:-2]
+                        elif tables.endswith(b"\xff\xd9"):
+                            clean_tables = tables[:-2]
+                        else:
+                            clean_tables = tables
+
+                tile_info_by_level[frame_idx] = {
+                    "is_tiled": True,
+                    "tile_width": tw,
+                    "tile_height": th,
+                    "cols": cols,
+                    "rows": rows,
+                    "offsets": offsets,
+                    "byte_counts": byte_counts,
+                    "compression": compression,
+                    "clean_jpegtables": clean_tables,
+                    "width": w,
+                    "height": h,
+                }
+
+            if slide_key:
+                with _TIFF_TILES_LOCK:
+                    _TIFF_TILES_CACHE[slide_key] = tile_info_by_level
+            return tile_info_by_level
+    except Exception as exc:
+        logger.debug("Failed building TIFF tile info for %s: %s", slide_key, exc)
+        return None
 
 
 def get_wsi_metadata(file_source: Any, cache_key: Optional[str] = None) -> Dict[str, Any]:
@@ -79,7 +147,11 @@ def get_wsi_metadata(file_source: Any, cache_key: Optional[str] = None) -> Dict[
 
                 # Detect tile size if explicitly tiled, otherwise default to 256
                 tile_size = 256
-                if hasattr(img, "tile") and img.tile:
+                tag_v2 = getattr(img, "tag_v2", {})
+                tw = tag_v2.get(322)
+                if tw and int(tw) in (256, 512, 1024):
+                    tile_size = int(tw)
+                elif hasattr(img, "tile") and img.tile:
                     try:
                         _, tile_box, _, _ = img.tile[0]
                         box_w = tile_box[2] - tile_box[0]
@@ -148,6 +220,17 @@ def get_wsi_metadata(file_source: Any, cache_key: Optional[str] = None) -> Dict[
         return result
 
 
+def _make_blank_tile(size: int = 256, image_format: str = "JPEG") -> bytes:
+    """Generate a white background tile for empty or out-of-bounds regions."""
+    blank = Image.new("RGB", (size, size), (255, 255, 255))
+    buffer = io.BytesIO()
+    if image_format.upper() in ("JPEG", "JPG"):
+        blank.save(buffer, format="JPEG", quality=80)
+    else:
+        blank.save(buffer, format=image_format)
+    return buffer.getvalue()
+
+
 def get_wsi_tile(
     file_source: Any,
     level: int,
@@ -157,7 +240,11 @@ def get_wsi_tile(
     image_format: str = "JPEG",
     slide_key: Optional[str] = None,
 ) -> bytes:
-    """Extract and encode a single tile (col, row) at the given pyramid level."""
+    """Extract and encode a single tile (col, row) at the given pyramid level.
+
+    Uses high-performance direct byte slicing for tiled JPEG BigTIFFs, and
+    semaphore-serialized decoded frame caching for untiled slides.
+    """
     # 1. Fast path: check in-memory loaded frame cache for sub-millisecond slicing
     if slide_key:
         with _FRAME_CACHE_LOCK:
@@ -170,10 +257,8 @@ def get_wsi_tile(
                 x1 = min(x0 + tile_size, w)
                 y1 = min(y0 + tile_size, h)
                 if x0 >= w or y0 >= h or x1 <= x0 or y1 <= y0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
-                else:
-                    tile = cached_frame.crop((x0, y0, x1, y1))
-
+                    return _make_blank_tile(tile_size, image_format)
+                tile = cached_frame.crop((x0, y0, x1, y1))
                 buffer = io.BytesIO()
                 if image_format.upper() in ("JPEG", "JPG"):
                     tile.save(buffer, format="JPEG", quality=80, subsampling="4:2:0")
@@ -181,108 +266,188 @@ def get_wsi_tile(
                     tile.save(buffer, format=image_format)
                 return buffer.getvalue()
 
-    # 2. Open slide and populate cache if frame size is within memory budget
-    with Image.open(file_source) as img:
-        has_pyramid = getattr(img, "n_frames", 1) > 1
+    # 2. High-Performance Direct Byte Extraction for Tiled TIFFs
+    tile_info_by_level = _get_or_build_tiff_tile_info(file_source, slide_key)
+    if tile_info_by_level and level in tile_info_by_level:
+        info = tile_info_by_level[level]
+        cols = info["cols"]
+        rows = info["rows"]
 
-        if has_pyramid and level < img.n_frames:
-            img.seek(level)
-            w, h = img.size
-            x0 = col * tile_size
-            y0 = row * tile_size
-            x1 = min(x0 + tile_size, w)
-            y1 = min(y0 + tile_size, h)
+        if col < 0 or col >= cols or row < 0 or row >= rows:
+            return _make_blank_tile(tile_size, image_format)
 
-            if slide_key and (w * h <= MAX_CACHED_FRAME_PIXELS):
-                frame_rgb = img.convert("RGB")
-                with _FRAME_CACHE_LOCK:
-                    _FRAME_CACHE[(slide_key, level)] = frame_rgb
+        tile_idx = row * cols + col
+        offsets = info["offsets"]
+        byte_counts = info["byte_counts"]
+
+        if tile_idx < len(offsets) and tile_idx < len(byte_counts):
+            offset = offsets[tile_idx]
+            byte_count = byte_counts[tile_idx]
+
+            if byte_count <= 0:
+                return _make_blank_tile(tile_size, image_format)
+
+            # Seek and read raw chunk
+            chunk = None
+            if isinstance(file_source, str):
+                with open(file_source, "rb") as fp:
+                    fp.seek(offset)
+                    chunk = fp.read(byte_count)
+            elif hasattr(file_source, "seek") and hasattr(file_source, "read"):
+                file_source.seek(offset)
+                chunk = file_source.read(byte_count)
+
+            if chunk:
+                compression = info["compression"]
+                if compression == 7:  # Standard JPEG tile
+                    clean_tables = info.get("clean_jpegtables") or b""
+                    if clean_tables:
+                        if chunk.startswith(b"\xff\xd8"):
+                            tile_bytes = chunk[:2] + clean_tables + chunk[2:]
+                        else:
+                            tile_bytes = clean_tables + chunk
+                    else:
+                        tile_bytes = chunk
+
+                    if image_format.upper() in ("JPEG", "JPG"):
+                        return tile_bytes
+
+                    try:
+                        tile_img = Image.open(io.BytesIO(tile_bytes))
+                        buffer = io.BytesIO()
+                        tile_img.save(buffer, format=image_format)
+                        return buffer.getvalue()
+                    except Exception:
+                        pass
+
+    # 3. Fallback path for untiled TIFFs or virtual downsample levels
+    # Guard with semaphore and populate _FRAME_CACHE so repeated crops take ~0.2ms
+    with _HEAVY_DECODE_SEMAPHORE:
+        # Re-check cache after acquiring semaphore
+        if slide_key:
+            with _FRAME_CACHE_LOCK:
+                cached_frame = _FRAME_CACHE.get((slide_key, level))
+                if cached_frame is not None:
                     _FRAME_CACHE.move_to_end((slide_key, level))
-                    if len(_FRAME_CACHE) > _MAX_CACHED_FRAMES:
-                        _FRAME_CACHE.popitem(last=False)
+                    w, h = cached_frame.size
+                    x0 = col * tile_size
+                    y0 = row * tile_size
+                    x1 = min(x0 + tile_size, w)
+                    y1 = min(y0 + tile_size, h)
+                    if x0 >= w or y0 >= h or x1 <= x0 or y1 <= y0:
+                        return _make_blank_tile(tile_size, image_format)
+                    tile = cached_frame.crop((x0, y0, x1, y1))
+                    buffer = io.BytesIO()
+                    if image_format.upper() in ("JPEG", "JPG"):
+                        tile.save(buffer, format="JPEG", quality=80, subsampling="4:2:0")
+                    else:
+                        tile.save(buffer, format=image_format)
+                    return buffer.getvalue()
+
+        with Image.open(file_source) as img:
+            has_pyramid = getattr(img, "n_frames", 1) > 1
+
+            if has_pyramid and level < img.n_frames:
+                img.seek(level)
+                w, h = img.size
+                x0 = col * tile_size
+                y0 = row * tile_size
+                x1 = min(x0 + tile_size, w)
+                y1 = min(y0 + tile_size, h)
+
                 if x0 >= w or y0 >= h or x1 <= x0 or y1 <= y0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
-                else:
+                    return _make_blank_tile(tile_size, image_format)
+
+                if slide_key and (w * h <= MAX_CACHED_FRAME_PIXELS):
+                    frame_rgb = img.convert("RGB")
+                    with _FRAME_CACHE_LOCK:
+                        _FRAME_CACHE[(slide_key, level)] = frame_rgb
+                        _FRAME_CACHE.move_to_end((slide_key, level))
+                        while len(_FRAME_CACHE) > _MAX_CACHED_FRAMES:
+                            _FRAME_CACHE.popitem(last=False)
                     tile = frame_rgb.crop((x0, y0, x1, y1))
-            else:
-                if x0 >= w or y0 >= h or x1 <= x0 or y1 <= y0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
                 else:
                     tile = img.crop((x0, y0, x1, y1)).convert("RGB")
 
-        elif level > 0:
-            # Virtual level downsampled from Level 0: check if level 0 is cached
-            factor = 2 ** level
-            base_frame = None
-            if slide_key:
-                with _FRAME_CACHE_LOCK:
-                    base_frame = _FRAME_CACHE.get((slide_key, 0))
+            elif level > 0:
+                # Virtual downsampling level from base level 0
+                factor = 2 ** level
+                base_frame = None
+                if slide_key:
+                    with _FRAME_CACHE_LOCK:
+                        base_frame = _FRAME_CACHE.get((slide_key, 0))
 
-            if base_frame is not None:
-                base_w, base_h = base_frame.size
-                sx0 = col * tile_size * factor
-                sy0 = row * tile_size * factor
-                sx1 = min(base_w, (col + 1) * tile_size * factor)
-                sy1 = min(base_h, (row + 1) * tile_size * factor)
-                if sx0 >= base_w or sy0 >= base_h or sx1 <= sx0 or sy1 <= sy0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
-                else:
+                if base_frame is None and slide_key:
+                    img.seek(0)
+                    bw, bh = img.size
+                    if bw * bh <= MAX_CACHED_FRAME_PIXELS:
+                        base_frame = img.convert("RGB")
+                        with _FRAME_CACHE_LOCK:
+                            _FRAME_CACHE[(slide_key, 0)] = base_frame
+                            _FRAME_CACHE.move_to_end((slide_key, 0))
+                            while len(_FRAME_CACHE) > _MAX_CACHED_FRAMES:
+                                _FRAME_CACHE.popitem(last=False)
+
+                if base_frame is not None:
+                    base_w, base_h = base_frame.size
+                    sx0 = col * tile_size * factor
+                    sy0 = row * tile_size * factor
+                    sx1 = min(base_w, (col + 1) * tile_size * factor)
+                    sy1 = min(base_h, (row + 1) * tile_size * factor)
+                    if sx0 >= base_w or sy0 >= base_h or sx1 <= sx0 or sy1 <= sy0:
+                        return _make_blank_tile(tile_size, image_format)
                     crop = base_frame.crop((sx0, sy0, sx1, sy1))
                     tw = max(1, (sx1 - sx0) // factor)
                     th = max(1, (sy1 - sy0) // factor)
                     tile = crop.resize((tw, th), Image.Resampling.BILINEAR)
-            else:
-                img.seek(0)
-                base_w, base_h = img.size
-                sx0 = col * tile_size * factor
-                sy0 = row * tile_size * factor
-                sx1 = min(base_w, (col + 1) * tile_size * factor)
-                sy1 = min(base_h, (row + 1) * tile_size * factor)
-
-                if sx0 >= base_w or sy0 >= base_h or sx1 <= sx0 or sy1 <= sy0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
                 else:
+                    img.seek(0)
+                    base_w, base_h = img.size
+                    sx0 = col * tile_size * factor
+                    sy0 = row * tile_size * factor
+                    sx1 = min(base_w, (col + 1) * tile_size * factor)
+                    sy1 = min(base_h, (row + 1) * tile_size * factor)
+                    if sx0 >= base_w or sy0 >= base_h or sx1 <= sx0 or sy1 <= sy0:
+                        return _make_blank_tile(tile_size, image_format)
                     crop = img.crop((sx0, sy0, sx1, sy1))
                     tw = max(1, (sx1 - sx0) // factor)
                     th = max(1, (sy1 - sy0) // factor)
                     tile = crop.resize((tw, th), Image.Resampling.BILINEAR).convert("RGB")
-        else:
-            img.seek(0)
-            w, h = img.size
-            x0 = col * tile_size
-            y0 = row * tile_size
-            x1 = min(x0 + tile_size, w)
-            y1 = min(y0 + tile_size, h)
-            if slide_key and (w * h <= MAX_CACHED_FRAME_PIXELS):
-                frame_rgb = img.convert("RGB")
-                with _FRAME_CACHE_LOCK:
-                    _FRAME_CACHE[(slide_key, level)] = frame_rgb
-                    _FRAME_CACHE.move_to_end((slide_key, level))
-                    if len(_FRAME_CACHE) > _MAX_CACHED_FRAMES:
-                        _FRAME_CACHE.popitem(last=False)
-                if x0 >= w or y0 >= h or x1 <= x0 or y1 <= y0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
-                else:
-                    tile = frame_rgb.crop((x0, y0, x1, y1))
+
             else:
+                img.seek(0)
+                w, h = img.size
+                x0 = col * tile_size
+                y0 = row * tile_size
+                x1 = min(x0 + tile_size, w)
+                y1 = min(y0 + tile_size, h)
                 if x0 >= w or y0 >= h or x1 <= x0 or y1 <= y0:
-                    tile = Image.new("RGB", (1, 1), (255, 255, 255))
+                    return _make_blank_tile(tile_size, image_format)
+
+                if slide_key and (w * h <= MAX_CACHED_FRAME_PIXELS):
+                    frame_rgb = img.convert("RGB")
+                    with _FRAME_CACHE_LOCK:
+                        _FRAME_CACHE[(slide_key, level)] = frame_rgb
+                        _FRAME_CACHE.move_to_end((slide_key, level))
+                        while len(_FRAME_CACHE) > _MAX_CACHED_FRAMES:
+                            _FRAME_CACHE.popitem(last=False)
+                    tile = frame_rgb.crop((x0, y0, x1, y1))
                 else:
                     tile = img.crop((x0, y0, x1, y1)).convert("RGB")
 
-        buffer = io.BytesIO()
-        if image_format.upper() in ("JPEG", "JPG"):
-            tile.save(buffer, format="JPEG", quality=80, subsampling="4:2:0")
-        else:
-            tile.save(buffer, format=image_format)
-        return buffer.getvalue()
+            buffer = io.BytesIO()
+            if image_format.upper() in ("JPEG", "JPG"):
+                tile.save(buffer, format="JPEG", quality=80, subsampling="4:2:0")
+            else:
+                tile.save(buffer, format=image_format)
+            return buffer.getvalue()
 
 
 def get_wsi_thumbnail(file_source: Any, max_dim: int = 512, image_format: str = "JPEG") -> bytes:
     """Extract or generate a slide overview thumbnail for the minimap navigator."""
     with Image.open(file_source) as img:
         if getattr(img, "n_frames", 1) > 1:
-            # Seek to lowest resolution frame
+            # Seek to lowest resolution frame for instantaneous downscaling
             img.seek(img.n_frames - 1)
         thumb = img.convert("RGB")
         thumb.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)

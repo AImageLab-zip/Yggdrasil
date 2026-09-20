@@ -540,7 +540,12 @@ def patient_detail(request, patient_id):
     # Prepare MRI volume grid data
     modality_files = {}
     mri_file = (
-        patient.files.filter(modality__slug="urology-mri").order_by("-created_at").first()
+        patient.files.filter(
+            modality__slug="urology-mri",
+            file_type__in=["urology_mri_raw", "urology_mri_processed"],
+        )
+        .order_by("-created_at")
+        .first()
         or patient.files.filter(
             file_type__in=["urology_mri_raw", "urology_mri_processed"]
         )
@@ -568,7 +573,12 @@ def patient_detail(request, patient_id):
 
     # Prepare Digital Pathology WSI data
     wsi_file = (
-        patient.files.filter(modality__slug="urology-wsi").order_by("-created_at").first()
+        patient.files.filter(
+            modality__slug="urology-wsi",
+            file_type__in=["urology_wsi_raw", "urology_wsi_processed"],
+        )
+        .order_by("-created_at")
+        .first()
         or patient.files.filter(
             file_type__in=["urology_wsi_raw", "urology_wsi_processed"]
         )
@@ -577,7 +587,12 @@ def patient_detail(request, patient_id):
     )
     # Prepare Confocale Microscopy data
     confocal_file = (
-        patient.files.filter(modality__slug="urology-confocal").order_by("-created_at").first()
+        patient.files.filter(
+            modality__slug="urology-confocal",
+            file_type__in=["urology_confocal_raw", "urology_confocal_processed"],
+        )
+        .order_by("-created_at")
+        .first()
         or patient.files.filter(
             file_type__in=["urology_confocal_raw", "urology_confocal_processed"]
         )

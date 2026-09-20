@@ -11,6 +11,12 @@
 }(typeof window !== 'undefined' ? window : globalThis, function () {
     'use strict';
 
+    function isConvertible(file) {
+        if (!file || !file.name) return false;
+        var name = file.name.toLowerCase();
+        return name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.tif') || name.endsWith('.tiff') || name.endsWith('.png');
+    }
+
     function isConvertibleJpeg(file) {
         if (!file || !file.name) return false;
         var name = file.name.toLowerCase();
@@ -18,18 +24,18 @@
     }
 
     /**
-     * Convert a flat gigapixel JPEG into a multi-resolution pyramidal BigTIFF (.tiff) File object.
+     * Convert a flat scan (JPEG, PNG, flat TIFF) into a multi-resolution pyramidal BigTIFF (.tiff) File object.
      *
      * @param {File} file
      * @param {Object} [options]
      * @param {Function} [options.onProgress] - Callback (percent, message)
      * @returns {Promise<{file: File}>}
      */
-    function convertJpegToTiff(file, options) {
+    function convertScanToPyramidTiff(file, options) {
         options = options || {};
         var onProgress = options.onProgress || function () {};
 
-        if (!isConvertibleJpeg(file)) {
+        if (!isConvertible(file)) {
             return Promise.resolve({ file: file });
         }
 
@@ -74,7 +80,7 @@
                     reject(new Error('WSI Conversion Worker error: ' + (err.message || 'unknown error')));
                 };
 
-                onProgress(5, 'Preparing gigapixel scan for conversion...');
+                onProgress(5, 'Preparing scan for pyramidal conversion...');
                 worker.postMessage({
                     type: 'CONVERT_JPG_TO_TIFF',
                     buffer: arrayBuffer,
@@ -83,15 +89,19 @@
             };
 
             reader.onerror = function () {
-                reject(new Error('Failed to read JPEG file: ' + file.name));
+                reject(new Error('Failed to read file: ' + file.name));
             };
 
             reader.readAsArrayBuffer(file);
         });
     }
 
+    var convertJpegToTiff = convertScanToPyramidTiff;
+
     return {
+        isConvertible: isConvertible,
         isConvertibleJpeg: isConvertibleJpeg,
-        convertJpegToTiff: convertJpegToTiff
+        convertJpegToTiff: convertJpegToTiff,
+        convertScanToPyramidTiff: convertScanToPyramidTiff
     };
 }));

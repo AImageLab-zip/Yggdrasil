@@ -81,12 +81,14 @@ class Command(BaseCommand):
                 self.style.SUCCESS(f"Linked {modality.name} to {project.name} project")
             )
 
-        voice_caption = AnnotationMethod.objects.filter(slug="voice_caption").first()
-        if voice_caption:
-            project.annotation_methods.add(voice_caption)
-            self.stdout.write(
-                self.style.SUCCESS(f"Linked {voice_caption.name} to {project.name} project")
-            )
+        voice_caption, _ = AnnotationMethod.objects.get_or_create(
+            slug="voice_caption",
+            defaults={"name": "Voice Captions", "is_active": True},
+        )
+        project.annotation_methods.add(voice_caption)
+        self.stdout.write(
+            self.style.SUCCESS(f"Linked {voice_caption.name} to {project.name} project")
+        )
 
         self.stdout.write(
             self.style.SUCCESS(

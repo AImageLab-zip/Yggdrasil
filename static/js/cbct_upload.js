@@ -248,13 +248,14 @@
                 return;
             }
 
-            // Check for Urology WSI / Confocale JPEG files requiring in-browser pyramidal conversion
+            // Check for Urology WSI / Confocale scan files requiring in-browser pyramidal conversion
             const wsiInput = form.querySelector('input[name="urology-wsi"]');
             const confocalInput = form.querySelector('input[name="urology-confocal"]');
             const convertibleInputs = [wsiInput, confocalInput].filter(input =>
                 input && !input.disabled && input.files && input.files.length &&
                 input.dataset.converted !== 'true' &&
-                window.WSIConvert && window.WSIConvert.isConvertibleJpeg(input.files[0])
+                window.WSIConvert &&
+                (window.WSIConvert.isConvertible ? window.WSIConvert.isConvertible(input.files[0]) : window.WSIConvert.isConvertibleJpeg(input.files[0]))
             );
 
             if (convertibleInputs.length > 0) {
@@ -269,7 +270,8 @@
                     for (const input of convertibleInputs) {
                         const file = input.files[0];
                         if (progressLabel) progressLabel.textContent = `Converting ${file.name} to Pyramidal TIFF...`;
-                        const res = await window.WSIConvert.convertJpegToTiff(file, {
+                        const convertFn = window.WSIConvert.convertScanToPyramidTiff || window.WSIConvert.convertJpegToTiff;
+                        const res = await convertFn(file, {
                             onProgress: (pct, msg) => {
                                 if (progressLabel) progressLabel.textContent = `[${pct}%] ${file.name}: ${msg}`;
                             }

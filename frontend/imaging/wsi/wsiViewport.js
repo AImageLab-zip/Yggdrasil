@@ -393,17 +393,47 @@ export function createWsiViewport({
         }
         if (pendingFetches.size === 0) return;
 
-        const currentLevel = choosePyramidLevel().level;
+        const levelInfo = choosePyramidLevel();
+        const currentLevel = levelInfo.level;
         const baseLevel = levels[levels.length - 1].level;
 
-        // Abort in-flight requests that are from other levels and not the base level
+        // Calculate visible bounding box with margin for panning culling
+        const lvlDownsample = levelInfo.downsample;
+        const lvlTileSlideSize = tileSize * lvlDownsample;
+        const rect = element.getBoundingClientRect();
+        const [visX0, visY0] = screenToSlide(0, 0);
+        const [visX1, visY1] = screenToSlide(rect.width, rect.height);
+        const cullMargin = 2;
+        const colStart = Math.max(0, Math.floor(Math.max(0, visX0) / lvlTileSlideSize) - cullMargin);
+        const colEnd = Math.min(levelInfo.cols - 1, Math.floor(Math.min(slideWidth, visX1) / lvlTileSlideSize) + cullMargin);
+        const rowStart = Math.max(0, Math.floor(Math.max(0, visY0) / lvlTileSlideSize) - cullMargin);
+        const rowEnd = Math.min(levelInfo.rows - 1, Math.floor(Math.min(slideHeight, visY1) / lvlTileSlideSize) + cullMargin);
+
+        // Abort in-flight requests that are from other levels (unless base level) or out of viewport
         for (const [key, controller] of inFlightFetches.entries()) {
             const parts = key.split(':');
             const reqLevel = Number(parts[1]);
-            if (reqLevel !== currentLevel && reqLevel !== baseLevel) {
+            const coords = parts[2] ? parts[2].split('_') : [0, 0];
+            const reqCol = Number(coords[0]);
+            const reqRow = Number(coords[1]);
+
+            const isObsoleteLevel = reqLevel !== currentLevel && reqLevel !== baseLevel;
+            const isOutOfView = reqLevel === currentLevel && (reqCol < colStart || reqCol > colEnd || reqRow < rowStart || reqRow > rowEnd);
+
+            if (isObsoleteLevel || isOutOfView) {
                 controller.abort();
                 inFlightFetches.delete(key);
                 activeFetchesCount = Math.max(0, activeFetchesCount - 1);
+            }
+        }
+
+        // Prune obsolete level or out-of-view tiles from fetchQueue
+        for (let i = fetchQueue.length - 1; i >= 0; i -= 1) {
+            const item = fetchQueue[i];
+            const isObsoleteLevel = item.level !== currentLevel && !item.isBase;
+            const isOutOfView = item.level === currentLevel && (item.col < colStart || item.col > colEnd || item.row < rowStart || item.row > rowEnd);
+            if (isObsoleteLevel || isOutOfView) {
+                fetchQueue.splice(i, 1);
             }
         }
 
