@@ -11,6 +11,22 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The Urology multimodal imaging release: digital pathology Whole Slide Images, multiparametric prostate MRI, and confocal endomicroscopy.
+
+### Added
+- **The Urology domain (`/urology/`).** Clinicians and research teams can now manage, view, and annotate urological studies spanning prostate MRI, digital pathology biopsies, and confocal microscopy.
+- **Whole Slide Image (WSI) deep-zoom viewer.** Native pyramidal tile streaming supporting BigTIFF and SVS slide formats with smooth navigation up to 40× magnification, physical scale calibration, and vector measurements.
+- **In-browser gigapixel converter.** Pathology scans in flat JPEG/PNG format can be converted into pyramidal tiled BigTIFF files directly in the browser via WebAssembly (`wasm-vips`), completely offloading heavy conversion compute from the server.
+- **Dual-canvas pathology segmentation overlays.** Histological segmentation masks render synchronously on both the primary slide viewport and the overview minimap navigator, toggling cleanly with a single control.
+- **Zero-padding edge stripping.** The WSI reader automatically detects and removes artificial black margin strips from scanner tiling boundaries for seamless pathology viewing.
+- **Raw data immutability locks.** Scans associated with clinical annotations or segmentation masks are protected against deletion or overwrite, safeguarding research data integrity.
+
+### Changed
+- **Unified with main v3.0.1.** Upstream improvements to the public demo, permissions, and index grouping are fully integrated.
+- **Dropped obsolete `Dataset` model** in favor of project-scoped study management across the platform.
+
 ## [3.0.1] - 2026-09-07
 
 The public demo becomes a real feature, and Brain upload stops crying wolf.

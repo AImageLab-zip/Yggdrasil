@@ -1,10 +1,10 @@
 # Adding a new project type
 
-A "project type" is a Django app like `maxillo/`, `brain/`, or `laparoscopy/` — each is a separate imaging workflow (its own patients, modalities, folders) mounted under its own URL prefix. There's no generator for this: the current practice is to copy an existing app and then touch a handful of shared files in `common/` to wire in the new domain.
+A "project type" is a Django app like `maxillo/`, `brain/`, `laparoscopy/`, or `urology/` — each is a separate imaging workflow (its own patients, modalities, folders) mounted under its own URL prefix. There's no generator for this: the current practice is to copy an existing app and then touch a handful of shared files in `common/` to wire in the new domain.
 
 Most of the per-domain wiring is driven by a single registry (`common/domains.py`) and a set of abstract base models (`common/base_models.py`), so there is far less hardcoded branching than there used to be. The remaining hardcoded piece is the per-app FK columns on the shared `Job`/`ProcessingJob`/`FileRegistry` tables (see step 4).
 
-Use `laparoscopy/` as your template if your app can reuse generic patient/folder/export views (lighter weight). Use `brain/` as your template if you need your own `app_urls.py`/`api_views.py`.
+Use `laparoscopy/` as your template if your app can reuse generic patient/folder/export views (lighter weight). Use `brain/` or `urology/` as your template if you need dedicated viewers, `app_urls.py` or specialized modality readers.
 
 ## 1. Pick a domain name
 
