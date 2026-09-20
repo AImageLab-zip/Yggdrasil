@@ -309,6 +309,23 @@ def get_wsi_tile(
                     else:
                         tile_bytes = chunk
 
+                    # Check if this is an edge or overview tile that needs black padding removal
+                    valid_w = min(info["tile_width"], info["width"] - col * info["tile_width"])
+                    valid_h = min(info["tile_height"], info["height"] - row * info["tile_height"])
+
+                    if valid_w < info["tile_width"] or valid_h < info["tile_height"]:
+                        try:
+                            tile_img = Image.open(io.BytesIO(tile_bytes))
+                            cropped = tile_img.crop((0, 0, max(1, valid_w), max(1, valid_h)))
+                            buffer = io.BytesIO()
+                            if image_format.upper() in ("JPEG", "JPG"):
+                                cropped.save(buffer, format="JPEG", quality=90)
+                            else:
+                                cropped.save(buffer, format=image_format)
+                            return buffer.getvalue()
+                        except Exception:
+                            pass
+
                     if image_format.upper() in ("JPEG", "JPG"):
                         return tile_bytes
 

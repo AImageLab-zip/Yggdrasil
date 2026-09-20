@@ -76,6 +76,15 @@ export function createWsiViewport({
     minimapImg.style.display = 'block';
     minimapContainer.appendChild(minimapImg);
 
+    const minimapSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    minimapSvg.style.position = 'absolute';
+    minimapSvg.style.left = '0';
+    minimapSvg.style.top = '0';
+    minimapSvg.style.width = '100%';
+    minimapSvg.style.height = '100%';
+    minimapSvg.style.pointerEvents = 'none';
+    minimapContainer.appendChild(minimapSvg);
+
     const minimapRect = document.createElement('div');
     minimapRect.style.position = 'absolute';
     minimapRect.style.border = '2px solid #38bdf8';
@@ -238,7 +247,12 @@ export function createWsiViewport({
                     const tileSlideH = Math.min(slideHeight - by, baseLvlTileSlideSize);
                     const bw = tileSlideW * zoom;
                     const bh = tileSlideH * zoom;
-                    ctx.drawImage(cachedBase.bitmap, bsx, bsy, bw, bh);
+
+                    const validTileW = Math.max(1, Math.min(tileSize, baseLvl.width - c * tileSize));
+                    const validTileH = Math.max(1, Math.min(tileSize, baseLvl.height - r * tileSize));
+                    const srcW = Math.min(cachedBase.bitmap.width, validTileW);
+                    const srcH = Math.min(cachedBase.bitmap.height, validTileH);
+                    ctx.drawImage(cachedBase.bitmap, 0, 0, srcW, srcH, bsx, bsy, bw, bh);
                 } else {
                     scheduleFetchTile(baseKey, baseLvl.level, c, r, true);
                 }
@@ -275,7 +289,11 @@ export function createWsiViewport({
                     const cached = globalWsiTileCache.get(tileKey);
 
                     if (cached?.bitmap) {
-                        ctx.drawImage(cached.bitmap, screenX, screenY, tileScreenW, tileScreenH);
+                        const validTileW = Math.max(1, Math.min(tileSize, levelInfo.width - col * tileSize));
+                        const validTileH = Math.max(1, Math.min(tileSize, levelInfo.height - row * tileSize));
+                        const srcW = Math.min(cached.bitmap.width, validTileW);
+                        const srcH = Math.min(cached.bitmap.height, validTileH);
+                        ctx.drawImage(cached.bitmap, 0, 0, srcW, srcH, screenX, screenY, tileScreenW, tileScreenH);
                     } else {
                         // Hierarchical LOD Fallback: immediately draw nearest cached parent level (e.g. 20x or 10x)
                         // scaled into this tile's exact footprint to eliminate blank/blurry stutter
@@ -289,10 +307,20 @@ export function createWsiViewport({
                             if (cachedAnc?.bitmap) {
                                 const ancSlideX = ancCol * ancTileSlideSize;
                                 const ancSlideY = ancRow * ancTileSlideSize;
-                                const srcX = Math.max(0, ((tileSlideX - ancSlideX) / ancTileSlideSize) * tileSize);
-                                const srcY = Math.max(0, ((tileSlideY - ancSlideY) / ancTileSlideSize) * tileSize);
-                                const srcW = Math.min(tileSize - srcX, (tileSlideW / ancTileSlideSize) * tileSize);
-                                const srcH = Math.min(tileSize - srcY, (tileSlideH / ancTileSlideSize) * tileSize);
+                                const ancValidW = Math.max(1, Math.min(tileSize, ancLvl.width - ancCol * tileSize));
+                                const ancValidH = Math.max(1, Math.min(tileSize, ancLvl.height - ancRow * tileSize));
+                                const bmpW = cachedAnc.bitmap.width;
+                                const bmpH = cachedAnc.bitmap.height;
+                                const scaleToBmpX = bmpW / ancValidW;
+                                const scaleToBmpY = bmpH / ancValidH;
+                                const relX = ((tileSlideX - ancSlideX) / ancTileSlideSize) * ancValidW;
+                                const relY = ((tileSlideY - ancSlideY) / ancTileSlideSize) * ancValidH;
+                                const relW = (tileSlideW / ancTileSlideSize) * ancValidW;
+                                const relH = (tileSlideH / ancTileSlideSize) * ancValidH;
+                                const srcX = Math.max(0, Math.min(bmpW, relX * scaleToBmpX));
+                                const srcY = Math.max(0, Math.min(bmpH, relY * scaleToBmpY));
+                                const srcW = Math.max(1, Math.min(bmpW - srcX, relW * scaleToBmpX));
+                                const srcH = Math.max(1, Math.min(bmpH - srcY, relH * scaleToBmpY));
                                 ctx.drawImage(
                                     cachedAnc.bitmap,
                                     srcX, srcY, srcW, srcH,
@@ -857,7 +885,11 @@ export function createWsiViewport({
 
     function renderSegmentation() {
         segmentationGroup.innerHTML = '';
-        if (!segmentationVisible || !segmentationData) return;
+        if (!segmentationVisible || !segmentationData) {
+            segmentationGroup.style.display = 'none';
+            return;
+        }
+        segmentationGroup.style.display = '';
 
         const features = Array.isArray(segmentationData.features)
             ? segmentationData.features
@@ -920,6 +952,83 @@ export function createWsiViewport({
                 }
             }
         }
+
+    }
+
+    function renderMinimapSegmentation() {
+        minimapSvg.innerHTML = '';
+        if (!segmentationVisible || !segmentationData) {
+            minimapSvg.style.display = 'none';
+            return;
+        }
+        minimapSvg.style.display = '';
+
+        const mBoxW = 160;
+        const mBoxH = 120;
+        const aspect = slideWidth / slideHeight;
+        let drawW = mBoxW;
+        let drawH = mBoxW / aspect;
+        if (drawH > mBoxH) {
+            drawH = mBoxH;
+            drawW = mBoxH * aspect;
+        }
+        const offsetX = (mBoxW - drawW) / 2;
+        const offsetY = (mBoxH - drawH) / 2;
+
+        const features = Array.isArray(segmentationData.features)
+            ? segmentationData.features
+            : (segmentationData.type === 'Feature' ? [segmentationData] : []);
+
+        for (const feat of features) {
+            const geom = feat.geometry;
+            if (!geom) continue;
+
+            const classification = feat.properties?.classification;
+            let rgb = [220, 38, 38];
+
+            if (classification && typeof classification === 'object') {
+                if (Array.isArray(classification.colorRGB)) {
+                    rgb = classification.colorRGB;
+                } else if (Array.isArray(classification.color)) {
+                    rgb = classification.color;
+                } else if (typeof classification.color === 'number') {
+                    const c = classification.color;
+                    rgb = [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+                }
+            }
+
+            const strokeColor = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+            const fillOpacity = Math.max(0.4, Math.min(0.85, segmentationOpacity * 1.5));
+            const fillColor = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${fillOpacity})`;
+
+            const renderMinimapRings = (rings) => {
+                if (!Array.isArray(rings) || !rings.length) return;
+                const outer = rings[0];
+                if (!Array.isArray(outer) || outer.length < 3) return;
+
+                const pointsStr = outer.map((coord) => {
+                    const mx = (coord[0] / slideWidth) * drawW + offsetX;
+                    const my = (coord[1] / slideHeight) * drawH + offsetY;
+                    return `${mx.toFixed(1)},${my.toFixed(1)}`;
+                }).join(' ');
+
+                const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                poly.setAttribute('points', pointsStr);
+                poly.setAttribute('stroke', strokeColor);
+                poly.setAttribute('stroke-width', '1');
+                poly.setAttribute('stroke-linejoin', 'round');
+                poly.setAttribute('fill', fillColor);
+                minimapSvg.appendChild(poly);
+            };
+
+            if (geom.type === 'Polygon' && Array.isArray(geom.coordinates)) {
+                renderMinimapRings(geom.coordinates);
+            } else if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates)) {
+                for (const polyCoords of geom.coordinates) {
+                    renderMinimapRings(polyCoords);
+                }
+            }
+        }
     }
 
     async function loadSegmentation(fid) {
@@ -931,6 +1040,7 @@ export function createWsiViewport({
                 if (data && data.hasSegmentation && data.geojson) {
                     segmentationData = data.geojson;
                     renderSegmentation();
+                    renderMinimapSegmentation();
                     if (onSegmentationLoaded) {
                         onSegmentationLoaded(data);
                     }
@@ -981,6 +1091,7 @@ export function createWsiViewport({
         setSegmentation(geojson) {
             segmentationData = geojson;
             renderSegmentation();
+            renderMinimapSegmentation();
         },
         getSegmentation() {
             return segmentationData;
@@ -988,6 +1099,7 @@ export function createWsiViewport({
         setSegmentationVisible(visible) {
             segmentationVisible = visible;
             renderSegmentation();
+            renderMinimapSegmentation();
         },
         isSegmentationVisible() {
             return segmentationVisible;
@@ -995,6 +1107,7 @@ export function createWsiViewport({
         setSegmentationOpacity(op) {
             segmentationOpacity = Math.max(0, Math.min(1, op));
             renderSegmentation();
+            renderMinimapSegmentation();
         },
         getSegmentationOpacity() {
             return segmentationOpacity;

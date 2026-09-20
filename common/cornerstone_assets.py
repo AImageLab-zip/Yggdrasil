@@ -68,7 +68,7 @@ def reload():
 
 def get_manifest():
     """Return the cached manifest dict, or ``None``."""
-    if _manifest is None:
+    if getattr(settings, "DEBUG", False) or _manifest is None:
         reload()
     return _manifest
 
