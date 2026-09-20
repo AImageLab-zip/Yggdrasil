@@ -50,21 +50,40 @@ export async function bootstrapWsiViewer({
             const res = await fetch(`/${namespace}/api/wsi/${fileId}/metadata/`, { credentials: 'same-origin' });
             if (res.ok) {
                 slideMetadata = await res.json();
+            } else {
+                const errBody = await res.json().catch(() => ({}));
+                console.error('Failed to fetch WSI metadata:', res.status, errBody);
+                stageEl.innerHTML = `
+                    <div class="d-flex flex-column align-items-center justify-content-center h-100 p-4 text-center text-muted" style="min-height: 400px; background: #0f172a;">
+                        <i class="fas fa-triangle-exclamation fa-3x text-warning mb-3"></i>
+                        <h5 class="text-white">Unable to load slide image</h5>
+                        <p class="small text-muted mb-0" style="max-width: 480px;">${errBody.error || 'The slide file could not be parsed or resolution levels are unavailable.'}</p>
+                    </div>
+                `;
+                return null;
             }
         } catch (e) {
             console.error('Failed to fetch WSI metadata:', e);
+            stageEl.innerHTML = `
+                <div class="d-flex flex-column align-items-center justify-content-center h-100 p-4 text-center text-muted" style="min-height: 400px; background: #0f172a;">
+                    <i class="fas fa-circle-exclamation fa-3x text-danger mb-3"></i>
+                    <h5 class="text-white">Connection or parsing error</h5>
+                    <p class="small text-muted mb-0" style="max-width: 480px;">Failed to communicate with the slide rendering service.</p>
+                </div>
+            `;
+            return null;
         }
     }
 
-    if (!slideMetadata) {
-        slideMetadata = {
-            width: 2000,
-            height: 2000,
-            tile_size: 256,
-            mpp_x: 0.25,
-            mpp_y: 0.25,
-            levels: [{ level: 0, width: 2000, height: 2000, downsample: 1.0, cols: 8, rows: 8 }],
-        };
+    if (!slideMetadata || !slideMetadata.levels || !slideMetadata.levels.length) {
+        stageEl.innerHTML = `
+            <div class="d-flex flex-column align-items-center justify-content-center h-100 p-4 text-center text-muted" style="min-height: 400px; background: #0f172a;">
+                <i class="fas fa-triangle-exclamation fa-3x text-warning mb-3"></i>
+                <h5 class="text-white">Invalid slide structure</h5>
+                <p class="small text-muted mb-0" style="max-width: 480px;">The slide does not contain multi-resolution pyramidal levels.</p>
+            </div>
+        `;
+        return null;
     }
 
     const viewport = createWsiViewport({

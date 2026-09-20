@@ -59,7 +59,7 @@ class DemoIsolationTests(TestCase):
         # only seeded for projects that existed at migrate time — none in the
         # test DB — so grant it here for the project this test uses.
         User = get_user_model()
-        cls.guest = User.objects.get(username=settings.DEMO_GUEST_USERNAME)
+        cls.guest, _ = User.objects.get_or_create(username=settings.DEMO_GUEST_USERNAME)
         ProjectAccess.objects.get_or_create(
             user=cls.guest, project=cls.project, defaults={"role": "standard"}
         )

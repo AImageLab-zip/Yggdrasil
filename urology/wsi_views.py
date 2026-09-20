@@ -64,6 +64,47 @@ def _get_local_slide_path(file_obj) -> str:
     return local_path
 
 
+def prune_wsi_cache(max_bytes: int = 10 * 1024 * 1024 * 1024) -> int:
+    """Prune oldest local slide files and tile caches if total size exceeds max_bytes.
+
+    Returns the total number of bytes freed.
+    """
+    if not os.path.exists(WSI_CACHE_DIR):
+        return 0
+    try:
+        entries = []
+        total_size = 0
+        for root, _, files in os.walk(WSI_CACHE_DIR):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                try:
+                    stat = os.stat(fpath)
+                    entries.append((stat.st_mtime, stat.st_size, fpath))
+                    total_size += stat.st_size
+                except OSError:
+                    continue
+        if total_size <= max_bytes:
+            return 0
+
+        # Sort oldest first
+        entries.sort(key=lambda x: x[0])
+        freed = 0
+        target_size = int(max_bytes * 0.8)  # Free down to 80% of ceiling
+        for _, size, fpath in entries:
+            try:
+                os.remove(fpath)
+                freed += size
+                total_size -= size
+                if total_size <= target_size:
+                    break
+            except OSError:
+                continue
+        return freed
+    except Exception as exc:
+        logger.warning("Error pruning WSI cache: %s", exc)
+        return 0
+
+
 def _get_authorized_file(request, file_id: int):
     file_obj = FileRegistry.objects.filter(id=file_id, domain="urology").first()
     if not file_obj:
