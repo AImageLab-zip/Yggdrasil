@@ -49,7 +49,9 @@ class CommittedBundleTests(SimpleTestCase):
             self.assertIsNotNone(path, name)
             self.assertTrue((static_dir / path).is_file(), f"{name} -> {path}")
 
-    #: The per-surface bundles. Phases 3, 4, 6, 7 and 10 each own one, plus wsi-viewer.
+    #: The per-surface bundles. Phases 3, 4, 6, 7 and 10 each own one; wsi-viewer
+    #: is the sixth, added with the urology domain for whole-slide imaging, which
+    #: the Cornerstone build has no viewport for.
     SURFACE_ENTRIES = [
         "mesh-landmarks",
         "panoramic-cpr",
@@ -59,13 +61,13 @@ class CommittedBundleTests(SimpleTestCase):
         "wsi-viewer",
     ]
 
-    def test_the_five_surfaces_the_roadmap_names_are_exactly_the_entries(self):
+    def test_the_surfaces_we_name_are_exactly_the_entries(self):
         """Strict equality, in both directions.
 
         A missing entry should fail here rather than in the template of whichever
         phase needs it next; an extra one is either a typo or scaffolding somebody
-        left behind. This was split in two while the Phase 3 harness existed as a
-        sixth, temporary entry; that entry is gone, so it is one check again.
+        left behind -- so adding one has to mean editing SURFACE_ENTRIES above and
+        saying what it is for, which is the whole point of the check.
         """
         self.assertEqual(sorted(cornerstone_assets.get_entries()), sorted(self.SURFACE_ENTRIES))
 

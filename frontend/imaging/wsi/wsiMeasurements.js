@@ -8,20 +8,32 @@
  * so lengths and areas are physically meaningful in micrometers (µm) or millimeters (mm).
  */
 
-import { assertSavable, interpretSaveResponse, measurementAnnotations, MAX_ANNOTATIONS } from '../annotations/protocol.js';
+import {
+    assertSavable,
+    interpretSaveResponse,
+    measurementAnnotations,
+    MAX_ANNOTATIONS,
+    MEASUREMENT_TOOLS,
+} from '../annotations/protocol.js';
 
 export const WSI_COORDINATE_SYSTEM = 'image_pixel';
 
+/** Point markers, which the server accepts via its own LABEL_TOOLS set. */
+export const WSI_LABEL_TOOLS = Object.freeze(['Label']);
+
 /**
  * Tools whose annotations are persisted for WSI.
+ *
+ * Derived from the shared list rather than written out again: `protocol.js` says
+ * a second copy is "a second thing to keep in step with the Python", and
+ * `frontend/tests/measurements.test.js` pins that list against
+ * `annotations/adapters/cornerstone.py`. A hand-written subset here was pinned to
+ * nothing and had already drifted. The extra names cost nothing -- this viewport
+ * creates no Height, Angle or Probe annotations to filter.
  */
 export const WSI_MEASUREMENT_TOOLS = Object.freeze([
-    'Length',
-    'RectangleROI',
-    'EllipticalROI',
-    'CircleROI',
-    'SplineROI',
-    'Label',
+    ...MEASUREMENT_TOOLS,
+    ...WSI_LABEL_TOOLS,
 ]);
 
 /**

@@ -1,45 +1,23 @@
 /**
  * Entry point: Digital Pathology Whole Slide Image (WSI) viewer.
  *
- * Provides multi-resolution pyramidal TIFF tiled rendering and durable Cornerstone
- * annotations for digital pathology slides.
+ * Multi-resolution pyramidal tile rendering for digital pathology slides, with
+ * measurements saved through the shared annotation protocol.
+ *
+ * Deliberately no Cornerstone image loader. One was registered here and never
+ * reached: the page runs from the two bootstrapWsiViewer() calls below, which go
+ * straight to createWsiViewport and fetch tiles themselves. Registering it also
+ * pulled @cornerstonejs/core -- and with it the 4 MB shared chunk -- into a
+ * bundle that never initialised Cornerstone. Cornerstone 5.8.2 as vendored has
+ * no whole-slide viewport; see docs/wsi_viewer_process.md.
  */
 
-import {
-    imageLoader,
-    utilities as coreUtilities,
-} from '@cornerstonejs/core';
-
-import { initImaging } from '../imaging/runtime/init.js';
-import {
-    WSI_IMAGE_SCHEME,
-    createWsiImageLoader,
-    wsiTileUrl,
-    wsiImageId,
-} from '../imaging/wsi/wsiLoader.js';
 import { createWsiViewport } from '../imaging/wsi/wsiViewport.js';
 import { bootstrapWsiViewer } from '../imaging/wsi/bootstrap.js';
 import { WSI_MEASUREMENT_TOOLS } from '../imaging/wsi/wsiMeasurements.js';
+import { wsiTileUrl } from '../imaging/wsi/wsiLoader.js';
 
 export const SURFACE = 'wsi-viewer';
-
-let registered = false;
-
-export async function mountWsiViewer(options) {
-    await initImaging();
-
-    if (!registered) {
-        imageLoader.registerImageLoader(
-            WSI_IMAGE_SCHEME,
-            createWsiImageLoader({
-                voxelManagerFactory: coreUtilities?.VoxelManager?.createImageVoxelManager,
-            })
-        );
-        registered = true;
-    }
-
-    return createWsiViewport(options);
-}
 
 /**
  * Auto-start on load if #urologyWsiData or #urologyConfocalData is present.
@@ -70,9 +48,7 @@ export {
     startedConfocal,
     bootstrapWsiViewer,
     createWsiViewport,
-    mountWsiViewer as default,
-    WSI_IMAGE_SCHEME,
+    createWsiViewport as default,
     WSI_MEASUREMENT_TOOLS,
     wsiTileUrl,
-    wsiImageId,
 };
