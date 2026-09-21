@@ -761,10 +761,12 @@ def patient_detail(request, patient_id):
                 "slug", flat=True
             )
         )
-    captions_enabled = "voice_caption" in allowed_annotations or True
+    captions_enabled = "voice_caption" in allowed_annotations
     context["allowed_annotations"] = allowed_annotations
     context["captions_enabled"] = captions_enabled
-    context["default_tab"] = "captions"
+    # Now that captions_enabled is real, the default tab has to follow it or the
+    # page opens on a pane the project has disabled (brain/views.py:256).
+    context["default_tab"] = "captions" if captions_enabled else "files"
 
     record_recent(
         request.user,
@@ -1064,6 +1066,8 @@ def create_folder(request):
 @login_required
 def folder_stats(request, folder_id):
     folder = get_object_or_404(Folder, id=folder_id)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"error": "Permission denied"}, status=403)
     return JsonResponse(
         {
             "success": True,
