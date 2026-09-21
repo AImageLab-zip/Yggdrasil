@@ -24,7 +24,7 @@ Urological imaging domain, mounted at `/urology/`. Supporting prostate multipara
   - **WSI Segmentation Overlay**: Dual-canvas mask rendering on both the primary slide viewport and the bottom-right minimap navigator, toggling synchronously with the segmentation control.
   - **Confocale Viewer**: Microscopy playback and multi-frame inspection.
 - **In-Browser Gigapixel Converter**:
-  - Client-side WebAssembly VIPS (`wasm-vips`) pipeline in `static/js/jpg_to_tiff_converter.js` and `static/js/jpg_to_tiff_worker.js`.
+  - Client-side WebAssembly VIPS (`wasm-vips`) pipeline in `static/js/wsi_convert.js` and `static/js/worker/wsi_convert_worker.js`.
   - Transforms ultra-high-resolution JPEG/PNG pathology images into tiled pyramidal BigTIFF directly in the user's browser before transmission to the server.
 - **Project-Scoped Security & File Management**:
   - Upload handling (`forms.py`, `file_utils.py`) enforcing unique, collision-resistant filenames.
@@ -79,7 +79,7 @@ urology  ──▶  annotations  ──▶  common
   2. The **bottom-right minimap navigator** (scaled to the slide overview thumbnail).
 - Toggling the segmentation visibility control seamlessly updates both overlays in lockstep.
 
-### C. Client-Side Gigapixel Converter (`static/js/jpg_to_tiff_converter.js`)
+### C. Client-Side Gigapixel Converter (`static/js/wsi_convert.js`)
 - Standard pathology workflows often produce single-plane giant JPEGs (e.g., 20,000 × 20,000 px).
 - The in-browser converter uses `wasm-vips` inside a dedicated Web Worker:
   - Generates a multi-resolution pyramidal BigTIFF with 256×256 JPEG tile compression and sub-IFD directory structures.

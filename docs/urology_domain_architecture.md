@@ -146,7 +146,7 @@ Single-plane ultra-high-resolution JPEG/PNG images (e.g. 20,000 × 20,000 px exp
 
 Urology introduces an in-browser WebAssembly converter:
 - **Engine**: `wasm-vips` (Libvips compiled to WebAssembly with SIMD and WebWorker threading).
-- **Execution**: Runs inside a dedicated Web Worker (`static/js/jpg_to_tiff_worker.js`) instantiated from `static/js/jpg_to_tiff_converter.js`.
+- **Execution**: Runs inside a dedicated Web Worker (`static/js/worker/wsi_convert_worker.js`) instantiated from `static/js/wsi_convert.js`.
 - **Output**: Multi-resolution pyramidal BigTIFF with 256×256 tiled JPEG compression.
 - **Workflow**:
   1. The user drags a giant JPEG/PNG into the converter dropzone.

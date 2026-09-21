@@ -75,7 +75,7 @@ In digital pathology, scanners and imaging software often export gigapixel tissu
 
 To solve this, Urology includes an **in-browser WebAssembly converter**:
 - Powered by `wasm-vips` (Libvips compiled to WebAssembly with SIMD acceleration).
-- Implemented in `static/js/jpg_to_tiff_converter.js` running inside a dedicated Web Worker (`static/js/jpg_to_tiff_worker.js`).
+- Implemented in `static/js/wsi_convert.js` running inside a dedicated Web Worker (`static/js/worker/wsi_convert_worker.js`).
 - Chunks and converts huge JPEG/PNG images into multi-resolution pyramidal BigTIFF files with 256×256 tiled JPEG compression directly inside the client's browser.
 - Automatically populates the resulting `.tiff` file into the WSI upload dropzone, eliminating server-side conversion overhead.
 
@@ -237,8 +237,8 @@ Pathology segmentation masks (`urology_wsi_seg`) highlight histological regions 
 
 | Path | Purpose |
 |---|---|
-| `static/js/jpg_to_tiff_converter.js` | In-browser gigapixel JPEG/PNG to pyramidal BigTIFF converter (`wasm-vips`) |
-| `static/js/jpg_to_tiff_worker.js` | Dedicated Web Worker handling client-side image tiling and pyramid encoding |
+| `static/js/wsi_convert.js` | In-browser gigapixel JPEG/PNG to pyramidal BigTIFF converter (`wasm-vips`) |
+| `static/js/worker/wsi_convert_worker.js` | Dedicated Web Worker handling client-side image tiling and pyramid encoding |
 | `templates/common/upload/modalities/urology-wsi.html` | WSI upload dropzone template |
 | `templates/common/upload/modalities/urology-confocal.html` | Confocale upload dropzone template |
 | `urology/views.py` | Ingestion, SHA-256 computation, and `FileRegistry` persistence |
