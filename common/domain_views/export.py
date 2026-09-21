@@ -493,8 +493,14 @@ def _preview_totals(domain, patients, artifacts):
         query = None
         for artifact in file_artifacts:
             query = artifact.registry_q() if query is None else query | artifact.registry_q()
+        # FileRegistry carries one patient column per domain, so the name comes
+        # from the registry. Hardcoding `patient` meant maxillo's column, and a
+        # preview for any other domain counted nothing.
+        from common.domains import fk_fields_for
+
+        patient_fk = fk_fields_for(domain)[0]
         rows = FileRegistry.objects.filter(
-            domain=domain, patient__in=patients
+            domain=domain, **{f"{patient_fk}__in": patients}
         ).filter(query)
         file_count += rows.count()
         total_size += rows.aggregate(total=Sum("file_size"))["total"] or 0

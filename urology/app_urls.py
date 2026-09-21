@@ -2,6 +2,10 @@ from django.shortcuts import redirect
 from django.urls import path
 
 from annotations import views as annotations_views
+from common.domain_views import deletion as shared_deletion
+from common.domain_views import export as shared_export
+from common.domain_views import folders_tags as shared_folders
+from common.domain_views import voice_captions as shared_captions
 from urology import views, wsi_views
 
 app_name = "urology"
@@ -31,22 +35,22 @@ urlpatterns = [
     ),
     path(
         "patient/<int:patient_id>/text-caption/",
-        views.upload_text_caption,
+        shared_captions.upload_text_caption,
         name="upload_text_caption",
     ),
     path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/delete/",
-        views.delete_voice_caption,
+        shared_captions.delete_voice_caption,
         name="delete_voice_caption",
     ),
     path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/edit/",
-        views.edit_voice_caption_transcription,
+        shared_captions.edit_voice_caption_transcription,
         name="edit_voice_caption_transcription",
     ),
     path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/update-modality/",
-        views.update_voice_caption_modality,
+        shared_captions.update_voice_caption_modality,
         name="update_voice_caption_modality",
     ),
     path(
@@ -56,19 +60,19 @@ urlpatterns = [
     ),
     path(
         "patient/<int:patient_id>/tags/add/",
-        views.add_patient_tag,
+        shared_folders.add_patient_tag,
         name="add_patient_tag",
     ),
     path(
         "patient/<int:patient_id>/tags/remove/",
-        views.remove_patient_tag,
+        shared_folders.remove_patient_tag,
         name="remove_patient_tag",
     ),
     path(
-        "patient/<int:patient_id>/delete/", views.delete_patient, name="delete_patient"
+        "patient/<int:patient_id>/delete/", shared_deletion.delete_patient, name="delete_patient"
     ),
     path(
-        "patients/bulk-delete/", views.bulk_delete_patients, name="bulk_delete_patients"
+        "patients/bulk-delete/", shared_deletion.bulk_delete_patients, name="bulk_delete_patients"
     ),
     path(
         "patients/bulk-purge/", views.bulk_purge_patients, name="bulk_purge_patients"
@@ -92,13 +96,13 @@ urlpatterns = [
     path(
         "profile/<str:username>/", views.user_profile, name="user_profile_by_username"
     ),
-    path("folders/create/", views.create_folder, name="create_folder"),
-    path("folders/<int:folder_id>/stats/", views.folder_stats, name="folder_stats"),
-    path("folders/<int:folder_id>/rename/", views.rename_folder, name="rename_folder"),
-    path("folders/<int:folder_id>/delete/", views.delete_folder, name="delete_folder"),
+    path("folders/create/", shared_folders.create_folder, name="create_folder"),
+    path("folders/<int:folder_id>/stats/", shared_folders.folder_stats, name="folder_stats"),
+    path("folders/<int:folder_id>/rename/", shared_folders.rename_folder, name="rename_folder"),
+    path("folders/<int:folder_id>/delete/", shared_folders.delete_folder, name="delete_folder"),
     path(
         "folders/move-patients/",
-        views.move_patients_to_folder,
+        shared_folders.move_patients_to_folder,
         name="move_patients_to_folder",
     ),
     path(
@@ -111,32 +115,32 @@ urlpatterns = [
         views.remove_patients_from_folder,
         name="remove_patients_from_folder",
     ),
-    path("export/", views.export_list, name="export_list"),
-    path("export/new/", views.export_new, name="export_new"),
-    path("export/preview/", views.export_preview, name="export_preview"),
-    path("export/<int:export_id>/", views.export_status, name="export_status"),
+    path("export/", shared_export.export_list, name="export_list"),
+    path("export/new/", shared_export.export_new, name="export_new"),
+    path("export/preview/", shared_export.export_preview, name="export_preview"),
+    path("export/<int:export_id>/", shared_export.export_status, name="export_status"),
     path(
         "export/<int:export_id>/download/",
-        views.export_download,
+        shared_export.export_download,
         name="export_download",
     ),
     path(
         "export/<int:export_id>/share/",
-        views.export_share_update,
+        shared_export.export_share_update,
         name="export_share_update",
     ),
     path(
         "export/shared/<str:share_token>/",
-        views.export_shared_landing,
+        shared_export.export_shared_landing,
         name="export_shared_landing",
     ),
     path(
         "export/shared/<str:share_token>/download/",
-        views.export_shared_download,
+        shared_export.export_shared_download,
         name="export_shared_download",
     ),
-    path("export/<int:export_id>/delete/", views.export_delete, name="export_delete"),
-    path("export/<int:export_id>/stop/", views.export_stop, name="export_stop"),
+    path("export/<int:export_id>/delete/", shared_export.export_delete, name="export_delete"),
+    path("export/<int:export_id>/stop/", shared_export.export_stop, name="export_stop"),
     path(
         "api/processing/files/serve/<int:file_id>/",
         wsi_views.serve_file,

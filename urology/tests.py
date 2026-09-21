@@ -461,7 +461,7 @@ class UrologyDomainTests(TestCase):
         self.assertIsNotNone(export.share_token)
 
         # Test shared landing page
-        with patch("urology.views.artifact_exists", return_value=True):
+        with patch("common.domain_views.export.artifact_exists", return_value=True):
             landing_resp = self.client.get(f"/urology/export/shared/{export.share_token}/")
             self.assertEqual(landing_resp.status_code, 200)
             # Shared landing is the shared template under urology's namespace.

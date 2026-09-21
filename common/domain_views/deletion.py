@@ -23,8 +23,10 @@ def delete_patient(request, patient_id):
 
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
+        # This patient's own project, not the session's: an admin of one project
+        # could otherwise delete another project's patient just by knowing its id.
         can_delete = bool(patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
-        if user_is_project_admin(request.user, request):
+        if user_is_project_admin(request.user, patient.project):
             can_delete = True
 
         if not can_delete:
@@ -62,12 +64,24 @@ def bulk_delete_patients(request):
                 'error': 'You do not have permission to bulk delete scans.'
             }, status=403)
 
-        scans_to_delete = Patient.objects.filter(patient_id__in=scan_ids)
+        scans_to_delete = list(Patient.objects.filter(patient_id__in=scan_ids))
 
-        if not scans_to_delete.exists():
+        if not scans_to_delete:
             return JsonResponse({'error': 'No valid scans found to delete'}, status=404)
 
-        deleted_count = scans_to_delete.update(deleted=True)
+        # The capability gate above is answered against the session; deleting is
+        # answered against each patient's own project, so a list of ids cannot
+        # reach across projects.
+        for patient in scans_to_delete:
+            if not user_is_project_admin(request.user, patient.project):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'You do not have permission to delete scans in that project.',
+                }, status=403)
+
+        deleted_count = Patient.objects.filter(
+            patient_id__in=[p.patient_id for p in scans_to_delete]
+        ).update(deleted=True)
 
         return JsonResponse({
             'success': True,

@@ -34,21 +34,52 @@ def _current_project(request):
         return None
 
 
+def _requested_project(request, data):
+    """A project named in the request body, if it belongs to this domain.
+
+    Returns None when none was asked for, or when the id names a project of
+    another domain -- the caller then falls back to the session's.
+    """
+    from common.models import Project
+    from common.domains import normalize_domain
+    from common.domain_models import get_namespace
+
+    project_id = data.get('project_id') or data.get('project')
+    if not project_id:
+        return None
+    return Project.objects.filter(
+        id=project_id,
+        domain=normalize_domain(get_namespace(request)),
+        is_active=True,
+    ).first()
+
+
 @login_required
 @require_POST
 def create_folder(request):
     """Create a folder inside the current project (single-level only)."""
     Folder = get_domain_models(request)['Folder']
     try:
-        if not user_is_project_admin(request.user, request):
-            return JsonResponse({'error': 'Permission denied'}, status=403)
-        project = _current_project(request)
-        if project is None:
-            return JsonResponse({'error': 'No project selected'}, status=400)
         data = json.loads(request.body) if request.body else request.POST
         name = (data.get('name') or '').strip()
         if not name:
             return JsonResponse({'error': 'Folder name is required'}, status=400)
+
+        # An explicit project lets an admin file a folder without first switching
+        # their session to it. It is confined to this domain, and the admin check
+        # below is made against the project actually being written to -- not
+        # against the session's, which is how folder_stats leaked across projects.
+        project = _requested_project(request, data) or _current_project(request)
+        if project is None:
+            from common.permissions import entry_project_for
+            from common.domains import normalize_domain
+            from common.domain_models import get_namespace
+
+            project = entry_project_for(request.user, normalize_domain(get_namespace(request)))
+        if project is None:
+            return JsonResponse({'error': 'No project selected'}, status=400)
+        if not user_is_project_admin(request.user, project):
+            return JsonResponse({'error': 'Permission denied'}, status=403)
         folder, created = Folder.objects.get_or_create(
             name=name, parent=None, project=project,
             defaults={'created_by': request.user},
@@ -139,8 +170,6 @@ def move_patients_to_folder(request):
     Patient = domain_models['Patient']
     Folder = domain_models['Folder']
     try:
-        if not user_is_project_admin(request.user, request):
-            return JsonResponse({'error': 'Permission denied'}, status=403)
         data = json.loads(request.body) if request.body else request.POST
         scan_ids = data.get('scan_ids', [])
         folder_id = data.get('folder_id')
@@ -149,10 +178,21 @@ def move_patients_to_folder(request):
         if not folder_id or folder_id in ('root', 'all'):
             return JsonResponse({'error': 'A folder is required (patients must live in a project folder)'}, status=400)
         folder = get_object_or_404(Folder, id=folder_id)
-        # Moving also sets the project, so cross-project moves are explicit.
-        updated = Patient.objects.filter(patient_id__in=scan_ids).update(
-            folder=folder, project=folder.project
-        )
+
+        # Both ends, because moving reassigns the patient's project: admin of the
+        # destination folder's project, and admin of every patient's current one.
+        # Checking the session's project instead let an admin of one project pull
+        # another project's patients into theirs.
+        if not user_is_project_admin(request.user, folder.project):
+            return JsonResponse({'error': 'Permission denied'}, status=403)
+        patients = list(Patient.objects.filter(patient_id__in=scan_ids))
+        for patient in patients:
+            if not user_is_project_admin(request.user, patient.project):
+                return JsonResponse({'error': 'Permission denied'}, status=403)
+
+        updated = Patient.objects.filter(
+            patient_id__in=[p.patient_id for p in patients]
+        ).update(folder=folder, project=folder.project)
         return JsonResponse({'success': True, 'updated': updated})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)

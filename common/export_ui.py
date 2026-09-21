@@ -79,14 +79,23 @@ def _patient_counts(folders, patient_model, domain):
     return {row["folder"]: row["total"] for row in rows}
 
 
-def artifact_groups(domain, project, patients, patient_fk="patient"):
+def artifact_groups(domain, project, patients, patient_fk=None):
     """Selectable artifacts grouped by modality, annotated with counts.
 
     Only the artifacts this project's modalities can produce, each with how many
     rows exist for the patients currently in scope. An artifact with none is
     marked unavailable so the form can grey it out instead of letting someone
     select something that would silently export nothing.
+
+    ``patient_fk`` is which of FileRegistry's parallel patient columns this domain
+    uses. It defaults to the registry's answer for ``domain``; passing it is only
+    for a caller that already has it. It used to default to ``"patient"``, which
+    is maxillo's -- so any other domain that forgot to pass it counted nothing.
     """
+    if patient_fk is None:
+        from common.domains import fk_fields_for
+
+        patient_fk = fk_fields_for(domain)[0]
     modalities = project_modalities(project)
     by_slug = {modality.slug: modality for modality in modalities}
     enabled_slugs = list(by_slug)

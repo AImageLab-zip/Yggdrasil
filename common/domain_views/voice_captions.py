@@ -5,6 +5,10 @@ from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 import json
 import logging
+
+#: A caption shorter than this is a slip, not a finding. Urology validated it and
+#: the other three domains did not, so it is enforced here for all of them.
+MIN_TEXT_CAPTION_LENGTH = 10
 from common.permissions import (
     project_allows_annotation,
     user_can_delete_caption,
@@ -13,9 +17,28 @@ from common.permissions import (
     user_is_project_admin,
 )
 
-from common.domain_models import get_domain_models
+from common.domain_models import get_domain_models, get_namespace
 
 logger = logging.getLogger(__name__)
+
+
+def _domain_modality_slugs(request):
+    """Active modality slugs for the namespace being served, in display order.
+
+    Read from the database rather than ``common.modality_helpers``: that caches
+    every modality for five minutes, which both lets one domain's slug pass in
+    another and hides a modality registered moments ago.
+    """
+    from common.domains import normalize_domain
+    from common.models import Modality
+
+    return list(
+        Modality.objects.filter(
+            domain=normalize_domain(get_namespace(request)), is_active=True
+        )
+        .order_by('name')
+        .values_list('slug', flat=True)
+    )
 
 
 @login_required
@@ -93,18 +116,22 @@ def upload_text_caption(request, patient_id):
     
     try:
         data = json.loads(request.body)
-        text_content = data.get('text', '').strip()
-        modality = data.get('modality', '').strip()
-        
-        # Validate modality against database
-        from common.modality_helpers import is_valid_modality_slug, get_all_modalities
-        if not modality or not is_valid_modality_slug(modality):
-            # Fallback to first available modality
-            all_modalities = get_all_modalities()
-            modality = all_modalities[0].slug if all_modalities else 'unknown'
+        text_content = (data.get('text') or data.get('caption') or '').strip()
+        modality = (data.get('modality') or '').strip()
+
+        # Scoped to this domain's modalities: falling back to the first modality
+        # platform-wide could stamp a urology caption with a maxillo one.
+        domain_slugs = _domain_modality_slugs(request)
+        if modality not in domain_slugs:
+            modality = next(iter(domain_slugs), 'unknown')
         
         if not text_content:
             return JsonResponse({'error': 'Text content cannot be empty'}, status=400)
+        if len(text_content) < MIN_TEXT_CAPTION_LENGTH:
+            return JsonResponse(
+                {'error': f'Caption must be at least {MIN_TEXT_CAPTION_LENGTH} characters'},
+                status=400,
+            )
 
         
         # Create VoiceCaption instance for text-only caption
@@ -134,6 +161,7 @@ def upload_text_caption(request, patient_id):
             'caption': {
                 'id': voice_caption.id,
                 'user_username': voice_caption.user.username,
+                'modality': voice_caption.modality,
                 'modality_display': voice_caption.get_modality_display(),
                 'display_duration': 'Text',  # Special display for text captions
                 'quality_color': 'success',  # Text captions are always "good quality"
@@ -243,9 +271,10 @@ def update_voice_caption_modality(request, patient_id, caption_id):
         if not new_modality:
             return JsonResponse({'error': 'Modality cannot be empty'}, status=400)
         
-        # Validate modality against database
-        from common.modality_helpers import is_valid_modality_slug
-        if not is_valid_modality_slug(new_modality):
+        # Scoped to this domain, and read live: `is_valid_modality_slug` answers
+        # from a 5-minute cache of *every* modality, so it both accepts another
+        # domain's slug and cannot see one registered moments ago.
+        if new_modality not in _domain_modality_slugs(request):
             return JsonResponse({'error': 'Invalid modality'}, status=400)
         
         # Update the modality
