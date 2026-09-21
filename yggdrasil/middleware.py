@@ -13,16 +13,29 @@ logger = logging.getLogger(__name__)
 
 
 class CrossOriginIsolationMiddleware(MiddlewareMixin):
-    """Enable cross-origin isolation for WebAssembly SharedArrayBuffer / multi-threading.
+    """Cross-origin isolation for the upload page, and nowhere else.
 
-    Required by wasm-vips (and Cornerstone/ITK-Wasm) so browsers expose SharedArrayBuffer
-    and allow WebAssembly pthread workers to instantiate without stalling.
+    The in-browser gigapixel converter (``static/js/worker/wsi_convert_worker.js``,
+    wasm-vips) needs ``SharedArrayBuffer``, which browsers only expose to a
+    cross-origin-isolated document. It is reached from ``static/js/wsi_convert.js``,
+    included by ``templates/common/upload/upload.html`` -- so the upload page is the
+    only document that needs the headers.
+
+    Scoped rather than site-wide on purpose: ``require-corp`` blocks every
+    cross-origin subresource that does not opt in with CORP, so stamping it on all
+    responses would make any future embed, CDN asset or off-origin object-storage
+    read fail, far from the code that asked for isolation.
+
+    ``upload_patient`` is the URL name in every domain's ``app_urls.py``, so this
+    names a route, not a domain.
     """
 
     def process_response(self, request, response):
-        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-        response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
-        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        match = getattr(request, "resolver_match", None)
+        if match is not None and match.url_name == "upload_patient":
+            response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+            response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+            response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         return response
 
 
