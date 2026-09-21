@@ -855,6 +855,8 @@ def create_folder(request):
 @login_required
 def folder_stats(request, folder_id):
     folder = get_object_or_404(Folder, id=folder_id)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"error": "Permission denied"}, status=403)
     return JsonResponse(
         {
             "success": True,

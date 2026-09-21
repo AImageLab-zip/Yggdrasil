@@ -93,14 +93,17 @@ def delete_folder(request, folder_id):
 @login_required
 @require_http_methods(["GET"])
 def folder_stats(request, folder_id):
-    if not user_is_project_admin(request.user, request):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
-
     domain_models = get_domain_models(request)
     Folder = domain_models['Folder']
     Patient = domain_models['Patient']
 
     folder = get_object_or_404(Folder, id=folder_id)
+    # Judged by the project the *folder* belongs to, not the one in the session:
+    # admin of any project in this domain otherwise read any other project's
+    # folder. Same rule as the 3.0.1 file-access fix.
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
     patient_count = Patient.objects.filter(folder=folder).count()
     return JsonResponse({
         'success': True,
