@@ -752,16 +752,11 @@ def start_export_processing(export_id, domain="maxillo"):
             start_new_session=True,
         )
         logger.info(f"Started background subprocess for export {export_id}")
-    except MaxilloExport.DoesNotExist:
-        logger.error(f"Export {export_id} not found")
     except Exception as e:
         logger.error(f"Error starting export processing: {e}", exc_info=True)
         try:
-            export = (
-                MaxilloExport.objects.filter(id=export_id).first()
-                or LaparoscopyExport.objects.filter(id=export_id).first()
-                or BrainExport.objects.filter(id=export_id).first()
-            )
+            ExportModel = apps.get_model(domain if domain in DOMAINS else "maxillo", "Export")
+            export = ExportModel.objects.filter(id=export_id).first()
             if export:
                 export.mark_failed(str(e))
         except Exception:
