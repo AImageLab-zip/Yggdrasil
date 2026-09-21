@@ -76,9 +76,7 @@
             var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
             if (input && input.value && input.value.length >= 32) return input.value;
             var token = '{{ csrf_token }}';
-            if (token && token.length >= 32) return token;
-            var m = document.cookie.match(/csrftoken=([^;]+)/);
-            return (m && m[1] && m[1].length >= 32) ? m[1] : '';
+            return (token && token.length >= 32) ? token : '';
         }
         function notify(type, msg) {
             if (window.appNotify) {
@@ -94,38 +92,12 @@
 
         if (rerunBtn) {
             rerunBtn.addEventListener('click', function () {
-                if (window.YggRerunModal && typeof window.YggRerunModal.open === 'function') {
-                    window.YggRerunModal.open({
-                        patientId: patientId,
-                        patientName: '{{ patient.name|default:"Unnamed scan"|escapejs }}',
-                        steps: window.__patientHeaderStepSlugs || [],
-                        onSuccess: function () { window.location.reload(); }
-                    });
-                } else {
-                    if (!confirm('Rerun processing for all modalities on this patient?')) return;
-                    rerunBtn.disabled = true;
-                    var rerunUrl = (actionsEl && actionsEl.dataset.rerunUrl) || ('/' + ns + '/patient/' + patientId + '/rerun-processing/');
-                    fetch(rerunUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
-                        body: JSON.stringify({ jobs: window.__patientHeaderStepSlugs || [] })
-                    }).then(function (r) {
-                        return r.json().catch(function () {
-                            return { success: false, error: 'Server returned ' + r.status + ' (' + r.statusText + ')' };
-                        });
-                    }).then(function (data) {
-                        if (data.success) {
-                            notify('success', data.message || 'Processing queued');
-                            setTimeout(function () { window.location.reload(); }, 500);
-                        } else {
-                            notify('error', data.error || 'Failed to rerun jobs');
-                        }
-                    }).catch(function (err) {
-                        notify('error', err.message || 'Network error');
-                    }).finally(function () {
-                        rerunBtn.disabled = false;
-                    });
-                }
+                window.YggRerunModal.open({
+                    patientId: patientId,
+                    patientName: '{{ patient.name|default:"Unnamed scan"|escapejs }}',
+                    steps: window.__patientHeaderStepSlugs || [],
+                    onSuccess: function () { window.location.reload(); }
+                });
             });
         }
         if (deleteBtn) {
