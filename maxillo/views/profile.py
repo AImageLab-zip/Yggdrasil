@@ -7,7 +7,7 @@ from django.db.models import Count, Q, Max
 from django.utils import timezone
 from datetime import timedelta
 
-from ..models import Patient as MaxilloPatient, Classification as MaxilloClassification, VoiceCaption as MaxilloVoiceCaption
+from .domain import get_domain_models
 from .helpers import render_with_fallback, redirect_with_namespace
 from common.models import ProjectAccess
 
@@ -16,7 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def _get_domain_models(request):
-    return MaxilloPatient, MaxilloClassification, MaxilloVoiceCaption
+    """(Patient, Classification, VoiceCaption) for the namespace being browsed.
+
+    ``Classification`` is maxillo's and laparoscopy's only -- brain and urology
+    declare none -- so it comes back as ``None`` there and the bite-classification
+    statistics are simply absent rather than borrowed from another domain.
+    """
+    models = get_domain_models(request)
+    return models['Patient'], models.get('Classification'), models['VoiceCaption']
 
 
 @login_required
@@ -59,16 +66,21 @@ def user_profile(request, username=None):
     total_patients_uploaded = patients_uploaded.count()
     
     # 2. Bite classifications (manual annotations)
-    classifications = Classification.objects.filter(
-        annotator=target_user,
-        classifier='manual',
-    ).select_related('patient').order_by('-timestamp')
-    if has_project_field:
-        classifications = classifications.filter(patient__project_id=active_project_id)
-    total_classifications = classifications.count()
-    
-    # Get unique patients annotated (a patient might have been annotated multiple times)
-    unique_patients_annotated = classifications.values('patient').distinct().count()
+    if Classification is None:
+        classifications = VoiceCaption.objects.none()
+        total_classifications = 0
+        unique_patients_annotated = 0
+    else:
+        classifications = Classification.objects.filter(
+            annotator=target_user,
+            classifier='manual',
+        ).select_related('patient').order_by('-timestamp')
+        if has_project_field:
+            classifications = classifications.filter(patient__project_id=active_project_id)
+        total_classifications = classifications.count()
+
+        # Get unique patients annotated (a patient might have been annotated multiple times)
+        unique_patients_annotated = classifications.values('patient').distinct().count()
     
     # 3. Voice captions
     voice_captions = VoiceCaption.objects.filter(
@@ -119,18 +131,21 @@ def user_profile(request, username=None):
             uploaded_at__gte=seven_days_ago
         ).count()
     
-    classifications_last_7_days = Classification.objects.filter(
-        annotator=target_user,
-        classifier='manual',
-        timestamp__gte=seven_days_ago
-    ).count()
-    if has_project_field:
+    if Classification is None:
+        classifications_last_7_days = 0
+    else:
         classifications_last_7_days = Classification.objects.filter(
             annotator=target_user,
             classifier='manual',
-            patient__project_id=active_project_id,
             timestamp__gte=seven_days_ago
         ).count()
+        if has_project_field:
+            classifications_last_7_days = Classification.objects.filter(
+                annotator=target_user,
+                classifier='manual',
+                patient__project_id=active_project_id,
+                timestamp__gte=seven_days_ago
+            ).count()
     
     voice_captions_last_7_days = VoiceCaption.objects.filter(
         user=target_user,
