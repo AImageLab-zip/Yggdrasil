@@ -290,10 +290,28 @@ _LAPAROSCOPY_ARTIFACTS = [
     ),
 ]
 
+_CARDIOLOGY_ARTIFACTS = [
+    Artifact("ecg.raw", "ecg", "Uploaded ECG recording", BUCKET_RAW, file_types=["ecg_raw"]),
+    # Generated client-side (static/js/cardiology/ecg_plot.js) the first time anyone
+    # opens the patient, then POSTed back -- see save_browser_ecg_plot. A patient
+    # nobody has opened yet simply contributes no row here (see the warmup page).
+    Artifact(
+        "ecg.processed", "ecg", "ECG plot (PNG)", BUCKET_PROCESSED,
+        file_types=["ecg_processed"], zip_dir="ecg/generated", filename="ecg_plot.png",
+    ),
+    # Database row (cardiology.Classification), not a FileRegistry artifact --
+    # same shape as "reports.captions" below, via its own collector.
+    Artifact(
+        "ecg.classification", "ecg", "AF/NSR/Other/NI classification", BUCKET_DERIVED,
+        collector="ecg_classification", zip_dir="reports",
+    ),
+]
+
 ARTIFACTS_BY_DOMAIN = {
     "maxillo": _MAXILLO_ARTIFACTS + _SHARED_ARTIFACTS,
     "brain": _mri_artifacts() + _SHARED_ARTIFACTS,
     "laparoscopy": _LAPAROSCOPY_ARTIFACTS + _SHARED_ARTIFACTS,
+    "cardiology": _CARDIOLOGY_ARTIFACTS + _SHARED_ARTIFACTS,
 }
 
 

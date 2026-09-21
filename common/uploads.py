@@ -265,8 +265,8 @@ def ensure_step_jobs_for_patient(patient, requested_slugs):
 
 def project_slug_from_patient(patient) -> str:
     domain = domain_for_patient(patient)
-    if domain == "laparoscopy":
-        return "laparoscopy"
+    if domain in ("laparoscopy", "cardiology"):
+        return domain
     return "maxillo"
 
 

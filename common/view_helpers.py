@@ -86,3 +86,25 @@ def upload_error_response(request, message, status=400):
     if not wants_json(request):
         return None
     return JsonResponse({'ok': False, 'error': message}, status=status)
+
+
+def bulk_upload_url_for(request, namespace: str):
+    """URL of the bulk-upload screen, or None when it is out of reach.
+
+    Bulk ingestion is administrators-only, needs a selected project, and is not
+    routed in every domain, so resolve it here and let templates render the
+    entry point with a plain ``{% if bulk_upload_url %}``.
+    """
+    from common.permissions import user_is_project_admin
+
+    if not request.session.get('current_project_id'):
+        return None
+    if not user_is_project_admin(request.user, request):
+        return None
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and profile.can_upload_scans()):
+        return None
+    try:
+        return reverse(f'{namespace}:bulk_upload_patients')
+    except NoReverseMatch:
+        return None

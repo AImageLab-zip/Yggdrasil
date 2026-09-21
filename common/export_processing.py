@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 from common import export_catalog
+from common.domains import DOMAINS, fk_fields_for
 from common.file_access import exists as artifact_exists
 from common.file_access import iter_bytes as iter_artifact_bytes
 from common.object_storage import get_object_storage
@@ -22,12 +23,16 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def build_patient_classification_blob(patient, classifications):
-    """Build a JSON-serializable summary of a patient's bite classification.
+def build_patient_classification_blob(patient, classifications, facet_names):
+    """Build a JSON-serializable summary of a patient's classification.
 
     `classifications` is an iterable of 0-2 Classification rows (one per
-    classifier: 'manual' and/or 'pipeline'). Returns None if there is
-    nothing to export for this patient.
+    classifier: 'manual' and/or 'pipeline'). `facet_names` lists the model
+    fields one classification carries -- each needs a matching Django-generated
+    `get_<field>_display()` -- five for maxillo's occlusion facets
+    (sagittal_left, sagittal_right, vertical, transverse, midline), one
+    ("value") for cardiology's single AF/NSR/Other/NI call. Returns None if
+    there is nothing to export for this patient.
     """
     by_classifier = {c.classifier: c for c in classifications}
     manual, pipeline = by_classifier.get("manual"), by_classifier.get("pipeline")
@@ -37,24 +42,13 @@ def build_patient_classification_blob(patient, classifications):
     def _serialize(c):
         if c is None:
             return None
-        return {
-            "sagittal_left": {
-                "code": c.sagittal_left,
-                "label": c.get_sagittal_left_display(),
-            },
-            "sagittal_right": {
-                "code": c.sagittal_right,
-                "label": c.get_sagittal_right_display(),
-            },
-            "vertical": {"code": c.vertical, "label": c.get_vertical_display()},
-            "transverse": {
-                "code": c.transverse,
-                "label": c.get_transverse_display(),
-            },
-            "midline": {"code": c.midline, "label": c.get_midline_display()},
-            "annotator": c.annotator.username if c.annotator_id else None,
-            "timestamp": c.timestamp.isoformat() if c.timestamp else None,
+        blob = {
+            name: {"code": getattr(c, name), "label": getattr(c, f"get_{name}_display")()}
+            for name in facet_names
         }
+        blob["annotator"] = c.annotator.username if c.annotator_id else None
+        blob["timestamp"] = c.timestamp.isoformat() if c.timestamp else None
+        return blob
 
     return {
         "patient_id": patient.patient_id,
@@ -73,7 +67,7 @@ class ExportProcessor:
         # Which of FileRegistry's parallel patient FK columns this domain uses.
         # The modality -> file_type mapping that used to live here (and in two
         # other copies) is now common.export_catalog.
-        self.patient_fk = "brain_patient" if domain == "brain" else "patient"
+        self.patient_fk, _voice_fk = fk_fields_for(domain)
         self.query_params = export.query_params
         self.folder_ids = self.query_params.get("folder_ids", [])
         self.project_id = self.query_params.get("project_id")
@@ -170,11 +164,10 @@ class ExportProcessor:
 
     def _domain_models(self):
         """Return (Patient, VoiceCaption) model classes for the active domain."""
-        if self.domain == "brain":
-            from brain.models import Patient, VoiceCaption
-        else:
-            from maxillo.models import Patient, VoiceCaption
-        return Patient, VoiceCaption
+        from django.apps import apps
+
+        domain = self.domain if self.domain in DOMAINS else "maxillo"
+        return apps.get_model(domain, "Patient"), apps.get_model(domain, "VoiceCaption")
 
     def _filter_patients_by_folders(self, Patient):
         """Base patient queryset restricted to the requested folders.
@@ -371,6 +364,7 @@ class ExportProcessor:
             "occlusion": self._collect_occlusion,
             "tooth_segmentation": self._collect_tooth_segmentation,
             "ios_landmarks": self._collect_ios_landmarks,
+            "ecg_classification": self._collect_ecg_classification,
         }.get(artifact.collector)
         if producer is None:
             logger.warning("No collector registered for artifact %s", artifact.key)
@@ -407,7 +401,33 @@ class ExportProcessor:
         classifications = list(
             Classification.objects.filter(patient=patient).select_related("annotator")
         )
-        blob = build_patient_classification_blob(patient, classifications)
+        blob = build_patient_classification_blob(
+            patient, classifications,
+            ["sagittal_left", "sagittal_right", "vertical", "transverse", "midline"],
+        )
+        if blob is None:
+            return
+        content = json.dumps(blob, indent=2)
+        yield (
+            {
+                "type": "document",
+                "patient": patient,
+                "artifact": artifact,
+                "content": content,
+                "filename": artifact.filename or "classification.json",
+            },
+            len(content.encode("utf-8")),
+        )
+
+    def _collect_ecg_classification(self, patient, artifact):
+        if self.domain != "cardiology":
+            return
+        from cardiology.models import Classification
+
+        classifications = list(
+            Classification.objects.filter(patient=patient).select_related("annotator")
+        )
+        blob = build_patient_classification_blob(patient, classifications, ["value"])
         if blob is None:
             return
         content = json.dumps(blob, indent=2)
@@ -702,16 +722,11 @@ def start_export_processing(export_id, domain="maxillo"):
     after the HTTP request ends (web workers can recycle and kill threads).
     """
 
-    from brain.models import Export as BrainExport
-    from laparoscopy.models import Export as LaparoscopyExport
-    from maxillo.models import Export as MaxilloExport
+    from django.apps import apps
+
     try:
-        if domain == "laparoscopy":
-            export = LaparoscopyExport.objects.filter(id=export_id).first()
-        elif domain == "brain":
-            export = BrainExport.objects.filter(id=export_id).first()
-        else:
-            export = MaxilloExport.objects.filter(id=export_id).first()
+        ExportModel = apps.get_model(domain if domain in DOMAINS else "maxillo", "Export")
+        export = ExportModel.objects.filter(id=export_id).first()
         if not export:
             logger.error(f"Export {export_id} not found for domain {domain}")
             return

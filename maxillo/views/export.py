@@ -372,7 +372,12 @@ def export_new(request):
             "project": project,
             "folders": folders,
             "modalities": modalities,
-            "panoramic_warmup_url": warmup_url,
+            "warmup_url": warmup_url,
+            "warmup_message": (
+                "Panoramic images are reconstructed in the browser, so patients "
+                "uploaded before anyone opened them may not have one yet."
+            ),
+            "warmup_cta": "Generate the missing default panoramics",
             "artifact_groups": export_ui.artifact_groups(
                 domain, project, patients_in_scope
             ),

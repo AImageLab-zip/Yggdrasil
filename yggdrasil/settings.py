@@ -88,6 +88,7 @@ INSTALLED_APPS = [
     "maxillo",
     "brain",
     "laparoscopy",
+    "cardiology",
 ]
 
 # Live Whisper is reached only by the ASGI WebSocket relay. The browser never

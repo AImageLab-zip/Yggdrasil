@@ -215,12 +215,12 @@ class LandingDomainCardTests(TestCase):
         self.assertEqual(slugs, ["brain"])
 
     def test_staff_sees_every_domain(self):
-        from common.domains import landing_domain_cards
+        from common.domains import DOMAIN_CHOICES, landing_domain_cards
 
         User = get_user_model()
         staff = User.objects.create_user(username="root", password="x", is_staff=True)
         slugs = [c["slug"] for c in landing_domain_cards(staff)]
-        self.assertEqual(slugs, ["maxillo", "brain", "laparoscopy"])
+        self.assertEqual(slugs, [slug for slug, _label in DOMAIN_CHOICES])
 
     def test_anonymous_gets_no_cards(self):
         from django.contrib.auth.models import AnonymousUser
