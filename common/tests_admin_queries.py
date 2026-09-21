@@ -352,14 +352,14 @@ class AdminStructureTests(TestCase):
         self.assertNotIn(None, clinical)
         # Each domain forms one contiguous run, in registry order.
         runs = [g for i, g in enumerate(clinical) if i == 0 or clinical[i - 1] != g]
-        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy"])
+        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy", "Urology"])
 
         # Shared models come first, before the per-domain runs.
         access = [entry["group"] for entry in sections["Projects & access"]["models"]]
         self.assertIsNone(access[0])
         self.assertEqual(
             [g for i, g in enumerate(access) if i == 0 or access[i - 1] != g],
-            [None, "Maxillo", "Brain", "Laparoscopy"],
+            [None, "Maxillo", "Brain", "Laparoscopy", "Urology"],
         )
 
         # A section drawing on one app has nothing to disambiguate.
