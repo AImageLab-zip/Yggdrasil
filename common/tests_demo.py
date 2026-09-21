@@ -64,7 +64,7 @@ class DemoIsolationTests(TestCase):
         )
 
         User = get_user_model()
-        cls.guest, _ = User.objects.get_or_create(username=settings.DEMO_GUEST_USERNAME)
+        cls.guest = User.objects.get(username=settings.DEMO_GUEST_USERNAME)
         # Publishing a project to the demo *is* granting the guest `viewer`.
         cls.grant = ProjectAccess.objects.create(
             user=cls.guest, project=cls.project, role="viewer"
