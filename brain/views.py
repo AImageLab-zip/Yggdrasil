@@ -50,6 +50,7 @@ from common.export_processing import (
     kill_export_processes as _kill_export_processes,
     recover_stuck_export as _recover_stuck_export,
 )
+from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
@@ -143,6 +144,9 @@ def patient_detail(request, patient_id):
         else:
             modality_files[item["slug"]] = payload
 
+    # The step picker reads the FileRegistry rows; `patient_files` below is the
+    # template's display shape, not those rows.
+    patient_file_rows = list(patient.files.all())
     patient_files = {"raw": [], "processed": [], "other": []}
     for file_obj in patient.files.all().order_by("-created_at"):
         file_data = {
@@ -224,8 +228,11 @@ def patient_detail(request, patient_id):
         "modality_files": modality_files,
         "segmentation_file": segmentation_file,
         "rerunnable_step_slugs": [
-            m["slug"] for m in patient_modalities
-            if m.get("slug") not in ("rawzip", "braintumor-mri-seg")
+            step["slug"]
+            for step in rerunnable_steps_for_patient(
+                patient_file_rows, patient_modalities, patient=patient
+            )
+            if step["slug"] not in ("rawzip", "braintumor-mri-seg")
         ],
         # Checkbox labels for the shared rerun picker (common/partials/rerun_modal.html).
         "rerun_step_labels": rerun_step_labels(patient_files, patient_modalities),
@@ -737,18 +744,14 @@ def rerun_processing(request, patient_id):
     if not requested_jobs:
         requested_jobs = list(patient.modalities.values_list("slug", flat=True))
 
-    from common.models import Job
-    jobs = Job.objects.filter(domain="brain", brain_patient=patient)
-    if requested_jobs:
-        jobs = jobs.filter(modality_slug__in=requested_jobs)
-
-    updated = jobs.update(
-        status="pending", started_at=None, completed_at=None, worker_id="", error_logs=""
-    )
+    result = rerun_steps_for_patient(patient, requested_jobs)
     return JsonResponse(
         {
             "success": True,
-            "message": f"Reprocessing queued for {updated} job(s)." if updated else "No existing jobs to rerun.",
+            "message": describe(result),
+            "updated": result["updated"],
+            "created": result["created"],
+            "not_found": result["not_found"],
         }
     )
 
@@ -770,19 +773,26 @@ def bulk_rerun_processing(request):
         if not user_is_project_admin(request.user, p.project):
             return JsonResponse({"success": False, "error": f"Permission denied for patient {p.patient_id}"}, status=403)
 
-    from common.models import Job
-    jobs = Job.objects.filter(domain="brain", brain_patient__in=patients)
     requested_jobs = data.get("jobs")
-    if requested_jobs and isinstance(requested_jobs, list):
-        jobs = jobs.filter(modality_slug__in=requested_jobs)
+    if not isinstance(requested_jobs, list) or not requested_jobs:
+        return JsonResponse({"success": False, "error": "jobs list is required"}, status=400)
 
-    updated = jobs.update(
-        status="pending", started_at=None, completed_at=None, worker_id="", error_logs=""
-    )
+    patients = list(patients)
+    result = bulk_rerun_steps(patients, requested_jobs)
     return JsonResponse(
         {
             "success": True,
-            "message": f"Reprocessing queued for {updated} job(s) across {len(patients)} scan(s)." if updated else "No jobs updated.",
+            "message": (
+                f"Reprocessing queued for {result['updated_pairs']} job(s) "
+                f"across {len(patients)} scan(s)."
+            ),
+            "selected_scan_count": len(patients),
+            "requested_modalities": result["requested"],
+            "updated_pairs": result["updated_pairs"],
+            "not_found_pairs": result["not_found_pairs"],
+            "created_slugs": result["created_slugs"],
+            "updated_by_modality": result["updated_by_modality"],
+            "not_found_by_modality": result["not_found_by_modality"],
         }
     )
 
