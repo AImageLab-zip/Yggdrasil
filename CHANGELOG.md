@@ -11,7 +11,7 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.1.0] - 2026-09-21
 
 The Urology multimodal imaging release: digital pathology Whole Slide Images, multiparametric prostate MRI, and confocal endomicroscopy.
 
@@ -26,6 +26,7 @@ The Urology multimodal imaging release: digital pathology Whole Slide Images, mu
 ### Changed
 - **Unified with main v3.0.1.** Upstream improvements to the public demo, permissions, and index grouping are fully integrated.
 - **Dropped obsolete `Dataset` model** in favor of project-scoped study management across the platform.
+- **The Rerun action offers processing steps that have never run.** Registering a new analysis step no longer leaves existing patients behind: any patient whose uploaded images the new step applies to now offers it in the Rerun picker, on both the patient page and the patient list, and picking it runs the step for the first time. Previously only steps that had already run at least once could be started again, and only in the dental workflow.
 
 ## [3.0.1] - 2026-09-07
 
