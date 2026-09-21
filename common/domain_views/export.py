@@ -26,8 +26,8 @@ from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
 from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
-from .domain import get_domain_models, get_namespace
-from .helpers import redirect_with_namespace
+from common.domain_models import get_domain_models, get_namespace
+from common.view_helpers import redirect_with_namespace
 from common.export_processing import (
     build_shared_download_url as _build_shared_download_url,
     format_file_size,
@@ -356,7 +356,7 @@ def export_new(request):
     # may have none to export yet. Point administrators at the batch page rather
     # than leaving an unexplained zero next to the panoramic artifacts.
     warmup_url = None
-    if domain == "maxillo" and any(m.slug == "cbct" for m in modalities):
+    if any(m.slug == "cbct" for m in modalities):
         if user_is_project_admin(request.user, project):
             from django.urls import NoReverseMatch, reverse
 
@@ -508,7 +508,7 @@ def _preview_totals(domain, patients, artifacts):
                 len(text.encode("utf-8"))
                 for text in captions.values_list("text_caption", flat=True)
             )
-        elif artifact.collector == "occlusion" and domain == "maxillo":
+        elif artifact.collector == "occlusion":
             from maxillo.models import Classification
 
             count = (
@@ -519,7 +519,7 @@ def _preview_totals(domain, patients, artifacts):
             )
             file_count += count
             total_size += count * 450
-        elif artifact.collector == "tooth_segmentation" and domain == "maxillo":
+        elif artifact.collector == "tooth_segmentation":
             # One document per photograph that still has polygons on the latest revision,
             # which is exactly what `_collect_tooth_segmentation` yields. Counted from
             # `annotations/` because that is where the polygons now live;
@@ -534,10 +534,11 @@ def _preview_totals(domain, patients, artifacts):
 
 
 def _caption_queryset(domain, patients, artifacts):
-    from brain.models import VoiceCaption as BrainVoiceCaption
-    from maxillo.models import VoiceCaption as MaxilloVoiceCaption
+    from django.apps import apps
 
-    model = BrainVoiceCaption if domain == "brain" else MaxilloVoiceCaption
+    from common.domains import normalize_domain
+
+    model = apps.get_model(normalize_domain(domain), "VoiceCaption")
     captions = model.objects.filter(
         patient__in=patients, text_caption__isnull=False
     ).exclude(text_caption="")

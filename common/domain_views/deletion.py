@@ -6,7 +6,7 @@ from django.views.decorators.http import require_POST
 import json
 import logging
 
-from .domain import get_domain_models
+from common.domain_models import get_domain_models
 from common.permissions import (
     user_can_delete_single_patient,
     user_can_perform_bulk_operations,

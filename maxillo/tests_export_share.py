@@ -68,7 +68,7 @@ class SharedLandingExpiryTests(ExportShareTestBase):
         response = self.client.get(self.download_url(export.share_token))
         self.assertEqual(response.status_code, 410)
 
-    @patch("maxillo.views.export.artifact_exists", return_value=True)
+    @patch("common.domain_views.export.artifact_exists", return_value=True)
     def test_future_expiry_still_available(self, _exists):
         export = self.make_export(
             expires_at=timezone.now() + timedelta(days=7)
@@ -77,7 +77,7 @@ class SharedLandingExpiryTests(ExportShareTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Download ZIP")
 
-    @patch("maxillo.views.export.artifact_exists", return_value=True)
+    @patch("common.domain_views.export.artifact_exists", return_value=True)
     def test_null_expiry_never_expires(self, _exists):
         export = self.make_export(expires_at=None)
         response = self.client.get(self.landing_url(export.share_token))

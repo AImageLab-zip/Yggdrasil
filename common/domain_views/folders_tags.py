@@ -14,7 +14,7 @@ import json
 import logging
 
 from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
-from .domain import get_domain_models, get_namespace
+from common.domain_models import get_domain_models, get_namespace
 from common.permissions import (
     user_can_write_patient_annotations,
     user_is_project_admin,

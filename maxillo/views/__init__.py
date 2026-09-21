@@ -23,7 +23,7 @@ from .panoramic_warmup import panoramic_warmup, panoramic_warmup_pending
 from .classification import update_classification
 
 # Folder and tag management
-from .folders_tags import (
+from common.domain_views.folders_tags import (
     create_folder,
     move_patients_to_folder,
     add_patient_tag,
@@ -34,7 +34,7 @@ from .folders_tags import (
 )
 
 # Deletion
-from .deletion import delete_patient, bulk_delete_patients
+from common.domain_views.deletion import delete_patient, bulk_delete_patients
 
 # Patient detail and management
 from .patient_detail import patient_detail, update_patient_name
@@ -56,7 +56,7 @@ from .patient_data import (
 # Intraoral segmentation APIs
 
 # Voice captions
-from .voice_captions import (
+from common.domain_views.voice_captions import (
     delete_voice_caption,
     upload_text_caption,
     edit_voice_caption_transcription,
@@ -73,7 +73,7 @@ from .metadata import get_nifti_metadata, update_nifti_metadata
 from .profile import user_profile
 
 # Export
-from .export import (
+from common.domain_views.export import (
     export_list,
     export_new,
     export_preview,

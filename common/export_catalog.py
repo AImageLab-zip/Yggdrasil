@@ -1,7 +1,7 @@
 """Declarative catalog of exportable artifacts and export filters.
 
 Before this module the same modality -> file_type mapping existed three times
-(``maxillo.views.export.EXPORT_MODALITY_FILE_TYPES``,
+(``common.domain_views.export.EXPORT_MODALITY_FILE_TYPES``,
 ``ExportProcessor.MODALITY_TO_FILE_TYPES`` and
 ``brain.export_config.BRAIN_EXPORT_MODALITY_FILE_TYPES``) and had already drifted
 apart, while the export form offered a fixed four-checkbox "content type" that

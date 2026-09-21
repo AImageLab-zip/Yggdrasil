@@ -1,42 +1,27 @@
-"""Helpers to route maxillo/laparoscopy namespaces to the correct domain models/forms."""
+"""Route a namespace to its domain models and forms.
+
+The model side moved to ``common/domain_models.py`` with the views that use it
+and is re-exported here so existing import paths keep working. The form side
+stays: it imports domain forms directly, which ``common/`` may not do.
+"""
 
 
 from django.apps import apps
 
+from common.domain_models import get_domain_models, get_namespace
 
-def get_namespace(request):
-    return (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
+__all__ = [
+    'get_namespace',
+    'get_domain_models',
+    'get_canonical_models',
+    'get_domain_forms',
+    'get_canonical_forms',
+    'is_laparoscopy_namespace',
+]
 
 
 def is_laparoscopy_namespace(request):
     return get_namespace(request) == 'laparoscopy'
-
-
-#: Models every domain declares, and those only some do. A domain app is not
-#: obliged to have a Classification -- brain and urology have none -- so asking
-#: for one must come back empty rather than raise or fall back to maxillo's.
-_REQUIRED_MODELS = ('Patient', 'Folder', 'Tag', 'VoiceCaption', 'Export')
-_OPTIONAL_MODELS = ('Classification',)
-
-
-def get_domain_models(request):
-    """Model classes for the namespace being browsed, from the domain registry.
-
-    Resolved through ``common.domains.normalize_domain`` rather than a branch per
-    domain, so a newly registered domain is served without editing this function.
-    Optional models are absent from the returned dict; use ``.get()`` for those.
-    """
-    from common.domains import normalize_domain
-
-    app_label = normalize_domain(get_namespace(request))
-
-    models = {name: apps.get_model(app_label, name) for name in _REQUIRED_MODELS}
-    for name in _OPTIONAL_MODELS:
-        try:
-            models[name] = apps.get_model(app_label, name)
-        except LookupError:
-            pass
-    return models
 
 
 def get_canonical_models():

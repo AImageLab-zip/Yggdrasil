@@ -741,7 +741,7 @@ def start_export_processing(export_id, domain="maxillo"):
 
 
 # ---------------------------------------------------------------------------
-# Shared export view-layer helpers (promoted from maxillo.views.export, Phase 5.1)
+# Shared export view-layer helpers (promoted from the shared export views, Phase 5.1)
 # Domain-agnostic: they operate on a passed Export instance / request / id.
 # ---------------------------------------------------------------------------
 

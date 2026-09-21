@@ -13,7 +13,7 @@ from common.permissions import (
     user_is_project_admin,
 )
 
-from .domain import get_domain_models
+from common.domain_models import get_domain_models
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def upload_text_caption(request, patient_id):
         modality = data.get('modality', '').strip()
         
         # Validate modality against database
-        from ..modality_helpers import is_valid_modality_slug, get_all_modalities
+        from common.modality_helpers import is_valid_modality_slug, get_all_modalities
         if not modality or not is_valid_modality_slug(modality):
             # Fallback to first available modality
             all_modalities = get_all_modalities()
@@ -244,7 +244,7 @@ def update_voice_caption_modality(request, patient_id, caption_id):
             return JsonResponse({'error': 'Modality cannot be empty'}, status=400)
         
         # Validate modality against database
-        from ..modality_helpers import is_valid_modality_slug
+        from common.modality_helpers import is_valid_modality_slug
         if not is_valid_modality_slug(new_modality):
             return JsonResponse({'error': 'Invalid modality'}, status=400)
         

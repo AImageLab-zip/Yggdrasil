@@ -814,7 +814,7 @@ def user_profile(request, username=None):
 def create_folder(request):
     """Create a folder inside the current project (single-level only).
 
-    Mirrors ``maxillo.views.folders_tags.create_folder``. ``Folder.project`` is
+    Mirrors ``common.domain_views.folders_tags.create_folder``. ``Folder.project`` is
     non-nullable and was omitted here, so every call raised IntegrityError and
     came back as a 500 -- Brain could not create folders at all.
     """
