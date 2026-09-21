@@ -101,9 +101,6 @@ def _require_own_export(request, export_id, *, json_response=False):
         messages.error(request, message)
         return redirect_with_namespace(request, "export_list")
 
-    if not _can_use_exports(request):
-        return None, deny("You do not have permission to access exports.", 403)
-
     ExportModel = get_domain_models(request)["Export"]
     export = ExportModel.objects.filter(id=export_id).first()
     if export is None:
@@ -111,8 +108,17 @@ def _require_own_export(request, export_id, *, json_response=False):
             return None, JsonResponse({"success": False, "error": "Export not found."}, status=404)
         raise Http404("Export not found.")
 
-    if export.user_id != request.user.id and not request.user.is_staff:
+    is_owner = export.user_id == request.user.id
+    if not is_owner and not request.user.is_staff:
         return None, deny("You do not have permission to access this export.", 403)
+
+    # `_can_use_exports` asks whether you may use the feature at all, which is the
+    # right question for the list and create screens. Asking it here too refused
+    # owners their own export -- the very thing this helper exists to prevent --
+    # because owning an export and still being allowed to make new ones are
+    # different things. Non-owners acting through staff rights still answer it.
+    if not is_owner and not _can_use_exports(request):
+        return None, deny("You do not have permission to access exports.", 403)
     return export, None
 
 
