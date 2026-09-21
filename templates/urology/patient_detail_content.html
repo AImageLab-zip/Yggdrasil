@@ -3,20 +3,6 @@
 
 <link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
 <style>
-.urology-multimodal-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 6px 12px;
-    margin-bottom: 12px;
-}
-.urology-multimodal-bar .btn-group .btn {
-    font-size: 0.875rem;
-    font-weight: 500;
-}
 .urology-stage-container {
     display: flex;
     gap: 12px;
@@ -103,20 +89,27 @@
 
 {% include 'common/sections/patient_header_section.html' %}
 
-<!-- Multimodal Switcher Bar -->
-<div class="urology-multimodal-bar">
-    <span class="text-white small fw-bold me-2"><i class="fas fa-layer-group me-1"></i>Modality View:</span>
-    <div class="btn-group" role="group" aria-label="Viewer Modality">
-        <button type="button" class="btn btn-sm btn-outline-primary active" id="urologyModeMriBtn" title="View MRI">
-            <i class="fas fa-magnet me-1"></i>MRI
-        </button>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="urologyModeWsiBtn" title="View WSI">
-            <i class="fas fa-microscope me-1"></i>WSI
-        </button>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="urologyModeConfocalBtn" title="View Confocale">
-            <i class="fas fa-eye me-1"></i>Confocale
-        </button>
-    </div>
+{% comment %} The shared modality strip (templates/maxillo/patient_detail_content.html).
+Same DOM contract -- radios named `viewerType` in #modalityToggleGroup, labels
+carrying data-modality -- so static/js/vocal_caption.js tags a caption with the
+active modality without knowing this domain exists, and a fourth urology modality
+appears here the moment it is registered. {% endcomment %}
+<div class="modality-tabs" id="modalityToggleGroup">
+    {% if patient_modalities %}
+        {% for m in patient_modalities %}
+            {% if m.slug != 'rawzip' %}
+            {% with rid='modality_'|add:m.slug %}
+            <input type="radio" class="btn-check" name="viewerType" id="{{ rid }}" autocomplete="off"
+                   {% if default_modality_slug == m.slug %}checked{% endif %}>
+            <label class="modality-toggle" data-modality="{{ m.slug }}" for="{{ rid }}">
+                {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %}
+            </label>
+            {% endwith %}
+            {% endif %}
+        {% endfor %}
+    {% else %}
+        <span class="text-muted small">No modalities configured for this patient</span>
+    {% endif %}
 </div>
 
 <div class="patient-view-grid">
@@ -316,77 +309,56 @@
 </div>
 
 <script>
+// Selecting a modality is the shared strip's job; swapping the stage is ours,
+// because .urology-stage-panel is a flex column and the shared handler's generic
+// branch would set display:block on it.
 document.addEventListener('DOMContentLoaded', () => {
-    const mriBtn = document.getElementById('urologyModeMriBtn');
-    const wsiBtn = document.getElementById('urologyModeWsiBtn');
-    const confocalBtn = document.getElementById('urologyModeConfocalBtn');
+    const STAGES = {
+        'urology-mri': {panel: 'urologyMriStage'},
+        'urology-wsi': {panel: 'urologyWsiStagePanel', stage: 'urologyWsiStage'},
+        'urology-confocal': {panel: 'urologyConfocalStagePanel', stage: 'urologyConfocalStage'},
+    };
+    const group = document.getElementById('modalityToggleGroup');
+    if (!group) return;
 
-    const mriStage = document.getElementById('urologyMriStage');
-    const wsiStagePanel = document.getElementById('urologyWsiStagePanel');
-    const confocalStagePanel = document.getElementById('urologyConfocalStagePanel');
-
-    function setViewMode(mode) {
-        mriBtn?.classList.remove('active');
-        wsiBtn?.classList.remove('active');
-        confocalBtn?.classList.remove('active');
-
-        mriStage?.classList.add('is-hidden');
-        wsiStagePanel?.classList.add('is-hidden');
-        confocalStagePanel?.classList.add('is-hidden');
-
-        if (mode === 'mri') {
-            mriBtn?.classList.add('active');
-            mriStage?.classList.remove('is-hidden');
-        } else if (mode === 'wsi') {
-            wsiBtn?.classList.add('active');
-            wsiStagePanel?.classList.remove('is-hidden');
-        } else if (mode === 'confocal') {
-            confocalBtn?.classList.add('active');
-            confocalStagePanel?.classList.remove('is-hidden');
-        }
-
-        // Show only the report template voices for the active modality
-        document.querySelectorAll('.report-urology-modality').forEach(el => {
-            if (el.dataset.urologyModality === mode) {
-                el.classList.remove('d-none');
-            } else {
-                el.classList.add('d-none');
-            }
+    function show(slug) {
+        if (!STAGES[slug]) return;
+        Object.entries(STAGES).forEach(([candidate, ids]) => {
+            document.getElementById(ids.panel)?.classList.toggle('is-hidden', candidate !== slug);
         });
 
-        const modIndicator = document.getElementById('modalityIndicator');
-        if (modIndicator) {
-            modIndicator.textContent = mode === 'wsi' ? 'WSI' : (mode === 'confocal' ? 'Confocale' : 'MRI');
-        }
+        // The report template shows the voices of the modality on screen.
+        const short = slug.replace(/^urology-/, '');
+        document.querySelectorAll('.report-urology-modality').forEach((el) => {
+            el.classList.toggle('d-none', el.dataset.urologyModality !== short);
+        });
 
-        // Trigger window resize and WSI viewport adaptation
+        const indicator = document.getElementById('modalityIndicator');
+        const label = group.querySelector(`label[data-modality="${slug}"]`);
+        if (indicator && label) indicator.textContent = label.textContent.trim();
+
+        // A viewport can only measure itself once its panel is on screen.
         setTimeout(() => {
             window.dispatchEvent(new Event('resize'));
-            if (mode === 'wsi') {
-                const stage = document.getElementById('urologyWsiStage');
-                if (stage && stage.__wsiViewport) {
-                    stage.__wsiViewport.resize();
-                }
-            } else if (mode === 'confocal') {
-                const stage = document.getElementById('urologyConfocalStage');
-                if (stage && stage.__wsiViewport) {
-                    stage.__wsiViewport.resize();
-                }
-            }
+            const stageId = STAGES[slug].stage;
+            if (stageId) document.getElementById(stageId)?.__wsiViewport?.resize();
         }, 50);
     }
 
-    mriBtn?.addEventListener('click', () => setViewMode('mri'));
-    wsiBtn?.addEventListener('click', () => setViewMode('wsi'));
-    confocalBtn?.addEventListener('click', () => setViewMode('confocal'));
+    group.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!target || target.type !== 'radio') return;
+        const label = group.querySelector(`label[for="${target.id}"]`);
+        show((label && label.dataset.modality) || target.id.replace(/^modality_/, ''));
+    });
 
-    // Initial view mode based on available scans
-    {% if not has_mri and has_wsi %}
-    setViewMode('wsi');
-    {% elif not has_mri and not has_wsi and has_confocal %}
-    setViewMode('confocal');
-    {% else %}
-    setViewMode('mri');
-    {% endif %}
+    // A patient with nothing uploaded has no server-side default, so pick the
+    // first stage and select its tab too -- otherwise a panel shows with no tab lit.
+    let checked = group.querySelector('input[name="viewerType"]:checked');
+    if (!checked) {
+        checked = document.getElementById(`modality_${Object.keys(STAGES)[0]}`);
+        if (checked) checked.checked = true;
+    }
+    if (checked) show(checked.id.replace(/^modality_/, ''));
 });
 </script>

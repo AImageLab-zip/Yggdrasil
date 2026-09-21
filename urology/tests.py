@@ -118,7 +118,11 @@ class UrologyDomainTests(TestCase):
         self.assertEqual(detail_resp.status_code, 200)
         self.assertContains(detail_resp, self.patient.name)
         self.assertContains(detail_resp, f"ID {self.patient.patient_id}")
-        self.assertContains(detail_resp, "urology-multimodal-bar")
+        # The modality selector is the shared strip, built from patient_modalities,
+        # not a hardcoded per-domain bar.
+        self.assertContains(detail_resp, 'id="modalityToggleGroup"')
+        for slug in ("urology-mri", "urology-wsi", "urology-confocal"):
+            self.assertContains(detail_resp, f'data-modality="{slug}"')
         self.assertContains(detail_resp, "urologyMriStage")
         self.assertContains(detail_resp, "urologyWsiStagePanel")
         self.assertContains(detail_resp, "urologyConfocalStagePanel")
@@ -561,9 +565,9 @@ class UrologyDomainTests(TestCase):
         self.assertNotContains(resp, "drop-hint")
         self.assertNotContains(resp, "Drop modality here")
         # Modality switcher buttons are clean without bracketed text
-        self.assertContains(resp, 'id="urologyModeMriBtn"')
-        self.assertContains(resp, 'id="urologyModeWsiBtn"')
-        self.assertContains(resp, 'id="urologyModeConfocalBtn"')
+        self.assertContains(resp, 'data-modality="urology-mri"')
+        self.assertContains(resp, 'data-modality="urology-wsi"')
+        self.assertContains(resp, 'data-modality="urology-confocal"')
         self.assertNotContains(resp, "(mpMRI)")
         self.assertNotContains(resp, "(Histopathology)")
         # Top right available images notice removed

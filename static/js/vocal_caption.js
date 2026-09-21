@@ -209,23 +209,6 @@ class VocalCaptionRecorder {
             return { value: '', display: '' };
         }
 
-        // Urology multimodal switcher bar detection
-        const urologyMri = document.getElementById('urologyModeMriBtn');
-        const urologyWsi = document.getElementById('urologyModeWsiBtn');
-        const urologyConfocal = document.getElementById('urologyModeConfocalBtn');
-        if (urologyMri || urologyWsi || urologyConfocal) {
-            if (urologyWsi && urologyWsi.classList.contains('active')) {
-                return { value: 'urology-wsi', display: 'WSI' };
-            }
-            if (urologyConfocal && urologyConfocal.classList.contains('active')) {
-                return { value: 'urology-confocal', display: 'Confocale' };
-            }
-            if (urologyMri && urologyMri.classList.contains('active')) {
-                return { value: 'urology-mri', display: 'MRI' };
-            }
-            return { value: 'urology-mri', display: 'MRI' };
-        }
-
         // Prefer the modality toggle group rendered in patient detail
         const toggleGroup = document.getElementById('modalityToggleGroup');
         if (toggleGroup) {

@@ -529,14 +529,23 @@ def patient_detail(request, patient_id):
                 messages.success(request, "Scan settings updated successfully!")
                 return redirect("urology:patient_detail", patient_id=patient_id)
 
-    patient_modalities = []
-    for modality in patient.modalities.all().order_by("name"):
-        patient_modalities.append({
+    # The strip lists the project's modalities, not only the ones this patient has
+    # uploaded: the page renders a stage panel per modality with its own empty state
+    # ("No MRI Scan Uploaded"), so a patient mid-upload still has somewhere to land.
+    _strip_modalities = (
+        patient.project.modalities.filter(is_active=True).order_by("name")
+        if getattr(patient, "project", None) is not None
+        else patient.modalities.all().order_by("name")
+    )
+    patient_modalities = [
+        {
             "slug": modality.slug,
             "name": modality.name,
             "label": modality.label or "",
             "subtypes": list(modality.subtypes or []),
-        })
+        }
+        for modality in _strip_modalities
+    ]
 
     # Prepare MRI volume grid data
     modality_files = {}
