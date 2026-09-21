@@ -396,7 +396,10 @@ class UrologyDomainTests(TestCase):
     def test_urology_export_views(self):
         resp = self.client.get("/urology/export/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Urology Export Datasets")
+        # The shared export templates are rendered under urology's namespace, so
+        # every link they build has to stay inside /urology/.
+        self.assertContains(resp, "/urology/export/new/")
+        self.assertNotContains(resp, "/maxillo/export/")
 
         # Verify fallback to active urology project when session is unset or cross-domain
         session = self.client.session
@@ -406,7 +409,7 @@ class UrologyDomainTests(TestCase):
 
         new_resp = self.client.get("/urology/export/new/")
         self.assertEqual(new_resp.status_code, 200)
-        self.assertContains(new_resp, "New Export - Urology")
+        self.assertContains(new_resp, 'action="/urology/export/new/"')
         self.assertContains(new_resp, self.project.name)
 
         # Test export preview endpoint
@@ -457,7 +460,8 @@ class UrologyDomainTests(TestCase):
         with patch("urology.views.artifact_exists", return_value=True):
             landing_resp = self.client.get(f"/urology/export/shared/{export.share_token}/")
             self.assertEqual(landing_resp.status_code, 200)
-            self.assertContains(landing_resp, "Shared Urology Dataset")
+            # Shared landing is the shared template under urology's namespace.
+        self.assertContains(landing_resp, "/urology/export/shared/")
 
         # Test export delete
         del_resp = self.client.post(f"/urology/export/{export.id}/delete/")

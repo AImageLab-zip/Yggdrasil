@@ -1342,7 +1342,7 @@ def export_list(request):
 
     return render(
         request,
-        "urology/export_list.html",
+        "maxillo/export_list.html",
         {"exports": page_obj, "page_obj": page_obj, "ns": "urology"},
     )
 
@@ -1426,7 +1426,7 @@ def export_new(request):
 
     return render(
         request,
-        "urology/export_new.html",
+        "maxillo/export_new.html",
         {
             "project": project,
             "folders": folders,
@@ -1641,7 +1641,7 @@ def export_shared_landing(request, share_token):
         return redirect_to_login(request.get_full_path())
     return render(
         request,
-        "urology/export_shared_landing.html",
+        "maxillo/export_shared_landing.html",
         {
             "ns": "urology",
             "export": export,
