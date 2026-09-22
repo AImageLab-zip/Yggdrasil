@@ -200,6 +200,7 @@ registers its modalities — uploads fail until it has been run:
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py create_maxillo_modalities
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_brain_modalities
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_urology_modalities
 ```
 
 See [setup.md](setup.md) for the rest of first-time setup and [running.md](running.md)

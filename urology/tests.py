@@ -1230,6 +1230,65 @@ class UrologyAuditRemediationTests(TestCase):
             uploaded_by=self.admin_user,
         )
 
+    def test_rerun_picker_offers_only_the_patients_project_modalities(self):
+        """The rerun picker never offers a modality the patient's project omits.
+
+        ``project2`` registers no modality, so its patient's picker is empty even
+        with the session pointed at ``project1`` (which registers all three) and
+        even when the patient carries a file -- the patient's own project decides,
+        as it does in maxillo and brain.
+        """
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from urology.file_utils import save_urology_modality_file
+
+        save_urology_modality_file(
+            self.patient1,
+            "urology-mri",
+            SimpleUploadedFile("a.nii.gz", b"DATA", content_type="application/gzip"),
+        )
+        save_urology_modality_file(
+            self.patient2,
+            "urology-mri",
+            SimpleUploadedFile("b.nii.gz", b"DATA", content_type="application/gzip"),
+        )
+
+        self.client.login(username="remediation_admin", password="pass")
+        session = self.client.session
+        session["current_project_id"] = self.project1.id
+        session.save()
+
+        resp = self.client.get(f"/urology/patient/{self.patient2.patient_id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["allowed_modality_slugs"], [])
+        self.assertEqual(resp.context["rerunnable_step_slugs"], [])
+
+        # project1 registers all three, but only the uploaded one is rerunnable.
+        resp1 = self.client.get(f"/urology/patient/{self.patient1.patient_id}/")
+        self.assertEqual(resp1.status_code, 200)
+        self.assertEqual(
+            sorted(resp1.context["allowed_modality_slugs"]),
+            ["urology-confocal", "urology-mri", "urology-wsi"],
+        )
+        self.assertNotIn("urology-wsi", resp1.context["rerunnable_step_slugs"])
+        self.assertNotIn("urology-confocal", resp1.context["rerunnable_step_slugs"])
+
+    def test_patient_list_rerun_picker_scoped_to_the_projects_modalities(self):
+        """A project registering no modality offers none, rather than the domain's."""
+        self.client.login(username="remediation_admin", password="pass")
+        session = self.client.session
+        session["current_project_id"] = self.project2.id
+        session.save()
+
+        resp = self.client.get("/urology/patients/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(resp.context["allowed_modalities"]), [])
+        listed = list(resp.context["page_obj"])
+        self.assertEqual(
+            [item["patient"].patient_id for item in listed], [self.patient2.patient_id]
+        )
+        for item in listed:
+            self.assertEqual(item["rerunnable_steps"], [])
+
     def test_save_urology_modality_file_unique_keys(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from urology.file_utils import save_urology_modality_file

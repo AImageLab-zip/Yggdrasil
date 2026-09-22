@@ -108,6 +108,9 @@ docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_brain_modali
 
 # Laparoscopy: video modality
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
+
+# Urology: MRI, WSI digital pathology, confocal
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_urology_modalities
 ```
 
 These are idempotent (`get_or_create` + update) — safe to re-run after upgrades that add/change modalities.

@@ -36,6 +36,7 @@ from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.modality_config import (
     modality_status,
+    present_modality_slugs,
     rerun_step_labels,
     rerunnable_steps_for_patient,
 )
@@ -149,12 +150,14 @@ def patient_list(request):
         patients = patients.filter(voice_captions__isnull=False).distinct()
 
     patients = patients.order_by("-uploaded_at")
-    if current_project:
-        allowed_modalities = list(current_project.modalities.filter(is_active=True))
-    else:
-        allowed_modalities = list(
-            Modality.objects.filter(domain="urology", is_active=True).order_by("name")
-        )
+    # Only what the project registers -- maxillo/views/patient_list.py:226 does the
+    # same. Falling back to every urology modality made the status filters and the
+    # rerun picker offer modalities the project has not enabled.
+    allowed_modalities = (
+        list(current_project.modalities.filter(is_active=True).order_by("name"))
+        if current_project
+        else []
+    )
 
     status_filters = {}
     for modality in allowed_modalities:
@@ -696,16 +699,14 @@ def patient_detail(request, patient_id):
         )
         caption.is_ghost = not caption.can_view_content
 
-    raw_allowed_modalities = list(
-        Modality.objects.filter(
-            projects__id=request.session.get("current_project_id"),
-            is_active=True,
-        )
+    # The patient's own project decides this, not whichever project the session
+    # happens to have open (maxillo/views/patient_detail.py:447), and a project
+    # that registers no modality offers none rather than the whole domain.
+    raw_allowed_modalities = (
+        list(patient.project.modalities.filter(is_active=True).order_by("name"))
+        if getattr(patient, "project", None) is not None
+        else []
     )
-    if not raw_allowed_modalities:
-        raw_allowed_modalities = list(
-            Modality.objects.filter(domain="urology", is_active=True)
-        )
     allowed_modalities = [
         {
             "slug": m.slug,
@@ -713,6 +714,14 @@ def patient_detail(request, patient_id):
         }
         for m in raw_allowed_modalities
     ]
+
+    # `patient_modalities` is the viewer strip: one panel per *project* modality so
+    # a patient mid-upload still has an empty state to land on. The rerun picker is
+    # the opposite question -- what can actually be re-run for this patient -- so it
+    # takes the same project-scoped list narrowed to the modalities the patient has
+    # files for, exactly as maxillo/views/patient_detail.py:500 narrows its own.
+    _present_slugs = present_modality_slugs(patient_file_rows)
+    rerun_modalities = [m for m in patient_modalities if m["slug"] in _present_slugs]
 
     _raw_lock_reasons = annotation_lock_reasons(patient)
 
@@ -753,10 +762,12 @@ def patient_detail(request, patient_id):
         "rerunnable_step_slugs": [
             step["slug"]
             for step in rerunnable_steps_for_patient(
-                patient_file_rows, patient_modalities, patient=patient
+                patient_file_rows, rerun_modalities, patient=patient
             )
             if step["slug"] != "rawzip"
         ],
+        # Checkbox labels for the shared rerun picker (common/partials/rerun_modal.html).
+        "rerun_step_labels": rerun_step_labels(patient_file_rows, rerun_modalities),
         "allowed_modalities": allowed_modalities,
         "allowed_modality_slugs": [
             m["slug"] if isinstance(m, dict) else m.slug for m in allowed_modalities
