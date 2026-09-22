@@ -279,7 +279,9 @@ class RunnerFailContractTests(RunnerApiTestCase):
 
     def test_fail_processing_job(self):
         job = self._job(status="processing", worker_id="worker-a")
-        response = self._fail(job, body={"error": "boom"})
+        # The retry is dispatched when the request's transaction commits.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._fail(job, body={"error": "boom"})
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["failed"])

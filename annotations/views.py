@@ -15,10 +15,9 @@ revision number against the unique constraint, refresh ``ever_annotated`` and
 fingerprint the targets in one transaction, and a caller free to skip a step will
 eventually skip the flag.
 
-This lives in ``annotations/`` rather than in a domain app because it serves all three
-namespaces and ``AnnotationSet`` already carries all three patient FKs.
-``maxillo.views.domain.get_domain_models`` only knows maxillo and laparoscopy, so the
-resolution is done here instead of bending that helper.
+This lives in ``annotations/`` rather than in a domain app because it serves every
+domain namespace and ``AnnotationSet`` carries a patient FK per domain. The patient model
+and FK column are resolved from the domain registry (``common.domains``).
 """
 
 import json
@@ -52,6 +51,8 @@ from annotations.services.viewer import (
     save_measurement_groups,
 )
 from common.models import FileRegistry
+from common.domain_models import get_namespace
+from common.domains import fk_fields_for, normalize_domain
 from common.permissions import (
     user_can_read_folder,
     user_can_write_annotations,
@@ -60,24 +61,18 @@ from common.permissions import (
 
 logger = logging.getLogger(__name__)
 
-#: URL namespace to the app that owns its ``Patient``.
-DOMAIN_APPS = {
-    "maxillo": "maxillo",
-    "brain": "brain",
-    "laparoscopy": "laparoscopy",
-    "urology": "urology",
-}
 
-
-def _namespace(request):
-    return (
-        getattr(request, "resolver_match", None) and request.resolver_match.namespace
-    ) or "maxillo"
+def _domain(request):
+    return normalize_domain(get_namespace(request))
 
 
 def _patient_model(request):
-    app_label = DOMAIN_APPS.get(_namespace(request), "maxillo")
-    return apps.get_model(app_label, "Patient")
+    return apps.get_model(_domain(request), "Patient")
+
+
+def _patient_fk(request):
+    """``AnnotationSet``'s patient FK column for the domain being served."""
+    return fk_fields_for(_domain(request))[0]
 
 
 def _file_for_patient(file_id, patient):
@@ -294,12 +289,7 @@ def measurements_state_api(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
 
     AnnotationSet = apps.get_model("annotations", "AnnotationSet")
-    lookup = {
-        "maxillo": "patient",
-        "brain": "brain_patient",
-        "laparoscopy": "laparoscopy_patient",
-        "urology": "urology_patient",
-    }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
+    lookup = _patient_fk(request)
     annotation_set = (
         AnnotationSet.objects.filter(**{lookup: patient, "kind": "measurements"})
         .order_by("id")
@@ -551,12 +541,7 @@ def tooth_segmentation_state_api(request, patient_id):
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
-    domain_field = {
-        "maxillo": "patient",
-        "brain": "brain_patient",
-        "laparoscopy": "laparoscopy_patient",
-        "urology": "urology_patient",
-    }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
+    domain_field = _patient_fk(request)
 
     state = tooth_segmentation_state(patient, domain_field=domain_field)
     updated_at = state.get("updatedAt")
@@ -709,12 +694,7 @@ def ios_landmarks_state_api(request, patient_id):
     ):
         return JsonResponse({"error": "Permission denied"}, status=403)
 
-    domain_field = {
-        "maxillo": "patient",
-        "brain": "brain_patient",
-        "laparoscopy": "laparoscopy_patient",
-        "urology": "urology_patient",
-    }[DOMAIN_APPS.get(_namespace(request), "maxillo")]
+    domain_field = _patient_fk(request)
 
     state = ios_landmarks_state(patient, domain_field=domain_field)
     updated_at = state.get("updatedAt")

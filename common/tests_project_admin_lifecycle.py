@@ -418,7 +418,9 @@ class FolderAccessSurfaceIsGoneTests(TestCase):
     def test_no_domain_routes_folder_permissions_any_more(self):
         from django.urls import NoReverseMatch
 
-        for domain in ("maxillo", "brain", "laparoscopy"):
+        from common.domains import DOMAINS
+
+        for domain in sorted(DOMAINS):
             for name in (
                 "folder_permissions",
                 "upsert_folder_permission",

@@ -605,3 +605,37 @@ class ProcessingStatusBlockingTests(TestCase):
         step.is_blocking = False
         step.save()
         self.assertEqual(patient._processing_status("demo"), "processed")
+
+
+class RawFileHiddenEveryDomainTests(TestCase):
+    """The blocking gate resolves the file's owner through the domain registry.
+
+    It used to walk a hand-written list of patient FKs that stopped at laparoscopy,
+    so for urology it found no owner and failed open: raw inputs stayed visible while
+    their blocking step was still running.
+    """
+
+    def test_blocking_hides_raw_while_a_job_is_in_flight_in_every_domain(self):
+        from django.apps import apps
+
+        from common.domains import DOMAINS, fk_fields_for
+        from common.models import FileRegistry, Job
+
+        _step(_modality("review-volume"), is_blocking=True, discard_raw=False)
+        for domain in sorted(DOMAINS):
+            with self.subTest(domain=domain):
+                patient = apps.get_model(domain, "Patient").objects.create(
+                    project=_project(domain), name=f"gate-{domain}"
+                )
+                fk = fk_fields_for(domain)[0]
+                raw = FileRegistry.objects.create(
+                    file_type="review-volume_raw", file_path=f"{domain}/raw.nii.gz",
+                    file_size=1, file_hash="h", domain=domain, **{fk: patient},
+                )
+                job = Job.objects.create(
+                    modality_slug="review-volume", status="processing", domain=domain,
+                    **{fk: patient},
+                )
+                self.assertTrue(mc.raw_file_hidden(raw))
+                Job.objects.filter(pk=job.pk).update(status="completed")
+                self.assertFalse(mc.raw_file_hidden(raw))

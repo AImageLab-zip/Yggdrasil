@@ -14,6 +14,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
+from common.domains import DOMAINS as REGISTERED_DOMAINS
 from common.deletion import FolderNotEmpty, delete_folder
 from common.models import Project, ProjectAccess
 
@@ -74,7 +75,7 @@ class FolderDeletionRuleTests(TestCase):
 class FolderDeleteEndpointTests(TestCase):
     """The same endpoint, reached through each domain's own namespace."""
 
-    DOMAINS = ["maxillo", "brain", "laparoscopy"]
+    DOMAINS = sorted(REGISTERED_DOMAINS)
 
     def setUp(self):
         self.admin = User.objects.create_user("boss", password="x")
