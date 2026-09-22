@@ -123,21 +123,16 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.WARNING(f"Modality already exists: {modality.name}")
                 )
-                # Update existing modality with new data
-                for key, value in modality_data.items():
-                    if key != "slug":
-                        setattr(modality, key, value)
-                modality.save()
-                self.stdout.write(
-                    self.style.SUCCESS(f"Updated modality: {modality.name}")
-                )
+                # Seeds create what is missing and never overwrite: an existing row may
+                # carry admin edits, and re-running a seed used to revert them silently.
 
-            maxillo_project.modalities.add(modality)
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Linked {modality.name} to {maxillo_project.name} project"
+            if created:
+                maxillo_project.modalities.add(modality)
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Linked {modality.name} to {maxillo_project.name} project"
+                    )
                 )
-            )
 
         self.stdout.write(
             self.style.SUCCESS(

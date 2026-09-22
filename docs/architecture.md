@@ -44,6 +44,11 @@ domain already depends on; an import back the other way is a cycle. Where
 `DomainFKAccessorMixin.get_patient()`) or `apps.get_model(...)`, never a direct
 import.
 
+This is enforced in CI by `lint-imports` (contracts in `pyproject.toml`), which
+also keeps the domain apps from importing each other. The imports that break the
+rule today are listed there as `ignore_imports`; a new one fails the build, and
+fixing one means deleting its line.
+
 ### Why `annotations/` is not part of `common/`
 
 `annotations/` depends on `common` (patients, `FileRegistry`, projects), and
@@ -206,9 +211,15 @@ presigning, a streaming download context manager). Keys are recorded in
 database dump without the bucket gives you working patient pages and 404ing
 downloads.
 
-Key prefixes are derived from the **domain**, not the project slug. Do not
-change that: prefixes only apply to new uploads, so a change silently splits one
-patient's files across two layouts.
+Key prefixes are **not** uniform, and not simply the domain:
+`common.uploads.raw_key_prefix_for()` uses `project_slug_from_patient()`, which
+returns `laparoscopy` for laparoscopy and `maxillo` for every other domain (so
+urology uploads land under `maxillo/`); brain's own upload path writes
+`brain/patients/<id>/...`; SLURM job outputs go under
+`<project slug>/processed/<modality>/job_<id>` (`common/runner/run.py`). Do not
+change a prefix rule in place: prefixes only apply to new uploads, so a change
+silently splits one patient's files across two layouts. (It also means
+prefix-scoped storage policies cannot be used yet.)
 
 Anything that reads bytes out of the store in bulk is a **management command** —
 never a `RunPython` migration (row counts are unbounded, it blocks the deploy,
@@ -230,7 +241,7 @@ SourceResource                     the thing annotated, addressed by a stable
         │ PROTECT
 AnnotationSet ──1:N──▶ AnnotationTarget ──1:N──▶ AnnotationSelector
   kind, domain,          role ('volume',           kind, coordinate_system
-  patient FK (x3),       'segmentation', …)        (lps | ras | volume_voxel |
+  patient FK (x4),       'segmentation', …)        (lps | ras | volume_voxel |
   annotation_method,     primary_slot (1 or NULL)   resource_local | none),
   label_schema,          status                     frame_index, slice_axis/index,
   status, ever_annotated                            start/end_time_ms (integers),
@@ -300,7 +311,10 @@ Two more properties that surprise people:
 
 ## Imaging frontend
 
-All imaging runs on **Cornerstone3D**, built from `frontend/` with npm +
+Volume, stack, mesh-adjacent and video imaging runs on **Cornerstone3D** (the
+exceptions: the urology WSI viewer is a hand-written Canvas2D tiler, the
+uploaded-panoramic view is a plain `<img>`, and the RGB editor is Canvas2D),
+built from `frontend/` with npm +
 esbuild into a committed bundle under `static/vendor/cornerstone/`. Both npm and
 esbuild are dev-only: deploys need no Node. Templates load a surface with
 `{% cornerstone_entry '<name>' %}` (`common/templatetags/cornerstone.py`), which
