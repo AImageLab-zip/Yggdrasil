@@ -1,17 +1,30 @@
-"""``ygg-stage`` — move data between object storage and the cluster (boto3).
+"""``ygg-stage`` — move data between object storage and the cluster.
 
 Used inside the sbatch job after sourcing the transient ``creds.env``:
   ygg-stage pull <key> <dest>     download one object (dest dir or file path)
   ygg-stage push <dir> <prefix>   upload every file under <dir> to <prefix>/<relpath>
 
-The cluster never stores credentials — they come from the sourced env only.
+``YGG_STAGE_MODE`` in that file picks the backend: ``presigned`` (per-job presigned
+URLs, no credentials at all -- see ``presigned.py``) or, for runners that predate it,
+``credentials`` / unset (the ``OBJECT_STORAGE_*`` keys, via boto3).
 """
 import os
 
 import click
 
 from yggdrasil_slurm.config import Config
-from yggdrasil_slurm.storage import Storage
+
+
+def _storage():
+    if os.environ.get("YGG_STAGE_MODE", "").strip() == "presigned":
+        from yggdrasil_slurm.presigned import PresignedStorage
+
+        return PresignedStorage.from_env()
+    from yggdrasil_slurm.storage import Storage
+
+    cfg = Config.from_env()
+    cfg.require()
+    return Storage(cfg)
 
 
 @click.group()
@@ -23,12 +36,10 @@ def main():
 @click.argument("key")
 @click.argument("dest", type=click.Path())
 def _pull(key, dest):
-    cfg = Config.from_env()
-    cfg.require()
     # A trailing slash (or an existing dir) means "into this directory".
     if dest.endswith(os.sep) or os.path.isdir(dest):
         dest = os.path.join(dest, os.path.basename(key.rstrip("/")))
-    Storage(cfg).download(key, dest)
+    _storage().download(key, dest)
     click.echo(f"pulled {key} -> {dest}")
 
 
@@ -36,9 +47,7 @@ def _pull(key, dest):
 @click.argument("src_dir", type=click.Path(exists=True))
 @click.argument("prefix")
 def _push(src_dir, prefix):
-    cfg = Config.from_env()
-    cfg.require()
-    storage = Storage(cfg)
+    storage = _storage()
     prefix = prefix.strip("/")
     count = 0
     for dirpath, _dirs, files in os.walk(src_dir):

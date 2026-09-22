@@ -91,17 +91,26 @@ class SlurmSSH:
         code = stdout.channel.recv_exit_status()
         return code, out, err
 
-    def mkdirs(self, path):
-        code, _out, err = self.run(f"mkdir -p {shlex.quote(path)}")
+    def mkdirs(self, path, mode=None):
+        """``mkdir -p``; ``mode`` (e.g. 0o700) is applied to ``path`` itself."""
+        cmd = f"mkdir -p {shlex.quote(path)}"
+        if mode is not None:
+            cmd += f" && chmod {mode:o} {shlex.quote(path)}"
+        code, _out, err = self.run(cmd)
         if code != 0:
             raise SlurmSSHError(f"mkdir -p {path} failed: {err.strip()}")
 
     def sftp_write(self, path, data, mode=0o600):
+        """Write ``data`` to ``path``, restricted to ``mode`` before any byte lands.
+
+        chmod-after-write left the secret readable under the remote umask for the
+        length of the write.
+        """
         sftp = self._client.open_sftp()
         try:
             with sftp.file(path, "w") as f:
+                f.chmod(mode)
                 f.write(data)
-            sftp.chmod(path, mode)
         finally:
             sftp.close()
 

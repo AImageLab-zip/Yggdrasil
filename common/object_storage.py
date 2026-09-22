@@ -464,8 +464,56 @@ class ObjectStorage:
         except ClientError as exc:
             raise ObjectStorageError(str(exc)) from exc
 
+    def presign_post_prefix(
+        self, prefix: str, *, expires_seconds: int = 600, max_bytes: int = 200 * 1024**3
+    ) -> Dict[str, object]:
+        """A browser-style POST policy allowing uploads under ``prefix/`` only.
+
+        Returns ``{"url", "fields", "key_prefix"}``: POST ``fields`` plus ``key``
+        (which must start with ``key_prefix``) and ``file`` to ``url``. Used to
+        let a processing job write its outputs without holding any storage
+        credentials -- output names are only known after the job runs, so a
+        per-object PUT URL cannot be issued in advance. ``bucket`` is a signed
+        form field because Garage requires it in the policy.
+        """
+        key_prefix = self.normalize_key(prefix).rstrip("/") + "/"
+        try:
+            post = self._client.generate_presigned_post(
+                self.bucket,
+                key_prefix + "${filename}",
+                Fields={"bucket": self.bucket},
+                Conditions=[
+                    {"bucket": self.bucket},
+                    ["starts-with", "$key", key_prefix],
+                    ["content-length-range", 0, int(max_bytes)],
+                ],
+                ExpiresIn=int(expires_seconds),
+            )
+        except BotoCoreError as exc:
+            raise ObjectStorageError(str(exc)) from exc
+        except ClientError as exc:
+            raise ObjectStorageError(str(exc)) from exc
+        return {"url": post["url"], "fields": post["fields"], "key_prefix": key_prefix}
+
 
 _storage_singleton: Optional[ObjectStorage] = None
+_backup_storage_singleton: Optional[ObjectStorage] = None
+
+
+def _build_storage(*, bucket, access_key_id, secret_access_key) -> ObjectStorage:
+    storage = ObjectStorage(
+        bucket=bucket,
+        endpoint_url=getattr(settings, "OBJECT_STORAGE_ENDPOINT_URL", None),
+        region_name=getattr(settings, "OBJECT_STORAGE_REGION", None),
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        use_ssl=_bool_env_fallback(getattr(settings, "OBJECT_STORAGE_USE_SSL", None), True),
+        verify_ssl=_bool_env_fallback(getattr(settings, "OBJECT_STORAGE_VERIFY_SSL", None), True),
+        addressing_style=getattr(settings, "OBJECT_STORAGE_ADDRESSING_STYLE", "path"),
+        key_prefix=getattr(settings, "OBJECT_STORAGE_KEY_PREFIX", ""),
+    )
+    storage.ensure_bucket_exists()
+    return storage
 
 
 def get_object_storage() -> ObjectStorage:
@@ -479,33 +527,36 @@ def get_object_storage() -> ObjectStorage:
     if not bucket:
         raise ObjectStorageError("OBJECT_STORAGE_BUCKET is not configured")
 
-    endpoint_url = getattr(settings, "OBJECT_STORAGE_ENDPOINT_URL", None)
-    region_name = getattr(settings, "OBJECT_STORAGE_REGION", None)
-    access_key_id = getattr(settings, "OBJECT_STORAGE_ACCESS_KEY_ID", None)
-    secret_access_key = getattr(settings, "OBJECT_STORAGE_SECRET_ACCESS_KEY", None)
-    use_ssl = _bool_env_fallback(
-        getattr(settings, "OBJECT_STORAGE_USE_SSL", None), True
-    )
-    verify_ssl = _bool_env_fallback(
-        getattr(settings, "OBJECT_STORAGE_VERIFY_SSL", None), True
-    )
-    addressing_style = getattr(settings, "OBJECT_STORAGE_ADDRESSING_STYLE", "path")
-    key_prefix = getattr(settings, "OBJECT_STORAGE_KEY_PREFIX", "")
-
-    _storage_singleton = ObjectStorage(
+    _storage_singleton = _build_storage(
         bucket=bucket,
-        endpoint_url=endpoint_url,
-        region_name=region_name,
-        access_key_id=access_key_id,
-        secret_access_key=secret_access_key,
-        use_ssl=use_ssl,
-        verify_ssl=verify_ssl,
-        addressing_style=addressing_style,
-        key_prefix=key_prefix,
+        access_key_id=getattr(settings, "OBJECT_STORAGE_ACCESS_KEY_ID", None),
+        secret_access_key=getattr(settings, "OBJECT_STORAGE_SECRET_ACCESS_KEY", None),
     )
-
-    _storage_singleton.ensure_bucket_exists()
     return _storage_singleton
+
+
+def get_backup_storage() -> ObjectStorage:
+    """Where database backups go: ``BACKUP_STORAGE_BUCKET`` if set, else the data bucket.
+
+    A backup holds every user's password hash and every patient name, so it
+    should not share a bucket -- or a key -- with data that processing jobs and
+    other tooling can reach. Set ``BACKUP_STORAGE_BUCKET`` (and optionally a
+    key scoped to it, ``BACKUP_STORAGE_ACCESS_KEY_ID`` / ``_SECRET_ACCESS_KEY``)
+    to separate them; unset, behaviour is unchanged.
+    """
+    global _backup_storage_singleton
+    bucket = getattr(settings, "BACKUP_STORAGE_BUCKET", "")
+    if not bucket:
+        return get_object_storage()
+    if _backup_storage_singleton is None:
+        _backup_storage_singleton = _build_storage(
+            bucket=bucket,
+            access_key_id=getattr(settings, "BACKUP_STORAGE_ACCESS_KEY_ID", "")
+            or getattr(settings, "OBJECT_STORAGE_ACCESS_KEY_ID", None),
+            secret_access_key=getattr(settings, "BACKUP_STORAGE_SECRET_ACCESS_KEY", "")
+            or getattr(settings, "OBJECT_STORAGE_SECRET_ACCESS_KEY", None),
+        )
+    return _backup_storage_singleton
 
 
 @contextlib.contextmanager

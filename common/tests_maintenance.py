@@ -56,7 +56,7 @@ class BackupTaskTests(TestCase):
         storage = mock.MagicMock()
         storage.list_keys.return_value = iter([])
         with mock.patch("common.tasks._run_mysqldump", side_effect=self._fake_dump), \
-                mock.patch("common.tasks.get_object_storage", return_value=storage):
+                mock.patch("common.tasks.get_backup_storage", return_value=storage):
             result = backup_database()
 
         self.assertEqual(result["status"], "ok")
@@ -72,7 +72,7 @@ class BackupTaskTests(TestCase):
     def test_failed_backup_records_fail_check(self):
         with mock.patch(
             "common.tasks._run_mysqldump", side_effect=RuntimeError("dump broke")
-        ), mock.patch("common.tasks.get_object_storage"):
+        ), mock.patch("common.tasks.get_backup_storage"):
             result = backup_database()
 
         self.assertEqual(result["status"], "fail")

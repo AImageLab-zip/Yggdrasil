@@ -135,6 +135,14 @@ class InMemoryObjectStorage:
 		key_n = self.normalize_key(key)
 		return f"memory://{self.bucket}/{key_n}?expires={int(expires_seconds)}"
 
+	def presign_post_prefix(self, prefix: str, *, expires_seconds: int = 600, max_bytes: int = 0):
+		key_prefix = self.normalize_key(prefix).rstrip("/") + "/"
+		return {
+			"url": f"memory://{self.bucket}/",
+			"fields": {"bucket": self.bucket, "policy": "memory", "expires": str(int(expires_seconds))},
+			"key_prefix": key_prefix,
+		}
+
 	# -- writes -------------------------------------------------------------
 
 	def ensure_bucket_exists(self) -> None:

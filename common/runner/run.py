@@ -2,11 +2,16 @@
 
 No job data flows through the worker. The worker only:
   - claims/completes the job over HTTP,
-  - drops a transient 0600 creds file on the cluster,
+  - drops a transient 0600 stage file on the cluster,
   - submits the step's sbatch script and waits for it,
   - lists the produced output keys in object storage (it has the creds).
-The sbatch job itself pulls inputs and pushes outputs (see Yggdrasil/slurm/scripts).
+The sbatch job itself pulls inputs and pushes outputs with ``ygg-stage``
+(``slurm/``). In the default ``presigned`` stage mode the stage file carries
+presigned URLs for exactly this job's inputs and a POST policy for its output
+prefix -- never the deployment's storage keys, which would reach every patient
+of every project and the database backups (see ``RUNNER_STAGE_MODE``).
 """
+import json
 import logging
 import os
 import shlex
@@ -18,7 +23,7 @@ from common.runner.ssh import SlurmSSH
 
 logger = logging.getLogger(__name__)
 
-# Object-storage settings copied verbatim into the cluster creds file.
+# Object-storage settings copied into the stage file in the legacy "credentials" mode.
 _STORAGE_KEYS = (
     "OBJECT_STORAGE_ENDPOINT_URL",
     "OBJECT_STORAGE_REGION",
@@ -67,16 +72,42 @@ def iter_input_keys(input_files):
             yield key
 
 
+def stage_grants(input_keys, output_prefix):
+    """Least-privilege storage access for one job, as presigned requests.
+
+    ``inputs`` maps each input key to a GET URL; ``output`` is a POST policy that
+    accepts uploads only under ``output_prefix/``. Both expire after
+    ``RUNNER_PRESIGN_TTL_SECONDS``.
+    """
+    from common.object_storage import get_object_storage
+
+    storage = get_object_storage()
+    ttl = settings.RUNNER_PRESIGN_TTL_SECONDS
+    return {
+        "inputs": {key: storage.presign_get(key, expires_seconds=ttl) for key in input_keys},
+        "output": {
+            "prefix": output_prefix.strip("/"),
+            **storage.presign_post_prefix(output_prefix, expires_seconds=ttl),
+        },
+    }
+
+
 def render_creds_env(input_keys, output_prefix):
-    """Shell-sourceable env file for the cluster: storage creds + IO locations.
+    """Shell-sourceable stage file for the cluster: storage access + IO locations.
 
     Values are shell-quoted; the file is written 0600 into the job's private stage dir
     and deleted by the sbatch script's trap.
     """
     lines = []
-    for name in _STORAGE_KEYS:
-        val = getattr(settings, name, "")
-        lines.append(f"export {name}={shlex.quote(str(val))}")
+    if settings.RUNNER_STAGE_MODE == "presigned":
+        grants = json.dumps(stage_grants(input_keys, output_prefix), separators=(",", ":"))
+        lines.append("export YGG_STAGE_MODE=presigned")
+        lines.append(f"export YGG_STAGE_GRANTS={shlex.quote(grants)}")
+    else:
+        lines.append("export YGG_STAGE_MODE=credentials")
+        for name in _STORAGE_KEYS:
+            val = getattr(settings, name, "")
+            lines.append(f"export {name}={shlex.quote(str(val))}")
     lines.append(f"export YGG_INPUT_KEYS={shlex.quote(' '.join(input_keys))}")
     lines.append(f"export YGG_OUTPUT_PREFIX={shlex.quote(output_prefix)}")
     return "\n".join(lines) + "\n"
@@ -226,21 +257,29 @@ def run_job(job_id: int) -> str:
                 )
             else:
                 ssh.mkdirs(log_dir)
+                ssh.mkdirs(stage, mode=0o700)
                 ssh.mkdirs(f"{stage}/in")
                 ssh.mkdirs(f"{stage}/out")
                 ssh.sftp_write(creds_path, render_creds_env(input_keys, output_prefix))
-                slurm_id = ssh.sbatch(
-                    script_path=script_path,
-                    export={
-                        "YGG_JOB_ID": job_id,
-                        "YGG_STAGE": stage,
-                        "YGG_CREDS": creds_path,
-                        "YGG_ALGO_DIR": algo_dir,
-                    },
-                    output_path=stdout_template,
-                    error_path=stderr_template,
-                    work_dir=stage_base,
-                )
+                try:
+                    slurm_id = ssh.sbatch(
+                        script_path=script_path,
+                        export={
+                            "YGG_JOB_ID": job_id,
+                            "YGG_STAGE": stage,
+                            "YGG_CREDS": creds_path,
+                            "YGG_ALGO_DIR": algo_dir,
+                        },
+                        output_path=stdout_template,
+                        error_path=stderr_template,
+                        work_dir=stage_base,
+                    )
+                except Exception:
+                    # Nothing was submitted, so no job's trap will delete the file.
+                    # Once a job exists it is left alone: it still needs the file,
+                    # and a reattach relies on it.
+                    ssh.remove_file(creds_path)
+                    raise
                 # Before the first poll: everything after this point can lose the
                 # worker, and the stamp is the only way back to this allocation.
                 api.attach(job_id, slurm_id)

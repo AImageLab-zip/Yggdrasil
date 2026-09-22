@@ -14,7 +14,7 @@ from pathlib import Path
 from . import presence
 from .domains import DOMAIN_CHOICES, project_admin_add_targets
 from .models import Job, ProcessingJob, Project, Modality, UserSession
-from .object_storage import get_object_storage
+from .object_storage import get_backup_storage, get_object_storage
 
 
 def _database_health():
@@ -333,7 +333,7 @@ def _backup_inventory():
         "keep_weekly": getattr(settings, "BACKUP_KEEP_WEEKLY", None),
     }
     try:
-        storage = get_object_storage()
+        storage = get_backup_storage()
         paginator = storage._client.get_paginator("list_objects_v2")
         for page in paginator.paginate(
             Bucket=storage.bucket, Prefix=storage.normalize_key(prefix)

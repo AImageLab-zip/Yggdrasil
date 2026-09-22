@@ -370,6 +370,11 @@ if MAINTENANCE_QUEUE in _runner_queues:
 BACKUP_KEEP_DAILY = config("BACKUP_KEEP_DAILY", default=14, cast=int)
 BACKUP_KEEP_WEEKLY = config("BACKUP_KEEP_WEEKLY", default=8, cast=int)
 BACKUP_KEY_PREFIX = config("BACKUP_KEY_PREFIX", default="backups/mysql/")
+# Optional separate bucket (and key) for database backups; see
+# common.object_storage.get_backup_storage. Unset: backups stay in OBJECT_STORAGE_BUCKET.
+BACKUP_STORAGE_BUCKET = config("BACKUP_STORAGE_BUCKET", default="")
+BACKUP_STORAGE_ACCESS_KEY_ID = config("BACKUP_STORAGE_ACCESS_KEY_ID", default="")
+BACKUP_STORAGE_SECRET_ACCESS_KEY = config("BACKUP_STORAGE_SECRET_ACCESS_KEY", default="")
 
 from celery.schedules import crontab  # noqa: E402
 
@@ -428,6 +433,20 @@ SLURM_STAGE_DIR = config("SLURM_STAGE_DIR", default="")
 # sacct polling cadence and the wall-clock ceiling before a job is declared stuck.
 SLURM_POLL_INTERVAL = config("SLURM_POLL_INTERVAL", default=15, cast=int)
 SLURM_MAX_WALL_SECONDS = config("SLURM_MAX_WALL_SECONDS", default=24 * 3600, cast=int)
+# How a SLURM job reaches object storage (common/runner/run.py):
+#   "presigned"   (default) the job gets presigned GET URLs for exactly its inputs and
+#                 a POST policy limited to its output prefix -- no storage credentials
+#                 leave this deployment. Needs ygg-stage >= 0.2 on the cluster.
+#   "credentials" legacy: the job gets the app's OBJECT_STORAGE_* keys. Only for a
+#                 cluster whose ygg-stage has not been upgraded yet.
+RUNNER_STAGE_MODE = config("RUNNER_STAGE_MODE", default="presigned")
+if RUNNER_STAGE_MODE not in {"presigned", "credentials"}:
+    raise ValueError("RUNNER_STAGE_MODE must be 'presigned' or 'credentials'")
+# Lifetime of those URLs. They must outlive queueing plus the run; SigV4 caps it at 7 days.
+RUNNER_PRESIGN_TTL_SECONDS = min(
+    config("RUNNER_PRESIGN_TTL_SECONDS", default=SLURM_MAX_WALL_SECONDS + 2 * 24 * 3600, cast=int),
+    7 * 24 * 3600,
+)
 # How long an id may stay invisible to sacct before poll() gives up. Covers the
 # submit -> accounting lag on the happy path, and bounds a reattach to an allocation
 # sacct has already purged (which would otherwise burn the full wall clock).
