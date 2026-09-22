@@ -25,7 +25,11 @@ from common.models import FileRegistry, Project
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
-from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
+from common.permissions import (
+    filter_folders_for_user,
+    user_can_create_export,
+    user_is_project_admin,
+)
 from common.domain_models import get_domain_models, get_namespace
 from common.view_helpers import redirect_with_namespace
 from common.export_processing import (
@@ -197,7 +201,7 @@ def _can_use_exports(request):
     access is to a sub-folder was previously refused outright -- and narrows to
     the selected project when there is one.
     """
-    if user_is_project_admin(request.user, request):
+    if user_is_project_admin(request.user, _current_project(request)):
         return True
     FolderModel = get_domain_models(request)["Folder"]
     folders = FolderModel.objects.all()
@@ -205,7 +209,7 @@ def _can_use_exports(request):
     if project_id:
         folders = folders.filter(project_id=project_id)
     for folder in folders.only("id", "project"):
-        if user_can_create_export(request.user, folder, request):
+        if user_can_create_export(request.user, folder):
             return True
     return False
 
@@ -297,7 +301,7 @@ def export_new(request):
             messages.error(request, "Select folders from the current project only.")
             return redirect_with_namespace(request, "export_new")
         for folder in selected_folders:
-            if not user_can_create_export(request.user, folder, request):
+            if not user_can_create_export(request.user, folder):
                 messages.error(request, "You do not have permission to export from selected folders.")
                 return redirect_with_namespace(request, "export_new")
 

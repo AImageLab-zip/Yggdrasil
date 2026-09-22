@@ -12,10 +12,7 @@ import logging
 import traceback
 import mimetypes
 from common.models import FileRegistry
-from common.permissions import (
-    filter_patients_for_user,
-    user_is_project_admin,
-)
+from common.permissions import filter_patients_for_user
 from common.file_access import (
     authorize_file_read,
     exists as artifact_exists,
@@ -228,14 +225,15 @@ def get_file_registry(request):
         # Query parameters
         file_type = request.GET.get("file_type")
         patient_id = request.GET.get("patient_id")
-        limit = int(request.GET.get("limit", 50))
-        offset = int(request.GET.get("offset", 0))
+        limit = min(max(int(request.GET.get("limit", 50)), 1), 500)
+        offset = max(int(request.GET.get("offset", 0)), 0)
 
         # Build query with authorization filtering
         files = FileRegistry.objects.select_related("patient")
 
         files = files.filter(domain='maxillo')
-        is_admin = user_is_project_admin(request.user, 'maxillo')
+        # Staff only: a project admin is filtered to their own projects below.
+        is_admin = request.user.is_staff
         files = files.filter(models.Q(patient__isnull=True) | models.Q(patient__deleted=False))
         if not is_admin:
             files = files.filter(patient__isnull=False)

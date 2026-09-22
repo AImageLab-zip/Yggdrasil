@@ -44,7 +44,9 @@ from common.models import FileRegistry, Modality, Project, ProjectAccess
 from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 from common.object_storage import get_object_storage
 from common.annotation_lock import annotation_lock_reasons, lock_message
+from common.permissions import current_project as session_project
 from common.permissions import (
+    get_patient_for,
     filter_folders_for_user,
     filter_patients_for_user,
     project_allows_annotation,
@@ -168,7 +170,8 @@ def patient_list(request):
                 status_filters[slug] = value
 
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, request)
+    # UI flag for the project the list is showing; each row is checked on its own project.
+    is_admin = user_is_project_admin(request.user, session_project(request))
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -1338,14 +1341,7 @@ def _bulk_urology_response(request, results, error=None):
 @login_required
 @require_POST
 def add_raw_file(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    project = getattr(patient, "project", None) or "urology"
-    if not (
-        user_is_project_admin(request.user, project)
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     reasons = annotation_lock_reasons(patient)
     if reasons:
@@ -1381,14 +1377,7 @@ def add_raw_file(request, patient_id):
 @login_required
 @require_POST
 def delete_raw_file(request, patient_id, file_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    project = getattr(patient, "project", None) or "urology"
-    if not (
-        user_is_project_admin(request.user, project)
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     reasons = annotation_lock_reasons(patient)
     if reasons:

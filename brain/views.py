@@ -30,6 +30,7 @@ from common import export_catalog, export_ui
 from common.project_filters import presence_filter_specs
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
+from common.permissions import current_project as session_project
 from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
@@ -37,6 +38,7 @@ from common.permissions import (
     user_can_edit_caption,
     user_can_view_caption_content,
     user_can_write_patient_annotations,
+    get_patient_for,
     project_allows_annotation,
     user_has_project_access,
     user_is_project_admin,
@@ -327,7 +329,8 @@ def patient_list(request):
                 status_filters[slug] = value
 
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, request)
+    # UI flag for the project the list is showing; each row is checked on its own project.
+    is_admin = user_is_project_admin(request.user, session_project(request))
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -368,7 +371,7 @@ def patient_list(request):
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
             "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient),
-            "can_delete": bool(is_admin or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))),
+            "can_delete": bool(user_is_project_admin(request.user, patient.project) or user_can_delete_single_patient(request.user, patient.folder, patient.project)),
         })
 
     if status_filters:
@@ -644,14 +647,14 @@ def bulk_purge_patients(request):
     if not isinstance(scan_ids, list) or not scan_ids:
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
 
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse(
-            {"success": False, "error": "You do not have permission to permanently delete scans."},
-            status=403,
-        )
-
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
-    found_ids = list(patients.values_list("patient_id", flat=True))
+    # Authorized per patient against its own project; ids the user does not
+    # administer are dropped exactly like ids that do not exist.
+    found_ids = [
+        patient.patient_id
+        for patient in Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
+        if user_is_project_admin(request.user, patient.project)
+    ]
+    patients = Patient.objects.filter(patient_id__in=found_ids)
     if not found_ids:
         return JsonResponse({"success": False, "error": "No valid scans found to delete"}, status=404)
 
@@ -789,12 +792,14 @@ def add_patients_to_folder(request):
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
     if not folder_id or folder_id in ("root", "all"):
         return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patients = Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            continue
         patient.folder = folder
         patient.project = folder.project
         patient.save(update_fields=["folder", "project"])
@@ -815,13 +820,13 @@ def remove_patients_from_folder(request):
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
     if not folder_id or folder_id in ("root", "all"):
         return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patients = Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        if patient.folder_id != folder.id:
+        if patient.folder_id != folder.id or not user_is_project_admin(request.user, patient.project):
             continue
         # Folders are mandatory: removing a folder falls back to the project's
         # default folder rather than leaving the patient folderless.
@@ -850,7 +855,7 @@ def _file_payload(file_obj):
 
 @login_required
 def patient_viewer_data(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     return JsonResponse({"patient_id": patient.patient_id, "files": [_file_payload(item) for item in patient.files.all()]})
 
 
@@ -862,7 +867,7 @@ patient_teleradiography_data = patient_viewer_data
 
 @login_required
 def patient_volume_data(request, patient_id, modality_slug):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     file_obj = patient.files.filter(modality__slug=modality_slug).order_by("-created_at").first()
     if not file_obj:
         return JsonResponse({"error": "File not found"}, status=404)
@@ -871,11 +876,13 @@ def patient_volume_data(request, patient_id, modality_slug):
 
 @login_required
 def get_nifti_metadata(request, patient_id):
+    get_patient_for(request.user, Patient, patient_id, "read")
     return JsonResponse({"metadata": {}})
 
 
 @login_required
 def update_nifti_metadata(request, patient_id):
+    get_patient_for(request.user, Patient, patient_id, "admin")
     return JsonResponse({"ok": True})
 
 

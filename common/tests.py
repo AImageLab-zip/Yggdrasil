@@ -6,28 +6,42 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 
-from common.permissions import _namespace
+from common.permissions import user_has_project_access, user_is_project_admin
 
 
-def _fake_request(namespace):
-    return SimpleNamespace(resolver_match=SimpleNamespace(namespace=namespace))
+class PermissionHelpersTakeAProjectTests(TestCase):
+    """A request or a domain name is no longer an authorization context.
 
+    Both used to resolve to the session's (or the domain's first) project, so an
+    admin of project A passed checks on project B's patients. The helpers now
+    refuse them outright instead of guessing.
+    """
 
-class NamespaceResolutionTests(TestCase):
-    def test_string_namespaces(self):
-        self.assertEqual(_namespace("maxillo"), "maxillo")
-        self.assertEqual(_namespace("brain"), "brain")
-        self.assertEqual(_namespace("laparoscopy"), "laparoscopy")
-        self.assertEqual(_namespace("unknown"), "maxillo")
+    def test_a_domain_name_is_refused(self):
+        from django.contrib.auth.models import User
 
-    def test_request_namespace_resolves_to_its_own_domain(self):
-        self.assertEqual(_namespace(_fake_request("brain")), "brain")
-        self.assertEqual(_namespace(_fake_request("laparoscopy")), "laparoscopy")
-        self.assertEqual(_namespace(_fake_request("maxillo")), "maxillo")
+        user = User.objects.create_user("ctx")
+        for helper in (user_is_project_admin, user_has_project_access):
+            with self.subTest(helper=helper.__name__):
+                with self.assertRaises(TypeError):
+                    helper(user, "maxillo")
 
-    def test_request_without_namespace_falls_back_to_maxillo(self):
-        self.assertEqual(_namespace(_fake_request("")), "maxillo")
-        self.assertEqual(_namespace(SimpleNamespace(resolver_match=None)), "maxillo")
+    def test_a_request_is_refused(self):
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_user("ctx")
+        request = SimpleNamespace(
+            user=user, session={}, resolver_match=SimpleNamespace(namespace="brain")
+        )
+        with self.assertRaises(TypeError):
+            user_is_project_admin(user, request)
+
+    def test_no_project_denies(self):
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_user("ctx")
+        self.assertFalse(user_is_project_admin(user, None))
+        self.assertFalse(user_has_project_access(user, None))
 
 
 class AppVersionTests(TestCase):

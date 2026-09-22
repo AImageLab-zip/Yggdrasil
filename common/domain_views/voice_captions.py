@@ -10,11 +10,11 @@ import logging
 #: the other three domains did not, so it is enforced here for all of them.
 MIN_TEXT_CAPTION_LENGTH = 10
 from common.permissions import (
+    get_patient_for,
     project_allows_annotation,
     user_can_delete_caption,
     user_can_edit_caption,
-    user_can_write_annotations,
-    user_is_project_admin,
+    user_is_patient_admin,
 )
 
 from common.domain_models import get_domain_models, get_namespace
@@ -50,15 +50,12 @@ def delete_voice_caption(request, patient_id, caption_id):
     Patient = domain_models['Patient']
     VoiceCaption = domain_models['VoiceCaption']
     
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, 'write')
     voice_caption = get_object_or_404(VoiceCaption, id=caption_id, patient=patient)
     
     # Check permissions
     is_owner = voice_caption.user == request.user
-    is_admin = user_is_project_admin(request.user, request)
+    is_admin = user_is_patient_admin(request.user, patient)
     
     # If not owner and not admin, deny access
     if not is_owner and not is_admin:
@@ -103,10 +100,7 @@ def upload_text_caption(request, patient_id):
     Patient = domain_models['Patient']
     VoiceCaption = domain_models['VoiceCaption']
     
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))):
-        return JsonResponse({'error': 'Permission denied'}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, 'write')
     if not project_allows_annotation(patient, 'voice_caption'):
         return JsonResponse({'error': 'Voice captions are disabled for this project'}, status=403)
     

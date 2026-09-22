@@ -53,11 +53,7 @@ from annotations.services.viewer import (
 from common.models import FileRegistry
 from common.domain_models import get_namespace
 from common.domains import fk_fields_for, normalize_domain
-from common.permissions import (
-    user_can_read_folder,
-    user_can_write_annotations,
-    user_is_project_admin,
-)
+from common.permissions import get_patient_for
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +107,7 @@ def save_measurements_api(request, patient_id):
     be the ``annotationUID`` -- the one identifier that is never persisted.
     """
     Patient = _patient_model(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    can_write = bool(
-        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
-    ) or user_is_project_admin(request.user, request)
-    if not can_write:
-        return JsonResponse({"error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     try:
         body = json.loads(request.body or b"{}")
@@ -286,7 +276,7 @@ def measurements_state_api(request, patient_id):
     radius -- the payload is the honest source.
     """
     Patient = _patient_model(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
 
     AnnotationSet = apps.get_model("annotations", "AnnotationSet")
     lookup = _patient_fk(request)
@@ -433,13 +423,7 @@ def save_tooth_segmentation_api(request, patient_id):
     is a 409, which is the legacy editor's "Reopen before editing" behaviour kept.
     """
     Patient = _patient_model(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    can_write = bool(
-        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
-    ) or user_is_project_admin(request.user, request)
-    if not can_write:
-        return JsonResponse({"error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     try:
         body = json.loads(request.body or b"{}")
@@ -534,12 +518,7 @@ def tooth_segmentation_state_api(request, patient_id):
     and a second copy allowed to go stale would only ever disagree with them.
     """
     Patient = _patient_model(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not (
-        (patient.folder and user_can_read_folder(request.user, patient.folder, request))
-        or user_is_project_admin(request.user, request)
-    ):
-        return JsonResponse({"error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
 
     domain_field = _patient_fk(request)
 
@@ -589,13 +568,7 @@ def save_ios_landmarks_api(request, patient_id):
     from maxillo.ios_meshes import current_ios_pair
 
     Patient = _patient_model(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    can_write = bool(
-        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
-    ) or user_is_project_admin(request.user, request)
-    if not can_write:
-        return JsonResponse({"error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     try:
         body = json.loads(request.body or b"{}")
@@ -687,12 +660,7 @@ def ios_landmarks_state_api(request, patient_id):
     from maxillo.ios_meshes import current_ios_pair
 
     Patient = _patient_model(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not (
-        (patient.folder and user_can_read_folder(request.user, patient.folder, request))
-        or user_is_project_admin(request.user, request)
-    ):
-        return JsonResponse({"error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
 
     domain_field = _patient_fk(request)
 
