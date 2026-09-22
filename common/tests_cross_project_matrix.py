@@ -44,9 +44,11 @@ OTHER_KWARGS = {
     "pk": 1,
 }
 
-#: Prefixes that are not object-level app routes: the Django admin (staff-only,
-#: and its own permission system) and the runner API (bearer-token auth).
-SKIPPED_PREFIXES = ("admin/", "api/runner/")
+#: Routes outside session authorization: the Django admin (staff-only, its own
+#: permission system) and the runner API (bearer-token auth, frozen contract tests),
+#: which is mounted both at /api/runner/ and under each domain's api/.
+SKIPPED_PREFIXES = ("admin/",)
+SKIPPED_SEGMENTS = ("api/runner/",)
 
 
 def _walk(resolver, prefix=""):
@@ -62,7 +64,7 @@ def object_routes():
     """``(route, converters)`` for every routed URL that names an object."""
     routes = []
     for route, entry in _walk(get_resolver()):
-        if route.startswith(SKIPPED_PREFIXES):
+        if route.startswith(SKIPPED_PREFIXES) or any(seg in route for seg in SKIPPED_SEGMENTS):
             continue
         names = set(entry.pattern.converters)
         if names & set(OBJECT_KWARGS) and names <= set(OBJECT_KWARGS) | set(OTHER_KWARGS):
