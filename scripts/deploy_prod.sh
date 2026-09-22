@@ -102,7 +102,7 @@ $COMPOSE up -d --remove-orphans "${APP_SERVICES[@]}"
 say "Waiting for web (migrations run on start)"
 healthy=0
 for _ in $(seq 1 90); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:${WEB_PORT}/healthz"; then healthy=1; break; fi
+    if curl -fsS -o /dev/null "http://127.0.0.1:${WEB_PORT}/healthz" 2>/dev/null; then healthy=1; break; fi
     sleep 2
 done
 $COMPOSE ps
