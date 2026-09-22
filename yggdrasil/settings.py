@@ -103,6 +103,8 @@ WHISPER_CA_CERT = config(
 WHISPER_CONNECT_TIMEOUT = config("WHISPER_CONNECT_TIMEOUT", default=10, cast=int)
 
 MIDDLEWARE = [
+    # Outermost, so it sees the final response body (see its docstring).
+    "yggdrasil.middleware.AsyncStreamingMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "yggdrasil.middleware.CrossOriginIsolationMiddleware",
     "django.middleware.security.SecurityMiddleware",

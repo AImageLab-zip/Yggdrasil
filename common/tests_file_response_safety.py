@@ -158,3 +158,45 @@ class SiteCspTests(TestCase):
         self.assertIn("object-src 'none'", response["Content-Security-Policy"])
         self.assertIn("frame-ancestors 'none'", response["Content-Security-Policy"])
         self.assertIn("script-src", response["Content-Security-Policy-Report-Only"])
+
+
+class AsgiDownloadStreamingTests(TestCase):
+    """Under ASGI a download is streamed chunk by chunk, not collected first.
+
+    Django's ASGI handler buffers a *sync* streaming body in full before sending
+    it, which held every multi-GB download in one worker's memory.
+    """
+
+    async def test_downloads_are_async_streams_under_asgi(self):
+        from asgiref.sync import sync_to_async
+
+        user, file_id, body = await sync_to_async(self._fixture)()
+        await self.async_client.aforce_login(user)
+        response = await self.async_client.get(f"/api/processing/files/serve/{file_id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.is_async)
+        received = b"".join([chunk async for chunk in response.streaming_content])
+        self.assertEqual(received, body)
+
+    def _fixture(self):
+        from maxillo.models import Patient
+
+        project = Project.objects.create(name="Stream", slug="file-stream", domain="maxillo")
+        user = User.objects.create_user("stream-viewer")
+        ProjectAccess.objects.create(user=user, project=project, role="viewer")
+        patient = Patient.objects.create(name="p", project=project)
+        body = bytes(range(256)) * 20000  # several storage chunks
+        key = "maxillo/raw/generic/stream.bin"
+        get_object_storage().upload_fileobj(io.BytesIO(body), key=key)
+        f = FileRegistry.objects.create(
+            file_type="generic_raw", file_path=key, file_size=len(body), file_hash="0" * 64,
+            domain="maxillo", patient=patient,
+        )
+        return user, f.id, body
+
+    def test_wsgi_responses_stay_synchronous(self):
+        user, file_id, body = self._fixture()
+        self.client.force_login(user)
+        response = self.client.get(f"/api/processing/files/serve/{file_id}/")
+        self.assertFalse(response.is_async)
+        self.assertEqual(b"".join(response), body)

@@ -12,6 +12,52 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 
+_STREAM_END = object()
+
+
+def _async_chunks(sync_iterable):
+    """Pull ``sync_iterable`` one chunk at a time on a worker thread."""
+    from asgiref.sync import sync_to_async
+
+    iterator = iter(sync_iterable)
+    next_chunk = sync_to_async(next, thread_sensitive=False)
+
+    async def chunks():
+        while True:
+            chunk = await next_chunk(iterator, _STREAM_END)
+            if chunk is _STREAM_END:
+                return
+            yield chunk
+
+    return chunks()
+
+
+class AsyncStreamingMiddleware(MiddlewareMixin):
+    """Stream file downloads under ASGI instead of buffering them whole.
+
+    Django's ASGI handler cannot iterate a *synchronous* streaming body without
+    blocking the event loop, so it first collects the entire iterator into a
+    list (``sync_to_async(list)``) and only then sends it. Every download here
+    streams object storage through a sync generator, so a multi-GB CBCT, video
+    or export ZIP was held in one worker's RAM in full before the first byte
+    left. Wrapping the body in an async iterator that pulls one chunk at a time
+    keeps memory at a chunk per download. WSGI (and the test client) iterate
+    synchronously already and are left alone. Storage iterators never touch the
+    ORM, which is what makes the non-thread-sensitive executor safe here.
+    """
+
+    def process_response(self, request, response):
+        from django.core.handlers.asgi import ASGIRequest
+
+        if (
+            isinstance(request, ASGIRequest)
+            and getattr(response, "streaming", False)
+            and not getattr(response, "is_async", False)
+        ):
+            response.streaming_content = _async_chunks(response.streaming_content)
+        return response
+
+
 class ContentSecurityPolicyMiddleware(MiddlewareMixin):
     """Site-wide Content-Security-Policy.
 
