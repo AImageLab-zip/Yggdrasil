@@ -486,11 +486,15 @@ LOGGING = {
             "style": "{",
         },
     },
+    "filters": {
+        "redact_share_tokens": {"()": "yggdrasil.log_filters.RedactShareTokens"},
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "detailed",
             "level": LOG_LEVEL,
+            "filters": ["redact_share_tokens"],
         },
         "file": {
             # Rotating, not plain FileHandler: this file is long-lived on the
@@ -502,6 +506,7 @@ LOGGING = {
             "backupCount": LOG_BACKUP_COUNT,
             "formatter": "detailed",
             "level": LOG_LEVEL,
+            "filters": ["redact_share_tokens"],
         },
     },
     "loggers": {
