@@ -3,4 +3,5 @@ ruff==0.15.20
 # Progress bar for the one-off migrate_dataset_to_object_storage command;
 # imported lazily there and not needed by the running application.
 tqdm==4.66.4
-tblib==3.1.0
+# Lets `manage.py test --parallel` report a failing test instead of crashing on it.
+tblib==3.2.2
