@@ -127,6 +127,7 @@ to leave applied):
   git checkout $OLD_REF
   for s in ${APP_SERVICES[*]}; do docker tag yggdrasil-${SUFFIX}-\$s:rollback yggdrasil-${SUFFIX}-\$s:latest; done
   docker compose up -d --no-build ${APP_SERVICES[*]}
+  echo $OLD_REF > .deployed-ref
 
 Once satisfied, delete the rollback images. The pre-hardening images contain .env,
 .env.worker, the SLURM key and SQL dumps (they were built without a .dockerignore):
