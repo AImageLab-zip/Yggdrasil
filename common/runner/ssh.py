@@ -26,7 +26,7 @@ class SlurmSSHError(RuntimeError):
 class SlurmSSH:
     def __init__(self, *, host, port=22, user=None, key_path=None,
                  password=None, poll_interval=15, max_wall_seconds=24 * 3600,
-                 unknown_grace_seconds=300, connect_timeout=30):
+                 unknown_grace_seconds=300, connect_timeout=30, known_hosts_path=None):
         if not host:
             raise SlurmSSHError("SLURM_SSH_HOST is not configured")
         self.host = host
@@ -38,6 +38,7 @@ class SlurmSSH:
         self.max_wall_seconds = int(max_wall_seconds)
         self.unknown_grace_seconds = int(unknown_grace_seconds)
         self.connect_timeout = connect_timeout
+        self.known_hosts_path = known_hosts_path or None
         self._client = None
 
     @classmethod
@@ -53,6 +54,7 @@ class SlurmSSH:
             unknown_grace_seconds=getattr(
                 settings, "SLURM_UNKNOWN_GRACE_SECONDS", 300
             ),
+            known_hosts_path=getattr(settings, "SLURM_KNOWN_HOSTS", "") or None,
         )
 
     # -- connection --------------------------------------------------------
@@ -61,7 +63,12 @@ class SlurmSSH:
         import paramiko
 
         client = paramiko.SSHClient()
-        client.load_system_host_keys()
+        # An explicit file when configured: the worker runs unprivileged, so the
+        # user's ~/.ssh is not where the deployment mounts the pinned host keys.
+        if self.known_hosts_path:
+            client.load_host_keys(self.known_hosts_path)
+        else:
+            client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
         client.connect(
             hostname=self.host,

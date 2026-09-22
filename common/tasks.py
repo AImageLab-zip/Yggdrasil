@@ -164,6 +164,14 @@ def prune_backups():
 # maintenance worker. The explicit task name keeps it clear of the
 # "common.tasks.*" -> MAINTENANCE_QUEUE route; it is enqueued by common.signals with
 # name settings.RUNNER_TASK_NAME (default 'yggdrasil.runner.process_job').
+@shared_task(name="common.tasks.clear_expired_sessions")
+def clear_expired_sessions():
+    """Delete expired sessions (Django never purges them on its own)."""
+    from django.core.management import call_command
+
+    call_command("clearsessions")
+
+
 @shared_task(name="yggdrasil.runner.process_job", bind=True)
 def process_job(self, job_id):
     """Execute one Job on the SLURM cluster. See common.runner.run.run_job."""

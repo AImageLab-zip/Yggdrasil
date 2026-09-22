@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 import json as _json
+from datetime import timedelta
 from pathlib import Path
 from decouple import config
 
@@ -83,6 +84,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
+    "axes",
     "common",
     "annotations",
     "maxillo",
@@ -122,6 +124,8 @@ MIDDLEWARE = [
     "yggdrasil.middleware.ActiveProfileMiddleware",
     "yggdrasil.middleware.DemoGuestReadOnlyMiddleware",
     "yggdrasil.middleware.PresenceMiddleware",
+    # Last, per django-axes: turns a lockout raised during authentication into a response.
+    "axes.middleware.AxesMiddleware",
 ]
 
 ROOT_URLCONF = "yggdrasil.urls"
@@ -261,6 +265,23 @@ CSRF_USE_SESSIONS = True  # Store CSRF token in session for better security
 CSRF_COOKIE_HTTPONLY = True  # Prevent XSS attacks on CSRF cookie
 CSRF_COOKIE_SAMESITE = "Strict"  # Prevent CSRF attacks
 SESSION_COOKIE_HTTPONLY = True  # Prevent XSS attacks on session cookie
+# Sessions last a working week instead of Django's two; expired rows are purged
+# nightly by common.tasks.clear_expired_sessions.
+SESSION_COOKIE_AGE = config("SESSION_COOKIE_AGE", default=7 * 24 * 3600, cast=int)
+
+# Login throttling (django-axes): after AXES_FAILURE_LIMIT failed logins for one
+# username from one address, that pair is locked out for AXES_COOLOFF_TIME. The
+# client address comes from X-Forwarded-For, which only the proxy can set now
+# that the web port is bound to loopback (docker-compose.yml).
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+AXES_FAILURE_LIMIT = config("AXES_FAILURE_LIMIT", default=10, cast=int)
+AXES_COOLOFF_TIME = timedelta(minutes=config("AXES_COOLOFF_MINUTES", default=30, cast=int))
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_RESET_ON_SUCCESS = True
+AXES_IPWARE_META_PRECEDENCE_ORDER = ["HTTP_X_FORWARDED_FOR", "REMOTE_ADDR"]
 SESSION_COOKIE_SAMESITE = "Strict"  # Prevent session fixation attacks
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -384,6 +405,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"queue": MAINTENANCE_QUEUE},
     },
+    "clear-expired-sessions-daily": {
+        "task": "common.tasks.clear_expired_sessions",
+        "schedule": crontab(hour=3, minute=40),
+        "options": {"queue": MAINTENANCE_QUEUE},
+    },
 }
 
 
@@ -425,6 +451,8 @@ SLURM_SSH_PORT = config("SLURM_SSH_PORT", default=22, cast=int)
 SLURM_SSH_USER = config("SLURM_SSH_USER", default="")
 SLURM_SSH_KEY = config("SLURM_SSH_KEY", default="")  # path to the private key
 SLURM_SSH_PASSWORD = config("SLURM_SSH_PASSWORD", default="")
+# Pinned host keys for the login node (paramiko RejectPolicy). Empty: ~/.ssh/known_hosts.
+SLURM_KNOWN_HOSTS = config("SLURM_KNOWN_HOSTS", default="")
 # Directory on the cluster holding one subdir per algo, each with a run.sbatch
 # (ProcessingStep.algo_name is resolved against this: ALGO_BASE_DIR/<algo_name>/run.sbatch).
 ALGO_BASE_DIR = config("ALGO_BASE_DIR", default="")
