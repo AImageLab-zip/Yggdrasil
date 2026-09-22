@@ -168,3 +168,6 @@ Thumbs.db
 
 # Written by scripts/deploy_prod.sh
 .deployed-ref
+
+# lint-imports cache
+.import_linter_cache/
