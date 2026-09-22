@@ -8,7 +8,7 @@ from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import bulk_upload_url_for, redirect_with_namespace, render_with_fallback
-from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
+from common.domains import landing_domain_cards, order_projects_for_landing
 from common.modality_config import (
     modality_status,
     rerun_step_labels,

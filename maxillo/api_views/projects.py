@@ -7,9 +7,8 @@ import json
 import os
 import logging
 import traceback
-from common.models import Project, Modality, ProjectAccess, FileRegistry
+from common.models import Project, ProjectAccess, FileRegistry
 from common.permissions import (
-    PermissionChecker,
     filter_folders_for_user,
     filter_patients_for_user,
     user_can_read_patient,
@@ -114,7 +113,7 @@ def project_upload_api(request, project_slug):
         patient.save()
         
         # Infer modalities from uploaded file field names using helper
-        from ..modality_helpers import infer_modality_from_field_name, get_modalities_for_uploaded_files
+        from ..modality_helpers import infer_modality_from_field_name
         candidate_slugs = ['ios', 'intraoral-photo']
         
         # Infer from uploaded files

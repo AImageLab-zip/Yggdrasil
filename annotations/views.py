@@ -34,7 +34,6 @@ from annotations.services import (
     AnnotationConflict,
     AnnotationNotAllowed,
     current_revision_number,
-    save_measurements,
 )
 from annotations.constants import AnnotationStatus, PayloadFormat, ResourceKind
 from annotations.services.ios_landmarks import (

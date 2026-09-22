@@ -1,11 +1,8 @@
 """Classification update views."""
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required, user_passes_test
-from django.contrib import messages
-from django.http import JsonResponse, HttpResponse
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 import json
-import os
 import logging
 
 from .domain import get_domain_models

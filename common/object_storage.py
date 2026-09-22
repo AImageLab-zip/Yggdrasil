@@ -2,7 +2,6 @@ import contextlib
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import BinaryIO, Dict, Generator, Optional, Tuple
 from urllib.parse import urlparse
 

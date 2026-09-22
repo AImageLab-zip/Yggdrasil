@@ -57,7 +57,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from laparoscopy.models import Patient, RegionAnnotation
+        from laparoscopy.models import Patient
 
         patients = Patient.objects.filter(
             region_annotations__isnull=False

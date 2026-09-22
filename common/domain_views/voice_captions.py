@@ -12,7 +12,6 @@ MIN_TEXT_CAPTION_LENGTH = 10
 from common.permissions import (
     get_patient_for,
     project_allows_annotation,
-    user_can_delete_caption,
     user_can_edit_caption,
     user_is_patient_admin,
 )

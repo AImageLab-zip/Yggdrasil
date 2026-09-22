@@ -10,7 +10,7 @@ import re
 import threading
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
-from PIL import Image, ImageOps, TiffImagePlugin
+from PIL import Image, TiffImagePlugin
 
 # Set a safe high ceiling (250 megapixels) for high-resolution pathology slides while protecting against decompression bombs
 Image.MAX_IMAGE_PIXELS = 250_000_000

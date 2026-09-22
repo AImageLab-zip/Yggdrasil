@@ -12,7 +12,6 @@ everyone else. Granting that role is therefore what publishes a project to the
 anonymous demo -- there is no separate demo flag.
 """
 
-from django.apps import apps
 
 from common.domains import normalize_domain
 from common.models import Project, ProjectAccess

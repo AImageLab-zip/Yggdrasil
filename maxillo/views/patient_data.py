@@ -13,16 +13,13 @@ import tempfile
 import hashlib
 import json
 import math
-import re
 import io
 import uuid
 from PIL import Image
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.file_access import exists as artifact_exists, streaming_response
-from common.file_access import open_binary
 from common.permissions import (
-    project_allows_annotation,
     user_can_read_patient,
     user_can_write_patient_annotations,
 )

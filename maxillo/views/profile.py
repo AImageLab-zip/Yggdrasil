@@ -1,9 +1,8 @@
 """User profile views."""
-from django.shortcuts import render, get_object_or_404, redirect
+from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib import messages
-from django.db.models import Count, Q, Max
 from django.utils import timezone
 from datetime import timedelta
 

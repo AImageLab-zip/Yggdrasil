@@ -4,9 +4,7 @@ import json
 import logging
 import os
 import re
-import tarfile
 import traceback
-import zipfile
 from pathlib import Path
 
 from common.job_routing import is_runner_enabled_for_modality
@@ -17,7 +15,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import Classification, Patient, VoiceCaption
+from .models import Classification, Patient
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +45,6 @@ from common.uploads import (
     domain_for_patient as _domain_for_patient,
     entity_fk_kwargs as _entity_fk_kwargs,
     get_patient as _get_patient,
-    processed_key_prefix_for as _processed_key_prefix_for,
-    project_slug_from_patient as _project_slug_from_patient,
     raw_key_prefix_for as _raw_key_prefix_for,
     sanitize_relpath as _sanitize_relpath,
     upload_uploaded_file_to_storage as _upload_uploaded_file_to_storage,

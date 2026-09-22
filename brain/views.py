@@ -6,29 +6,23 @@ import os
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
-from django.views.decorators.http import require_http_methods, require_POST
-from django.http import JsonResponse, Http404, HttpResponseGone
-from django.utils import timezone
-from django.contrib.auth.views import redirect_to_login
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
-from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
-from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
-from common.export_share import is_share_expired, resolve_share_expiry
-from common.file_access import exists as artifact_exists, streaming_response
+from common.domains import landing_domain_cards, order_projects_for_landing
+from common.export_share import is_share_expired
+from common.file_access import exists as artifact_exists
 from common.modality_config import (
     modality_status,
     rerun_step_labels,
     rerunnable_steps_for_patient,
 )
-from common import export_catalog, export_ui
 from common.project_filters import presence_filter_specs
-from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
+from common.models import FileRegistry, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
 from common.permissions import current_project as session_project
 from common.permissions import (
@@ -39,19 +33,10 @@ from common.permissions import (
     user_can_view_caption_content,
     user_can_write_patient_annotations,
     get_patient_for,
-    project_allows_annotation,
     user_has_project_access,
     user_is_project_admin,
 )
 
-from common.export_processing import (
-    ExportProcessor,
-    start_export_processing,
-    build_shared_download_url as _build_shared_download_url,
-    format_file_size,
-    kill_export_processes as _kill_export_processes,
-    recover_stuck_export as _recover_stuck_export,
-)
 from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
