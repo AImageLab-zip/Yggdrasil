@@ -99,7 +99,7 @@ def authorize_file_read(user, file_obj, namespace=None):
     Authorization resolves the patient through the domain registry and defers
     to ``patient.project``, which is mandatory on all three Patient models.
     """
-    from common.domains import fk_fields_for, normalize_domain
+    from common.domains import DOMAINS, fk_fields_for, normalize_domain
     from common.models import ProjectAccess
     from common.modality_config import raw_file_hidden
     from common.permissions import user_can_read_patient, user_can_view_caption_content
@@ -117,7 +117,7 @@ def authorize_file_read(user, file_obj, namespace=None):
     if patient is None:
         # Tolerate mis-filed rows: fall back across the other domains' FKs
         # rather than 403-ing on data the uploader wrote to the wrong column.
-        for other_domain in ("maxillo", "brain", "laparoscopy"):
+        for other_domain in DOMAINS:
             other_fk, _ = fk_fields_for(other_domain)
             patient = getattr(file_obj, other_fk, None)
             if patient is not None:
@@ -133,7 +133,7 @@ def authorize_file_read(user, file_obj, namespace=None):
 
         caption = getattr(file_obj, caption_fk, None)
         if caption is None:
-            for other_domain in ("maxillo", "brain", "laparoscopy"):
+            for other_domain in DOMAINS:
                 _, other_caption_fk = fk_fields_for(other_domain)
                 caption = getattr(file_obj, other_caption_fk, None)
                 if caption is not None:

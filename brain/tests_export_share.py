@@ -76,7 +76,7 @@ class BrainSharedExpiryTests(BrainExportShareTestBase):
         )
         self.assertEqual(response.status_code, 410)
 
-    @patch("brain.views.artifact_exists", return_value=True)
+    @patch("common.domain_views.export.artifact_exists", return_value=True)
     def test_unexpired_link_still_available(self, _exists):
         export = self.make_export(
             expires_at=timezone.now() + timedelta(days=7)

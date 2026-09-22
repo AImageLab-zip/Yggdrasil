@@ -33,6 +33,7 @@ from annotations.models import (
 )
 from annotations.services.exceptions import AnnotationConflict, AnnotationNotAllowed
 from annotations.services.resources import fingerprint_targets
+from common.domains import fk_fields_for
 from common.permissions import project_allows_annotation
 
 
@@ -68,7 +69,8 @@ def get_or_create_set(
 
     domain = patient._meta.app_label
     lookup = {"domain": domain, "kind": kind}
-    lookup[{"maxillo": "patient", "brain": "brain_patient"}.get(domain, "laparoscopy_patient")] = patient
+    patient_fk, _ = fk_fields_for(domain)
+    lookup[patient_fk] = patient
 
     annotation_set = AnnotationSet.objects.filter(**lookup).order_by("id").first()
     if annotation_set is not None:

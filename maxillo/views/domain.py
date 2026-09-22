@@ -1,34 +1,27 @@
-"""Helpers to route maxillo/laparoscopy namespaces to the correct domain models/forms."""
+"""Route a namespace to its domain models and forms.
+
+The model side moved to ``common/domain_models.py`` with the views that use it
+and is re-exported here so existing import paths keep working. The form side
+stays: it imports domain forms directly, which ``common/`` may not do.
+"""
 
 
 from django.apps import apps
 
+from common.domain_models import get_domain_models, get_namespace
 
-def get_namespace(request):
-    return (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
+__all__ = [
+    'get_namespace',
+    'get_domain_models',
+    'get_canonical_models',
+    'get_domain_forms',
+    'get_canonical_forms',
+    'is_laparoscopy_namespace',
+]
 
 
 def is_laparoscopy_namespace(request):
     return get_namespace(request) == 'laparoscopy'
-
-
-def get_domain_models(request):
-
-    ns = get_namespace(request)
-    if ns == 'laparoscopy':
-        app_label = 'laparoscopy'
-    else:
-        app_label = 'maxillo'
-
-    models = {
-        'Patient': apps.get_model(app_label, 'Patient'),
-        'Folder': apps.get_model(app_label, 'Folder'),
-        'Tag': apps.get_model(app_label, 'Tag'),
-        'Classification': apps.get_model(app_label, 'Classification'),
-        'VoiceCaption': apps.get_model(app_label, 'VoiceCaption'),
-        'Export': apps.get_model(app_label, 'Export'),
-    }
-    return models
 
 
 def get_canonical_models():

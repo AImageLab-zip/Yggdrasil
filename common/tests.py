@@ -56,6 +56,7 @@ class SeedDevCommandTests(TestCase):
         from common.models import Project
         from laparoscopy.models import Patient as LaparoscopyPatient
         from maxillo.models import Patient as MaxilloPatient
+        from urology.models import Patient as UrologyPatient
 
         with mock.patch("common.signals.celery_app.send_task"):
             call_command("seed_dev")
@@ -63,16 +64,16 @@ class SeedDevCommandTests(TestCase):
 
         self.assertEqual(
             set(Project.objects.values_list("slug", flat=True)),
-            {"maxillo", "brain", "laparoscopy"},
+            {"maxillo", "brain", "laparoscopy", "urology"},
         )
-        for model in (MaxilloPatient, BrainPatient, LaparoscopyPatient):
+        for model in (MaxilloPatient, BrainPatient, LaparoscopyPatient, UrologyPatient):
             self.assertEqual(model.objects.filter(name="Demo Patient").count(), 1)
 
         from django.contrib.auth.models import User
 
         admin = User.objects.get(username="admin")
         self.assertTrue(admin.is_superuser)
-        self.assertEqual(admin.project_access.count(), 3)
+        self.assertEqual(admin.project_access.count(), 4)
 
 
 class UrlSmokeTests(TestCase):
@@ -87,7 +88,7 @@ class UrlSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_app_indexes_redirect_anonymous_user_to_login(self):
-        for path in ("/maxillo/", "/brain/", "/laparoscopy/"):
+        for path in ("/maxillo/", "/brain/", "/laparoscopy/", "/urology/"):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 302)
@@ -100,3 +101,4 @@ class UrlSmokeTests(TestCase):
         self.client.login(username="smoke-admin", password="pw")
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Confocale")

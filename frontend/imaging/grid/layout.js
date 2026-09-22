@@ -98,6 +98,13 @@ export const FIXED_CBCT_LAYOUT = Object.freeze([
 ]);
 
 /**
+ * Single viewport layout: one window, typically axial slice view.
+ */
+export const SINGLE_LAYOUT = Object.freeze([
+    Object.freeze({ window: 0, orientation: ORIENTATIONS.AXIAL, lazy: false }),
+]);
+
+/**
  * The layout brain uses: four axial windows, each showing whatever was dropped on it.
  *
  * This surface compares *sequences*, not planes. Four axial windows side by side is what

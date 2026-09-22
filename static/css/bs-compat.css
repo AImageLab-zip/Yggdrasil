@@ -16,6 +16,7 @@
 
 /* ---- Layout utilities --------------------------------------------------- */
 .d-flex { display: flex; }
+.flex-column { flex-direction: column !important; }
 .d-block { display: block; }
 .d-none { display: none !important; }
 .d-inline-block { display: inline-block; }

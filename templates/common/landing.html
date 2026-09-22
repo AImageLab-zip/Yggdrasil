@@ -76,16 +76,34 @@
             <!-- Domain chooser -->
             <div class="domains">
                 {% for c in landing_cards %}
-                <a class="domain domain--{{ c.slug }}" href="/{{ c.slug }}/">
+                <a class="domain domain--{{ c.slug }}" href="{{ c.url|default:'/' }}">
                     <span class="domain__bar" aria-hidden="true"></span>
                     <i class="{{ c.icon }} domain__watermark" aria-hidden="true"></i>
-                    <span class="domain__tile">{% icon c.icon %}</span>
+                    <div class="domain__head">
+                        <span class="domain__tile">{% icon c.icon %}</span>
+                        {% if c.badge %}
+                        <span class="domain__badge domain__badge--{{ c.badge_type|default:'active' }}">
+                            <span class="domain__badge-dot" aria-hidden="true"></span>
+                            {{ c.badge }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if c.overline %}
+                    <span class="domain__overline">{{ c.overline }}</span>
+                    {% endif %}
                     <h2 class="domain__title">{{ c.name }}</h2>
                     <p class="domain__desc">{{ c.blurb }}</p>
+                    {% if c.tags %}
+                    <div class="domain__tags">
+                        {% for tag in c.tags %}
+                        <span class="domain__tag">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                     <span class="domain__spacer"></span>
                     <span class="domain__foot">
                         <span class="domain__stat mono">{{ c.stat }}</span>
-                        <span class="domain__cta">Enter <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
+                        <span class="domain__cta">{{ c.cta|default:'Enter' }} <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
                     </span>
                 </a>
                 {% endfor %}

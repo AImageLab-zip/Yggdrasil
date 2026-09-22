@@ -12,6 +12,56 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 
+class CrossOriginIsolationMiddleware(MiddlewareMixin):
+    """Cross-origin isolation for the upload page and the workers it starts.
+
+    The in-browser converters need ``SharedArrayBuffer``, which browsers only
+    expose to a cross-origin-isolated document. Both live on the upload page:
+    ``static/js/cbct_convert.js`` (CBCT -> NIfTI) and ``static/js/wsi_convert.js``
+    (gigapixel scan -> pyramidal BigTIFF, via wasm-vips).
+
+    Two kinds of response need the headers, and missing either one breaks the
+    converters in a way that is hard to read:
+
+    1. The upload document itself, or ``crossOriginIsolated`` is false and
+       ``SharedArrayBuffer`` is undefined.
+    2. **Every script started as a Worker.** A dedicated worker whose own script
+       response does not carry the owner's COEP is refused at load, and the
+       refusal reaches the page as an ErrorEvent with an *empty* ``message`` --
+       so the converter reports "unknown error" and no upload is ever attempted.
+       That covers ``static/js/worker/`` and, because wasm-vips spawns its
+       pthread pool as nested workers from its own script URL,
+       ``static/vendor/vips/``.
+
+    Deliberately not site-wide: ``require-corp`` blocks every cross-origin
+    subresource that does not opt in with CORP, so applying it to all responses
+    would break any future embed, CDN asset or off-origin object-storage read,
+    far from the code that asked for isolation.
+    """
+
+    #: Responses that must repeat the headers because they are Worker entry
+    #: points (or files those workers load). Prefixes, not exact paths, so a new
+    #: worker dropped into these directories is covered.
+    WORKER_SCRIPT_PREFIXES = ("/static/js/worker/", "/static/vendor/vips/")
+
+    #: The view whose page starts those workers. A URL name, not a domain: every
+    #: domain's app_urls.py uses it.
+    ISOLATED_VIEW_NAMES = frozenset({"upload_patient"})
+
+    def _needs_isolation(self, request):
+        match = getattr(request, "resolver_match", None)
+        if match is not None and match.url_name in self.ISOLATED_VIEW_NAMES:
+            return True
+        return request.path.startswith(self.WORKER_SCRIPT_PREFIXES)
+
+    def process_response(self, request, response):
+        if self._needs_isolation(request):
+            response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+            response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+            response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        return response
+
+
 class RequestLoggingMiddleware(MiddlewareMixin):
     """Request/response access logging.
 

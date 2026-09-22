@@ -418,9 +418,11 @@ class Job(DomainFKAccessorMixin, models.Model):
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+	urology_patient = models.ForeignKey('urology.Patient', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+	urology_voice_caption = models.ForeignKey('urology.VoiceCaption', on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
 
 	# IO
 	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
@@ -582,9 +584,11 @@ class ProcessingJob(DomainFKAccessorMixin, models.Model):
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
+	urology_patient = models.ForeignKey('urology.Patient', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
+	urology_voice_caption = models.ForeignKey('urology.VoiceCaption', on_delete=models.CASCADE, related_name='processing_jobs', null=True, blank=True)
 
 	# File paths
 	input_files = models.JSONField(default=dict, blank=True, help_text='Dict of input object keys used by workers')
@@ -746,6 +750,14 @@ class FileRegistry(DomainFKAccessorMixin, models.Model):
 		# Generic video modality (used by laparoscopy and any future video domain)
 		('video_raw', 'Video Raw'),
 		('video_processed', 'Video Processed'),
+		# Urology modalities
+		('urology_mri_raw', 'Urology MRI Raw'),
+		('urology_mri_processed', 'Urology MRI Processed'),
+		('urology_wsi_raw', 'Urology WSI Raw'),
+		('urology_wsi_processed', 'Urology WSI Processed'),
+		('urology_confocal_raw', 'Urology Confocale Raw'),
+		('urology_confocal_processed', 'Urology Confocale Processed'),
+		('urology_segmentation', 'Urology Segmentation (GeoJSON)'),
 		# Dense annotation artifacts. Sparse annotations are MySQL rows (decision #20);
 		# a labelmap is not sparse, and the governing rule already says dense segmentation
 		# is a file artifact in object storage. Addressed by an AnnotationPayload, never
@@ -764,9 +776,11 @@ class FileRegistry(DomainFKAccessorMixin, models.Model):
 	patient = models.ForeignKey('maxillo.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	brain_patient = models.ForeignKey('brain.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	laparoscopy_patient = models.ForeignKey('laparoscopy.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
+	urology_patient = models.ForeignKey('urology.Patient', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	voice_caption = models.ForeignKey('maxillo.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	brain_voice_caption = models.ForeignKey('brain.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	laparoscopy_voice_caption = models.ForeignKey('laparoscopy.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
+	urology_voice_caption = models.ForeignKey('urology.VoiceCaption', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	processing_job = models.ForeignKey('common.Job', on_delete=models.CASCADE, related_name='files', null=True, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	metadata = models.JSONField(default=dict, blank=True, help_text='Additional file metadata')
@@ -776,6 +790,7 @@ class FileRegistry(DomainFKAccessorMixin, models.Model):
 			models.Index(fields=['domain', 'file_type', 'created_at']),
 			models.Index(fields=['domain', 'file_type', 'patient']),
 			models.Index(fields=['domain', 'file_type', 'brain_patient']),
+			models.Index(fields=['domain', 'file_type', 'urology_patient']),
 			models.Index(fields=['file_type', 'patient']),
 			models.Index(fields=['modality', 'patient']),
 			models.Index(fields=['modality', 'subtype', 'patient']),

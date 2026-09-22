@@ -46,6 +46,10 @@ worker still parses headers through it (finding F2).
 {% endcomment %}
 {% cornerstone_entry 'volume-grid' %}
 {% endif %}
+{% if ns == 'urology' %}
+{% cornerstone_entry 'volume-grid' %}
+{% cornerstone_entry 'wsi-viewer' %}
+{% endif %}
 {% comment %}
     rgb_editor.js survives Phases 4+5 and is NOT scaffolding. It is a *geometric* editor
     -- crop, mirror, rotate -- and it writes the `*_processed` FileRegistry rows the

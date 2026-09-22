@@ -25,7 +25,7 @@ from maxillo.models import (
     IntraoralToothSegmentation,
     Patient,
 )
-from maxillo.views.export import _preview_totals
+from common.domain_views.export import _preview_totals
 
 
 def _method(slug, name):

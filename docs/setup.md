@@ -79,9 +79,25 @@ The container serves the Django ASGI application with Uvicorn (`ASGI_WORKERS` an
 set `RUN_DEV_SERVER=1`; the entrypoint will run Uvicorn with `--reload` so the live
 transcription WebSocket remains available.
 
-## 6. Seed projects and modalities
+## 6. Seed projects, modalities, and create admin account
 
 Each project app ships a management command that creates its `Project` row and registers its `Modality` rows (file types it accepts). The database is empty without this — uploads will fail until it's run, since `Patient.modalities` and upload forms validate against existing `Modality` records.
+
+### Quick setup for local development (recommended)
+
+For local development, run `seed_dev`. This single command seeds all projects and modalities, creates a superuser account (`admin` / `admin`), configures the required `ProjectAccess` roles, and creates initial demo patients:
+
+```bash
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py seed_dev
+```
+
+You can then log in at <http://localhost:8000> with:
+- **Username:** `admin`
+- **Password:** `admin`
+
+### Individual / production commands
+
+For production deployments or fine-grained seeding, run the individual commands:
 
 ```bash
 # Maxillo: CBCT, IOS, intraoral photos, teleradiography, panoramic, raw zip
@@ -95,6 +111,12 @@ docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_
 ```
 
 These are idempotent (`get_or_create` + update) — safe to re-run after upgrades that add/change modalities.
+
+To create an admin superuser manually (e.g., in production where `seed_dev` refuses to run when `DEBUG=False`):
+
+```bash
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py createsuperuser
+```
 
 ## 7. Configure Live Whisper
 

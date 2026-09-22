@@ -220,7 +220,7 @@ class LandingDomainCardTests(TestCase):
         User = get_user_model()
         staff = User.objects.create_user(username="root", password="x", is_staff=True)
         slugs = [c["slug"] for c in landing_domain_cards(staff)]
-        self.assertEqual(slugs, ["maxillo", "brain", "laparoscopy"])
+        self.assertEqual(slugs, ["maxillo", "brain", "laparoscopy", "urology"])
 
     def test_anonymous_gets_no_cards(self):
         from django.contrib.auth.models import AnonymousUser

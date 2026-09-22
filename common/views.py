@@ -9,6 +9,7 @@ from django.utils.text import slugify
 from django.utils import timezone
 
 from datetime import timedelta
+from pathlib import Path
 
 from . import presence
 from .domains import project_admin_add_targets
@@ -601,7 +602,7 @@ def _has_real_intro(release):
 
 def _load_changelog():
     try:
-        return _parse_changelog(settings.BASE_DIR / "CHANGELOG.md")
+        return _parse_changelog(Path(settings.BASE_DIR) / "CHANGELOG.md")
     except Exception:  # noqa: BLE001 -- a broken changelog must not break boot
         import logging
 
@@ -629,3 +630,4 @@ def changelog_page(request):
             "hide_maintenance_banner": False,
         },
     )
+

@@ -1,7 +1,7 @@
 """Declarative catalog of exportable artifacts and export filters.
 
 Before this module the same modality -> file_type mapping existed three times
-(``maxillo.views.export.EXPORT_MODALITY_FILE_TYPES``,
+(``common.domain_views.export.EXPORT_MODALITY_FILE_TYPES``,
 ``ExportProcessor.MODALITY_TO_FILE_TYPES`` and
 ``brain.export_config.BRAIN_EXPORT_MODALITY_FILE_TYPES``) and had already drifted
 apart, while the export form offered a fixed four-checkbox "content type" that
@@ -290,10 +290,32 @@ _LAPAROSCOPY_ARTIFACTS = [
     ),
 ]
 
+_UROLOGY_ARTIFACTS = [
+    Artifact("urology-mri.raw", "urology-mri", "Uploaded MRI", BUCKET_RAW, file_types=["urology_mri_raw"]),
+    Artifact(
+        "urology-mri.processed", "urology-mri", "Processed MRI", BUCKET_PROCESSED,
+        file_types=["urology_mri_processed"],
+    ),
+    Artifact("urology-wsi.raw", "urology-wsi", "Uploaded WSI", BUCKET_RAW, file_types=["urology_wsi_raw"]),
+    Artifact(
+        "urology-wsi.processed", "urology-wsi", "Processed WSI", BUCKET_PROCESSED,
+        file_types=["urology_wsi_processed"],
+    ),
+    Artifact(
+        "urology-confocal.raw", "urology-confocal", "Uploaded Confocale", BUCKET_RAW,
+        file_types=["urology_confocal_raw"],
+    ),
+    Artifact(
+        "urology-confocal.processed", "urology-confocal", "Processed Confocale", BUCKET_PROCESSED,
+        file_types=["urology_confocal_processed"],
+    ),
+]
+
 ARTIFACTS_BY_DOMAIN = {
     "maxillo": _MAXILLO_ARTIFACTS + _SHARED_ARTIFACTS,
     "brain": _mri_artifacts() + _SHARED_ARTIFACTS,
     "laparoscopy": _LAPAROSCOPY_ARTIFACTS + _SHARED_ARTIFACTS,
+    "urology": _UROLOGY_ARTIFACTS + _SHARED_ARTIFACTS,
 }
 
 

@@ -12,9 +12,11 @@ import zipfile
 from pathlib import Path
 
 from common import export_catalog
+from common.domains import fk_fields_for
 from common.file_access import exists as artifact_exists
 from common.file_access import iter_bytes as iter_artifact_bytes
 from common.object_storage import get_object_storage
+from django.apps import apps
 from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
@@ -73,7 +75,7 @@ class ExportProcessor:
         # Which of FileRegistry's parallel patient FK columns this domain uses.
         # The modality -> file_type mapping that used to live here (and in two
         # other copies) is now common.export_catalog.
-        self.patient_fk = "brain_patient" if domain == "brain" else "patient"
+        self.patient_fk = fk_fields_for(domain)[0]
         self.query_params = export.query_params
         self.folder_ids = self.query_params.get("folder_ids", [])
         self.project_id = self.query_params.get("project_id")
@@ -170,10 +172,8 @@ class ExportProcessor:
 
     def _domain_models(self):
         """Return (Patient, VoiceCaption) model classes for the active domain."""
-        if self.domain == "brain":
-            from brain.models import Patient, VoiceCaption
-        else:
-            from maxillo.models import Patient, VoiceCaption
+        Patient = apps.get_model(self.domain, "Patient")
+        VoiceCaption = apps.get_model(self.domain, "VoiceCaption")
         return Patient, VoiceCaption
 
     def _filter_patients_by_folders(self, Patient):
@@ -702,16 +702,9 @@ def start_export_processing(export_id, domain="maxillo"):
     after the HTTP request ends (web workers can recycle and kill threads).
     """
 
-    from brain.models import Export as BrainExport
-    from laparoscopy.models import Export as LaparoscopyExport
-    from maxillo.models import Export as MaxilloExport
     try:
-        if domain == "laparoscopy":
-            export = LaparoscopyExport.objects.filter(id=export_id).first()
-        elif domain == "brain":
-            export = BrainExport.objects.filter(id=export_id).first()
-        else:
-            export = MaxilloExport.objects.filter(id=export_id).first()
+        ExportModel = apps.get_model(domain, "Export")
+        export = ExportModel.objects.filter(id=export_id).first()
         if not export:
             logger.error(f"Export {export_id} not found for domain {domain}")
             return
@@ -737,16 +730,10 @@ def start_export_processing(export_id, domain="maxillo"):
             start_new_session=True,
         )
         logger.info(f"Started background subprocess for export {export_id}")
-    except MaxilloExport.DoesNotExist:
-        logger.error(f"Export {export_id} not found")
     except Exception as e:
         logger.error(f"Error starting export processing: {e}", exc_info=True)
         try:
-            export = (
-                MaxilloExport.objects.filter(id=export_id).first()
-                or LaparoscopyExport.objects.filter(id=export_id).first()
-                or BrainExport.objects.filter(id=export_id).first()
-            )
+            export = apps.get_model(domain, "Export").objects.filter(id=export_id).first()
             if export:
                 export.mark_failed(str(e))
         except Exception:
@@ -754,7 +741,7 @@ def start_export_processing(export_id, domain="maxillo"):
 
 
 # ---------------------------------------------------------------------------
-# Shared export view-layer helpers (promoted from maxillo.views.export, Phase 5.1)
+# Shared export view-layer helpers (promoted from the shared export views, Phase 5.1)
 # Domain-agnostic: they operate on a passed Export instance / request / id.
 # ---------------------------------------------------------------------------
 
