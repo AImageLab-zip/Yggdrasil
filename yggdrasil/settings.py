@@ -106,6 +106,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "yggdrasil.middleware.CrossOriginIsolationMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "yggdrasil.middleware.ContentSecurityPolicyMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",

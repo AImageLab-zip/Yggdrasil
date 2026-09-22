@@ -12,6 +12,35 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 
+class ContentSecurityPolicyMiddleware(MiddlewareMixin):
+    """Site-wide Content-Security-Policy.
+
+    Enforced: only directives nothing on the site relies on breaking -- no
+    plugins, no <base> hijack, no framing (matching X-Frame-Options DENY), forms
+    post to this origin only. Report-only: the script/style policy the templates
+    are expected to meet (they still carry inline scripts), so violations show in
+    the browser console before it is enforced. A response that already sets its
+    own policy (stored files: ``common.file_access.FILE_RESPONSE_CSP``) keeps it.
+    """
+
+    ENFORCED = "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    REPORT_ONLY = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; media-src 'self' blob:; "
+        "connect-src 'self' wss: blob:; worker-src 'self' blob:; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    )
+
+    def process_response(self, request, response):
+        if "Content-Security-Policy" not in response:
+            response["Content-Security-Policy"] = self.ENFORCED
+        if "Content-Security-Policy-Report-Only" not in response:
+            response["Content-Security-Policy-Report-Only"] = self.REPORT_ONLY
+        return response
+
+
 class CrossOriginIsolationMiddleware(MiddlewareMixin):
     """Cross-origin isolation for the upload page and the workers it starts.
 

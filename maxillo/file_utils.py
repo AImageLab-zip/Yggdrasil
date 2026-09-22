@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tarfile
 import traceback
 import zipfile
@@ -440,8 +441,18 @@ def _detect_extension_and_format(filename_lower: str):
         if filename_lower.endswith(".tgz"):
             return ".tgz", "archive_tar"
         return ".tar", "archive_tar"
-    # Fallback
-    return os.path.splitext(filename_lower)[1] or ".bin", "unknown"
+    # Fallback: keep a plain extension, never an arbitrary suffix in the key.
+    ext = os.path.splitext(filename_lower)[1]
+    return (ext if re.fullmatch(r"\.[a-z0-9]{1,10}", ext) else ".bin"), "unknown"
+
+
+#: Image formats accepted for photo uploads (RGB, intraoral). Includes what real
+#: uploads contain beyond the Modality rows' lists (HEIC from phones, BMP/TIFF
+#: from scanners). Anything else is refused rather than stored under its own
+#: extension, where it would be served as whatever that extension claims.
+IMAGE_UPLOAD_EXTENSIONS = frozenset(
+    {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif"}
+)
 
 
 def save_generic_modality_file(
@@ -861,12 +872,9 @@ def save_rgb_images_to_dataset(patient_or_legacy, images):
         try:
             original_name = img.name
             name_lower = original_name.lower()
-            # Accept common RGB formats
-            valid_exts = [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"]
             ext = Path(original_name).suffix.lower()
-            if ext not in valid_exts:
-                # Try to infer via content-type if no/unknown extension
-                ext = ext if ext else ".png"
+            if ext not in IMAGE_UPLOAD_EXTENSIONS:
+                raise ValueError(f"Unsupported image type '{ext or 'none'}'")
 
             # Optionally parse a friendly label from field name; support (name,img) tuples
             label = getattr(img, "label", "") or ""
@@ -922,6 +930,8 @@ def save_intraoral_photos_to_dataset(patient_or_legacy, images):
         try:
             original_name = getattr(img, "name", f"intraoral_{idx}.jpg")
             ext = os.path.splitext(original_name)[1].lower() or ".jpg"
+            if ext not in IMAGE_UPLOAD_EXTENSIONS:
+                raise ValueError(f"Unsupported image type '{ext}'")
 
             filename = f"intraoral_{idx + 1}_patient_{patient.patient_id}{ext}"
             key = f"{_raw_key_prefix_for(patient, 'intraoral-photo')}/{filename}"
