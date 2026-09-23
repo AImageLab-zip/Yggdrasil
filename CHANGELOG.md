@@ -11,6 +11,27 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-09-23
+
+Reporting templates are edited rather than deployed, a caption can be filed into its template with one button, and the services behind both are configured in the administration panel.
+
+### Added
+- **Report templates are edited in the administration panel.** The reporting checklist shown beside the voice-caption controls used to be written into the software, so changing a word — a wording your specialty prefers, a corrected Italian translation, a field nobody uses — meant asking a developer and waiting for a release. It is now ordinary content: *Clinical data → Report templates*, one row per field, English, Italian and German side by side, with a description that becomes the guidance clinicians expand while dictating. The checklists you have been reading are unchanged; they were moved across word for word.
+- **A template can belong to one project.** By default a template covers its whole workflow, and urology keeps one per modality. A project that reports differently can be given its own, and it applies only there.
+- **"Structure" turns a dictation into the report template.** Once a caption is complete, one button sends it to a language model with an instruction to file what was said under the template's headings, fix the mistakes speech recognition makes, and change nothing else. The report appears section by section as it is written, and can be run again as many times as you like — each run is kept, with the time, the model and the attempt number. **Your dictation is never touched.** The structured version is stored beside it, and the words you recorded stay exactly as you said them.
+- **Structuring is enabled per project.** It is off everywhere until a project administrator ticks *Report structuring* on the project, in the same list as voice captions. Until then the button does not appear. This matters: structuring sends the dictated text to whichever language-model service the platform is pointed at, so turning it on is a deliberate decision about where that text may go.
+- **A warning when the report may have lost something.** If the structured version appears to be missing a chunk of what was dictated, it says so instead of quietly presenting a shorter report, and anything that fits no field is kept under "uncategorised" rather than dropped.
+- **External services are configured in the administration panel.** Speech-to-text and the language model are now rows under *Processing → External services*: address, model, languages, timeouts and tuning, editable without a deploy, with a check that reports whether each one is actually usable. Passwords and API keys are **not** stored there — each row names the environment variable to read, so no key ends up in the database or in a backup of it.
+
+### Changed
+- **Dictation messages no longer name a service that is not at fault.** "Live Whisper is not configured" became "Speech transcription is not configured on this server", and so on.
+
+### Upgrading
+- Run `python manage.py seed_external_services`, `python manage.py seed_report_templates` and `python manage.py seed_llm_prompts` once after upgrading. All three are safe to re-run and none of them overwrites anything an administrator has edited.
+- *Report structuring* appears in the project’s annotation-method list after the
+  migration runs; tick it on a project to turn the feature on there.
+- Report structuring stays off until a project is opted in and an API key is configured, so upgrading changes nothing on its own.
+
 ## [3.1.0] - 2026-09-22
 
 The Urology multimodal imaging release: digital pathology Whole Slide Images, multiparametric prostate MRI, and confocal endomicroscopy.

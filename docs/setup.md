@@ -131,6 +131,19 @@ WHISPER_WS_URL=wss://155.185.48.254:9097/ws
 WHISPER_API_TOKEN=replace-with-the-server-token
 WHISPER_CA_CERT=/app/certs/whisper-live.pem
 ```
+Then create the admin rows that own this configuration from here on:
+
+```bash
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py seed_external_services
+```
+
+Idempotent, and it never overwrites an admin’s edits (`--force` does, explicitly).
+After this, **Admin → Processing → External services** owns the endpoint, the
+language set, the timeouts and the tuning; `.env` is only the fallback for a
+deployment with no row. The token stays in `.env` — the row names the variable to
+read, never the value. Unticking *Enabled* turns dictation off completely and does
+**not** fall back to `.env`.
+
 
 The tracked certificate pins the current self-signed Live Whisper certificate.
 Verify its SHA-256 fingerprint before deployment:

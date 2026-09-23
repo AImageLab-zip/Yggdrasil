@@ -196,6 +196,61 @@ deployed outside this repository speak it.
 not editable without maintainer sign-off.** A failing contract test means
 deployed runners break. Endpoint shapes are in [runners.md](runners.md).
 
+## Real-time external services
+
+The pipeline above is one of three natures of processing in this platform, and
+the pipeline is only the right shape for one of them.
+
+| Nature | Runs on | Dispatch | Result lands via | Example |
+|---|---|---|---|---|
+| Asynchronous job | External hardware (SLURM) | `Job` row → signal → Celery → runner | Frozen runner HTTP API → `FileRegistry` | CBCT segmentation |
+| Browser processing | The clinician's tab | Opening the viewer | A validated POST; no `Job` row | CBCT → panoramic |
+| **Real-time external service** | A service reachable over the network, answering now | A user action, synchronously | The response itself | Live dictation |
+
+The third has no `Job` row on purpose. A `Job` buys queueing, retries, a DAG and
+a cluster; a service that must answer while the clinician waits needs none of
+them, and giving it a `ProcessingStep` would mean a step with no `algo_name`,
+which `common/runner/run.py` can only ever fail.
+
+What these services have in common is a *declaration*, the way a cluster job has
+a `ProcessingStep`: `common.ExternalService` is one admin-owned row per service —
+endpoint, model, timeouts, language set, tuning — and `common/external_services.py`
+declares the *kinds* a row may be, with the parameters each kind accepts and the
+URL schemes it speaks, so an admin cannot break a service from a text box.
+
+Nothing reads that table directly. `common/external_config.py` resolves a slug to
+a frozen value object or to `None`, on one rule:
+
+- an **enabled row wins entirely** — the environment is not consulted;
+- **no row** falls back to `settings`, so a deployment that never opens the admin
+  keeps working;
+- a **disabled row resolves to `None`**, and the environment does not rescue it.
+  Otherwise the tick box would be decorative.
+
+**The API key is never in the database.** A row carries `api_key_env`, the *name*
+of an environment variable; the value is read from the process environment at
+call time. A key column would be in every nightly dump, in `dumpdata`, in the
+admin's own `LogEntry` change messages, and readable by any staff user with
+change permission. `manage.py seed_external_services` creates the shipped rows.
+
+Today that nature is live dictation. The browser opens a WebSocket to
+`/ws/live-transcription/<domain>/<patient>/`, which `common/consumers.py` relays
+to the speech-to-text service — **a relay, not a redirect**: the browser is
+authenticated by its session and never learns the upstream address or its shared
+token. The scheme in the row decides whether a pinned CA is required: a `wss://`
+host with a self-signed certificate pins one and never falls back to the system
+trust store, while a `ws://` service on an internal network needs none.
+
+The relay fails closed, and says which way it failed in its own log because every
+pre-accept close reaches uvicorn as an indistinguishable `403`: `4401`
+unauthenticated, `4400` unsupported language, `4403` no annotation rights on that
+patient, `4409` oversized frame, `4502` upstream unreachable, `4503` unconfigured.
+
+One contract is worth stating here because breaking it is silent: the transcript
+messages the service sends are **cumulative for the session**, because the
+browser assigns rather than appends them. A per-utterance final erases everything
+dictated before it.
+
 ## Object storage
 
 All patient bytes live in an S3-compatible store (Garage in production and in
@@ -333,6 +388,8 @@ not are documented in [CONTRIBUTING.md](../CONTRIBUTING.md).
 | Upload → FileRegistry | `common/uploads.py` |
 | Export | `common/export_catalog.py`, `common/export_processing.py`, `common/export_share.py` |
 | Site maintenance modes | `common.SiteMaintenance`, `yggdrasil/middleware.py` |
+| External service registry | `common/external_services.py`, `common.ExternalService`, `common/external_config.py` |
+| Live dictation relay | `common/consumers.py`, `common/routing.py` |
 | Annotation writes | `annotations/services/` |
 | Raw-data lock | `common/annotation_lock.py` |
 | Backups | `common/tasks.py`, `manage.py backup_now` |
