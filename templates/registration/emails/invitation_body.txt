@@ -1,18 +1,21 @@
-Hello,
+{% autoescape off %}Hello,
 
-You have been invited to register to Yggdrasil platform.
+You have been invited to join the Yggdrasil medical-imaging research platform.
 
-Projects:
-{% for project_name in project_names %}- {{ project_name }}
-{% endfor %}
-Role: {{ role_display }}
-Invitation expires: {{ expires_at }}
+{% if project_names %}Projects: {{ project_names|join:", " }}
+{% endif %}Role: {{ role_display }}
+Expires: {{ expires_at }}
 
-To register your account, open the link below and complete the form:
+Create your account here:
 {{ register_url }}
 
 If the link does not open directly, copy and paste it into your browser.
-For any issue please contact us by replying to this email.
+Questions? Just reply to this email.
 
 Best regards,
 {{ signature }}
+
+--
+You received this email because an administrator invited this address to Yggdrasil.
+If you weren't expecting it, you can safely ignore it.
+{% endautoescape %}

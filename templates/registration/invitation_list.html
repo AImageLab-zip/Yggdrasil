@@ -93,7 +93,10 @@
                             </td>
                             <td>
                                 {% if not invitation.used_at %}
-                                    <a href="{% url 'delete_invitation' invitation.code %}" class="btn btn-danger btn-sm" onclick="return confirm('Delete this invitation?')">{% icon 'trash' 'ygg-icon-sm' %}</a>
+                                    <form method="post" action="{% url 'delete_invitation' invitation.code %}" onsubmit="return confirm('Delete this invitation?')">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-danger btn-sm" title="Delete invitation">{% icon 'trash' 'ygg-icon-sm' %}<span class="sr-only">Delete</span></button>
+                                    </form>
                                 {% endif %}
                             </td>
                         </tr>
@@ -107,14 +110,56 @@
     </div>
 </div>
 
+<!-- Users -->
+<div class="card-ygg card-ygg-body mt-5">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <h2 class="flex items-center gap-2 text-base font-semibold">{% icon 'users' %}<span>Users ({{ users|length }})</span></h2>
+        {% if contact_emails %}
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyText(this.dataset.emails, 'Emails of active users copied to clipboard!')" data-emails="{{ contact_emails }}">{% icon 'copy' 'ygg-icon-sm' %}<span>Copy all emails</span></button>
+        {% endif %}
+    </div>
+    <div class="overflow-x-auto">
+        <table class="table-ygg">
+            <thead>
+                <tr><th>Username</th><th>Name</th><th>Email</th><th>Projects</th><th>Joined</th><th>Last login</th></tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td class="whitespace-nowrap">
+                        {{ u.username }}
+                        {% if u.is_staff %}<span class="badge-ygg badge-neutral">Staff</span>{% endif %}
+                        {% if not u.is_active %}<span class="badge-ygg badge-danger">Inactive</span>{% endif %}
+                    </td>
+                    <td>{{ u.get_full_name|default:"-" }}</td>
+                    <td>{% if u.email %}<a class="text-primary" href="mailto:{{ u.email }}">{{ u.email }}</a>{% else %}<span class="text-content-muted">-</span>{% endif %}</td>
+                    <td>
+                        <div class="flex flex-wrap gap-1">
+                            {% for access in u.project_access.all %}<span class="badge-ygg badge-neutral">{{ access.project.name }} · {{ access.get_role_display }}</span>{% empty %}<span class="text-content-muted">-</span>{% endfor %}
+                        </div>
+                    </td>
+                    <td class="whitespace-nowrap">{{ u.date_joined|date:"Y-m-d" }}</td>
+                    <td class="whitespace-nowrap">{{ u.last_login|date:"Y-m-d"|default:"Never" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-center text-content-muted py-6">No users found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <script>
-function copyInvitationLink(code) {
-    const link = '{{ registration_base_url }}?code=' + code;
-    navigator.clipboard.writeText(link).then(() => {
+function copyText(text, notice) {
+    navigator.clipboard.writeText(text).then(() => {
         if (typeof window.appNotify === 'function') {
-            window.appNotify('success', 'Invitation link copied to clipboard!');
+            window.appNotify('success', notice);
         }
     });
+}
+
+function copyInvitationLink(code) {
+    copyText('{{ registration_base_url }}?code=' + code, 'Invitation link copied to clipboard!');
 }
 </script>
 {% endblock %}

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
@@ -72,6 +73,108 @@ class InvitationCodeTests(TestCase):
 
         invitation = Invitation.objects.get()
         self.assertTrue(invitation.code)
+
+
+
+@override_settings(
+    SECURE_SSL_REDIRECT=False,
+    EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+    EMAIL_SENDER_EMAILS=['noreply@example.org'],
+    DEFAULT_FROM_EMAIL='noreply@example.org',
+)
+class InvitationEmailTests(TestCase):
+    def setUp(self):
+        self.project = Project.objects.create(name='Dental & Co')
+        self.staff = User.objects.create_user('staff', password='pw', is_staff=True)
+        self.user = User.objects.create_user('plain', password='pw')
+
+    def _create(self, **extra):
+        self.client.force_login(self.staff)
+        data = {
+            'email': 'new.user@example.org',
+            'sender_email': 'noreply@example.org',
+            'role': 'annotator',
+            'projects': [self.project.pk],
+            'expiry_days': 7,
+            'signature': '',
+        }
+        data.update(extra)
+        return self.client.post(reverse('invitation_list'), data)
+
+    def test_invitation_email_is_html_with_inline_logo(self):
+        response = self._create()
+
+        self.assertRedirects(response, reverse('invitation_list'), fetch_redirect_response=False)
+        invitation = Invitation.objects.get()
+        self.assertIsNotNone(invitation.email_sent_at)
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, ['new.user@example.org'])
+        self.assertEqual(message.from_email, 'noreply@example.org')
+
+        register_url = f"http://testserver{reverse('register')}?code={invitation.code}"
+        self.assertIn(register_url, message.body)
+        self.assertIn('Dental & Co', message.body)  # text part is not HTML-escaped
+
+        html, mimetype = message.alternatives[0]
+        self.assertEqual(mimetype, 'text/html')
+        self.assertIn(f'href="{register_url}"', html)
+        self.assertIn('src="cid:yggdrasil-logo"', html)
+        self.assertIn('Dental &amp; Co', html)
+
+        parsed = message.message()
+        self.assertEqual(parsed.get_content_subtype(), 'related')
+        logo = [part for part in parsed.walk() if part.get('Content-ID') == '<yggdrasil-logo>']
+        self.assertEqual(len(logo), 1)
+        self.assertEqual(logo[0].get_content_type(), 'image/png')
+
+    def test_invitation_without_email_sends_nothing(self):
+        self._create(email='')
+
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(Invitation.objects.count(), 1)
+
+    def test_invitation_page_is_staff_only(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('invitation_list'))
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_invitation_page_lists_users_with_emails(self):
+        self.user.email = 'plain@example.org'
+        self.user.save()
+        ProjectAccess.objects.create(user=self.user, project=self.project, role='annotator')
+        User.objects.create_user('gone', email='gone@example.org', is_active=False)
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse('invitation_list'))
+
+        self.assertContains(response, 'href="mailto:plain@example.org"')
+        self.assertContains(response, 'Dental &amp; Co · Annotator')
+        self.assertContains(response, 'Inactive')
+        # "Copy all emails" only gathers active users.
+        self.assertEqual(response.context['contact_emails'], 'plain@example.org')
+
+    def test_delete_invitation_is_a_post_form(self):
+        self._create(email='')
+        invitation = Invitation.objects.get()
+        url = reverse('delete_invitation', args=[invitation.code])
+
+        page = self.client.get(reverse('invitation_list'))
+        self.assertContains(page, f'<form method="post" action="{url}"')
+        self.client.post(url)
+
+        self.assertFalse(Invitation.objects.exists())
+
+    def test_rail_links_invitations_for_staff_only(self):
+        url = reverse('invitation_list')
+
+        self.client.force_login(self.staff)
+        self.assertContains(self.client.get(reverse('admin_control_panel')), f'href="{url}"')
+
+        self.client.force_login(self.user)
+        self.assertNotContains(self.client.get(reverse("changelog_page")), f'href="{url}"')
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
