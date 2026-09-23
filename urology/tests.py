@@ -4,7 +4,7 @@ from django.test import TestCase, Client
 from django.urls import reverse
 
 import os
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import MagicMock, patch
 
 from common.models import FileRegistry, Modality, Project, ProjectAccess
@@ -20,6 +20,10 @@ class UrologyDomainTests(TestCase):
             password="password123",
         )
         call_command("setup_urology_modalities")
+        # The reporting checklist is admin-owned content now, not markup: the
+        # panel renders whatever the seeded templates say, so seed it here
+        # exactly as an upgrade does.
+        call_command("seed_report_templates", stdout=StringIO())
         self.project = Project.objects.get(slug="urology")
         ProjectAccess.objects.get_or_create(
             user=self.user, project=self.project, defaults={"role": "admin"}

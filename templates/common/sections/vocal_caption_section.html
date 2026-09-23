@@ -1,4 +1,4 @@
-{% load static %}
+{% load static report_templates %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
         <!-- Hidden CSRF token for AJAX usage -->
         <form style="display:none;">{% csrf_token %}</form>
@@ -37,6 +37,19 @@
                     <div id="textControls" class="d-flex align-items-center">
                         <small class="text-muted me-2">Characters: <span id="textCharCount">0</span></small>
                         <div>
+                            {% if structuring_available %}
+                            {% comment %}
+                              In #textControls on purpose: updateUI() already hides this
+                              cluster while recording, so "not while dictating" needs no
+                              new state. Its server-side twin is the refusal in
+                              common/domain_views/caption_reports.py — never a UI-only gate.
+                            {% endcomment %}
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="structureCaption"
+                                    data-min-length="10" disabled
+                                    title="Save this caption and file it into the report template">
+                                <i class="fas fa-wand-magic-sparkles me-1"></i><span class="label">Structure</span>
+                            </button>
+                            {% endif %}
                             <button type="button" class="btn btn-success btn-sm" id="saveTextCaption">
                                 <i class="fas fa-save me-1"></i>Save
                             </button>
@@ -50,6 +63,41 @@
                 <div id="textInputContainer" class="mb-2 position-relative">
                     <textarea id="captionTextArea" class="form-control form-control-sm" rows="4" placeholder="Speak or write your caption here..."></textarea>
                 </div>
+
+                {% if structuring_available %}
+                {% comment %}
+                  The structured report lands here, not in #captionTextArea: that textarea
+                  is the dictation — the *input* to this operation — and overwriting it
+                  would destroy what the clinician actually said.
+                {% endcomment %}
+                <div id="structuredCaptionPanel" class="card mt-2 d-none" data-caption-id=""
+                     data-structure-url-template="{% url ns|add:':structure_caption' patient_id=patient.patient_id caption_id=0 %}"
+                     data-report-url-template="{% url ns|add:':caption_report' patient_id=patient.patient_id caption_id=0 %}">
+                    <div class="card-body p-2">
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <small class="text-muted" id="structuredCaptionHeading">Structured report</small>
+                            <div class="d-flex align-items-center gap-2">
+                                <span id="structuredCaptionStatus" class="badge-ygg badge-neutral"></span>
+                                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="structuredCaptionStop">Stop</button>
+                            </div>
+                        </div>
+                        <details id="structuredCaptionSource" class="mb-2">
+                            <summary><small class="text-muted">Dictated text</small></summary>
+                            <small class="text-muted" id="structuredCaptionSourceText"></small>
+                        </details>
+                        <textarea id="structuredCaptionText" class="form-control form-control-sm"
+                                  rows="8" readonly></textarea>
+                        <div id="structuredCaptionWarnings" class="mt-1"></div>
+                        <div class="d-flex gap-1 mt-2 d-none" id="structuredCaptionActions">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="structuredCaptionRerun">
+                                <i class="fas fa-rotate me-1"></i>Run again
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="structuredCaptionClose">Close</button>
+                        </div>
+                    </div>
+                </div>
+                {{ structuring_modalities|json_script:"caption-structuring-modalities" }}
+                {% endif %}
 
                 <div id="recordingArea" class="d-none">
                     <div class="d-flex align-items-center justify-content-between mb-2">
@@ -146,6 +194,14 @@
                                     {% endif %}
                                     {% if c.text_caption %}
                                     {% if c.can_edit_content %}
+                                    {% if structuring_available %}
+                                    <button class="btn btn-outline-primary btn-sm btn-structure-caption"
+                                            data-caption-id="{{ c.id }}"
+                                            data-modality="{{ c.modality }}"
+                                            title="File this caption into the report template">
+                                        <i class="fas fa-wand-magic-sparkles" style="font-size: 0.75rem;"></i>
+                                    </button>
+                                    {% endif %}
                                     <button class="btn btn-outline-secondary btn-sm btn-edit-caption" data-caption-id="{{ c.id }}" title="Edit">
                                         <i class="fas fa-edit" style="font-size: 0.75rem;"></i>
                                     </button>
@@ -206,12 +262,14 @@
             {% endwith %}
         </div>
 
-        {% if ns != 'laparoscopy' %}
-            <!-- Report Template: shown directly under the voice-caption controls so
-                 clinicians can read the structured reporting checklist while
-                 dictating. Content is per-domain; language persists cross-app. -->
-            {% include 'common/sections/report_template_section.html' %}
-        {% endif %}
+        {% comment %}
+          Report Template: shown directly under the voice-caption controls so clinicians
+          can read the structured reporting checklist while dictating. Content comes from
+          common.ReportTemplate rows, so which domains have one is data — the tag renders
+          nothing where there is no template, which is what the per-domain guard around
+          this include used to hardcode.
+        {% endcomment %}
+        {% report_template_panel %}
 
         <!-- Edit Transcription Modal -->
         <div class="modal" id="editTranscriptionModal" tabindex="-1" aria-labelledby="editTranscriptionLabel" aria-hidden="true">
