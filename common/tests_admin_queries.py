@@ -348,10 +348,20 @@ class AdminStructureTests(TestCase):
         sections = {app["name"]: app for app in admin.site.get_app_list(request)}
 
         clinical = [entry["group"] for entry in sections["Clinical data"]["models"]]
-        # Every clinical model is declared by a domain, so every row is grouped.
-        self.assertNotIn(None, clinical)
+        # Report templates and caption reports are declared by common/, not by a
+        # domain, so they are shared rows: ungrouped, and hoisted to the front the
+        # way "Projects & access" hoists its own (asserted below).
+        shared = 0
+        while shared < len(clinical) and clinical[shared] is None:
+            shared += 1
+        self.assertEqual(shared, 2)
+        per_domain = clinical[shared:]
+        # Every clinical model below them is declared by a domain, so every row is grouped.
+        self.assertNotIn(None, per_domain)
         # Each domain forms one contiguous run, in registry order.
-        runs = [g for i, g in enumerate(clinical) if i == 0 or clinical[i - 1] != g]
+        runs = [
+            g for i, g in enumerate(per_domain) if i == 0 or per_domain[i - 1] != g
+        ]
         self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy", "Urology"])
 
         # Shared models come first, before the per-domain runs.

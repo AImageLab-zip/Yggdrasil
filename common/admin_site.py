@@ -75,6 +75,8 @@ SECTIONS = (
             ("laparoscopy", "QuadrantType"),
             ("laparoscopy", "RegionType"),
             ("laparoscopy", "QuadrantClassificationMarker"),
+            ("common", "ReportTemplate"),
+            ("common", "CaptionReport"),
             ("maxillo", "VoiceCaption"),
             ("brain", "VoiceCaption"),
             ("laparoscopy", "VoiceCaption"),
@@ -116,6 +118,8 @@ SECTIONS = (
         (
             ("common", "Modality"),
             ("common", "ProcessingStep"),
+            ("common", "ExternalService"),
+            ("common", "PromptTemplate"),
             ("common", "AnnotationMethod"),
             ("common", "Job"),
             ("common", "ProcessingJob"),
