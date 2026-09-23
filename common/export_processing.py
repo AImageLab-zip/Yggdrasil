@@ -373,8 +373,11 @@ class ExportProcessor:
             "ios_landmarks": self._collect_ios_landmarks,
         }.get(artifact.collector)
         if producer is None:
-            logger.warning("No collector registered for artifact %s", artifact.key)
-            return
+            registered = export_catalog.domain_collector(artifact.collector)
+            if registered is None:
+                logger.warning("No collector registered for artifact %s", artifact.key)
+                return
+            producer = registered[0]
         yield from producer(patient, artifact)
 
     def _collect_captions(self, patient, artifact):

@@ -54,7 +54,7 @@
                 <div id="recordingArea" class="d-none">
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <div class="recording-info">
-                            {% if ns != 'brain' and ns != 'cardiology' %}
+                            {% if caption_modality_picker %}
                             <small class="text-muted me-2">Modality:</small>
                             <span class="badge-ygg badge-neutral" id="modalityIndicator">Voice</span>
                             {% else %}
@@ -98,11 +98,11 @@
                 {% if captions %}
                     <div class="caption-list-compact">
                         {% for c in captions|dictsortreversed:"created_at" %}
-                        <div class="caption-item-compact" data-caption-id="{{ c.id }}"{% if ns != 'brain' and ns != 'cardiology' %} data-update-modality-url="{% url ns|add:':update_voice_caption_modality' patient_id=patient.patient_id caption_id=c.id %}"{% endif %}>
+                        <div class="caption-item-compact" data-caption-id="{{ c.id }}"{% if caption_modality_picker %} data-update-modality-url="{% url ns|add:':update_voice_caption_modality' patient_id=patient.patient_id caption_id=c.id %}"{% endif %}>
                             <div class="d-flex align-items-center justify-content-between">
                                 <div class="caption-info">
                                     <small class="text-primary me-2">{{ c.user.username }}</small>
-                                    {% if ns != 'brain' and ns != 'cardiology' %}
+                                    {% if caption_modality_picker %}
                                     <div class="dropdown d-inline-block me-2">
                                         <span class="badge-ygg badge-neutral {% if c.can_edit_content %}dropdown-toggle modality-badge-clickable{% endif %}"
                                               id="modalityDropdown{{ c.id }}"
@@ -206,7 +206,7 @@
             {% endwith %}
         </div>
 
-        {% if ns != 'laparoscopy' and ns != 'cardiology' %}
+        {% if caption_report_template %}
             <!-- Report Template: shown directly under the voice-caption controls so
                  clinicians can read the structured reporting checklist while
                  dictating. Content is per-domain; language persists cross-app. -->
@@ -233,7 +233,7 @@
         </div>
         <script>
         document.addEventListener('DOMContentLoaded', function () {
-            {% if ns != 'brain' and ns != 'cardiology' %}
+            {% if caption_modality_picker %}
             // Handle modality change
             document.addEventListener('click', function(e) {
                 if (e.target.classList.contains('modality-option') || e.target.closest('.modality-option')) {

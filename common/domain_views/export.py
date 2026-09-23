@@ -392,18 +392,28 @@ def export_new(request):
     patients_in_scope = PatientModel.objects.filter(folder_id__in=visible_folder_ids)
     modalities = export_ui.project_modalities(project)
 
-    # Panoramics are reconstructed in the browser, so already-uploaded patients
-    # may have none to export yet. Point administrators at the batch page rather
-    # than leaving an unexplained zero next to the panoramic artifacts.
+    # Some artifacts are generated in the browser the first time somebody opens the
+    # patient, so already-uploaded patients may have none to export yet. Point
+    # administrators at the domain's batch page rather than leaving an unexplained
+    # zero next to them.
+    warmup = next(
+        (
+            artifact.warmup
+            for artifact in export_catalog.artifacts_for_project(
+                domain, [m.slug for m in modalities]
+            )
+            if artifact.warmup
+        ),
+        None,
+    )
     warmup_url = None
-    if any(m.slug == "cbct" for m in modalities):
-        if user_is_project_admin(request.user, project):
-            from django.urls import NoReverseMatch, reverse
+    if warmup and user_is_project_admin(request.user, project):
+        from django.urls import NoReverseMatch, reverse
 
-            try:
-                warmup_url = reverse(f"{domain}:panoramic_warmup")
-            except NoReverseMatch:
-                warmup_url = None
+        try:
+            warmup_url = reverse(f"{domain}:{warmup[0]}")
+        except NoReverseMatch:
+            warmup_url = None
 
     return render(
         request,
@@ -413,11 +423,8 @@ def export_new(request):
             "folders": folders,
             "modalities": modalities,
             "warmup_url": warmup_url,
-            "warmup_message": (
-                "Panoramic images are reconstructed in the browser, so patients "
-                "uploaded before anyone opened them may not have one yet."
-            ),
-            "warmup_cta": "Generate the missing default panoramics",
+            "warmup_message": warmup[1] if warmup else "",
+            "warmup_cta": warmup[2] if warmup else "",
             "artifact_groups": export_ui.artifact_groups(
                 domain, project, patients_in_scope
             ),
@@ -580,6 +587,11 @@ def _preview_totals(domain, patients, artifacts):
             count = tooth_segmentation_image_count(patients)
             file_count += count
             total_size += count * 2048
+        elif export_catalog.domain_collector(artifact.collector):
+            _produce, count_documents = export_catalog.domain_collector(artifact.collector)
+            count, size = count_documents(patients)
+            file_count += count
+            total_size += size
 
     return file_count, total_size
 

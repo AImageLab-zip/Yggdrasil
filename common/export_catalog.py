@@ -37,6 +37,22 @@ BUCKET_LABELS = {
 }
 
 
+#: ``Artifact.warmup`` values: (URL name in the domain's namespace, why some patients
+#: may have none yet, the link text).
+_PANORAMIC_WARMUP = (
+    "panoramic_warmup",
+    "Panoramic images are reconstructed in the browser, so patients uploaded before "
+    "anyone opened them may not have one yet.",
+    "Generate the missing default panoramics",
+)
+_ECG_PLOT_WARMUP = (
+    "ecg_warmup",
+    "ECG plots are drawn in the browser, so patients uploaded before anyone opened "
+    "them may not have one yet.",
+    "Generate the missing ECG plots",
+)
+
+
 class Artifact:
     """One exportable thing.
 
@@ -51,7 +67,12 @@ class Artifact:
 
     database-backed artifacts:
         ``collector``   name of the collector in ExportProcessor that produces
-                        the document (no FileRegistry row exists).
+                        the document (no FileRegistry row exists), or of one a
+                        domain app registered (``register_collector``).
+
+    ``warmup`` is an optional ``(url_name, message, call_to_action)`` for artifacts
+    a browser generates the first time somebody opens the patient: the export page
+    links to that domain's page for generating the missing ones.
     """
 
     def __init__(
@@ -69,6 +90,7 @@ class Artifact:
         collector=None,
         filename=None,
         zip_dir=None,
+        warmup=None,
     ):
         self.key = key
         self.modality = modality
@@ -82,6 +104,7 @@ class Artifact:
         self.collector = collector
         self.filename = filename
         self.zip_dir = zip_dir
+        self.warmup = warmup
 
     def __repr__(self):
         return f"<Artifact {self.key}>"
@@ -218,11 +241,13 @@ _MAXILLO_ARTIFACTS = [
         "panoramic.mip", "panoramic", "Panoramic image (MIP)", BUCKET_DERIVED,
         file_types=["panoramic_processed"], subtypes=["mip"],
         zip_dir="panoramic/generated", filename="panoramic_mip.png",
+        warmup=_PANORAMIC_WARMUP,
     ),
     Artifact(
         "panoramic.raysum", "panoramic", "Panoramic image (X-ray)", BUCKET_DERIVED,
         file_types=["panoramic_processed"], subtypes=["raysum"],
         zip_dir="panoramic/generated", filename="panoramic_xray.png",
+        warmup=_PANORAMIC_WARMUP,
     ),
     # --- IOS ----------------------------------------------------------------
     Artifact(
@@ -319,9 +344,11 @@ _CARDIOLOGY_ARTIFACTS = [
     Artifact(
         "ecg.processed", "ecg", "ECG plot (PNG)", BUCKET_PROCESSED,
         file_types=["ecg_processed"], zip_dir="ecg/generated", filename="ecg_plot.png",
+        warmup=_ECG_PLOT_WARMUP,
     ),
-    # Database row (cardiology.Classification), not a FileRegistry artifact --
-    # same shape as "reports.captions" below, via its own collector.
+    # A rhythm call in `annotations/`, not a FileRegistry artifact. Its collector is
+    # registered by the cardiology app (see register_collector), because only it
+    # may read the annotation service that holds the call.
     Artifact(
         "ecg.classification", "ecg", "AF/NSR/Other/NI classification", BUCKET_DERIVED,
         collector="ecg_classification", zip_dir="reports",
@@ -438,6 +465,35 @@ def modality_slugs_for(artifacts):
 
 def collectors_for(artifacts):
     return {artifact.collector for artifact in artifacts if artifact.collector}
+
+
+# ---------------------------------------------------------------------------
+# Collectors a domain app supplies
+# ---------------------------------------------------------------------------
+#
+# A database-backed artifact whose data only one domain app can read (because the
+# reader lives in that app, or in `annotations/` behind it) cannot be collected from
+# here: `common` may import neither. The app registers its collector from
+# `AppConfig.ready()` instead, and the export processor and preview look it up by
+# `Artifact.collector`.
+
+
+_DOMAIN_COLLECTORS = {}
+
+
+def register_collector(name, *, produce, count):
+    """Register a domain app's collector for ``Artifact.collector == name``.
+
+    ``produce(patient, artifact)`` yields ``(entry, size)`` exactly as the built-in
+    collectors on ``ExportProcessor`` do; ``count(patients)`` returns
+    ``(document_count, estimated_bytes)`` for the export preview.
+    """
+    _DOMAIN_COLLECTORS[name] = (produce, count)
+
+
+def domain_collector(name):
+    """``(produce, count)`` for a registered collector, or ``None``."""
+    return _DOMAIN_COLLECTORS.get(name)
 
 
 # ---------------------------------------------------------------------------

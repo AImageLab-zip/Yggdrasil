@@ -145,6 +145,7 @@ TEMPLATES = [
                 "common.context_processors.app_meta",
                 "common.context_processors.site_maintenance",
                 "common.context_processors.user_prefs",
+                "common.context_processors.domain_features",
             ],
         },
     },

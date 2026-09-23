@@ -33,6 +33,34 @@ DOMAIN_FK_FIELDS = {
 }
 
 
+# Top-level object-storage prefix for each domain's raw/processed keys. Historical:
+# brain and urology share maxillo's prefix, and stored keys must not move, so a
+# domain absent here stays under the default.
+_STORAGE_PREFIXES = {
+    "laparoscopy": "laparoscopy",
+    "cardiology": "cardiology",
+}
+
+
+def storage_prefix_for(domain):
+    return _STORAGE_PREFIXES.get(domain, DEFAULT_DOMAIN)
+
+
+# Parts of the shared voice-caption panel (templates/common/sections/
+# vocal_caption_section.html) that only some domains have: a per-caption modality
+# picker, where a caption can be filed against one of several modalities, and the
+# structured report template, which needs content in report_template_section.html.
+_CAPTION_MODALITY_PICKER = frozenset({"maxillo", "laparoscopy", "urology"})
+_CAPTION_REPORT_TEMPLATE = frozenset({"maxillo", "brain", "urology"})
+
+
+def caption_features(domain):
+    return {
+        "caption_modality_picker": domain in _CAPTION_MODALITY_PICKER,
+        "caption_report_template": domain in _CAPTION_REPORT_TEMPLATE,
+    }
+
+
 def normalize_domain(value):
     """Return ``value`` if it is a known domain slug, else ``DEFAULT_DOMAIN``."""
     return value if value in DOMAINS else DEFAULT_DOMAIN

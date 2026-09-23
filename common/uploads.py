@@ -305,10 +305,9 @@ def ensure_step_jobs_for_patient(patient, requested_slugs):
 
 
 def project_slug_from_patient(patient) -> str:
-    domain = domain_for_patient(patient)
-    if domain in ("laparoscopy", "cardiology"):
-        return domain
-    return "maxillo"
+    from common.domains import storage_prefix_for
+
+    return storage_prefix_for(domain_for_patient(patient))
 
 
 def raw_key_prefix_for(patient, modality_slug: str) -> str:

@@ -25,6 +25,14 @@ def app_meta(request):
     }
 
 
+def domain_features(request):
+    """Per-domain template switches from the registry (``common.domains``)."""
+    from common.domain_models import get_namespace
+    from common.domains import caption_features
+
+    return caption_features(get_namespace(request))
+
+
 def site_maintenance(request):
     try:
         return {'site_maintenance': SiteMaintenance.get_solo()}
