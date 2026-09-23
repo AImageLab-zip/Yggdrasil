@@ -15,24 +15,57 @@ from common.domains import DOMAINS
 from common.permissions import user_can_write_patient_annotations
 
 
+#: The languages the code knows how to ask for. A service row may narrow this
+#: (``ExternalService.languages``); it cannot widen it past what Whisper supports.
 SUPPORTED_LANGUAGES = frozenset({"it", "en", "es", "fr", "de"})
 MAX_AUDIO_FRAME_BYTES = 64 * 1024
 logger = logging.getLogger(__name__)
 
 
-def _upstream_url(language):
-    parts = urlsplit(settings.WHISPER_WS_URL)
+@database_sync_to_async
+def _config():
+    """The speech-to-text endpoint to relay to, or ``None`` if there is none.
+
+    An admin row wins; with no row, ``settings.WHISPER_*`` is used exactly as it was
+    before the registry existed. Wrapped for the ORM read because this runs inside the
+    consumer's async ``connect``.
+    """
+    from common.external_config import whisper_service
+
+    return whisper_service()
+
+
+def _supported_languages(config):
+    """What this endpoint accepts: its own list, else the codebase default."""
+    declared = frozenset(config.languages) & SUPPORTED_LANGUAGES if config else frozenset()
+    return declared or SUPPORTED_LANGUAGES
+
+
+def _upstream_url(config, language):
+    parts = urlsplit(config.base_url)
     query = parse_qs(parts.query, keep_blank_values=True)
-    query["token"] = [settings.WHISPER_API_TOKEN]
+    query["token"] = [config.api_key]
     query["lang"] = [language]
     encoded = urlencode(query, doseq=True, quote_via=quote)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, encoded, parts.fragment))
 
 
-def _ssl_context():
-    if not settings.WHISPER_CA_CERT:
+def _ssl_context(url, ca_cert=None):
+    """The SSL context for this upstream, or ``None`` when it speaks plain ``ws://``.
+
+    The pinned-CA requirement belongs to the *scheme*, not to the feature. A service row
+    may name a ``ws://`` upstream -- a speech-to-text service on an internal network,
+    reached by service name -- where there is no certificate to pin and demanding one
+    would refuse every connection. A ``wss://`` upstream is unchanged: it still requires a
+    CA and still fails rather than falling back to the system trust store, because a
+    self-signed certificate is not in it.
+    """
+    if urlsplit(url).scheme != "wss":
+        return None
+    cafile = ca_cert if ca_cert is not None else settings.WHISPER_CA_CERT
+    if not cafile:
         raise RuntimeError("WHISPER_CA_CERT is not configured")
-    return ssl.create_default_context(cafile=settings.WHISPER_CA_CERT)
+    return ssl.create_default_context(cafile=cafile)
 
 
 @database_sync_to_async
@@ -87,15 +120,31 @@ class LiveTranscriptionConsumer(AsyncWebsocketConsumer):
                 f"{user} may not write annotations on {domain} patient {patient_id}",
             )
             return
-        if not settings.WHISPER_API_TOKEN or not settings.WHISPER_WS_URL:
-            await self._refuse(4503, "WHISPER_API_TOKEN or WHISPER_WS_URL is unset")
+
+        # Config is read after the permission check on purpose: whether this deployment
+        # has speech-to-text configured is not something to tell a user who may not
+        # dictate on this patient anyway.
+        config = await _config()
+        if config is None:
+            await self._refuse(
+                4503,
+                "no speech-to-text service is configured (no enabled ExternalService row, "
+                "and WHISPER_WS_URL/WHISPER_API_TOKEN are unset)",
+            )
+            return
+        if language not in _supported_languages(config):
+            await self._refuse(
+                4400,
+                f"{language!r} is not in the language set of service {config.slug!r}",
+            )
             return
 
+        url = _upstream_url(config, language)
         try:
             self.upstream = await websockets.connect(
-                _upstream_url(language),
-                ssl=_ssl_context(),
-                open_timeout=settings.WHISPER_CONNECT_TIMEOUT,
+                url,
+                ssl=_ssl_context(url, config.ca_cert),
+                open_timeout=config.connect_timeout,
                 max_size=1024 * 1024,
             )
         except Exception as exc:

@@ -102,6 +102,22 @@ WHISPER_CA_CERT = config(
 )
 WHISPER_CONNECT_TIMEOUT = config("WHISPER_CONNECT_TIMEOUT", default=10, cast=int)
 
+# External LLM (OpenAI-compatible). Used by the report-structuring button under voice
+# captions, and by any future task registered in common/llm_tasks.py.
+#
+# These are only the *fallback* for a deployment with no ExternalService row; once
+# `manage.py seed_external_services` has run, the admin owns them. The API key itself is
+# deliberately NOT read into settings: common/external_config.py reads it from the
+# process environment by the name the row carries, so it never reaches a settings dump,
+# `diffsettings`, or a debug error page.
+OPENROUTER_BASE_URL = config("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY_ENV = config("OPENROUTER_API_KEY_ENV", default="OPENROUTER_API_KEY")
+OPENROUTER_MODEL = config(
+    "OPENROUTER_MODEL", default="nvidia/nemotron-3-super-120b-a12b:free"
+)
+LLM_TIMEOUT = config("LLM_TIMEOUT", default=60, cast=int)
+LLM_CONNECT_TIMEOUT = config("LLM_CONNECT_TIMEOUT", default=10, cast=int)
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "yggdrasil.middleware.CrossOriginIsolationMiddleware",

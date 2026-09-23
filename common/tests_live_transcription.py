@@ -165,3 +165,169 @@ class LiveTranscriptionConsumerTests(TransactionTestCase):
         connected, code = await communicator.connect()
         self.assertFalse(connected)
         self.assertEqual(code, 4403)
+
+
+@override_settings(
+    WHISPER_API_TOKEN="test-token",
+    WHISPER_CA_CERT="/unused/test-ca.pem",
+)
+class UpstreamSchemeTests(TransactionTestCase):
+    """Which upstreams get a pinned CA, and which must not be asked for one.
+
+    ``_ssl_context`` used to demand ``WHISPER_CA_CERT`` unconditionally, which was right
+    while the only upstream was an external ``wss://`` host with a self-signed
+    certificate. A service row may now name a ``ws://`` upstream on an internal
+    network, where there is no certificate to pin -- and an unconditional context
+    would refuse every connection to it.
+    """
+
+    reset_sequences = True
+
+    def test_a_plain_ws_upstream_gets_no_ssl_context(self):
+        from common.consumers import _ssl_context
+
+        self.assertIsNone(_ssl_context("ws://whisper:9097/ws"))
+
+    @override_settings(WHISPER_CA_CERT="")
+    def test_a_plain_ws_upstream_does_not_need_a_ca_at_all(self):
+        """A ws:// upstream must work on a deployment that never had a CA file."""
+        from common.consumers import _ssl_context
+
+        self.assertIsNone(_ssl_context("ws://whisper:9097/ws"))
+
+    def test_a_wss_upstream_still_pins_the_ca(self):
+        from common.consumers import _ssl_context
+
+        with mock.patch("common.consumers.ssl.create_default_context") as create:
+            _ssl_context("wss://155.185.48.254:9097/ws")
+        create.assert_called_once_with(cafile="/unused/test-ca.pem")
+
+    @override_settings(WHISPER_CA_CERT="")
+    def test_a_wss_upstream_without_a_ca_still_refuses(self):
+        """No silent fall back to the system trust store: that cert is not in it."""
+        from common.consumers import _ssl_context
+
+        with self.assertRaises(RuntimeError):
+            _ssl_context("wss://155.185.48.254:9097/ws")
+
+
+@override_settings(
+    WHISPER_WS_URL="ws://whisper:9097/ws",
+    WHISPER_API_TOKEN="test-token",
+    WHISPER_CA_CERT="",
+)
+class LocalWhisperServiceTests(TransactionTestCase):
+    """End to end against the shipped container's configuration shape."""
+
+    reset_sequences = True
+
+    def setUp(self):
+        self.project, _ = Project.objects.get_or_create(
+            slug="maxillo", defaults={"name": "Maxillo"}
+        )
+        self.user = User.objects.create_user(username="local-transcriber", password="x")
+        ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
+        self.patient = Patient.objects.create(name="P", project=self.project)
+
+    async def test_connects_to_the_local_service_without_a_certificate(self):
+        upstream = FakeWhisperSocket()
+        with mock.patch(
+            "common.consumers.websockets.connect",
+            new=mock.AsyncMock(return_value=upstream),
+        ) as connect:
+            communicator = WebsocketCommunicator(
+                URLRouter(websocket_urlpatterns),
+                f"/ws/live-transcription/maxillo/{self.patient.patient_id}/?lang=it",
+            )
+            communicator.scope["user"] = self.user
+            connected, code = await communicator.connect()
+            self.assertTrue(connected, msg=f"refused with {code}")
+            self.assertEqual(await communicator.receive_json_from(), {"type": "ready"})
+
+            self.assertTrue(connect.await_args.args[0].startswith("ws://whisper:9097/ws"))
+            self.assertIsNone(connect.await_args.kwargs["ssl"])
+            await communicator.disconnect()
+
+
+@override_settings(
+    WHISPER_WS_URL="wss://external.example/ws",
+    WHISPER_API_TOKEN="env-token",
+    WHISPER_CA_CERT="/unused/test-ca.pem",
+)
+class RelayReadsTheServiceRowTests(TransactionTestCase):
+    """The relay's endpoint is admin-owned; ``settings`` is only the fallback.
+
+    The pairing that matters is the last test: a disabled row must not fall back to the
+    environment. If it did, an admin who turns dictation off would watch it keep working
+    and have no way to stop it, which makes the tick box decorative.
+    """
+
+    reset_sequences = True
+
+    def setUp(self):
+        from common.models import ExternalService
+
+        self.project, _ = Project.objects.get_or_create(
+            slug="maxillo", defaults={"name": "Maxillo"}
+        )
+        self.user = User.objects.create_user(username="row-transcriber", password="x")
+        ProjectAccess.objects.create(user=self.user, project=self.project, role="admin")
+        self.patient = Patient.objects.create(name="P", project=self.project)
+        self.service = ExternalService.objects.create(
+            slug="whisper_live",
+            name="Local Whisper",
+            kind="stt_websocket",
+            base_url="ws://whisper:9097/ws",
+            api_key_env="TEST_RELAY_TOKEN",
+            languages=["it", "en"],
+            connect_timeout_seconds=7,
+        )
+
+    def communicator(self, query="lang=it"):
+        communicator = WebsocketCommunicator(
+            URLRouter(websocket_urlpatterns),
+            f"/ws/live-transcription/maxillo/{self.patient.patient_id}/?{query}",
+        )
+        communicator.scope["user"] = self.user
+        return communicator
+
+    async def test_the_row_overrides_the_environment(self):
+        upstream = FakeWhisperSocket()
+        with (
+            mock.patch.dict("os.environ", {"TEST_RELAY_TOKEN": "row-token"}),
+            mock.patch(
+                "common.consumers.websockets.connect",
+                new=mock.AsyncMock(return_value=upstream),
+            ) as connect,
+        ):
+            communicator = self.communicator()
+            connected, code = await communicator.connect()
+            self.assertTrue(connected, msg=f"refused with {code}")
+
+            url = connect.await_args.args[0]
+            self.assertTrue(url.startswith("ws://whisper:9097/ws"))
+            self.assertIn("token=row-token", url)
+            self.assertNotIn("env-token", url)
+            self.assertEqual(connect.await_args.kwargs["open_timeout"], 7)
+            await communicator.disconnect()
+
+    async def test_a_language_outside_the_rows_set_is_refused(self):
+        """The row narrows what the endpoint is asked for; 'de' is supported code-side."""
+        with mock.patch.dict("os.environ", {"TEST_RELAY_TOKEN": "row-token"}):
+            communicator = self.communicator("lang=de")
+            connected, code = await communicator.connect()
+        self.assertFalse(connected)
+        self.assertEqual(code, 4400)
+
+    async def test_a_disabled_row_refuses_even_though_the_environment_is_set(self):
+        from common.models import ExternalService
+
+        await database_sync_to_async(
+            ExternalService.objects.filter(slug="whisper_live").update
+        )(is_enabled=False)
+
+        with mock.patch.dict("os.environ", {"TEST_RELAY_TOKEN": "row-token"}):
+            communicator = self.communicator()
+            connected, code = await communicator.connect()
+        self.assertFalse(connected)
+        self.assertEqual(code, 4503)
