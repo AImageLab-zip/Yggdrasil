@@ -1,11 +1,15 @@
 """Authentication and invitation-related views."""
 import logging
 import uuid
+from email.mime.image import MIMEImage
 
 from django.conf import settings
-from django.core.mail import get_connection, send_mail
+from django.contrib.staticfiles import finders
+from django.core.mail import EmailMultiAlternatives, get_connection
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.models import User
+from django.db.models import Prefetch
 from django.contrib import messages
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -102,6 +106,35 @@ def register(request):
     return render(request, 'registration/register.html', {'form': form})
 
 
+INVITATION_LOGO_CID = 'yggdrasil-logo'
+
+
+def _send_invitation_email(invitation, context, sender_email, connection):
+    """Send the invitation as text + HTML, with the logo attached inline (cid:)."""
+    subject = render_to_string('registration/emails/invitation_subject.txt', context).strip()
+    text_body = render_to_string('registration/emails/invitation_body.txt', context)
+    html_body = render_to_string('registration/emails/invitation_body.html', context)
+
+    message = EmailMultiAlternatives(
+        subject, text_body, sender_email, [invitation.email], connection=connection,
+    )
+    message.attach_alternative(html_body, 'text/html')
+
+    logo_path = finders.find('icons/email-logo.png')
+    if logo_path:
+        # multipart/related keeps clients from listing the inline logo as an attachment.
+        message.mixed_subtype = 'related'
+        with open(logo_path, 'rb') as fh:
+            logo = MIMEImage(fh.read(), 'png')
+        logo.add_header('Content-ID', f'<{INVITATION_LOGO_CID}>')
+        logo.add_header('Content-Disposition', 'inline', filename='yggdrasil-logo.png')
+        message.attach(logo)
+    else:
+        logger.warning('Invitation email logo not found; sending without it')
+
+    message.send(fail_silently=False)
+
+
 @login_required
 @user_passes_test(lambda u: u.is_staff)
 def invitation_list(request):
@@ -131,8 +164,6 @@ def invitation_list(request):
                     'register_url': register_url,
                     'signature': form.cleaned_data.get('signature') or 'The Yggdrasil team',
                 }
-                subject = render_to_string('registration/emails/invitation_subject.txt', email_context).strip()
-                message = render_to_string('registration/emails/invitation_body.txt', email_context)
                 sender_email = form.cleaned_data.get('sender_email')
 
                 try:
@@ -141,14 +172,7 @@ def invitation_list(request):
                         password=settings.EMAIL_HOST_PASSWORD,
                         fail_silently=False,
                     )
-                    send_mail(
-                        subject,
-                        message,
-                        sender_email,
-                        [invitation.email],
-                        fail_silently=False,
-                        connection=connection,
-                    )
+                    _send_invitation_email(invitation, email_context, sender_email, connection)
                     invitation.email_sent_at = timezone.now()
                     invitation.email_send_error = ''
                     invitation.save(update_fields=['email_sent_at', 'email_send_error'])
@@ -170,8 +194,14 @@ def invitation_list(request):
             return redirect('invitation_list')
     else:
         form = InvitationForm()
+    users = User.objects.order_by('username').prefetch_related(Prefetch(
+        'project_access',
+        queryset=ProjectAccess.objects.select_related('project').order_by('project__name'),
+    ))
     return render(request, 'registration/invitation_list.html', {
         'invitations': invitations,
+        'users': users,
+        'contact_emails': ', '.join(u.email for u in users if u.is_active and u.email),
         'form': form,
         'registration_base_url': request.build_absolute_uri(reverse('register'))
     })

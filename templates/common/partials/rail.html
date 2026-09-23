@@ -24,6 +24,7 @@
         {% if user.is_staff %}
             <a href="{% url 'online_users_dashboard' %}" class="ygg-rail-item{% if un == 'online_users_dashboard' %} is-active{% endif %}" title="Live Users">{% icon 'circle-dot' %}</a>
             <a href="{% url 'user_activity_stats' %}" class="ygg-rail-item{% if un == 'user_activity_stats' %} is-active{% endif %}" title="User Activity">{% icon 'chart-line' %}</a>
+            <a href="{% url 'invitation_list' %}" class="ygg-rail-item{% if un == 'invitation_list' %} is-active{% endif %}" title="Invitations">{% icon 'envelope' %}</a>
             <a href="{% url 'admin_control_panel' %}" class="ygg-rail-item{% if un == 'admin_control_panel' %} is-active{% endif %}" title="Control Panel">{% icon 'layout-dashboard' %}</a>
         {% endif %}
     {% endif %}

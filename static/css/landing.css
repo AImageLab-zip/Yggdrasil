@@ -201,23 +201,29 @@ main.landing {
 }
 
 /* ---- Domain cards ------------------------------------------------------ */
+/* Only the domains the user can enter get a card, so the count varies (most
+   users see one, admins see all). Equal-width cards in a centred, wrapping row
+   line up at any count; five or more shrink so they still share one row. */
 .domains {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    --domain-w: 280px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 16px;
     width: 100%;
 }
-@media (max-width: 1080px) {
-    .domains { grid-template-columns: repeat(2, 1fr); gap: 16px; }
-}
+.domains:has(> .domain:nth-child(5)) { --domain-w: 220px; }
 @media (max-width: 640px) {
-    .domains { grid-template-columns: 1fr; }
+    .domains,
+    .domains:has(> .domain:nth-child(5)) { --domain-w: 100%; }
 }
 
 .domain {
     position: relative;
     display: flex;
     flex-direction: column;
+    flex: 0 1 var(--domain-w);
+    min-width: 0;
     min-height: 350px;
     padding: 24px;
     border-radius: 18px;
