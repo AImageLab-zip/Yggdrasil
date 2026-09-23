@@ -11,6 +11,50 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1] - 2026-09-23
+
+Cardiology joins the platform, inviting people is easy to find again, and the
+home page fits the areas you actually work in.
+
+### Added
+- **Cardiology.** A new area at `/cardiology/` for reviewing ECG recordings. Upload
+  one recording per patient, or a whole folder at once if you administer the
+  project. Each recording is drawn on the familiar clinical grid (25 mm/s, 10 mm/mV)
+  and can be panned by dragging or with the slider, so a 12-lead strip stays
+  readable on a phone. Classify each recording as AF, NSR, Other or NI and add
+  notes; a **Next** button walks you through a folder in list order. The list can
+  be filtered to classified recordings, recordings with notes, or recordings with
+  neither. Exports can include the raw recordings, the plots and the
+  classifications.
+- **Every change to an ECG classification is kept.** If someone else changes it
+  while you have the page open, your change is refused and you are asked to reload,
+  instead of silently replacing theirs.
+- **A recording that cannot be plotted is refused at upload**, with the reason:
+  malformed files, non-numeric samples, and recordings too long to draw at clinical
+  scale (about three minutes for 12 leads).
+- **The invitations page lists every user with their email.** Staff can see each
+  account's name, email, projects and role, when they joined and last signed in, and
+  copy the addresses of all active users in one click to contact them.
+
+### Changed
+- **Invitations are back in the navigation**: an envelope icon in the left bar and
+  an **Invitations** button in the Control Panel (staff only).
+- **Invitation emails look the part.** They now carry the Yggdrasil logo, a short
+  summary of the projects, role and expiry, and an **Accept invitation** button,
+  with a plain-text version for mail clients that do not show formatting.
+- **The home page shows only your areas, centred.** Someone with access to a single
+  area now sees one card in the middle of the page instead of a lone card in the
+  first of four columns; on a wide screen administrators see all five areas in one
+  row.
+
+### Fixed
+- **Deleting an unused invitation works again**; the button used to lead to an
+  error page.
+- **"Generate the missing default panoramics" now works.** The batch page loads each
+  patient in a hidden frame, and the site's security settings refused to be framed,
+  even by itself, so every patient timed out. The patient page now allows framing by
+  Yggdrasil's own pages only. The new ECG plot batch page relies on the same fix.
+
 ## [3.2.0] - 2026-09-23
 
 A security and reliability release. Most of it is invisible when things work; where
