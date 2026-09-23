@@ -952,16 +952,6 @@ def bulk_rerun_processing(request):
     )
 
 
-@login_required
-def user_profile(request, username=None):
-    """The shared profile page, resolved for this namespace.
-
-    The stub this replaces rendered a 35-line template and ignored `username`, so
-    profile/<username>/ always showed your own.
-    """
-    from maxillo.views.profile import user_profile as shared_user_profile
-
-    return shared_user_profile(request, username=username)
 
 
 

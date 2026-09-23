@@ -5,6 +5,7 @@ from annotations import views as annotations_views
 from common.domain_views import deletion as shared_deletion
 from common.domain_views import export as shared_export
 from common.domain_views import folders_tags as shared_folders
+from common.domain_views import profile as shared_profile
 from common.domain_views import voice_captions as shared_captions
 from urology import views, wsi_views
 
@@ -92,9 +93,9 @@ urlpatterns = [
         lambda request: redirect("admin_control_panel"),
         name="admin_control_panel",
     ),
-    path("profile/", views.user_profile, name="user_profile"),
+    path("profile/", shared_profile.user_profile, name="user_profile"),
     path(
-        "profile/<str:username>/", views.user_profile, name="user_profile_by_username"
+        "profile/<str:username>/", shared_profile.user_profile, name="user_profile_by_username"
     ),
     path("folders/create/", shared_folders.create_folder, name="create_folder"),
     path("folders/<int:folder_id>/stats/", shared_folders.folder_stats, name="folder_stats"),
