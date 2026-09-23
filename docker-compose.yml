@@ -4,10 +4,14 @@ services:
     web:
         build: .
         container_name: yggdrasil-web-${DOCKER_SUFFIX}
+        user: "${UID:-1000}:${GID:-1000}"
         working_dir: /app
         command: /app/entrypoint.sh
         ports:
-            - "${WEB_EXTERNAL_PORT}:8000"
+            # Loopback only: the proxy reaches web over proxy-net. Published on
+            # 0.0.0.0 this bypassed TLS, and a direct client could set the
+            # X-Forwarded-* headers the app trusts from the proxy.
+            - "127.0.0.1:${WEB_EXTERNAL_PORT}:8000"
         depends_on:
             db:
                 condition: service_healthy
@@ -35,6 +39,7 @@ services:
     beat:
         build: .
         container_name: yggdrasil-beat-${DOCKER_SUFFIX}
+        user: "${UID:-1000}:${GID:-1000}"
         working_dir: /app
         command: python -m celery -A yggdrasil beat --loglevel=info --schedule /tmp/celerybeat-schedule
         depends_on:
@@ -57,6 +62,7 @@ services:
     maintenance-worker:
         build: .
         container_name: yggdrasil-maintenance-${DOCKER_SUFFIX}
+        user: "${UID:-1000}:${GID:-1000}"
         working_dir: /app
         command: python -m celery -A yggdrasil worker --queues ${MAINTENANCE_QUEUE:-maintenance} --concurrency 1 --loglevel=info
         depends_on:
@@ -80,6 +86,7 @@ services:
     runner-worker:
         build: .
         container_name: yggdrasil-runner-${DOCKER_SUFFIX}
+        user: "${UID:-1000}:${GID:-1000}"
         working_dir: /app
         # Consumes every runner queue (RUNNER_QUEUES from .env.worker) and drives the
         # SLURM cluster over SSH. The ONLY service with the SSH key + cluster config.
@@ -88,18 +95,49 @@ services:
         # Django process. Each task builds its own SlurmSSH client, so no paramiko
         # state is shared across threads.
         command: sh -c 'python -m celery -A yggdrasil worker --queues "$${RUNNER_QUEUES:-runner_prod}" --pool=threads --concurrency "$${RUNNER_CONCURRENCY:-32}" --loglevel=info'
+        # Not the web app's .env: this service holds the cluster SSH key, so it gets
+        # only what it uses -- .env.worker plus the storage settings it presigns and
+        # lists outputs with (interpolated from .env by compose). It never touches
+        # the database or sends mail; those settings are inert placeholders, and
+        # DB_HOST is unresolvable so an accidental ORM call fails loudly.
+        env_file:
+            - .env.worker
         environment:
             PYTHONPATH: /app
-        env_file:
-            - .env
-            - .env.worker
+            SECRET_KEY: runner-worker-serves-no-http
+            DB_NAME: none
+            DB_USER: none
+            DB_PASSWORD: none
+            DB_HOST: runner-worker-has-no-database.invalid
+            EMAIL_BACKEND: django.core.mail.backends.dummy.EmailBackend
+            EMAIL_HOST: localhost
+            EMAIL_PORT: "25"
+            EMAIL_HOST_USER: ""
+            EMAIL_HOST_PASSWORD: ""
+            EMAIL_USE_TLS: "false"
+            EMAIL_USE_SSL: "false"
+            DEFAULT_FROM_EMAIL: runner@localhost
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+            OBJECT_STORAGE_ENDPOINT_URL: ${OBJECT_STORAGE_ENDPOINT_URL}
+            OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-}
+            OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID}
+            OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY}
+            OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+            OBJECT_STORAGE_USE_SSL: ${OBJECT_STORAGE_USE_SSL:-false}
+            OBJECT_STORAGE_VERIFY_SSL: ${OBJECT_STORAGE_VERIFY_SSL:-true}
+            OBJECT_STORAGE_ADDRESSING_STYLE: ${OBJECT_STORAGE_ADDRESSING_STYLE:-path}
+            OBJECT_STORAGE_KEY_PREFIX: ${OBJECT_STORAGE_KEY_PREFIX:-}
+            RUNNER_STAGE_MODE: ${RUNNER_STAGE_MODE:-presigned}
+            SLURM_KNOWN_HOSTS: /run/secrets/slurm_known_hosts
+            LOG_LEVEL: ${LOG_LEVEL:-INFO}
         restart: unless-stopped
         volumes:
             - app_logs:/app/logs
             # SSH key mounted read-only; path must match SLURM_SSH_KEY in .env.worker.
+            # The file must be readable by ${UID} (the service user).
             - ${SLURM_SSH_KEY_HOST:-./secrets/slurm_ssh_key}:/run/secrets/slurm_ssh_key:ro
             # Paramiko rejects unknown hosts; pre-populate with ssh-keyscan for the cluster login node.
-            - ${SLURM_KNOWN_HOSTS_HOST:-./secrets/slurm_known_hosts}:/root/.ssh/known_hosts:ro
+            - ${SLURM_KNOWN_HOSTS_HOST:-./secrets/slurm_known_hosts}:/run/secrets/slurm_known_hosts:ro
         # SITE-SPECIFIC. On app-net, Docker's embedded resolver forwards to the
         # host stub, which can drop a CNAME alias the login node is reachable by
         # (here: ing.unimore.it resolves only via the site resolvers, while the

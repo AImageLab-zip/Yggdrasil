@@ -29,7 +29,12 @@
         if (!files.length) {
             summary.textContent = input.multiple ? 'No files selected' : 'No file selected';
         } else if (files.length === 1) {
-            summary.textContent = files[0].name;
+            const f = files[0];
+            if (f.name.match(/\.(jpe?g)$/i) && (input.name === 'urology-wsi' || input.name === 'urology-confocal')) {
+                summary.textContent = `${f.name} (auto-pyramidize to TIFF)`;
+            } else {
+                summary.textContent = f.name;
+            }
         } else {
             summary.textContent = `${files.length} files selected`;
         }
@@ -153,6 +158,11 @@
                 window.location.href = data.redirect;
                 return;
             }
+            if (xhr.status >= 200 && xhr.status < 300) {
+                const targetUrl = (data && data.redirect) || xhr.responseURL || window.location.href;
+                window.location.href = targetUrl;
+                return;
+            }
             const message = data && data.error ? data.error : `Upload failed (HTTP ${xhr.status}).`;
             notify('danger', message);
             if (progress) progress.hidden = true;
@@ -235,6 +245,55 @@
                     if (progress) progress.hidden = true;
                     setSubmitting(form, false);
                 });
+                return;
+            }
+
+            // Check for Urology WSI / Confocale scan files requiring in-browser pyramidal conversion
+            const wsiInput = form.querySelector('input[name="urology-wsi"]');
+            const confocalInput = form.querySelector('input[name="urology-confocal"]');
+            const convertibleInputs = [wsiInput, confocalInput].filter(input =>
+                input && !input.disabled && input.files && input.files.length &&
+                input.dataset.converted !== 'true' &&
+                window.WSIConvert &&
+                (window.WSIConvert.isConvertible ? window.WSIConvert.isConvertible(input.files[0]) : window.WSIConvert.isConvertibleJpeg(input.files[0]))
+            );
+
+            if (convertibleInputs.length > 0) {
+                event.preventDefault();
+                setSubmitting(form, true);
+
+                const progressLabel = document.getElementById('uploadProgressLabel');
+                const progress = document.getElementById('uploadProgress');
+                if (progress) progress.hidden = false;
+
+                async function convertAllSequential() {
+                    for (const input of convertibleInputs) {
+                        const file = input.files[0];
+                        if (progressLabel) progressLabel.textContent = `Converting ${file.name} to Pyramidal TIFF...`;
+                        const convertFn = window.WSIConvert.convertScanToPyramidTiff || window.WSIConvert.convertJpegToTiff;
+                        const res = await convertFn(file, {
+                            onProgress: (pct, msg) => {
+                                if (progressLabel) progressLabel.textContent = `[${pct}%] ${file.name}: ${msg}`;
+                            }
+                        });
+                        const transfer = new DataTransfer();
+                        transfer.items.add(res.file);
+                        input.files = transfer.files;
+                        input.disabled = false;
+                        input.dataset.converted = 'true';
+                        summarizeFiles(input);
+                    }
+                }
+
+                convertAllSequential()
+                    .then(() => {
+                        uploadFormWithProgress(form);
+                    })
+                    .catch(err => {
+                        notify('danger', 'Slide Pyramidal Conversion failed: ' + err.message);
+                        if (progress) progress.hidden = true;
+                        setSubmitting(form, false);
+                    });
                 return;
             }
 

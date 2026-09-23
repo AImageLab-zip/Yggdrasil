@@ -352,14 +352,14 @@ class AdminStructureTests(TestCase):
         self.assertNotIn(None, clinical)
         # Each domain forms one contiguous run, in registry order.
         runs = [g for i, g in enumerate(clinical) if i == 0 or clinical[i - 1] != g]
-        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy"])
+        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy", "Urology"])
 
         # Shared models come first, before the per-domain runs.
         access = [entry["group"] for entry in sections["Projects & access"]["models"]]
         self.assertIsNone(access[0])
         self.assertEqual(
             [g for i, g in enumerate(access) if i == 0 or access[i - 1] != g],
-            [None, "Maxillo", "Brain", "Laparoscopy"],
+            [None, "Maxillo", "Brain", "Laparoscopy", "Urology"],
         )
 
         # A section drawing on one app has nothing to disambiguate.
@@ -473,7 +473,8 @@ class JobActionSafetyTests(TestCase):
     def test_retry_runs_once_confirmed(self):
         jobs = [self._job("failed") for _ in range(2)]
         self.send_task.reset_mock()
-        response = self._post("retry_failed_jobs", jobs, confirmed="yes")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._post("retry_failed_jobs", jobs, confirmed="yes")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Job.objects.filter(status="retrying").count(), 2)
         self.assertEqual(self.send_task.call_count, 2)

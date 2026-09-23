@@ -5,13 +5,14 @@ studies, an external compute cluster processes them, and the results are viewed,
 annotated and exported — all under one authorization model and one durable
 annotation record.
 
-Three research areas are mounted as their own Django apps:
+Four research areas are mounted as their own Django apps:
 
 | Area | Prefix | What it holds |
 |---|---|---|
 | **Maxillo** | `/maxillo/` | Dental / maxillofacial imaging — CBCT, intraoral scans (IOS), intraoral photos, teleradiography, panoramic |
 | **Brain** | `/brain/` | Brain-tumour MRI — T1, T1c, T2, FLAIR and segmentation |
 | **Laparoscopy** | `/laparoscopy/` | Surgical video |
+| **Urology** | `/urology/` | Multimodal urology — multiparametric prostate MRI, digital pathology Whole Slide Images (WSI), confocal laser endomicroscopy |
 
 Live instance: <https://yggdrasil.ing.unimore.it>
 
@@ -29,8 +30,10 @@ Live instance: <https://yggdrasil.ing.unimore.it>
   `frontend/` into a committed bundle: an orthogonal volume grid with
   measurements and segmentation, a tooth-segmentation surface, an IOS mesh
   viewer, a photo viewer with calibrated measurements, a panoramic
-  reconstruction (arch fit → slab → projection) and a frame-accurate video
-  editor.
+  reconstruction (arch fit → slab → projection), a frame-accurate video
+  editor, and a digital pathology Whole Slide Image (WSI) multi-resolution
+  deep-zoom viewer with synchronized segmentation masks and an in-browser
+  WebAssembly (`wasm-vips`) gigapixel pyramidal TIFF converter.
 - **Durable annotations.** Landmarks, segmentations, classifications, panoramic
   arches, measurements, video regions and quadrant markers are all stored in one
   versioned model in the `annotations/` app — snapshots with revision numbers,
@@ -62,16 +65,20 @@ Full instructions: [docs/setup.md](docs/setup.md).
 - [docs/setup.md](docs/setup.md) — first-time setup: `.env`, `DOCKER_SUFFIX`, Docker networks
 - [docs/running.md](docs/running.md) — day-to-day commands: start/stop, logs, migrations, shell access
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit: apps, request lifecycle, pipeline, annotation model
+- [docs/urology_domain_architecture.md](docs/urology_domain_architecture.md) — urology domain architecture, multimodal design, and WSI pipeline
+- [docs/wsi_viewer_process.md](docs/wsi_viewer_process.md) — WSI digital pathology pipeline from in-browser conversion to 40× visualization
 - [docs/runners.md](docs/runners.md) — distributed runners and the runner callback API
 - [docs/admin-tasks.md](docs/admin-tasks.md) — production operations: superusers, backups, maintenance modes, sweeps
 - [docs/new-project-type.md](docs/new-project-type.md) — adding a new project app
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Docker quickstart, tests, CI, migrations, and the invariants
+- [STUDENTS.md](STUDENTS.md) — where new work goes: free, through review, or maintainers only
 - [CLAUDE.md](CLAUDE.md) — orientation for AI coding agents
 
 Each app also carries its own README describing what it owns and where its
 boundary with `common/` runs: [common](common/README.md),
 [annotations](annotations/README.md), [maxillo](maxillo/README.md),
-[brain](brain/README.md), [laparoscopy](laparoscopy/README.md).
+[brain](brain/README.md), [laparoscopy](laparoscopy/README.md),
+[urology](urology/README.md).
 
 Notes:
 

@@ -1,0 +1,78 @@
+{% comment %}
+One slide stage -- toolbar, tiled canvas host and empty state -- for the WSI and
+Confocale viewers, which are the same viewer over different images. Included
+twice with a different `id_prefix`; frontend/entries/wsi-viewer.js bootstraps
+each from `urology<Prefix>Data` / `urology<Prefix>Stage`.
+
+    id_prefix   Wsi | Confocal -- every element id is urology{{ id_prefix }}*
+    kind        display name, e.g. "WSI"
+    icon        Font Awesome class for the empty state
+    available   whether the patient has a slide of this kind
+    empty_hint  what to upload, for the empty state
+{% endcomment %}
+            <div class="urology-stage-panel is-hidden" id="urology{{ id_prefix }}StagePanel">
+                {% if available %}
+                <!-- {{ kind }} Toolbar -->
+                <div class="wsi-toolbar">
+                    <!-- Navigation & Annotation Tools -->
+                    <div class="btn-group me-2" role="group" aria-label="{{ kind }} Tools">
+                        <button type="button" class="btn btn-dark active" id="urology{{ id_prefix }}ToolPan" title="Pan / Navigate">
+                            <i class="fas fa-hand"></i> Pan
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}ToolLength" title="Calibrated Ruler (µm / mm)">
+                            <i class="fas fa-ruler"></i> Ruler
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}ToolRect" title="Rectangle ROI (Area)">
+                            <i class="fas fa-vector-square"></i> Rect
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}ToolCircle" title="Circle ROI">
+                            <i class="fas fa-circle"></i> Circle
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}ToolSpline" title="Spline / Boundary (Outline)">
+                            <i class="fas fa-draw-polygon"></i> Spline
+                        </button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}ToolLabel" title="Point Marker & Name">
+                            <i class="fas fa-tag"></i> Label
+                        </button>
+                    </div>
+
+                    <!-- Magnification Controls -->
+                    <div class="btn-group me-2" role="group" aria-label="Magnification">
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Fit" title="Fit Slide to Window">Fit</button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Mag1">1.25x</button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Mag2">2.5x</button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Mag5">5x</button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Mag10">10x</button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Mag20">20x</button>
+                        <button type="button" class="btn btn-dark" id="urology{{ id_prefix }}Mag40">40x</button>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="ms-auto d-flex align-items-center gap-2">
+                        <span id="urology{{ id_prefix }}Status" class="small text-muted me-1"></span>
+                        <button type="button" class="btn btn-sm btn-outline-info active" id="urology{{ id_prefix }}ToggleSegBtn" title="Toggle Segmentation Overlay" style="display: none;">
+                            <i class="fas fa-shapes me-1"></i><span>Segmentation</span>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="urology{{ id_prefix }}ToggleVisibilityBtn" title="Toggle Annotations">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="urology{{ id_prefix }}ClearBtn" title="Clear Annotations">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success" id="urology{{ id_prefix }}SaveBtn" title="Save Annotations">
+                            <i class="fas fa-floppy-disk"></i> Save
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Host for {{ kind }} tiled canvas, SVG layer, minimap -->
+                <div class="wsi-canvas-host" id="urology{{ id_prefix }}Stage"></div>
+                {% else %}
+                <div class="urology-empty-stage">
+                    <i class="fas {{ icon }} fa-3x text-secondary"></i>
+                    <h5>No {{ kind }} Slide Uploaded</h5>
+                    <p>Upload {{ empty_hint }} for this patient to view it here.</p>
+                </div>
+                {% endif %}
+            </div>
+

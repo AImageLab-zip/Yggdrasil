@@ -43,9 +43,9 @@ def _can_transcribe(user, domain, patient_id):
     make, through the same helper -- and deliberately not a second spelling of it.
 
     **The project is the patient's, not the domain's.** This used to pass the domain
-    *slug* as the permission context, and a string resolves through
-    ``entry_project_for(None, domain)`` (``common.permissions._project_from_context``):
-    the domain's first active project by name, for nobody in particular. Every patient in
+    *slug* as the permission context, and a string used to resolve through
+    ``entry_project_for(None, domain)``: the domain's first active project by name, for
+    nobody in particular (the helpers now refuse anything but a ``Project``). Every patient in
     every other project of the domain was therefore checked against a project it is not
     in, and refused with 4403 -- live captions stopped working on a page whose Record
     button, save and every other write still did, because those resolve the project the

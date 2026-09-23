@@ -8,4 +8,4 @@ class MaxilloConfig(AppConfig):
 	verbose_name = "Maxillo"
 
 	def ready(self):
-		import maxillo.signals
+		import maxillo.signals  # noqa: F401  (registers signal receivers)

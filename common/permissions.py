@@ -12,7 +12,6 @@ everyone else. Granting that role is therefore what publishes a project to the
 anonymous demo -- there is no separate demo flag.
 """
 
-from django.apps import apps
 
 from common.domains import normalize_domain
 from common.models import Project, ProjectAccess
@@ -21,27 +20,21 @@ WRITE_ROLES = {"annotator", "admin"}
 READ_ROLES = {"viewer", "annotator", "admin"}
 
 
-def _namespace(request_or_namespace):
-    if isinstance(request_or_namespace, str):
-        return normalize_domain(request_or_namespace)
-    namespace = (
-        getattr(request_or_namespace, "resolver_match", None)
-        and request_or_namespace.resolver_match.namespace
-    )
-    return normalize_domain(namespace)
+def current_project(request):
+    """The project the user is working in for this request's domain.
 
-
-def _project_from_context(project_or_app_context):
-    """Resolve a Project from a Project, a request, or a namespace string.
-
-    For a request the session's current project wins (when it belongs to the
-    request's domain); otherwise the domain's entry project for the requesting
-    user is used, so this agrees with the project the middleware put them in.
+    The session's ``current_project_id`` when it belongs to the request's domain,
+    else the user's entry project (``entry_project_for``). This is a UI
+    preference -- which project a list page opens on, where an upload lands --
+    and never an authorization input: every object-level check takes the
+    object's own project. Passing a request to a permission helper used to mean
+    "the session project", so an admin of project A passed checks on patients of
+    project B; the helpers now refuse anything that is not a ``Project``.
     """
-    if isinstance(project_or_app_context, Project):
-        return project_or_app_context
-    namespace = _namespace(project_or_app_context)
-    session = getattr(project_or_app_context, "session", None)
+    from common.domain_models import get_namespace
+
+    namespace = normalize_domain(get_namespace(request))
+    session = getattr(request, "session", None)
     if session is not None:
         pid = session.get("current_project_id")
         if pid:
@@ -50,7 +43,20 @@ def _project_from_context(project_or_app_context):
             ).first()
             if project:
                 return project
-    return entry_project_for(getattr(project_or_app_context, "user", None), namespace)
+    return entry_project_for(getattr(request, "user", None), namespace)
+
+
+def _as_project(project):
+    """``project`` itself, refusing requests and domain names.
+
+    A ``None`` project (a legacy row without one) denies instead of guessing.
+    """
+    if project is None or isinstance(project, Project):
+        return project
+    raise TypeError(
+        f"permission checks take a Project, not {type(project).__name__}; "
+        "use the object's own project (current_project(request) is UI-only)"
+    )
 
 
 def entry_project_for(user, domain):
@@ -81,64 +87,58 @@ def _access_for(user, project):
     return ProjectAccess.objects.filter(user=user, project=project).first()
 
 
-def user_is_project_admin(user, project_or_app_context):
+def user_is_project_admin(user, project):
+    project = _as_project(project)
     if not user or not user.is_authenticated:
         return False
     if user.is_staff:
         return True
-    project = _project_from_context(project_or_app_context)
     if project is None:
         return False
     access = _access_for(user, project)
     return bool(access and access.role == "admin")
 
 
-def user_has_project_access(user, project_or_app_context):
+def user_has_project_access(user, project):
+    project = _as_project(project)
     if not user or not user.is_authenticated:
         return False
     if user.is_staff:
         return True
-    project = _project_from_context(project_or_app_context)
     if project is None:
         return False
     access = _access_for(user, project)
     return bool(access and access.role in READ_ROLES)
 
 
-def _project_for_folder(folder, project_or_app_context):
+def _project_for_folder(folder, project=None):
     """The project whose ACL decides access to ``folder``.
 
-    A folder's own project is authoritative whenever it has one. The context
-    argument is only a fallback for a missing folder, because resolving it can
-    answer with a *different* project: given a request or a namespace it returns
-    the session's current project (``_project_from_context``). Preferring it
-    meant a folder was checked against whichever project the user happened to be
-    working in -- so holding access to project A authorized reading a folder in
-    project B, for every caller that passes ``request`` or a domain slug.
+    A folder's own project is authoritative whenever it has one; ``project`` is
+    only the fallback for a missing folder (e.g. a patient outside any folder
+    passes its own project).
     """
-    project = getattr(folder, "project", None)
-    if project is not None:
-        return project
-    if project_or_app_context is not None:
-        return _project_from_context(project_or_app_context)
-    return None
+    folder_project = getattr(folder, "project", None)
+    if folder_project is not None:
+        return folder_project
+    return _as_project(project)
 
 
-def user_can_read_folder(user, folder, project_or_app_context=None):
-    project = _project_for_folder(folder, project_or_app_context)
+def user_can_read_folder(user, folder, project=None):
+    project = _project_for_folder(folder, project)
     if user_is_project_admin(user, project):
         return True
     access = _access_for(user, project)
     return bool(access and access.role in READ_ROLES)
 
 
-def user_can_write_annotations(user, folder, project_or_app_context=None):
+def user_can_write_annotations(user, folder, project=None):
     # A viewer is refused below anyway; this is the cheap guard for the day
     # someone grants the shared guest account a writing role by mistake.
     from common.demo import is_demo_guest
     if is_demo_guest(user):
         return False
-    project = _project_for_folder(folder, project_or_app_context)
+    project = _project_for_folder(folder, project)
     if user_is_project_admin(user, project):
         return True
     access = _access_for(user, project)
@@ -146,17 +146,49 @@ def user_can_write_annotations(user, folder, project_or_app_context=None):
 
 
 def user_can_read_patient(user, patient):
-    """Project-scoped read check for a patient (any role)."""
+    """Read check for a patient (any role) against the patient's own project."""
     if not user or not user.is_authenticated or patient is None:
         return False
-    return user_can_read_folder(user, getattr(patient, "folder", None), patient.project)
+    return user_can_read_folder(user, None, patient.project)
 
 
 def user_can_write_patient_annotations(user, patient):
-    """Project-scoped write check for a patient (annotator/admin)."""
+    """Write check for a patient (annotator/admin) against the patient's own project."""
     if not user or not user.is_authenticated or patient is None:
         return False
-    return user_can_write_annotations(user, getattr(patient, "folder", None), patient.project)
+    return user_can_write_annotations(user, None, patient.project)
+
+
+def user_is_patient_admin(user, patient):
+    """Admin check against the patient's own project."""
+    return patient is not None and user_is_project_admin(user, patient.project)
+
+
+PATIENT_PERMISSIONS = {
+    "read": user_can_read_patient,
+    "write": user_can_write_patient_annotations,
+    "admin": user_is_patient_admin,
+}
+
+
+def get_patient_for(user, patient_model, patient_id, perm="read"):
+    """Load a patient and authorize ``perm`` on *its* project.
+
+    The one choke point for object-level patient access. Raises ``Http404`` when
+    the user cannot read the patient at all -- ids of other projects' patients
+    are not confirmed to exist -- and ``PermissionDenied`` (403) when they can
+    read it but ``perm`` asks for more.
+    """
+    from django.core.exceptions import PermissionDenied
+    from django.http import Http404
+
+    check = PATIENT_PERMISSIONS[perm]
+    patient = patient_model.objects.select_related("project").filter(pk=patient_id).first()
+    if patient is None or not user_can_read_patient(user, patient):
+        raise Http404("No such patient")
+    if not check(user, patient):
+        raise PermissionDenied("Permission denied")
+    return patient
 
 
 def project_allows_annotation(patient, method_slug):
@@ -172,28 +204,27 @@ def project_allows_annotation(patient, method_slug):
     return project.allows_annotation(method_slug)
 
 
-def user_can_delete_single_patient(user, folder, project_or_app_context=None):
-    return user_can_write_annotations(user, folder, project_or_app_context)
+def user_can_delete_single_patient(user, folder, project=None):
+    return user_can_write_annotations(user, folder, project)
 
 
 def user_can_move_patient(user, patient):
-    return user_is_project_admin(user, getattr(patient, "project", None) or patient)
+    return user_is_project_admin(user, getattr(patient, "project", None))
 
 
-def user_can_perform_bulk_operations(user, folder_or_project):
-    return user_is_project_admin(user, folder_or_project)
-
-
-def user_can_edit_metadata(user, patient_or_folder):
-    project = getattr(patient_or_folder, "project", None) or patient_or_folder
+def user_can_perform_bulk_operations(user, project):
     return user_is_project_admin(user, project)
 
 
-def user_can_create_export(user, folder, project_or_app_context=None):
+def user_can_edit_metadata(user, patient_or_folder):
+    return user_is_project_admin(user, getattr(patient_or_folder, "project", None))
+
+
+def user_can_create_export(user, folder, project=None):
     from common.demo import is_demo_guest
     if is_demo_guest(user):
         return False
-    project = _project_for_folder(folder, project_or_app_context)
+    project = _project_for_folder(folder, project)
     if user_is_project_admin(user, project):
         return True
     access = _access_for(user, project)
@@ -220,7 +251,7 @@ def user_can_edit_caption(user, caption):
     return bool(patient and user_is_project_admin(user, patient.project))
 
 
-def user_can_view_caption_content(user, caption, project_or_app_context=None):
+def user_can_view_caption_content(user, caption, project=None):
     if not user or not user.is_authenticated:
         return False
     if caption.user_id == user.id:

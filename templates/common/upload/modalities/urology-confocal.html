@@ -1,0 +1,20 @@
+<article class="upload-modality">
+    <div class="upload-modality__head">
+        <i class="fas fa-eye" aria-hidden="true"></i>
+        <h3>Confocale</h3>
+    </div>
+    <label class="upload-dropzone" for="urology-confocal_file">
+        <input type="file" name="urology-confocal" id="urology-confocal_file" accept=".tiff,.tif,.svs,.ndpi,.mrxs,.dz,.jpg,.jpeg">
+        <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+        <strong>Drop Confocale slide (.tiff, .svs, .jpg)</strong>
+        <small>Pyramidal TIFF or flat confocal JPG (converted automatically in browser)</small>
+        <span class="upload-file-summary" data-file-summary>No file selected</span>
+    </label>
+    <label class="upload-dropzone mt-2" for="urology-confocal-seg_file">
+        <input type="file" name="urology-confocal-segmentation" id="urology-confocal-seg_file" accept=".geojson,.json">
+        <i class="fas fa-shapes" aria-hidden="true"></i>
+        <strong>Segmentation (.geojson)</strong>
+        <small>QuPath or AI polygon masks (optional)</small>
+        <span class="upload-file-summary" data-file-summary>No segmentation selected</span>
+    </label>
+</article>

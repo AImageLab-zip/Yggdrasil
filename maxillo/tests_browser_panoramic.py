@@ -20,7 +20,7 @@ from annotations.constants import (
 from annotations.models import AnnotationSet, Geometry2DItem
 from common.annotation_lock import annotation_lock_reasons
 from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
-from maxillo.models import Folder, FolderAccess, PanoramicState, Patient
+from maxillo.models import Folder, PanoramicState, Patient
 from maxillo.views.panoramic_state import current_browser_panoramic
 from maxillo.views.patient_detail import _panorex_source_data, _resolved_cbct_viewer_source
 

@@ -1,0 +1,235 @@
+{% load static %}
+{% load cornerstone %}
+
+<link rel="stylesheet" href="{% static 'css/viewer_grid.css' %}">
+<style>
+.urology-stage-container {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    min-height: 620px;
+    height: calc(100vh - 280px);
+}
+.urology-stage-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+    background: #0f172a;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+.urology-stage-panel.is-hidden {
+    display: none !important;
+}
+.wsi-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #1e293b;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+    font-size: 13px;
+    z-index: 5;
+}
+.wsi-toolbar .btn-group .btn, .wsi-toolbar button.btn {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+.wsi-canvas-host {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 480px;
+    overflow: hidden;
+}
+.urology-empty-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 400px;
+    padding: 3rem 1.5rem;
+    text-align: center;
+}
+.urology-empty-stage i {
+    margin-bottom: 1rem;
+}
+.urology-empty-stage h5 {
+    color: #f8fafc;
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    display: block;
+    width: 100%;
+}
+.urology-empty-stage p {
+    color: #94a3b8;
+    font-size: 0.875rem;
+    margin: 0;
+    display: block;
+    width: 100%;
+}
+</style>
+
+<!-- JSON Script Payloads -->
+{{ viewer_grid_data|json_script:"viewerGridData" }}
+{% if wsi_data %}
+{{ wsi_data|json_script:"urologyWsiData" }}
+{% endif %}
+{% if confocal_data %}
+{{ confocal_data|json_script:"urologyConfocalData" }}
+{% endif %}
+
+{% include 'common/sections/patient_header_section.html' %}
+
+{% comment %} The shared modality strip (templates/maxillo/patient_detail_content.html).
+Same DOM contract -- radios named `viewerType` in #modalityToggleGroup, labels
+carrying data-modality -- so static/js/vocal_caption.js tags a caption with the
+active modality without knowing this domain exists, and a fourth urology modality
+appears here the moment it is registered. {% endcomment %}
+<div class="modality-tabs" id="modalityToggleGroup">
+    {% if patient_modalities %}
+        {% for m in patient_modalities %}
+            {% if m.slug != 'rawzip' %}
+            {% with rid='modality_'|add:m.slug %}
+            <input type="radio" class="btn-check" name="viewerType" id="{{ rid }}" autocomplete="off"
+                   {% if default_modality_slug == m.slug %}checked{% endif %}>
+            <label class="modality-toggle" data-modality="{{ m.slug }}" for="{{ rid }}">
+                {% if m.label %}{{ m.label }}{% elif m.name %}{{ m.name }}{% else %}{{ m.slug|upper }}{% endif %}
+            </label>
+            {% endwith %}
+            {% endif %}
+        {% endfor %}
+    {% else %}
+        <span class="text-muted small">No modalities configured for this patient</span>
+    {% endif %}
+</div>
+
+<div class="patient-view-grid">
+    <!-- Viewers Column -->
+    <div class="patient-view-viewer">
+        <div class="urology-stage-container" id="urologyStageContainer">
+            <!-- MRI Stage (Cornerstone3D Volume Grid) -->
+            <div class="urology-stage-panel" id="urologyMriStage">
+                {% if has_mri %}
+                <!-- MRI Toolbar -->
+                <div class="viewer-toolbar">
+                    <div class="viewer-toolbar__group" id="cbctControls">
+                        {% include 'common/sections/volume_grid_toolbar.html' with grid_has_3d=False grid_has_crosshairs=True grid_can_annotate=can_modify_segmentation %}
+                    </div>
+                </div>
+
+                <!-- 1x1 Single Viewer Grid -->
+                <div class="viewer-grid" style="flex: 1; min-height: 480px; display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr; width: 100%; height: 100%;">
+                    <div class="viewer-window" data-window-index="0"></div>
+                </div>
+                {% else %}
+                <div class="urology-empty-stage">
+                    <i class="fas fa-magnet fa-3x text-secondary"></i>
+                    <h5>No MRI Scan Uploaded</h5>
+                    <p>Upload an MRI volume (.nii, .nii.gz, .dcm) for this patient to view it here.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- WSI Stage (Digital Pathology Multi-resolution Pyramid) -->
+            {% include 'urology/sections/slide_stage.html' with id_prefix='Wsi' kind='WSI' icon='fa-microscope' available=has_wsi empty_hint='a digital pathology slide (.tiff, .svs)' %}
+            <!-- Confocale Stage (Confocale Microscopy Multi-resolution Pyramid) -->
+            {% include 'urology/sections/slide_stage.html' with id_prefix='Confocal' kind='Confocale' icon='fa-eye' available=has_confocal empty_hint='a confocal microscopy slide (.tiff, .svs)' %}
+        </div>
+    </div>
+
+    <!-- Tabbed sidebar -->
+    <div class="side-panel">
+        <div class="side-panel__tabs" role="tablist">
+            <button type="button" class="side-tab {% if default_tab == 'captions' or not default_tab %}is-active{% endif %}" data-tab-target="captions">Captions</button>
+            <button type="button" class="side-tab {% if default_tab == 'files' %}is-active{% endif %}" data-tab-target="files">Files</button>
+            <button type="button" class="side-tab {% if default_tab == 'settings' %}is-active{% endif %}" data-tab-target="settings">Settings</button>
+            <button type="button" class="side-tab {% if default_tab == 'activity' %}is-active{% endif %}" data-tab-target="activity">Activity</button>
+        </div>
+        <div class="side-panel__body">
+            <div class="side-tab-pane {% if default_tab == 'captions' or not default_tab %}is-active{% endif %}" data-tab-pane="captions">
+                {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
+            </div>
+            <div class="side-tab-pane {% if default_tab == 'files' %}is-active{% endif %}" data-tab-pane="files">
+                {% include 'common/sections/file_management_section.html' %}
+            </div>
+            <div class="side-tab-pane" data-tab-pane="settings">
+                {% include 'common/sections/scan_settings_section.html' %}
+            </div>
+            <div class="side-tab-pane" data-tab-pane="activity">
+                {% include 'common/sections/activity_section.html' %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Back Button -->
+<div class="mt-3">
+    {% firstof request.resolver_match.namespace 'urology' as ns %}
+    <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Scan List
+    </a>
+</div>
+
+<script>
+// Selecting a modality is the shared strip's job; swapping the stage is ours,
+// because .urology-stage-panel is a flex column and the shared handler's generic
+// branch would set display:block on it.
+document.addEventListener('DOMContentLoaded', () => {
+    const STAGES = {
+        'urology-mri': {panel: 'urologyMriStage'},
+        'urology-wsi': {panel: 'urologyWsiStagePanel', stage: 'urologyWsiStage'},
+        'urology-confocal': {panel: 'urologyConfocalStagePanel', stage: 'urologyConfocalStage'},
+    };
+    const group = document.getElementById('modalityToggleGroup');
+    if (!group) return;
+
+    function show(slug) {
+        if (!STAGES[slug]) return;
+        Object.entries(STAGES).forEach(([candidate, ids]) => {
+            document.getElementById(ids.panel)?.classList.toggle('is-hidden', candidate !== slug);
+        });
+
+        // The report template shows the voices of the modality on screen.
+        const short = slug.replace(/^urology-/, '');
+        document.querySelectorAll('.report-urology-modality').forEach((el) => {
+            el.classList.toggle('d-none', el.dataset.urologyModality !== short);
+        });
+
+        const indicator = document.getElementById('modalityIndicator');
+        const label = group.querySelector(`label[data-modality="${slug}"]`);
+        if (indicator && label) indicator.textContent = label.textContent.trim();
+
+        // A viewport can only measure itself once its panel is on screen.
+        setTimeout(() => {
+            window.dispatchEvent(new Event('resize'));
+            const stageId = STAGES[slug].stage;
+            if (stageId) document.getElementById(stageId)?.__wsiViewport?.resize();
+        }, 50);
+    }
+
+    group.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!target || target.type !== 'radio') return;
+        const label = group.querySelector(`label[for="${target.id}"]`);
+        show((label && label.dataset.modality) || target.id.replace(/^modality_/, ''));
+    });
+
+    // A patient with nothing uploaded has no server-side default, so pick the
+    // first stage and select its tab too -- otherwise a panel shows with no tab lit.
+    let checked = group.querySelector('input[name="viewerType"]:checked');
+    if (!checked) {
+        checked = document.getElementById(`modality_${Object.keys(STAGES)[0]}`);
+        if (checked) checked.checked = true;
+    }
+    if (checked) show(checked.id.replace(/^modality_/, ''));
+});
+</script>

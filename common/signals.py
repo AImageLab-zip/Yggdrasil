@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
@@ -93,10 +94,14 @@ def _job_post_save(sender, instance: Job, created: bool, **kwargs):
 
     The web app knows nothing about how jobs execute — a dedicated Celery worker
     (see common.runner) consumes the queue and drives the cluster.
+
+    Sent on commit: jobs are created inside ``transaction.atomic()`` blocks, and a
+    runner that claims the id before the row is committed finds nothing. Outside a
+    transaction ``on_commit`` runs the send immediately.
     """
     if instance.status not in {"pending", "retrying"}:
         return
     prev = getattr(instance, "_previous_status", None)
     if not (created or prev != instance.status):
         return
-    enqueue_runner_task(instance)
+    transaction.on_commit(lambda: enqueue_runner_task(instance))

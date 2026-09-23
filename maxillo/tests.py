@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from common.models import Invitation, Modality, Project, ProjectAccess
-from .models import Folder, FolderAccess, Patient
+from .models import Folder, Patient
 from .views.auth import _repair_empty_invitation_codes
 from .intraoral_teeth import _normalize_teeth_payload
 

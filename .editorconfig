@@ -1,0 +1,14 @@
+# Minimal on purpose: the codebase mixes tabs and spaces in Python and nothing is
+# reformatted wholesale (CONTRIBUTING.md). Only settings no file disagrees with.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.{js,mjs,json,yml,yaml,html,css,md,toml}]
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false

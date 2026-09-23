@@ -1,19 +1,12 @@
 """Classification update views."""
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required, user_passes_test
-from django.contrib import messages
-from django.http import JsonResponse, HttpResponse
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 import json
-import os
 import logging
 
 from .domain import get_domain_models
-from common.permissions import (
-    project_allows_annotation,
-    user_can_write_annotations,
-    user_is_project_admin,
-)
+from common.permissions import get_patient_for, project_allows_annotation
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +19,8 @@ def update_classification(request, patient_id):
     Patient = domain_models['Patient']
     Classification = domain_models['Classification']
     
+    patient = get_patient_for(request.user, Patient, patient_id, 'write')
     try:
-        patient = get_object_or_404(Patient, patient_id=patient_id)
-        
-        can_classify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-        if user_is_project_admin(request.user, request):
-            can_classify = True
-        
-        if not can_classify:
-            return JsonResponse({'error': 'Permission denied'}, status=403)
 
         # Every other annotation write asks the project first; this one did not,
         # so a project with occlusion classification switched off still accepted

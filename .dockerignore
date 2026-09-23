@@ -1,0 +1,26 @@
+# Never in an image: configuration and secrets come from env_file / mounts at run time.
+.env
+.env.*
+!.env.example
+!.env.worker.example
+secrets/
+certs/*.key
+backups/
+*.sql
+*.sql.gz
+
+# Runtime state lives in volumes.
+logs/
+media/
+staticfiles/
+
+# Development-only.
+.git/
+.github/
+node_modules/
+.venv*/
+**/__pycache__/
+**/*.pyc
+.ruff_cache/
+docker-compose.review.yml
+yggdrasil-technical-review-*.md

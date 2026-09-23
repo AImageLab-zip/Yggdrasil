@@ -153,6 +153,27 @@ def create_step_jobs(source_job):
     return created
 
 
+def _root_input_file(patient, modality_slug):
+    """The patient's newest raw file for ``modality_slug``, or None.
+
+    Resolves the modality the same way the rerun picker does
+    (``common.modality_config._modality_slug_for_file``), so "the picker offers
+    this step" and "a root job can be built for it" cannot disagree. Prefers a
+    raw upload over a processed derivative -- a root step's input is the raw one.
+    """
+    from common.modality_config import _modality_slug_for_file
+
+    candidates = [
+        file_obj
+        for file_obj in patient.files.all().order_by("-created_at")
+        if _modality_slug_for_file(file_obj) == modality_slug and file_obj.file_path
+    ]
+    if not candidates:
+        return None
+    raw = [f for f in candidates if "raw" in str(f.file_type or "")]
+    return (raw or candidates)[0]
+
+
 def ensure_step_jobs_for_patient(patient, requested_slugs):
     """Create missing pipeline jobs for a patient so the requested steps can run.
 
@@ -241,7 +262,27 @@ def ensure_step_jobs_for_patient(patient, requested_slugs):
             continue
         deps = list(step.depends_on.all())
         if not deps:
-            # Root step with no source job: nothing to run without the raw input.
+            # Root step with no source job. At upload time the root job is created
+            # alongside the file; a step registered *later* has none, so synthesize
+            # it from the raw input already in the registry. Without this the rerun
+            # picker would offer a step -- it decides from the same files, see
+            # common.modality_config._available_steps_for_files -- that the rerun
+            # could then never start.
+            source = _root_input_file(patient, step.modality.slug)
+            if source is None:
+                continue
+            job = Job.objects.create(
+                step=step,
+                modality_slug=slug,
+                status="pending",
+                input_files={"input": source.file_path},
+                priority=priority,
+                **entity_kwargs,
+            )
+            job_by_step[slug] = job
+            job_by_step[step.id] = job
+            newest[slug] = job
+            created.append(job)
             continue
         dep_jobs = [newest.get(d.slug) for d in deps]
         if any(dep_job is None for dep_job in dep_jobs):

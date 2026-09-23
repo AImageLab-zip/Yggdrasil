@@ -36,6 +36,7 @@ import numpy as np
 from annotations import roi_stats, services
 from annotations.constants import CoordinateSystem, MeasurementKind, MeasurementUnit
 from annotations.models import AnnotationSet, MeasurementItem, SpatialAnnotation3DItem
+from common.domains import DOMAINS
 from common.file_access import exists as artifact_exists
 from common.object_storage import download_to_tempfile
 
@@ -69,7 +70,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--domain",
-            choices=("maxillo", "brain", "laparoscopy"),
+            choices=sorted(DOMAINS),
             help="Limit to one domain.",
         )
         parser.add_argument(

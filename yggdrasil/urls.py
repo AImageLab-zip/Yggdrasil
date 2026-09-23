@@ -63,6 +63,7 @@ urlpatterns = [
     path("maxillo/", include("maxillo.urls")),
     path("brain/", include("brain.urls")),
     path("laparoscopy/", include("laparoscopy.urls")),
+    path("urology/", include("urology.urls")),
     path("cardiology/", include("cardiology.urls")),
     # Public anonymous read-only demo (Phase 7)
     path("demo/", include("common.demo_urls")),

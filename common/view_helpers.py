@@ -95,11 +95,11 @@ def bulk_upload_url_for(request, namespace: str):
     routed in every domain, so resolve it here and let templates render the
     entry point with a plain ``{% if bulk_upload_url %}``.
     """
-    from common.permissions import user_is_project_admin
+    from common.permissions import current_project, user_is_project_admin
 
     if not request.session.get('current_project_id'):
         return None
-    if not user_is_project_admin(request.user, request):
+    if not user_is_project_admin(request.user, current_project(request)):
         return None
     profile = getattr(request.user, 'profile', None)
     if not (profile and profile.can_upload_scans()):

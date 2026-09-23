@@ -15,7 +15,6 @@ from django.test import TestCase
 from annotations import serializers, services
 from annotations.adapters import legacy_maxillo
 from annotations.constants import (
-    AnnotationOrigin,
     CoordinateSystem,
     Geometry2DType,
     Geometry3DType,

@@ -38,7 +38,10 @@ python manage.py test --settings=yggdrasil.settings_sqlite_test
 MySQL and validates its credentials at import, so a suite that only ever touches a
 `test_` database would otherwise need a database server. It imports the real settings
 and swaps in an in-memory SQLite database, disables the SSL redirect and uses a fast
-password hasher. It is not used by any deployment.
+password hasher. It needs no `.env` and no environment: it supplies test-only
+placeholders for the settings `settings.py` insists on (a real environment still wins).
+It is not used by any deployment. Install `requirements-dev.txt` for `--parallel`
+(`tblib` lets a failing test report instead of crashing the runner).
 
 It is a convenience, not the reference environment. **CI runs against MySQL 8**, and it
 has to: several rules in this codebase are green on SQLite and absent on MySQL (see
@@ -61,10 +64,14 @@ The frontend has its own suite (`npm test`), described under
 `.github/workflows/ci.yml` runs on self-hosted runners for pushes to
 `release/3.0`/`main` and all PRs:
 
-- **lint** — `ruff check .` with a deliberately minimal ruleset
-  (`E9`, `F63`, `F7`, `F82`: syntax errors and undefined names only).
-  The codebase mixes tabs/spaces; there is **no formatting enforcement**.
-  Do not reformat files wholesale — widening the lint ruleset is its own PR.
+- **lint** — `ruff check .` with a deliberately small ruleset (`pyproject.toml`:
+  `E9`, `F63`, `F7`, `F82` syntax errors and undefined names, `F401` unused
+  imports, and the bandit-derived security rules `S`), then `lint-imports`, which
+  enforces the import direction (domain apps → `annotations` → `common`, domain
+  apps independent of each other; contracts and today's exceptions in
+  `pyproject.toml`). The codebase mixes tabs/spaces; there is **no formatting
+  enforcement**. Do not reformat files wholesale — widening the lint ruleset is its
+  own PR.
 - **test** — `makemigrations --check --dry-run` (no unmigrated model changes),
   `migrate`, then the full suite against MySQL 8 + Redis 7 services.
 - **frontend** — `npm ci`, `npm run build`, then **`git diff --exit-code`**: the
@@ -283,9 +290,9 @@ change makes one of those tests fail, you are breaking deployed runners:
 
 ## Database migrations
 
-**The 3.0 baseline is the anchor.** The live 3.0 schema is the reference state: the
-migration history has been collapsed into a fresh baseline, and there is no supported
-rollback path to a 1.9 or 2.0 database. Restoring an old dump and migrating forward is
+**The 3.0 schema is the anchor.** The live 3.0 schema is the reference state, and there
+is no supported rollback path to a 1.9 or 2.0 database. (The history was not squashed:
+it is ~150 migration files, several of them merges, from a `0001_initial` of 2025-09.) Restoring an old dump and migrating forward is
 not a scenario this repository supports any more.
 
 Consequently:

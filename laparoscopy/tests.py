@@ -15,7 +15,7 @@ from django.urls import reverse
 from common.models import FileRegistry, Modality, Project, ProjectAccess
 from common.permissions import filter_folders_for_user, filter_patients_for_user
 from laparoscopy.export_processor import LaparoscopyExportProcessor
-from laparoscopy.models import Export, Folder, FolderAccess, Patient, RegionAnnotation, RegionType
+from laparoscopy.models import Export, Folder, Patient, RegionAnnotation, RegionType
 from maxillo.models import Export as MaxilloExport
 
 

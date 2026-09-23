@@ -47,6 +47,7 @@ main.landing {
     --ygg-maxillo: #5b8def;
     --ygg-brain: #14a38b;
     --ygg-laparoscopy: #e0785f;
+    --ygg-urology: #8b5cf6;
     --ygg-accent2: var(--ygg-green-600);
 }
 .landing-bar__word { font-weight: 700; font-size: 15px; letter-spacing: 0.01em; }
@@ -136,7 +137,7 @@ main.landing {
     align-items: center;
     justify-content: center;
     width: 100%;
-    max-width: 1120px;
+    max-width: 1240px;
     margin: 0 auto;
     padding: 40px 24px;
 }
@@ -201,11 +202,14 @@ main.landing {
 /* ---- Domain cards ------------------------------------------------------ */
 .domains {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 18px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
     width: 100%;
 }
-@media (max-width: 900px) {
+@media (max-width: 1080px) {
+    .domains { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+}
+@media (max-width: 640px) {
     .domains { grid-template-columns: 1fr; }
 }
 
@@ -213,8 +217,8 @@ main.landing {
     position: relative;
     display: flex;
     flex-direction: column;
-    min-height: 340px;
-    padding: 26px;
+    min-height: 350px;
+    padding: 24px;
     border-radius: 18px;
     overflow: hidden;
     background: var(--ygg-surface);
@@ -222,7 +226,7 @@ main.landing {
     color: var(--ygg-text);
     text-decoration: none;
     box-shadow: var(--ygg-shadow-card-light);
-    transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
     /* Cards set --accent/--soft/--grad; these defaults keep new domains sane. */
     --accent: var(--ygg-primary);
     --soft: var(--ygg-accent-soft);
@@ -230,7 +234,7 @@ main.landing {
 }
 .domain:hover {
     transform: translateY(-6px);
-    box-shadow: var(--ygg-shadow-pop);
+    box-shadow: 0 16px 36px rgba(10, 15, 31, 0.12), 0 0 0 1px var(--accent);
     border-color: var(--accent);
     color: var(--ygg-text);
 }
@@ -250,6 +254,11 @@ main.landing {
     --grad: var(--ygg-laparoscopy-grad);
     --soft: var(--ygg-danger-soft);
 }
+.domain--urology {
+    --accent: var(--ygg-urology);
+    --grad: var(--ygg-urology-grad);
+    --soft: var(--ygg-urology-soft);
+}
 
 .domain__bar {
     position: absolute;
@@ -263,55 +272,137 @@ main.landing {
     position: absolute;
     right: -14px;
     bottom: -18px;
-    font-size: 150px;
+    font-size: 140px;
     color: var(--accent);
     opacity: 0.07;
     pointer-events: none;
 }
-/* The brain glyph's ink sits lower in its em-box than the tooth/video
-   glyphs (almost no padding below it), so the shared -18px bottom offset
-   crops into the actual silhouette instead of just trimming empty space.
-   Nudge it up just enough to clear the ink; keep the same size/corner
-   anchor as the other watermarks so it reads with the same visual weight. */
+/* Visual balancing for watermark ink bounds */
 .domain--brain .domain__watermark {
     bottom: -3px;
 }
+.domain--urology .domain__watermark {
+    bottom: -12px;
+    right: -8px;
+}
+
+.domain__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    position: relative;
+    z-index: 2;
+}
+
 .domain__tile {
-    width: 52px;
-    height: 52px;
-    border-radius: 13px;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
     background: var(--soft);
     color: var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
-    margin-bottom: 18px;
+    font-size: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
-.domain__title { font-size: 21px; font-weight: 700; margin: 0 0 8px; }
+
+.domain__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--soft);
+    color: var(--accent);
+    border: 1px solid currentColor;
+    line-height: 1.2;
+}
+.domain__badge--preview {
+    background: rgba(139, 92, 246, 0.12);
+    color: var(--ygg-urology);
+    border-color: rgba(139, 92, 246, 0.35);
+}
+.domain__badge-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.domain__overline {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+
+.domain__title { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
 .domain__desc {
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--ygg-text-muted);
-    line-height: 1.55;
+    line-height: 1.5;
     margin: 0;
     position: relative;
+    z-index: 1;
 }
+
+.domain__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 14px;
+    margin-bottom: 8px;
+    position: relative;
+    z-index: 2;
+}
+.domain__tag {
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: var(--ygg-surface-alt);
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text-muted);
+    font-family: var(--ygg-font-mono);
+    letter-spacing: -0.01em;
+    transition: border-color 0.15s, color 0.15s;
+}
+.domain:hover .domain__tag {
+    border-color: var(--ygg-border-strong);
+    color: var(--ygg-text);
+}
+
 .domain__spacer { flex: 1; }
 .domain__foot {
     display: flex;
     align-items: center;
     justify-content: space-between;
     position: relative;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--ygg-border);
+    z-index: 2;
 }
 .domain__stat { font-size: 11px; color: var(--ygg-text-faint); }
 .domain__cta {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    font-size: 13px;
+    gap: 6px;
+    font-size: 12.5px;
     font-weight: 700;
     color: var(--accent);
+    transition: gap 0.15s ease;
 }
+.domain:hover .domain__cta { gap: 9px; }
 .domain__cta i { font-size: 11px; }
 
 /* ---- Recents ----------------------------------------------------------- */

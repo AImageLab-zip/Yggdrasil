@@ -1,8 +1,8 @@
 """Object-storage config for the cluster stage helper, read from environment.
 
-On the cluster these come from the transient ``creds.env`` the runner worker drops per
-job (0600, deleted by the sbatch trap) — the cluster never stores credentials. There is
-no Yggdrasil-API config here: the cluster only moves bytes to/from object storage.
+Legacy ``YGG_STAGE_MODE=credentials`` only: these come from the transient ``creds.env``
+the runner worker drops per job (0600, deleted by the sbatch trap). The default
+presigned mode needs none of this (``presigned.py``).
 """
 import os
 from dataclasses import dataclass

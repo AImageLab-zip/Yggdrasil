@@ -13,6 +13,7 @@ DOMAIN_CHOICES = [
     ("maxillo", "Maxillo"),
     ("brain", "Brain"),
     ("laparoscopy", "Laparoscopy"),
+    ("urology", "Urology"),
     ("cardiology", "Cardiology"),
 ]
 
@@ -27,6 +28,7 @@ DOMAIN_FK_FIELDS = {
     "maxillo": ("patient", "voice_caption"),
     "brain": ("brain_patient", "brain_voice_caption"),
     "laparoscopy": ("laparoscopy_patient", "laparoscopy_voice_caption"),
+    "urology": ("urology_patient", "urology_voice_caption"),
     "cardiology": ("cardiology_patient", "cardiology_voice_caption"),
 }
 
@@ -60,6 +62,7 @@ _DOMAIN_BLURBS = {
     "maxillo": "Dental & maxillofacial imaging — bite classification, IOS, CBCT and panoramic extraction.",
     "brain": "Brain tumor MRI — multi-sequence review with AI-assisted captioning.",
     "laparoscopy": "Surgical video annotation — frame-accurate segmentation and tagging.",
+    "urology": "Urological oncology — MRI, WSI digital pathology and Confocale microscopy.",
     "cardiology": "ECG review — clinical-grid waveform plotting and arrhythmia annotation.",
 }
 
@@ -68,7 +71,26 @@ _DOMAIN_ICONS = {
     "maxillo": "fas fa-tooth",
     "brain": "fas fa-brain",
     "laparoscopy": "fas fa-video",
+    "urology": "fas fa-microscope",
     "cardiology": "fas fa-heart-pulse",
+}
+
+# Modality feature tags per domain for the landing cards
+_DOMAIN_TAGS = {
+    "maxillo": ["CBCT", "IOS", "Panoramic"],
+    "brain": ["MRI T1/T2", "FLAIR", "AI Voice"],
+    "laparoscopy": ["Video", "Keyframes", "Segmentation"],
+    "urology": ["MRI", "WSI", "Confocale"],
+    "cardiology": ["12-lead ECG", "Rhythm", "Captions"],
+}
+
+# Domain specialty overline
+_DOMAIN_OVERLINES = {
+    "maxillo": "Maxillofacial",
+    "brain": "Neuroimaging",
+    "laparoscopy": "Surgical Vision",
+    "urology": "Urological Oncology",
+    "cardiology": "Cardiology",
 }
 
 
@@ -210,11 +232,18 @@ def landing_domain_cards(user=None):
             {
                 "slug": slug,
                 "name": label,
+                "overline": _DOMAIN_OVERLINES.get(slug, "Clinical Domain"),
+                "badge": "Active",
+                "badge_type": "active",
                 "icon": resolve_icon(_DOMAIN_ICONS.get(slug, "fas fa-folder-open")),
                 "blurb": _DOMAIN_BLURBS.get(slug, ""),
+                "tags": _DOMAIN_TAGS.get(slug, []),
                 "stat": stat,
+                "url": f"/{slug}/",
+                "cta": "Enter",
             }
         )
+
     return cards
 
 

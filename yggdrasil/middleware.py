@@ -12,6 +12,131 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 
+_STREAM_END = object()
+
+
+def _async_chunks(sync_iterable):
+    """Pull ``sync_iterable`` one chunk at a time on a worker thread."""
+    from asgiref.sync import sync_to_async
+
+    iterator = iter(sync_iterable)
+    next_chunk = sync_to_async(next, thread_sensitive=False)
+
+    async def chunks():
+        while True:
+            chunk = await next_chunk(iterator, _STREAM_END)
+            if chunk is _STREAM_END:
+                return
+            yield chunk
+
+    return chunks()
+
+
+class AsyncStreamingMiddleware(MiddlewareMixin):
+    """Stream file downloads under ASGI instead of buffering them whole.
+
+    Django's ASGI handler cannot iterate a *synchronous* streaming body without
+    blocking the event loop, so it first collects the entire iterator into a
+    list (``sync_to_async(list)``) and only then sends it. Every download here
+    streams object storage through a sync generator, so a multi-GB CBCT, video
+    or export ZIP was held in one worker's RAM in full before the first byte
+    left. Wrapping the body in an async iterator that pulls one chunk at a time
+    keeps memory at a chunk per download. WSGI (and the test client) iterate
+    synchronously already and are left alone. Storage iterators never touch the
+    ORM, which is what makes the non-thread-sensitive executor safe here.
+    """
+
+    def process_response(self, request, response):
+        from django.core.handlers.asgi import ASGIRequest
+
+        if (
+            isinstance(request, ASGIRequest)
+            and getattr(response, "streaming", False)
+            and not getattr(response, "is_async", False)
+        ):
+            response.streaming_content = _async_chunks(response.streaming_content)
+        return response
+
+
+class ContentSecurityPolicyMiddleware(MiddlewareMixin):
+    """Site-wide Content-Security-Policy.
+
+    Enforced: only directives nothing on the site relies on breaking -- no
+    plugins, no <base> hijack, no framing (matching X-Frame-Options DENY), forms
+    post to this origin only. Report-only: the script/style policy the templates
+    are expected to meet (they still carry inline scripts), so violations show in
+    the browser console before it is enforced. A response that already sets its
+    own policy (stored files: ``common.file_access.FILE_RESPONSE_CSP``) keeps it.
+    """
+
+    ENFORCED = "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    REPORT_ONLY = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; media-src 'self' blob:; "
+        "connect-src 'self' wss: blob:; worker-src 'self' blob:; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    )
+
+    def process_response(self, request, response):
+        if "Content-Security-Policy" not in response:
+            response["Content-Security-Policy"] = self.ENFORCED
+        if "Content-Security-Policy-Report-Only" not in response:
+            response["Content-Security-Policy-Report-Only"] = self.REPORT_ONLY
+        return response
+
+
+class CrossOriginIsolationMiddleware(MiddlewareMixin):
+    """Cross-origin isolation for the upload page and the workers it starts.
+
+    The in-browser converters need ``SharedArrayBuffer``, which browsers only
+    expose to a cross-origin-isolated document. Both live on the upload page:
+    ``static/js/cbct_convert.js`` (CBCT -> NIfTI) and ``static/js/wsi_convert.js``
+    (gigapixel scan -> pyramidal BigTIFF, via wasm-vips).
+
+    Two kinds of response need the headers, and missing either one breaks the
+    converters in a way that is hard to read:
+
+    1. The upload document itself, or ``crossOriginIsolated`` is false and
+       ``SharedArrayBuffer`` is undefined.
+    2. **Every script started as a Worker.** A dedicated worker whose own script
+       response does not carry the owner's COEP is refused at load, and the
+       refusal reaches the page as an ErrorEvent with an *empty* ``message`` --
+       so the converter reports "unknown error" and no upload is ever attempted.
+       That covers ``static/js/worker/`` and, because wasm-vips spawns its
+       pthread pool as nested workers from its own script URL,
+       ``static/vendor/vips/``.
+
+    Deliberately not site-wide: ``require-corp`` blocks every cross-origin
+    subresource that does not opt in with CORP, so applying it to all responses
+    would break any future embed, CDN asset or off-origin object-storage read,
+    far from the code that asked for isolation.
+    """
+
+    #: Responses that must repeat the headers because they are Worker entry
+    #: points (or files those workers load). Prefixes, not exact paths, so a new
+    #: worker dropped into these directories is covered.
+    WORKER_SCRIPT_PREFIXES = ("/static/js/worker/", "/static/vendor/vips/")
+
+    #: The view whose page starts those workers. A URL name, not a domain: every
+    #: domain's app_urls.py uses it.
+    ISOLATED_VIEW_NAMES = frozenset({"upload_patient"})
+
+    def _needs_isolation(self, request):
+        match = getattr(request, "resolver_match", None)
+        if match is not None and match.url_name in self.ISOLATED_VIEW_NAMES:
+            return True
+        return request.path.startswith(self.WORKER_SCRIPT_PREFIXES)
+
+    def process_response(self, request, response):
+        if self._needs_isolation(request):
+            response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+            response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+            response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        return response
+
+
 class RequestLoggingMiddleware(MiddlewareMixin):
     """Request/response access logging.
 

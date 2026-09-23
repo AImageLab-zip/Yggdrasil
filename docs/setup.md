@@ -11,7 +11,7 @@ First-time setup for running Yggdrasil locally with Docker Compose.
 
 Two infrastructure pieces sit outside the Django app's own code and are easy to overlook:
 
-- **Redis** — started as the `redis` service in [docker-compose.yml](../docker-compose.yml) (so `docker compose up` brings it up for you), but it isn't just an internal cache: it's the Celery broker that external distributed runners connect to directly to pick up and report on jobs (see [docs/runners.md](runners.md)). If you change `REDIS_PASSWORD` or `REDIS_EXTERNAL_PORT`, runner nodes need the matching values too.
+- **Redis** — started as the `redis` service in [docker-compose.yml](../docker-compose.yml) (so `docker compose up` brings it up for you), but it isn't just an internal cache: it's the Celery broker the runner worker consumes jobs from (see [docs/runners.md](runners.md)). It is published on loopback only; keep it that way. If you change `REDIS_PASSWORD`, update `CELERY_BROKER_URL` in `.env.worker` too.
 - **Garage** (or any S3-compatible object store, e.g. MinIO) — **not** part of `docker-compose.yml` at all. It's a fully external service that must already be running and reachable from the `yggdrasil-web-$DOCKER_SUFFIX` container at `OBJECT_STORAGE_ENDPOINT_URL` (`.env.example` defaults to `http://garage:3900`). Make sure that container can actually resolve/reach the `garage` host — either join the same Docker network Garage is on, or point `OBJECT_STORAGE_ENDPOINT_URL` at a routable address — otherwise uploads/exports will fail with object storage errors (check `/api/processing/health/`, see [docs/running.md](running.md)).
 
 ## 1. Pick a `DOCKER_SUFFIX`
@@ -79,9 +79,25 @@ The container serves the Django ASGI application with Uvicorn (`ASGI_WORKERS` an
 set `RUN_DEV_SERVER=1`; the entrypoint will run Uvicorn with `--reload` so the live
 transcription WebSocket remains available.
 
-## 6. Seed projects and modalities
+## 6. Seed projects, modalities, and create admin account
 
 Each project app ships a management command that creates its `Project` row and registers its `Modality` rows (file types it accepts). The database is empty without this — uploads will fail until it's run, since `Patient.modalities` and upload forms validate against existing `Modality` records.
+
+### Quick setup for local development (recommended)
+
+For local development, run `seed_dev`. This single command seeds all projects and modalities, creates a superuser account (`admin` / `admin`), configures the required `ProjectAccess` roles, and creates initial demo patients:
+
+```bash
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py seed_dev
+```
+
+You can then log in at <http://localhost:8000> with:
+- **Username:** `admin`
+- **Password:** `admin`
+
+### Individual / production commands
+
+For production deployments or fine-grained seeding, run the individual commands:
 
 ```bash
 # Maxillo: CBCT, IOS, intraoral photos, teleradiography, panoramic, raw zip
@@ -92,9 +108,18 @@ docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_brain_modali
 
 # Laparoscopy: video modality
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_laparoscopy_modalities
+
+# Urology: MRI, WSI digital pathology, confocal
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py setup_urology_modalities
 ```
 
 These are idempotent (`get_or_create` + update) — safe to re-run after upgrades that add/change modalities.
+
+To create an admin superuser manually (e.g., in production where `seed_dev` refuses to run when `DEBUG=False`):
+
+```bash
+docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py createsuperuser
+```
 
 ## 7. Configure Live Whisper
 

@@ -26,7 +26,7 @@ test('the global api namespace has no path prefix', () => {
 });
 
 test('a domain namespace prefixes its own path', () => {
-    for (const namespace of ['maxillo', 'brain', 'laparoscopy']) {
+    for (const namespace of ['maxillo', 'brain', 'laparoscopy', 'urology']) {
         assert.equal(
             serveFilePath({ fileId: 7, filename: 'v.nii.gz', namespace }),
             `/${namespace}/api/processing/files/serve/7/v.nii.gz`

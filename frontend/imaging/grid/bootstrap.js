@@ -20,7 +20,7 @@
  * back rather than logging it; this is what puts it on screen.
  */
 
-import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, GRID_WINDOWS, ORIENTATIONS, viewportId } from './layout.js';
+import { FIXED_CBCT_LAYOUT, FREE_LAYOUT, SINGLE_LAYOUT, GRID_WINDOWS, ORIENTATIONS, viewportId } from './layout.js';
 import { windowAt } from './windowState.js';
 import { isMeasurable, observeSize } from '../runtime/elementSize.js';
 import { volumeUrl } from '../ids/imageIds.js';
@@ -93,10 +93,14 @@ export function readWindowElements(doc) {
     if (found.length === 0) {
         return null;
     }
-    const elements = new Array(GRID_WINDOWS).fill(null);
+    const count = found.length;
+    if (count !== 1 && count !== GRID_WINDOWS) {
+        return null;
+    }
+    const elements = new Array(count).fill(null);
     for (const element of found) {
         const index = Number(element.dataset.windowIndex);
-        if (Number.isInteger(index) && index >= 0 && index < GRID_WINDOWS) {
+        if (Number.isInteger(index) && index >= 0 && index < count) {
             elements[index] = element;
         }
     }
@@ -362,8 +366,10 @@ async function mountAndLoad({ mount, doc, data, elements }) {
     // the ready event is dispatched from it, and both belong to this document.
     const view = doc.defaultView ?? globalThis;
     // maxillo pins three orthogonal planes and loads 3D on demand; brain lets the user
-    // put anything anywhere, which is what `fixedMode` has always meant.
-    const layout = data.fixedMode ? FIXED_CBCT_LAYOUT : FREE_LAYOUT;
+    // put anything anywhere, which is what `fixedMode` has always meant; urology uses 1 window.
+    const layout = elements.length === 1 || data.singleWindowMode
+        ? SINGLE_LAYOUT
+        : (data.fixedMode ? FIXED_CBCT_LAYOUT : FREE_LAYOUT);
 
     let grid;
     try {

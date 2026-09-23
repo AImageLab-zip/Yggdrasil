@@ -1,10 +1,13 @@
 {% extends 'common/base_app.html' %}
 {% load icons %}
-{% firstof request.resolver_match.namespace 'maxillo' as ns %}
 
 {% block title %}{% if is_own_profile %}My Profile{% else %}{{ target_user.username }}'s Profile{% endif %} - Yggdrasil{% endblock %}
 
 {% block content %}
+{% comment %} Assigned inside the block on purpose: a child template's content
+outside {% block %} is never rendered, so a {% firstof %} up at the top leaves
+`ns` empty and every {% url ns|add:... %} below raises KeyError: ''. {% endcomment %}
+{% firstof request.resolver_match.namespace 'maxillo' as ns %}
 <div class="page-header">
     <div>
         <h1 class="page-title">{% icon 'user-circle' %}<span>{% if is_own_profile %}My profile{% else %}{{ target_user.username }}{% endif %}</span></h1>

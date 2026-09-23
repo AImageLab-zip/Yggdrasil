@@ -19,18 +19,36 @@ S3-compatible object storage, Cornerstone3D viewers). Everything runs in Docker.
 | `maxillo/` | Dental / maxillofacial imaging (`/maxillo/`) — and, historically, the shared auth, admin and runner-API surfaces |
 | `brain/` | Brain-tumour MRI (`/brain/`) |
 | `laparoscopy/` | Surgical video (`/laparoscopy/`) |
+| `urology/` | Urology imaging: MRI, digital pathology / WSI, confocal laser endomicroscopy (`/urology/`) |
 
 Each app has its own `README.md` stating what it owns, what it must not own, and
 where its boundary with `common/` runs — read the relevant one before adding a
 model or a view.
 
-**Import direction is one-way: domain apps → `annotations` → `common`.**
-`common/` must never import a domain app or `annotations`; where it needs domain
-data it goes through `common/domains.py` or `apps.get_model(...)`.
+**Import direction is one-way: domain apps → `annotations` → `common`**, and
+domain apps do not import each other. `common/` must never import a domain app or
+`annotations`; where it needs domain data it goes through `common/domains.py` or
+`apps.get_model(...)`. CI enforces this with `lint-imports` (`pyproject.toml`
+lists today's exceptions; never add one).
 
-`maxillo`, `brain` and `laparoscopy` are *domains*, registered in exactly one
+`maxillo`, `brain`, `laparoscopy`, and `urology` are *domains*, registered in exactly one
 place (`common/domains.py`). Behaviour derives from that registry — never add an
-`if domain == "…"` branch.
+`if domain == "…"` branch (`common/tests_domain_registry.py` caps them).
+
+## Authorization and file serving
+
+- **Authorize against the object's own project.** Load patients with
+  `common.permissions.get_patient_for(user, Patient, id, perm)` (`"read"`, `"write"`,
+  `"admin"`; 404 when unreadable, 403 when readable but not allowed). The permission
+  helpers take a `Project` and raise `TypeError` for a request or a domain name.
+  `current_project(request)` is the session's project for UI defaults (which project a
+  list opens on) and is never an authorization input.
+- `common/tests_cross_project_matrix.py` requests every routed object URL of every
+  domain as an admin of another project; a new URL is covered automatically and must
+  refuse cleanly (3xx/4xx, never 2xx or 5xx).
+- **Stored files go out through `common.file_access`** (`streaming_response`,
+  `range_response`): it decides content type and disposition from an allow-list and
+  sandboxes every file response. Never build a file response by hand.
 
 ## Running things
 
@@ -40,7 +58,8 @@ Tests:
 docker compose -f docker-compose.dev.yml run --rm --no-deps -T web python manage.py test
 ```
 
-Without a MySQL server: `python manage.py test --settings=yggdrasil.settings_sqlite_test`.
+Without a MySQL server: `python manage.py test --settings=yggdrasil.settings_sqlite_test`
+(needs no `.env`).
 Convenience only — CI runs against MySQL, and some constraints exist on MySQL but
 not SQLite (and vice versa). Anything touching models or constraints must be run
 against MySQL.
@@ -97,8 +116,9 @@ green in every test while being wrong in production.
 ## House style
 
 - **Do not reformat files wholesale.** The codebase mixes tabs and spaces and
-  there is no formatting enforcement; `ruff` runs a deliberately minimal ruleset
-  (syntax errors and undefined names only). Widening it is its own PR.
+  there is no formatting enforcement; `ruff` runs a deliberately small ruleset
+  (syntax errors, undefined names, unused imports, security rules). Widening it is
+  its own PR.
 - Volumes are **NIfTI (`.nii.gz`)**. There is no DICOM path.
 - Bump `VERSION` and add a `CHANGELOG.md` section in the same PR as a release.
 - Development targets `main`. Branch from it; `release/3.0` is closed.

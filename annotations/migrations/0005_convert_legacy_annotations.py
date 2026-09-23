@@ -64,12 +64,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ("annotations", "0004_event_value_text"),
         ("brain", "0021_patient_project_required"),
-        # "Every legacy table this reads must be at its final shape" (see the
-        # module docstring) -- 0054 adds cardiology_patient/cardiology_voice_caption
-        # to FileRegistry/Job/ProcessingJob, which the live-model read above touches.
-        # Without this, a from-scratch build (manage.py test, CI) can apply this
-        # migration before 0054 and fail with "Unknown column ...cardiology_patient_id".
-        ("common", "0054_fileregistry_cardiology_patient_and_more"),
+        ("common", "0049_backfill_modality_domain"),
         ("laparoscopy", "0013_patient_project_required"),
         ("maxillo", "0029_patient_project_required"),
     ]

@@ -161,8 +161,10 @@ def _file_is_raw(file_obj):
 
 def _owner_filters(file_obj):
     """``{owner_fk: id}`` for the first domain FK this row actually carries."""
+    from common.domains import DOMAIN_FK_FIELDS
+
     filters = {}
-    for field in ("patient", "brain_patient", "laparoscopy_patient"):
+    for field, _ in DOMAIN_FK_FIELDS.values():
         owner = getattr(file_obj, f"{field}_id", None)
         if owner:
             filters[field] = owner

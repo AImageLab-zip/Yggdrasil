@@ -6,30 +6,25 @@ import os
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
-from django.views.decorators.http import require_http_methods, require_POST
-from django.http import JsonResponse, Http404, HttpResponseGone
-from django.utils import timezone
-from django.contrib.auth.views import redirect_to_login
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
-from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
-from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
-from common.export_share import is_share_expired, resolve_share_expiry
-from common.file_access import exists as artifact_exists, streaming_response
+from common.domains import landing_domain_cards, order_projects_for_landing
+from common.export_share import is_share_expired
+from common.file_access import exists as artifact_exists
 from common.modality_config import (
     modality_status,
     rerun_step_labels,
     rerunnable_steps_for_patient,
 )
-from common import export_catalog, export_ui
 from common.project_filters import presence_filter_specs
-from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
+from common.models import FileRegistry, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
+from common.permissions import current_project as session_project
 from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
@@ -37,19 +32,12 @@ from common.permissions import (
     user_can_edit_caption,
     user_can_view_caption_content,
     user_can_write_patient_annotations,
-    project_allows_annotation,
+    get_patient_for,
     user_has_project_access,
     user_is_project_admin,
 )
 
-from common.export_processing import (
-    ExportProcessor,
-    start_export_processing,
-    build_shared_download_url as _build_shared_download_url,
-    format_file_size,
-    kill_export_processes as _kill_export_processes,
-    recover_stuck_export as _recover_stuck_export,
-)
+from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
@@ -143,6 +131,9 @@ def patient_detail(request, patient_id):
         else:
             modality_files[item["slug"]] = payload
 
+    # The step picker reads the FileRegistry rows; `patient_files` below is the
+    # template's display shape, not those rows.
+    patient_file_rows = list(patient.files.all())
     patient_files = {"raw": [], "processed": [], "other": []}
     for file_obj in patient.files.all().order_by("-created_at"):
         file_data = {
@@ -224,8 +215,11 @@ def patient_detail(request, patient_id):
         "modality_files": modality_files,
         "segmentation_file": segmentation_file,
         "rerunnable_step_slugs": [
-            m["slug"] for m in patient_modalities
-            if m.get("slug") not in ("rawzip", "braintumor-mri-seg")
+            step["slug"]
+            for step in rerunnable_steps_for_patient(
+                patient_file_rows, patient_modalities, patient=patient
+            )
+            if step["slug"] not in ("rawzip", "braintumor-mri-seg")
         ],
         # Checkbox labels for the shared rerun picker (common/partials/rerun_modal.html).
         "rerun_step_labels": rerun_step_labels(patient_files, patient_modalities),
@@ -320,7 +314,8 @@ def patient_list(request):
                 status_filters[slug] = value
 
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, request)
+    # UI flag for the project the list is showing; each row is checked on its own project.
+    is_admin = user_is_project_admin(request.user, session_project(request))
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -361,7 +356,7 @@ def patient_list(request):
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
             "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient),
-            "can_delete": bool(is_admin or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))),
+            "can_delete": bool(user_is_project_admin(request.user, patient.project) or user_can_delete_single_patient(request.user, patient.folder, patient.project)),
         })
 
     if status_filters:
@@ -483,6 +478,7 @@ def upload_patient(request):
             "braintumor-mri-t1c",
             "braintumor-mri-seg",
         }
+        is_xhr = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         has_upload = any(request.FILES.getlist(field_name) for field_name in brain_upload_fields)
         form_is_valid = patient_upload_form.is_valid()
         if form_is_valid and not has_upload:
@@ -618,53 +614,8 @@ def update_patient_name(request, patient_id):
     return JsonResponse({"success": True, "name": patient.name})
 
 
-@login_required
-@require_POST
-def delete_patient(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_delete = bool(
-        user_is_project_admin(request.user, patient.project)
-        or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))
-    )
-    if not can_delete:
-        return JsonResponse(
-            {"success": False, "error": "You do not have permission to delete this patient."},
-            status=403,
-        )
-    patient.deleted = True
-    patient.save(update_fields=["deleted"])
-    return JsonResponse({"success": True, "message": "Scan deleted successfully"})
 
 
-@login_required
-@require_POST
-def bulk_delete_patients(request):
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-
-    scan_ids = data.get("scan_ids", [])
-    if not isinstance(scan_ids, list) or not scan_ids:
-        return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
-
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse(
-            {"success": False, "error": "You do not have permission to bulk delete scans."},
-            status=403,
-        )
-
-    deleted_count = Patient.objects.filter(patient_id__in=scan_ids).update(deleted=True)
-    if not deleted_count:
-        return JsonResponse({"success": False, "error": "No valid scans found to delete"}, status=404)
-
-    return JsonResponse(
-        {
-            "success": True,
-            "message": f"Successfully deleted {deleted_count} scans.",
-            "deleted_count": deleted_count,
-        }
-    )
 
 
 @login_required
@@ -681,14 +632,14 @@ def bulk_purge_patients(request):
     if not isinstance(scan_ids, list) or not scan_ids:
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
 
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse(
-            {"success": False, "error": "You do not have permission to permanently delete scans."},
-            status=403,
-        )
-
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
-    found_ids = list(patients.values_list("patient_id", flat=True))
+    # Authorized per patient against its own project; ids the user does not
+    # administer are dropped exactly like ids that do not exist.
+    found_ids = [
+        patient.patient_id
+        for patient in Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
+        if user_is_project_admin(request.user, patient.project)
+    ]
+    patients = Patient.objects.filter(patient_id__in=found_ids)
     if not found_ids:
         return JsonResponse({"success": False, "error": "No valid scans found to delete"}, status=404)
 
@@ -720,161 +671,97 @@ def bulk_purge_patients(request):
 @login_required
 @require_POST
 def rerun_processing(request, patient_id):
-    return JsonResponse(
-        {"success": False, "error": "Brain processing rerun is not configured."},
-        status=400,
-    )
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    if not (
+        user_is_project_admin(request.user, patient.project)
+        or (patient.folder and user_can_write_patient_annotations(request.user, patient))
+    ):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
 
-
-@login_required
-@require_POST
-def bulk_rerun_processing(request):
-    return JsonResponse(
-        {"success": False, "error": "Brain bulk processing rerun is not configured."},
-        status=400,
-    )
-
-
-@login_required
-def user_profile(request, username=None):
-    return render(request, "brain/profile.html", {"profile_user": request.user})
-
-
-@login_required
-@require_POST
-def create_folder(request):
-    """Create a folder inside the current project (single-level only).
-
-    Mirrors ``maxillo.views.folders_tags.create_folder``. ``Folder.project`` is
-    non-nullable and was omitted here, so every call raised IntegrityError and
-    came back as a 500 -- Brain could not create folders at all.
-    """
     try:
-        if not user_is_project_admin(request.user, "brain"):
-            return JsonResponse({"error": "Permission denied"}, status=403)
+        data = _json.loads(request.body) if request.body else {}
+    except _json.JSONDecodeError:
+        data = {}
 
-        current_project_id = request.session.get("current_project_id")
-        project = (
-            Project.objects.filter(id=current_project_id, is_active=True).first()
-            if current_project_id
-            else None
-        )
-        if project is None:
-            return JsonResponse({"error": "No project selected"}, status=400)
+    requested_jobs = data.get("jobs")
+    if not requested_jobs:
+        requested_jobs = list(patient.modalities.values_list("slug", flat=True))
 
-        data = _json.loads(request.body) if request.body else request.POST
-        name = (data.get("name") or "").strip()
-        if not name:
-            return JsonResponse({"error": "Folder name is required"}, status=400)
-
-        # Matches unique_together ("project", "name", "parent").
-        folder, created = Folder.objects.get_or_create(
-            name=name,
-            parent=None,
-            project=project,
-            defaults={"created_by": request.user},
-        )
-        return JsonResponse(
-            {
-                "success": True,
-                "folder": {
-                    "id": folder.id,
-                    "name": folder.name,
-                    "path": folder.name,
-                    "created": created,
-                },
-            }
-        )
-    except Exception as exc:
-        logger.exception("Error creating brain folder")
-        return JsonResponse({"error": str(exc)}, status=500)
-
-
-@login_required
-def folder_stats(request, folder_id):
-    folder = get_object_or_404(Folder, id=folder_id)
+    result = rerun_steps_for_patient(patient, requested_jobs)
     return JsonResponse(
         {
             "success": True,
-            "folder": {"id": folder.id, "name": folder.name},
-            "stats": {"patient_count": folder.patients.count()},
+            "message": describe(result),
+            "updated": result["updated"],
+            "created": result["created"],
+            "not_found": result["not_found"],
         }
     )
 
 
 @login_required
 @require_POST
-def rename_folder(request, folder_id):
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+def bulk_rerun_processing(request):
     try:
-        data = _json.loads(request.body) if request.body else request.POST
+        data = _json.loads(request.body) if request.body else {}
     except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    name = (data.get("name") or "").strip()
-    if not name:
-        return JsonResponse({"success": False, "error": "Folder name is required"}, status=400)
-    folder = get_object_or_404(Folder, id=folder_id)
-    folder.name = name
-    folder.parent = None
-    folder.save(update_fields=["name", "parent"])
-    return JsonResponse({"success": True, "folder": {"id": folder.id, "name": folder.name}})
+        data = {}
 
-
-@login_required
-@require_http_methods(["DELETE"])
-def delete_folder(request, folder_id):
-    """Delete a brain folder. Patients survive, unfiled.
-
-    The rule lives in :func:`common.deletion.delete_folder` so the three domains
-    cannot drift: this copy counted only the folder's *direct* patients, so a
-    folder with populated sub-folders read as empty and took them silently.
-    """
-    folder = get_object_or_404(Folder, id=folder_id)
-    # The folder's own project, not the domain slug: passing "brain" makes
-    # `_project_from_context` fall back to the first active brain project by
-    # name, so with more than one brain project the check consulted the wrong
-    # one -- refusing its own admins and admitting another project's.
-    if not user_is_project_admin(request.user, folder.project):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-
-    try:
-        unfiled = _delete_folder(folder, force=request.GET.get("force") == "true")
-    except FolderNotEmpty as exc:
-        return JsonResponse(
-            {"success": False, "error": str(exc), "patient_count": exc.patient_count},
-            status=400,
-        )
-    return JsonResponse({"success": True, "unfiled_patients": unfiled})
-
-
-
-
-@login_required
-@require_POST
-def move_patients_to_folder(request):
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     scan_ids = data.get("scan_ids", [])
-    folder_id = data.get("folder_id")
     if not isinstance(scan_ids, list) or not scan_ids:
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    folder = None
-    if folder_id and folder_id not in ("root", "all"):
-        folder = get_object_or_404(Folder, id=folder_id)
+
     patients = Patient.objects.filter(patient_id__in=scan_ids)
-    updated = 0
-    for patient in patients:
-        patient.folder = folder
-        if folder:
-            patient.project = folder.project
-        patient.save(update_fields=["folder", "project"])
-        updated += 1
-    return JsonResponse({"success": True, "updated": updated})
+    for p in patients:
+        if not user_is_project_admin(request.user, p.project):
+            return JsonResponse({"success": False, "error": f"Permission denied for patient {p.patient_id}"}, status=403)
+
+    requested_jobs = data.get("jobs")
+    if not isinstance(requested_jobs, list) or not requested_jobs:
+        return JsonResponse({"success": False, "error": "jobs list is required"}, status=400)
+
+    patients = list(patients)
+    result = bulk_rerun_steps(patients, requested_jobs)
+    return JsonResponse(
+        {
+            "success": True,
+            "message": (
+                f"Reprocessing queued for {result['updated_pairs']} job(s) "
+                f"across {len(patients)} scan(s)."
+            ),
+            "selected_scan_count": len(patients),
+            "requested_modalities": result["requested"],
+            "updated_pairs": result["updated_pairs"],
+            "not_found_pairs": result["not_found_pairs"],
+            "created_slugs": result["created_slugs"],
+            "updated_by_modality": result["updated_by_modality"],
+            "not_found_by_modality": result["not_found_by_modality"],
+        }
+    )
+
+
+@login_required
+def user_profile(request, username=None):
+    """The shared profile page, resolved for this namespace.
+
+    The stub this replaces rendered a 35-line template and ignored `username`, so
+    profile/<username>/ always showed your own.
+    """
+    from maxillo.views.profile import user_profile as shared_user_profile
+
+    return shared_user_profile(request, username=username)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @login_required
@@ -890,12 +777,14 @@ def add_patients_to_folder(request):
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
     if not folder_id or folder_id in ("root", "all"):
         return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patients = Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            continue
         patient.folder = folder
         patient.project = folder.project
         patient.save(update_fields=["folder", "project"])
@@ -916,13 +805,13 @@ def remove_patients_from_folder(request):
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
     if not folder_id or folder_id in ("root", "all"):
         return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patients = Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        if patient.folder_id != folder.id:
+        if patient.folder_id != folder.id or not user_is_project_admin(request.user, patient.project):
             continue
         # Folders are mandatory: removing a folder falls back to the project's
         # default folder rather than leaving the patient folderless.
@@ -933,173 +822,16 @@ def remove_patients_from_folder(request):
     return JsonResponse({"success": True, "updated": updated})
 
 
-@login_required
-@require_POST
-def add_patient_tag(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not (
-        user_is_project_admin(request.user, patient.project)
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    tag_name = (data.get("tag") or data.get("name") or "").strip()
-    if not tag_name:
-        return JsonResponse({"success": False, "error": "Tag name required"}, status=400)
-    tag, _ = Tag.objects.get_or_create(name=tag_name)
-    patient.tags.add(tag)
-    return JsonResponse({"success": True, "tags": patient.tag_names()})
 
 
-@login_required
-@require_POST
-def remove_patient_tag(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not (
-        user_is_project_admin(request.user, patient.project)
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    tag_name = (data.get("tag") or data.get("name") or "").strip()
-    if not tag_name:
-        return JsonResponse({"success": False, "error": "Tag name required"}, status=400)
-    tag = Tag.objects.filter(name=tag_name).first()
-    if not tag:
-        return JsonResponse({"success": False, "error": "Tag not found"}, status=404)
-    patient.tags.remove(tag)
-    return JsonResponse({"success": True, "tags": patient.tag_names()})
 
 
-@login_required
-@require_POST
-def upload_text_caption(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    if not (
-        user_is_project_admin(request.user, patient.project)
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"error": "Permission denied"}, status=403)
-    if not project_allows_annotation(patient, "voice_caption"):
-        return JsonResponse({"error": "Voice captions are disabled for this project"}, status=403)
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except _json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
-    text = data.get("text") or data.get("caption") or ""
-    if not text.strip():
-        return JsonResponse({"error": "Caption text is required"}, status=400)
-    caption = patient.voice_captions.create(
-        user=request.user,
-        duration=0,
-        text_caption=text.strip(),
-        original_text_caption=text.strip(),
-        processing_status="completed",
-    )
-    return JsonResponse(
-        {
-            "success": True,
-            "caption": {
-                "id": caption.id,
-                "user_username": caption.user.username,
-                "display_duration": "Text",
-                "quality_color": "success",
-                "created_at": caption.created_at.strftime("%b %d, %H:%M"),
-                "audio_url": None,
-                "is_processed": True,
-                "text_caption": caption.text_caption,
-                "is_text_caption": True,
-            },
-        }
-    )
 
 
-@login_required
-@require_http_methods(["DELETE"])
-def delete_voice_caption(request, patient_id, caption_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    caption = get_object_or_404(patient.voice_captions, id=caption_id)
-
-    is_owner = caption.user_id == request.user.id
-    is_admin = user_is_project_admin(request.user, caption.patient.project)
-    if not is_owner and not is_admin:
-        return JsonResponse(
-            {
-                "error": "You cannot delete voice captions created by other users.",
-                "code": "not_owner",
-            },
-            status=403,
-        )
-
-    if is_admin and not is_owner:
-        data = _json.loads(request.body) if request.body else {}
-        if not data.get("admin_confirmed"):
-            return JsonResponse(
-                {
-                    "error": "Admin confirmation required",
-                    "code": "admin_confirmation_required",
-                    "message": f"You are about to delete a voice caption created by {caption.user.username}. Please confirm this action.",
-                },
-                status=403,
-            )
-
-    caption.delete()
-    return JsonResponse({"success": True})
 
 
-@login_required
-@require_POST
-def edit_voice_caption_transcription(request, patient_id, caption_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    caption = get_object_or_404(patient.voice_captions, id=caption_id)
-
-    if not user_can_edit_caption(request.user, caption):
-        return JsonResponse(
-            {
-                "error": "You do not have permission to edit this transcription.",
-                "code": "permission_denied",
-            },
-            status=403,
-        )
-
-    try:
-        data = _json.loads(request.body) if request.body else {}
-        action = data.get("action")
-
-        if action == "edit":
-            new_text = (data.get("text") or "").strip()
-            if not new_text:
-                return JsonResponse({"error": "Transcription text cannot be empty"}, status=400)
-            caption.edit_transcription(new_text, request.user)
-        elif action == "revert":
-            caption.revert_to_original(request.user)
-        else:
-            return JsonResponse({"error": 'Invalid action. Use "edit" or "revert"'}, status=400)
-    except ValueError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    return JsonResponse(
-        {
-            "success": True,
-            "caption": {
-                "id": caption.id,
-                "text_caption": caption.text_caption,
-                "is_edited": caption.is_edited,
-                "edit_history": caption.edit_history,
-            },
-        }
-    )
 
 
-@login_required
-def update_voice_caption_modality(request, patient_id, caption_id):
-    return JsonResponse({"error": "Modality is not used for brain voice captions."}, status=400)
 
 
 def _file_payload(file_obj):
@@ -1108,7 +840,7 @@ def _file_payload(file_obj):
 
 @login_required
 def patient_viewer_data(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     return JsonResponse({"patient_id": patient.patient_id, "files": [_file_payload(item) for item in patient.files.all()]})
 
 
@@ -1120,7 +852,7 @@ patient_teleradiography_data = patient_viewer_data
 
 @login_required
 def patient_volume_data(request, patient_id, modality_slug):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     file_obj = patient.files.filter(modality__slug=modality_slug).order_by("-created_at").first()
     if not file_obj:
         return JsonResponse({"error": "File not found"}, status=404)
@@ -1129,11 +861,13 @@ def patient_volume_data(request, patient_id, modality_slug):
 
 @login_required
 def get_nifti_metadata(request, patient_id):
+    get_patient_for(request.user, Patient, patient_id, "read")
     return JsonResponse({"metadata": {}})
 
 
 @login_required
 def update_nifti_metadata(request, patient_id):
+    get_patient_for(request.user, Patient, patient_id, "admin")
     return JsonResponse({"ok": True})
 
 
@@ -1153,121 +887,8 @@ def _brain_shared_export_availability(share_token):
     return export, True, ""
 
 
-@login_required
-@_with_brain_export_mappings
-def export_list(request):
-    """Export history page. Reuses the maxillo template with ns='brain'."""
-    exports = Export.objects.filter(user=request.user).order_by("-created_at")
-
-    exports_with_sizes = [
-        {
-            "export": export,
-            "size_display": format_file_size(export.file_size) if export.file_size else None,
-        }
-        for export in exports
-    ]
-
-    paginator = Paginator(exports_with_sizes, 50)
-    page_obj = paginator.get_page(request.GET.get("page"))
-
-    return render(
-        request,
-        "maxillo/export_list.html",
-        {"exports": page_obj, "page_obj": page_obj, "ns": "brain"},
-    )
 
 
-@login_required
-@_with_brain_export_mappings
-def export_new(request):
-    """Create-export page. Reuses the maxillo template with ns='brain'.
-
-    Same project-scoped model as maxillo: folders of the selected project
-    (including sub-folders), artifacts the project's own MRI channels can
-    produce, and filters derived from the project.
-    """
-    project = _current_export_project(request)
-    if project is None:
-        messages.error(request, "Select a project before creating an export.")
-        return redirect("brain:patient_list")
-
-    if request.method == "POST":
-        folder_ids = [int(fid) for fid in request.POST.getlist("folder_ids")]
-        artifact_keys = request.POST.getlist("artifacts")
-        filters = export_catalog.filters_from_form(request.POST)
-
-        if not folder_ids:
-            messages.error(request, "Please select at least one folder.")
-            return redirect("brain:export_new")
-
-        if Folder.objects.filter(id__in=folder_ids, project=project).count() != len(set(folder_ids)):
-            messages.error(request, "Select folders from the current project only.")
-            return redirect("brain:export_new")
-
-        allowed_keys = export_ui.allowed_artifact_keys("brain", project)
-        artifact_keys = [key for key in artifact_keys if key in allowed_keys]
-        if not artifact_keys:
-            messages.error(request, "Please select at least one artifact to export.")
-            return redirect("brain:export_new")
-
-        artifacts = export_catalog.resolve_artifacts("brain", artifact_keys)
-        query_params = {
-            "domain": "brain",
-            "project_id": project.id,
-            "folder_ids": folder_ids,
-            "artifacts": artifact_keys,
-            "filters": filters,
-            "modality_slugs": sorted(export_catalog.modality_slugs_for(artifacts)),
-        }
-
-        summary_parts = [f"{len(folder_ids)} folder{'s' if len(folder_ids) != 1 else ''}"]
-        summary_parts.append(", ".join(a.label for a in artifacts) or "nothing")
-        described = export_catalog.describe_filters(
-            "brain", project, [m.slug for m in export_ui.project_modalities(project)], filters
-        )
-        if described:
-            summary_parts.append(", ".join(described))
-
-        export = Export.objects.create(
-            user=request.user,
-            status="pending",
-            query_params=query_params,
-            query_summary=", ".join(summary_parts),
-        )
-
-        start_export_processing(export.id, "brain")
-        messages.success(request, f"Export #{export.id} created and processing started.")
-        return redirect("brain:export_list")
-
-    folders = export_ui.folder_tree(
-        filter_folders_for_user(
-            request.user,
-            Folder.objects.filter(project=project).order_by("name"),
-            "brain",
-        ),
-        Patient,
-        "brain",
-    )
-    visible_folder_ids = [entry["folder"].id for entry in folders]
-    patients_in_scope = Patient.objects.filter(folder_id__in=visible_folder_ids)
-    modalities = export_ui.project_modalities(project)
-
-    return render(
-        request,
-        "maxillo/export_new.html",
-        {
-            "project": project,
-            "folders": folders,
-            "modalities": modalities,
-            "artifact_groups": export_ui.artifact_groups(
-                "brain", project, patients_in_scope, patient_fk="brain_patient"
-            ),
-            "filter_groups": export_ui.grouped_filters(
-                "brain", project, [m.slug for m in modalities]
-            ),
-            "ns": "brain",
-        },
-    )
 
 
 def _current_export_project(request):
@@ -1281,316 +902,17 @@ def _current_export_project(request):
     )
 
 
-@login_required
-@_with_brain_export_mappings
-def export_preview(request):
-    """AJAX export statistics, run through the same ExportProcessor as the export."""
-    try:
-        data = (_json.loads(request.body) if request.body else {}) if request.method == "POST" else request.GET
-
-        folder_ids = data.get("folder_ids", [])
-        if isinstance(folder_ids, str):
-            folder_ids = [fid for fid in folder_ids.split(",") if fid]
-        folder_ids = [int(fid) for fid in folder_ids if str(fid).strip()]
-
-        artifact_keys = data.get("artifacts", [])
-        if isinstance(artifact_keys, str):
-            artifact_keys = [key for key in artifact_keys.split(",") if key]
-
-        query_params = {
-            "domain": "brain",
-            "folder_ids": folder_ids,
-            "artifacts": list(artifact_keys),
-            "filters": data.get("filters", {}),
-        }
-
-        proc = ExportProcessor(
-            Export(user=request.user, query_params=query_params), domain="brain"
-        )
-        patients = proc.query_patients()
-        patient_count = patients.count()
-        if patient_count:
-            files, total_size = proc.collect_files(patients)
-            file_count = len(files)
-        else:
-            file_count, total_size = 0, 0
-
-        return JsonResponse(
-            {
-                "success": True,
-                "patient_count": patient_count,
-                "folder_count": len(folder_ids),
-                "modality_count": len(proc.modality_slugs),
-                "artifact_count": len(proc.artifacts),
-                "file_count": file_count,
-                "estimated_size": format_file_size(total_size),
-                "estimated_size_bytes": total_size,
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error in brain export_preview: {e}", exc_info=True)
-        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
-@login_required
-def export_status(request, export_id):
-    """AJAX status endpoint polled by the export list page."""
-    export = get_object_or_404(Export, id=export_id)
-    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"error": "Permission denied"}, status=403)
-
-    export = _recover_stuck_export(export)
-
-    data = {
-        "id": export.id,
-        "status": export.status,
-        "query_summary": export.query_summary,
-    }
-    if export.status == "completed":
-        data["file_size"] = export.file_size
-        data["file_size_human"] = format_file_size(export.file_size)
-        data["patient_count"] = export.patient_count
-        if export.completed_at:
-            data["completed_at"] = export.completed_at.isoformat()
-    if export.status == "failed":
-        data["error_message"] = export.error_message
-    if export.status == "processing":
-        if export.started_at:
-            data["started_at"] = export.started_at.isoformat()
-        if export.patient_count:
-            data["patient_count"] = export.patient_count
-        if export.progress_message:
-            data["progress_message"] = export.progress_message
-        if export.progress_percent is not None:
-            data["progress_percent"] = export.progress_percent
-    return JsonResponse(data)
 
 
-@login_required
-def export_download(request, export_id):
-    export = get_object_or_404(Export, id=export_id)
-
-    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
-        messages.error(request, "You do not have permission to download this export.")
-        return redirect("brain:export_list")
-
-    if export.status != "completed":
-        messages.error(request, "Export is not yet completed.")
-        return redirect("brain:export_list")
-
-    if not export.file_path or not artifact_exists(export.file_path):
-        messages.error(request, "Export file not found.")
-        export.mark_failed("Export file not found in storage")
-        return redirect("brain:export_list")
-
-    filename = (
-        os.path.basename((export.file_path or "").rstrip("/"))
-        or f"export_{export.id}.zip"
-    )
-    return streaming_response(
-        path_or_key=export.file_path,
-        content_type="application/zip",
-        filename=filename,
-        as_attachment=True,
-    )
 
 
-@login_required
-@require_POST
-def export_share_update(request, export_id):
-    export = get_object_or_404(Export, id=export_id)
-
-    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-    if export.status != "completed":
-        return JsonResponse(
-            {"success": False, "error": "Only completed exports can be shared"}, status=400
-        )
-
-    try:
-        data = _json.loads(request.body) if request.body else request.POST
-    except ValueError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-
-    share_mode = (data.get("share_mode") or "").strip()
-    if share_mode not in ("private", "authenticated", "public"):
-        return JsonResponse({"success": False, "error": "Invalid share mode"}, status=400)
-
-    regenerate_raw = data.get("regenerate", False)
-    regenerate = (
-        regenerate_raw
-        if isinstance(regenerate_raw, bool)
-        else str(regenerate_raw).lower() in ("1", "true", "yes")
-    )
-
-    export.share_mode = share_mode
-    if share_mode == "private":
-        export.share_token = None
-        export.shared_at = None
-        export.expires_at = None
-        export.save(
-            update_fields=["share_mode", "share_token", "shared_at", "expires_at"]
-        )
-        return JsonResponse(
-            {
-                "success": True,
-                "share_mode": export.share_mode,
-                "share_url": None,
-                "expires_at": None,
-            }
-        )
-
-    expires_at, expiry_error = resolve_share_expiry(
-        data.get("expires_in_days"),
-        current=export.expires_at,
-        can_set_never=request.user.is_staff
-        or user_is_project_admin(request.user, "brain"),
-    )
-    if expiry_error:
-        return JsonResponse({"success": False, "error": expiry_error}, status=400)
-
-    if regenerate or not export.share_token:
-        export.ensure_share_token(force_new=regenerate)
-    export.shared_at = timezone.now()
-    export.expires_at = expires_at
-    export.save(update_fields=["share_mode", "shared_at", "expires_at"])
-
-    return JsonResponse(
-        {
-            "success": True,
-            "share_mode": export.share_mode,
-            "share_url": _build_shared_download_url(request, export.share_token),
-            "expires_at": export.expires_at.isoformat() if export.expires_at else None,
-        }
-    )
 
 
-@require_http_methods(["GET"])
-def export_shared_landing(request, share_token):
-    export, is_available, reason = _brain_shared_export_availability(share_token)
-    if (
-        export
-        and export.share_mode == "authenticated"
-        and not request.user.is_authenticated
-    ):
-        return redirect_to_login(request.get_full_path())
-    return render(
-        request,
-        "maxillo/export_shared_landing.html",
-        {
-            "ns": "brain",
-            "export": export,
-            "is_available": is_available,
-            "is_expired": reason == "expired",
-            "share_token": share_token,
-            "file_size_human": format_file_size(export.file_size)
-            if export and export.file_size
-            else None,
-        },
-        status=410 if reason == "expired" else 200,
-    )
 
 
-@require_http_methods(["GET"])
-def export_shared_download(request, share_token):
-    export, is_available, reason = _brain_shared_export_availability(share_token)
-    if reason == "expired":
-        return HttpResponseGone("This share link has expired.")
-    if not export or not is_available:
-        raise Http404("Export is not available.")
-    if export.share_mode == "authenticated" and not request.user.is_authenticated:
-        return redirect_to_login(request.get_full_path())
-    filename = (
-        os.path.basename((export.file_path or "").rstrip("/"))
-        or f"export_{export.id}.zip"
-    )
-    return streaming_response(
-        path_or_key=export.file_path,
-        content_type="application/zip",
-        filename=filename,
-        as_attachment=True,
-    )
 
 
-@login_required
-@require_POST
-def export_delete(request, export_id):
-    export = get_object_or_404(Export, id=export_id)
-    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-
-    file_path = export.file_path
-    deleted_count, _ = Export.objects.filter(id=export_id).delete()
-    if not deleted_count:
-        return JsonResponse(
-            {"success": False, "error": "Export not found or already deleted."}, status=404
-        )
-
-    if file_path:
-        try:
-            get_object_storage().delete(file_path)
-        except Exception as e:
-            logger.warning(f"Could not delete export file {file_path}: {e}")
-
-    return JsonResponse({"success": True})
 
 
-@login_required
-@require_POST
-def export_stop(request, export_id):
-    """Stop a processing/pending export: kill worker and delete partial ZIPs."""
-    export = get_object_or_404(Export, id=export_id)
-    if export.user != request.user and not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
-
-    if export.status not in {"processing", "pending"}:
-        return JsonResponse(
-            {"success": False, "error": f"Export is not running (status: {export.status})."},
-            status=409,
-        )
-
-    killed_pids = _kill_export_processes(export.id)
-
-    deleted_keys = []
-    warnings = []
-    storage = get_object_storage()
-
-    if export.file_path:
-        try:
-            storage.delete(export.file_path)
-            deleted_keys.append(export.file_path)
-        except Exception as e:
-            warnings.append(f"Could not delete {export.file_path}: {e}")
-
-    prefix = f"exports/export_{export.id}_"
-    try:
-        for key in storage.list_keys(prefix):
-            if not key.startswith(prefix) or not key.endswith(".zip"):
-                continue
-            try:
-                storage.delete(key)
-                deleted_keys.append(key)
-            except Exception as e:
-                warnings.append(f"Could not delete {key}: {e}")
-    except Exception as e:
-        warnings.append(f"Could not list keys for prefix {prefix}: {e}")
-
-    who = getattr(request.user, "username", "unknown")
-    stopped_at = timezone.now().strftime("%Y-%m-%d %H:%M:%S %Z")
-    message = f"Stopped manually by {who} at {stopped_at}."
-    if killed_pids:
-        message += f" Killed worker PID(s): {', '.join(str(p) for p in killed_pids)}."
-    if deleted_keys:
-        message += f" Deleted {len(set(deleted_keys))} ZIP object(s)."
-    export.mark_failed(message)
-
-    return JsonResponse(
-        {
-            "success": True,
-            "killed_pids": killed_pids,
-            "deleted_keys": sorted(set(deleted_keys)),
-            "warnings": warnings,
-            "status": "failed",
-            "error_message": message,
-        }
-    )

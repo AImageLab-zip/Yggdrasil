@@ -13,19 +13,15 @@ import tempfile
 import hashlib
 import json
 import math
-import re
 import io
 import uuid
 from PIL import Image
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.file_access import exists as artifact_exists, streaming_response
-from common.file_access import open_binary
 from common.permissions import (
-    project_allows_annotation,
-    user_can_read_folder,
-    user_can_write_annotations,
-    user_is_project_admin,
+    user_can_read_patient,
+    user_can_write_patient_annotations,
 )
 from common.object_storage import get_object_storage
 from common.imaging_calibration import (
@@ -637,19 +633,11 @@ def _serve_file_url(request, file_id):
 
 
 def _can_read_patient(request, patient):
-    if user_is_project_admin(request.user, request):
-        return True
-    if not patient.folder:
-        return False
-    return user_can_read_folder(request.user, patient.folder, request)
+    return user_can_read_patient(request.user, patient)
 
 
 def _can_write_patient(request, patient):
-    if user_is_project_admin(request.user, request):
-        return True
-    return bool(
-        patient.folder and user_can_write_annotations(request.user, patient.folder, request)
-    )
+    return user_can_write_patient_annotations(request.user, patient)
 
 
 def _content_type_for_image_path(file_path):

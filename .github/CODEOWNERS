@@ -1,0 +1,46 @@
+# Core paths: changes need a maintainer's review (enforced once branch protection
+# requires code-owner review on `main`). Everything not listed here is open to any
+# contributor through the normal review. See STUDENTS.md for where new work goes.
+
+# --- maintainers -----------------------------------------------------------------
+# @lorenzobrg @homarone00 @Morelli-01
+
+# Data model and migrations (every app)
+/common/models.py                    @lorenzobrg @homarone00 @Morelli-01
+/common/base_models.py               @lorenzobrg @homarone00 @Morelli-01
+**/migrations/                       @lorenzobrg @homarone00 @Morelli-01
+/annotations/models/                 @lorenzobrg @homarone00 @Morelli-01
+/annotations/services/               @lorenzobrg @homarone00 @Morelli-01
+
+# Authorization, storage, file serving, the domain registry
+/common/permissions.py               @lorenzobrg @homarone00 @Morelli-01
+/common/file_access.py               @lorenzobrg @homarone00 @Morelli-01
+/common/object_storage.py            @lorenzobrg @homarone00 @Morelli-01
+/common/domains.py                   @lorenzobrg @homarone00 @Morelli-01
+/common/tests_cross_project_matrix.py @lorenzobrg @homarone00 @Morelli-01
+/common/tests_domain_registry.py     @lorenzobrg @homarone00 @Morelli-01
+
+# The runner HTTP API (frozen contract) and the internal SLURM executor
+/maxillo/runner_api_service.py       @lorenzobrg @homarone00 @Morelli-01
+/maxillo/api_views/runner.py         @lorenzobrg @homarone00 @Morelli-01
+/maxillo/tests_runner_api.py         @lorenzobrg @homarone00 @Morelli-01
+/common/runner/                      @lorenzobrg @homarone00 @Morelli-01
+/slurm/                              @lorenzobrg @homarone00 @Morelli-01
+
+# Imaging invariants (CONTRIBUTING.md#imaging-invariants)
+/frontend/imaging/geometry/reorient.js         @lorenzobrg @homarone00 @Morelli-01
+/frontend/imaging/metadata/modalityLutModule.js @lorenzobrg @homarone00 @Morelli-01
+/frontend/imaging/ids/imageIds.js              @lorenzobrg @homarone00 @Morelli-01
+/static/js/seg2pano_core.js                    @lorenzobrg @homarone00 @Morelli-01
+
+# Settings, security, deployment, CI and the lint contracts
+/yggdrasil/settings.py               @lorenzobrg @homarone00 @Morelli-01
+/yggdrasil/middleware.py             @lorenzobrg @homarone00 @Morelli-01
+/Dockerfile                          @lorenzobrg @homarone00 @Morelli-01
+/.dockerignore                       @lorenzobrg @homarone00 @Morelli-01
+/docker-compose.yml                  @lorenzobrg @homarone00 @Morelli-01
+/entrypoint.sh                       @lorenzobrg @homarone00 @Morelli-01
+/scripts/deploy_prod.sh              @lorenzobrg @homarone00 @Morelli-01
+/requirements.txt                    @lorenzobrg @homarone00 @Morelli-01
+/pyproject.toml                      @lorenzobrg @homarone00 @Morelli-01
+/.github/                            @lorenzobrg @homarone00 @Morelli-01

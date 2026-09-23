@@ -10,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from common.activity import log_activity
 from common.models import Project, ProjectAccess
+from common.permissions import current_project as session_project
 from common.permissions import filter_folders_for_user, user_is_project_admin
 from common.view_helpers import patient_list_response, upload_error_response, wants_json
 from .domain import get_domain_forms, get_domain_models
@@ -42,7 +43,7 @@ def upload_patient(request):
     # refuses a project the user has no access to at all.
     current_project_id = request.session.get('current_project_id')
     if current_project_id and not (
-        user_is_project_admin(request.user, request)
+        user_is_project_admin(request.user, session_project(request))
         or ProjectAccess.objects.filter(
             user=request.user, project_id=current_project_id
         ).exists()

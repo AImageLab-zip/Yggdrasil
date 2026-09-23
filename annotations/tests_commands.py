@@ -31,7 +31,7 @@ from annotations.models import (
     SpatialAnnotation3DItem,
 )
 from common.annotation_lock import raw_data_is_locked
-from common.models import FileRegistry, Job, Modality, Project
+from common.models import FileRegistry, Modality, Project
 from laparoscopy.models import (
     Folder as LaparoFolder,
     Patient as LaparoPatient,

@@ -41,7 +41,7 @@
 export const NIFTI_SCHEME = 'nifti';
 
 /** Namespaces that expose the file-serving API. `api` is the global, unprefixed one. */
-export const SERVE_NAMESPACES = Object.freeze(['api', 'maxillo', 'brain', 'laparoscopy']);
+export const SERVE_NAMESPACES = Object.freeze(['api', 'maxillo', 'brain', 'laparoscopy', 'urology']);
 
 /**
  * Path of the filename-suffixed serve route, matching the Django `api_serve_file_named`

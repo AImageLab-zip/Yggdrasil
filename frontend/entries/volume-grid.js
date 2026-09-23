@@ -211,9 +211,9 @@ export const GRID_TOOLS = {
  * @returns {Promise<object>} the grid handle from `createVolumeGrid`.
  */
 export async function mountVolumeGrid({ elements, layout = FIXED_CBCT_LAYOUT }) {
-    if (!Array.isArray(elements) || elements.length !== GRID_VIEWPORT_COUNT) {
+    if (!Array.isArray(elements) || (elements.length !== GRID_VIEWPORT_COUNT && elements.length !== 1)) {
         throw new Error(
-            `The grid needs exactly ${GRID_VIEWPORT_COUNT} elements, got ${elements?.length}.`
+            `The grid needs 1 or ${GRID_VIEWPORT_COUNT} elements, got ${elements?.length}.`
         );
     }
 

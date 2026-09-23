@@ -67,7 +67,7 @@ RUNTIME_KEYS = frozenset(
 
 #: Tools whose value the store can re-derive from the geometry alone.
 GEOMETRIC_TOOLS = frozenset(
-    {"Length", "Height", "Angle", "CobbAngle", "Bidirectional", "RectangleROI", "EllipticalROI", "CircleROI"}
+    {"Length", "Height", "Angle", "CobbAngle", "Bidirectional", "RectangleROI", "EllipticalROI", "CircleROI", "SplineROI", "PlanarFreehandROI"}
 )
 
 #: Tools that carry geometry but whose *number* needs the voxels. See the module note.
@@ -538,6 +538,29 @@ def descriptors_for_annotation(
                 MeasurementKind.AREA,
                 math.pi * semi_major * semi_minor,
                 area_unit,
+                calibrated=calibrated,
+                **shared,
+            ),
+        ]
+
+    if tool_name in ("SplineROI", "PlanarFreehandROI"):
+        if len(points) < 3:
+            raise ValidationError(
+                f"{tool_name} needs at least 3 handles, got {len(points)}"
+            )
+        return [
+            _geometry(Geometry3DType.POLYLINE, points, **geometry_kwargs),
+            _measurement(
+                MeasurementKind.AREA,
+                polygon_area(maths),
+                area_unit,
+                calibrated=calibrated,
+                **shared,
+            ),
+            _measurement(
+                MeasurementKind.PERIMETER,
+                polyline_length(maths + [maths[0]]),
+                length_unit,
                 calibrated=calibrated,
                 **shared,
             ),
