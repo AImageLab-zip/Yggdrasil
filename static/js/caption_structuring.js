@@ -155,6 +155,11 @@
         return Math.min(Math.max(contentHeight || 0, min), max);
     }
 
+    /** A report with no filled section: the panel must say so, not sit blank. */
+    function reportIsEmpty(report) {
+        return !report || !String(report.structured_text || '').trim();
+    }
+
     function humanizeKey(key) {
         var words = String(key || "").replace(/[_-]+/g, " ").trim();
         return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
@@ -184,7 +189,8 @@
             '<div class="caption-structured mt-1" data-structured-for="' + escapeHtml(report.id) + '">' +
                 '<div class="d-flex align-items-center gap-2">' +
                     '<span class="badge-ygg badge-neutral">' +
-                        '<i class="fas fa-wand-magic-sparkles me-1"></i>Structured' +
+                        '<i class="fas fa-wand-magic-sparkles me-1"></i>' +
+                        (reportIsEmpty(report) ? 'Nothing filed' : 'Structured') +
                     '</span>' +
                     '<small class="text-muted">' + escapeHtml(when) + '</small>' +
                     (report.attempt > 1
@@ -502,9 +508,10 @@
 
     CaptionStructuringController.prototype.complete = function (report) {
         var textarea = document.getElementById('structuredCaptionText');
-        if (report && report.structured_text) textarea.value = report.structured_text;
+        var empty = reportIsEmpty(report);
+        textarea.value = empty ? '' : report.structured_text;
         this.fitReport();
-        this.setStatus('Structured', false);
+        this.setStatus(empty ? 'Nothing filed' : 'Structured', false);
         this.setWarnings((report && report.warnings) || []);
         document.getElementById('structuredCaptionActions').classList.remove('d-none');
 
@@ -594,6 +601,7 @@
         shouldEnableStructureButton: shouldEnableStructureButton,
         templateAvailableFor: templateAvailableFor,
         prettifySections: prettifySections,
+        reportIsEmpty: reportIsEmpty,
         reportHeight: reportHeight,
         renderStructuredBlock: renderStructuredBlock,
         escapeHtml: escapeHtml,

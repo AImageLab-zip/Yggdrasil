@@ -395,3 +395,26 @@ test('a report between the two is shown at its own height', () => {
 test('a tiny viewport never produces a box smaller than the minimum', () => {
     assert.equal(CS.reportHeight(2000, 200), 220);
 });
+
+
+// ----------------------------------------------------------- an unfilled report
+
+test('a report with no filled section is recognised as empty', () => {
+    assert.equal(CS.reportIsEmpty({ structured_text: '' }), true);
+    assert.equal(CS.reportIsEmpty({ structured_text: '   \n ' }), true);
+    assert.equal(CS.reportIsEmpty(null), true);
+    assert.equal(CS.reportIsEmpty({ structured_text: 'Sede\nA sinistra.' }), false);
+});
+
+test('the row badge says nothing was filed instead of claiming a report', () => {
+    const empty = CS.renderStructuredBlock({
+        id: 3, status: 'completed', structured_text: '', warnings: [{ code: 'nothing_filed' }],
+    });
+    assert.ok(empty.includes('Nothing filed'));
+    assert.ok(!empty.includes('>Structured'));
+
+    const filled = CS.renderStructuredBlock({
+        id: 4, status: 'completed', structured_text: 'Sede\nA sinistra.', warnings: [],
+    });
+    assert.ok(filled.includes('Structured'));
+});

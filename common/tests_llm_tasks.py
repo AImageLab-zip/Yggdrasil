@@ -390,4 +390,36 @@ class CatchAllIsNotPartOfTheReportTests(TestCase):
             "## uncategorised\n" + caption, caption=caption
         )
         self.assertEqual(rendered, "")
-        self.assertIn("not_filed", [w["code"] for w in warnings])
+        self.assertIn("nothing_filed", [w["code"] for w in warnings])
+
+class NothingFiledTests(TestCase):
+    """An empty report explains itself rather than being an empty box.
+
+    It happens for a real reason worth naming: a dictation about one thing filed under
+    a template about another -- a clinic visit under an MRI template, say.
+    """
+
+    def _parse(self, raw):
+        context = {
+            "fields": [{"key": "side", "label": "Sede della lesione"}],
+            "caption": "x",
+            "source_language": "it",
+            "report_language": "it",
+        }
+        return llm_tasks.CAPTION_TO_TEMPLATE.parse(raw, context)
+
+    def test_an_entirely_unfiled_answer_says_so(self):
+        _structured, rendered, warnings = self._parse('## uncategorised\nVisita urologica.')
+        self.assertEqual(rendered, "")
+        codes = [w["code"] for w in warnings]
+        self.assertIn("nothing_filed", codes)
+        self.assertNotIn("not_filed", codes)
+        detail = next(w["detail"] for w in warnings if w["code"] == "nothing_filed")
+        self.assertIn("modality", detail)
+
+    def test_a_partly_filed_answer_keeps_the_milder_warning(self):
+        _structured, rendered, warnings = self._parse('## side\nA sinistra.\n\n## uncategorised\nprova.')
+        codes = [w["code"] for w in warnings]
+        self.assertIn("not_filed", codes)
+        self.assertNotIn("nothing_filed", codes)
+        self.assertTrue(rendered)

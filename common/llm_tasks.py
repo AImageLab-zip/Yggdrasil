@@ -364,13 +364,30 @@ def _caption_parser(raw_text, context):
         # The text itself is kept in ``structured`` and not repeated here: a warning
         # that quotes the dictation puts clinical wording back on screen next to a
         # report that deliberately leaves it out.
-        warnings.append({
-            "code": "not_filed",
-            "detail": (
-                "Part of the dictation fitted no field of this template and is not in "
-                "the report."
-            ),
-        })
+        filed_anything = any(
+            key != UNCATEGORISED_KEY and (value or "").strip()
+            for key, value in structured.items()
+        )
+        if filed_anything:
+            warnings.append({
+                "code": "not_filed",
+                "detail": (
+                    "Part of the dictation fitted no field of this template and is not "
+                    "in the report."
+                ),
+            })
+        else:
+            # An empty report with a mild note under it reads like a failure nobody
+            # explained. The likeliest cause is a real one worth naming: the dictation
+            # and the template are about different things.
+            warnings.append({
+                "code": "nothing_filed",
+                "detail": (
+                    "None of this dictation fitted the fields of this template, so the "
+                    "report is empty. Check the caption's modality, or ask an "
+                    "administrator for a template that matches this kind of dictation."
+                ),
+            })
 
     same_language = (
         context.get("source_language")

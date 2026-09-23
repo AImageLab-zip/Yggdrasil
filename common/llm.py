@@ -253,6 +253,12 @@ def stream_chat(service, messages, *, temperature=None, max_tokens=None):
                  max_tokens=max_tokens),
         stream=True,
     )
+    # An SSE body is "text/event-stream" with no charset, and requests decodes any
+    # charset-less text/* as ISO-8859-1 (RFC 2616). The bodies are UTF-8, so without
+    # this every accented character in a dictated report came back mangled -- "nÃ©"
+    # for "né" -- and was stored that way. The non-streaming path never showed it
+    # because response.json() decodes as UTF-8 regardless.
+    response.encoding = "utf-8"
 
     pieces = []
     model = service.model_name
