@@ -95,6 +95,12 @@ worker still parses headers through it (finding F2).
 
 {# Additional features #}
 <script src="{% static 'js/vocal_caption.js' %}"></script>
+{% comment %}
+  Loaded after vocal_caption.js: the structuring controller reads window.recorder and
+  listens for the caption:added event that class dispatches. Both are plain static/js,
+  so neither needs `npm run build`.
+{% endcomment %}
+<script src="{% static 'js/caption_structuring.js' %}"></script>
 <script src="{% static 'js/nifti_metadata.js' %}"></script>
 <script src="{% static 'js/cbct_convert.js' %}"></script>
 <script src="{% static 'js/cbct_upload.js' %}"></script>

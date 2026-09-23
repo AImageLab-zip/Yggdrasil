@@ -55,6 +55,7 @@ from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from common.view_helpers import patient_list_response, upload_error_response
+from common.structuring_context import structuring_context
 from .helpers import redirect_with_namespace, render_with_fallback
 from .models import Export, Folder, Patient, Tag
 
@@ -255,6 +256,9 @@ def patient_detail(request, patient_id):
     context["captions_enabled"] = captions_enabled
     context["default_tab"] = "captions" if captions_enabled else "files"
     context["occlusion_enabled"] = False
+    # The same helper the POST endpoint calls, so the button and the refusal
+    # cannot disagree (see common/structuring_context.py).
+    context.update(structuring_context(patient))
 
     # Record for the landing "Continue where you left off" strip (best-effort).
     from common.activity import record_recent

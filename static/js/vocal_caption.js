@@ -271,7 +271,7 @@ class VocalCaptionRecorder {
             this.liveTranscription.enabled = true;
             this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             if (this.liveTranscription.socket?.readyState !== WebSocket.OPEN) {
-                throw new Error('The Live Whisper connection closed before recording started.');
+                throw new Error('The transcription connection closed before recording started.');
             }
             this.isRecording = true;
             this.isPaused = false;
@@ -303,7 +303,7 @@ class VocalCaptionRecorder {
                 this.modalityIndicator.textContent = this.modality.display;
             }
             if (this.captionTextArea) this.captionTextArea.readOnly = true;
-            this.notify('info', 'Connected to Live Whisper. Listening...');
+            this.notify('info', 'Connected. Listening...');
         } catch (error) {
             console.error('Error starting live transcription:', error);
             if (['NotAllowedError', 'NotFoundError', 'NotSupportedError', 'NotReadableError'].includes(error.name)) {
@@ -516,12 +516,14 @@ class VocalCaptionRecorder {
             this.discardBtn?.classList.remove('d-none');
             this.audioLevelVisualizer?.classList.add('is-active');
             this.audioLevelVisualizer?.classList.remove('is-paused');
+            this.syncStructureButton();
         } else {
             this.resetUI();
         }
     }
     
     resetUI() {
+        this.syncStructureButton();
         this.startBtn?.classList.remove('d-none');
         this.recordingInfo?.classList.add('d-none');
         this.audioPlayback?.classList.add('d-none');
@@ -601,7 +603,7 @@ class VocalCaptionRecorder {
         this.liveTranscription.socket = socket;
 
         await new Promise((resolve, reject) => {
-            const timeout = window.setTimeout(() => reject(new Error('Live Whisper connection timed out.')), 10000);
+            const timeout = window.setTimeout(() => reject(new Error('The transcription service did not respond in time.')), 10000);
             socket.onmessage = (event) => {
                 let message;
                 try {
@@ -616,7 +618,7 @@ class VocalCaptionRecorder {
             };
             socket.onerror = () => {
                 window.clearTimeout(timeout);
-                reject(new Error('Could not connect to Live Whisper.'));
+                reject(new Error('Could not connect to the transcription service.'));
             };
             socket.onclose = (event) => {
                 window.clearTimeout(timeout);
@@ -686,8 +688,8 @@ class VocalCaptionRecorder {
     transcriptionCloseMessage(code) {
         if (code === 4401) return 'Your session has expired. Reload the page and sign in again.';
         if (code === 4403) return 'You do not have permission to transcribe this patient.';
-        if (code === 4503) return 'Live Whisper is not configured.';
-        return 'The Live Whisper connection closed unexpectedly.';
+        if (code === 4503) return 'Speech transcription is not configured on this server.';
+        return 'The transcription connection closed unexpectedly.';
     }
 
     joinCaptionText(...parts) {
@@ -754,6 +756,8 @@ class VocalCaptionRecorder {
     addCaptionToList(caption) {
         const captionListContainer = document.querySelector('.voice-captions-list');
         if (!captionListContainer) return;
+        // caption_structuring.js listens for this rather than reaching into this class.
+        document.dispatchEvent(new CustomEvent('caption:added', { detail: caption }));
         
         // Remove "no captions" message if it exists
         const noCaptions = captionListContainer.querySelector('.no-captions');
@@ -1357,6 +1361,15 @@ class VocalCaptionRecorder {
                 this.textCharCount.style.color = '#6c757d'; // Default gray
             }
         }
+        this.syncStructureButton();
+    }
+
+    /** Let the (optional) structuring controller re-evaluate its button. */
+    syncStructureButton() {
+        const structuring = window.CaptionStructuring;
+        if (structuring && structuring.controller) {
+            structuring.controller.syncButtonState();
+        }
     }
     
     clearTextCaption() {
@@ -1403,6 +1416,9 @@ class VocalCaptionRecorder {
                 this.addCaptionToList(result.caption);
                 this.clearTextCaption();
                 this.showSavedIndicator();
+                // Returned so caption_structuring.js can structure the row this became
+                // without asking the clinician to press Save and then Structure.
+                return result.caption;
             } else {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
                 throw new Error(errorData.error || `Save failed (${response.status})`);

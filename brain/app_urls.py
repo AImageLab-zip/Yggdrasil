@@ -6,6 +6,7 @@ from annotations import views as annotations_views
 from common.domain_views import deletion as shared_deletion
 from common.domain_views import export as shared_export
 from common.domain_views import folders_tags as shared_folders
+from common.domain_views import caption_reports as shared_caption_reports
 from common.domain_views import voice_captions as shared_captions
 
 
@@ -38,6 +39,16 @@ urlpatterns = [
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/edit/",
         shared_captions.edit_voice_caption_transcription,
         name="edit_voice_caption_transcription",
+    ),
+    path(
+        "patient/<int:patient_id>/voice-caption/<int:caption_id>/structure/",
+        shared_caption_reports.structure_caption,
+        name="structure_caption",
+    ),
+    path(
+        "patient/<int:patient_id>/voice-caption/<int:caption_id>/report/",
+        shared_caption_reports.caption_report,
+        name="caption_report",
     ),
     path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/update-modality/",

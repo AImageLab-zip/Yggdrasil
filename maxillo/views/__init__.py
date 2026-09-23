@@ -62,6 +62,10 @@ from common.domain_views.voice_captions import (
     edit_voice_caption_transcription,
     update_voice_caption_modality,
 )
+from common.domain_views.caption_reports import (
+    caption_report,
+    structure_caption,
+)
 
 # Admin
 from .admin import rerun_processing, bulk_rerun_processing

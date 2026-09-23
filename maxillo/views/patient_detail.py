@@ -12,6 +12,7 @@ import hashlib
 from common.file_access import exists as artifact_exists
 from common.object_storage import get_object_storage
 from common.annotation_lock import annotation_lock_reasons, lock_message
+from common.structuring_context import structuring_context
 from common.permissions import (
     project_allows_annotation,
     user_can_edit_caption,
@@ -765,6 +766,9 @@ def patient_detail(request, patient_id):
         'allowed_annotations': allowed_annotations,
         'occlusion_enabled': occlusion_enabled,
         'captions_enabled': captions_enabled,
+        # The same helper the POST endpoint calls, so the button and the refusal cannot
+        # disagree (see common/structuring_context.py). This view serves laparoscopy too.
+        **structuring_context(patient),
         'default_tab': default_tab,
         'django_data': django_data,
         'patient_files': patient_files,

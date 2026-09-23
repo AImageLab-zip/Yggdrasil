@@ -55,6 +55,16 @@ urlpatterns = [
         name="edit_voice_caption_transcription",
     ),
     path(
+        "patient/<int:patient_id>/voice-caption/<int:caption_id>/structure/",
+        views.structure_caption,
+        name="structure_caption",
+    ),
+    path(
+        "patient/<int:patient_id>/voice-caption/<int:caption_id>/report/",
+        views.caption_report,
+        name="caption_report",
+    ),
+    path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/update-modality/",
         views.update_voice_caption_modality,
         name="update_voice_caption_modality",

@@ -58,6 +58,7 @@ from common.permissions import (
     user_is_project_admin,
 )
 from common.project_filters import presence_filter_specs
+from common.structuring_context import structuring_context
 
 from .export_config import install_urology_export_mappings
 from .file_utils import save_urology_modality_file
@@ -787,6 +788,9 @@ def patient_detail(request, patient_id):
     # Now that captions_enabled is real, the default tab has to follow it or the
     # page opens on a pane the project has disabled (brain/views.py:256).
     context["default_tab"] = "captions" if captions_enabled else "files"
+    # The same helper the POST endpoint calls, so the button and the refusal
+    # cannot disagree (see common/structuring_context.py).
+    context.update(structuring_context(patient))
 
     record_recent(
         request.user,
