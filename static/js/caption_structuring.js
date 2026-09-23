@@ -123,15 +123,28 @@
      * heading routinely arrives split across two reads ("## pi_" then "rads_score").
      * Unknown keys fall back to their own words, the way the server does.
      */
-    function prettifySections(text, labels) {
+    function prettifySections(text, labels, omit) {
         labels = labels || {};
-        var HEADING = /^#{1,6}[ \t]*([^\s#][^\r\n]*?)[ \t]*$/gm;
-        return String(text || "").replace(HEADING, function (whole, key) {
-            var trimmed = key.trim();
-            if (labels[trimmed]) return labels[trimmed];
-            var words = trimmed.replace(/[_-]+/g, ' ').trim();
-            return words ? words.charAt(0).toUpperCase() + words.slice(1) : whole;
+        omit = omit || [];
+        var HEADING = /^#{1,6}[ \t]*([^\s#][^\r\n]*?)[ \t]*$/;
+        var skipping = false;
+        var out = [];
+        String(text || "").split(/\r?\n/).forEach(function (line) {
+            var match = HEADING.exec(line);
+            if (match) {
+                var key = match[1].trim();
+                skipping = omit.indexOf(key) !== -1;
+                if (!skipping) out.push(labels[key] || humanizeKey(key) || line);
+                return;
+            }
+            if (!skipping) out.push(line);
         });
+        return out.join("\n").replace(/\s+$/, "");
+    }
+
+    function humanizeKey(key) {
+        var words = String(key || "").replace(/[_-]+/g, " ").trim();
+        return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
     }
 
     function escapeHtml(value) {
@@ -185,6 +198,7 @@
         this.currentCaptionId = null;
         this.availableModalities = [];
         this.sectionLabels = {};
+        this.omitSections = [];
         this.rawAnswer = '';
     }
 
@@ -241,7 +255,16 @@
             textarea.addEventListener('input', function () { self.syncButtonState(); });
         }
 
-        document.addEventListener('caption:added', function () { self.syncButtonState(); });
+        document.addEventListener('caption:added', function (event) {
+            // The event fires before vocal_caption.js has inserted the row, and that
+            // row is built in JS without a structure button -- so a caption typed and
+            // saved in this page session had none until the next reload.
+            var caption = event && event.detail;
+            setTimeout(function () {
+                self.decorateRow(caption);
+                self.syncButtonState();
+            }, 0);
+        });
 
         // A run in flight holds an open request and an unfinished row; leaving the page
         // without cancelling leaves both until they time out.
@@ -269,6 +292,31 @@
         if (checked) return checked.value;
         var card = document.getElementById('captionUnifiedCard');
         return card ? (card.dataset.modality || '') : '';
+    };
+
+    /**
+     * Give a client-inserted caption row the same structure button the server renders.
+     *
+     * Only the markup is duplicated: whether the control may exist at all was decided
+     * server-side, and is expressed here by the panel being on the page.
+     */
+    CaptionStructuringController.prototype.decorateRow = function (caption) {
+        if (!this.panel || !caption || !caption.id) return;
+        if (!caption.text_caption) return;
+        var row = document.querySelector('.caption-item-compact[data-caption-id="' + caption.id + '"]');
+        if (!row) return;
+        var actions = row.querySelector('.caption-actions');
+        if (!actions || actions.querySelector('.btn-structure-caption')) return;
+
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline-primary btn-sm btn-structure-caption';
+        button.dataset.captionId = caption.id;
+        button.dataset.modality = caption.modality || '';
+        button.innerHTML = '<i class="fas fa-wand-magic-sparkles" style="font-size: 0.75rem;"></i>';
+        var edit = actions.querySelector('.btn-edit-caption');
+        if (edit) actions.insertBefore(button, edit);
+        else actions.appendChild(button);
     };
 
     CaptionStructuringController.prototype.syncButtonState = function () {
@@ -424,11 +472,12 @@
 
         if (event.type === 'start') {
             this.sectionLabels = event.sections || {};
+            this.omitSections = event.omit || [];
             this.rawAnswer = '';
             this.setStatus(event.replayed ? 'Already structured' : 'Model working…', !event.replayed);
         } else if (event.type === 'delta') {
             this.rawAnswer += event.text || '';
-            report.value = prettifySections(this.rawAnswer, this.sectionLabels);
+            report.value = prettifySections(this.rawAnswer, this.sectionLabels, this.omitSections);
             report.scrollTop = report.scrollHeight;
         } else if (event.type === 'done') {
             this.complete(event.report);

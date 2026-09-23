@@ -303,3 +303,75 @@ test('a half-arrived heading is not mangled once the rest turns up', () => {
     assert.equal(CS.prettifySections('## pi_', labels), 'Pi');
     assert.equal(CS.prettifySections('## pi_rads_score', labels), 'Punteggio PI-RADS');
 });
+
+test('an omitted section is left out of the streaming view too', () => {
+    // The finished report drops it, so showing it mid-stream would be a heading that
+    // appears and then vanishes when the "done" frame lands.
+    const raw = '## side\nA sinistra.\n\n## uncategorised\nciao ciao prova';
+    const out = CS.prettifySections(raw, { side: 'Sede' }, ['uncategorised']);
+    assert.equal(out, 'Sede\nA sinistra.');
+});
+
+test('omitting nothing keeps every section', () => {
+    const raw = '## side\nA sinistra.\n\n## uncategorised\nstray';
+    const out = CS.prettifySections(raw, { side: 'Sede' }, []);
+    assert.ok(out.includes('stray'));
+});
+
+
+// --------------------------------------------- rows inserted without a page reload
+
+test('a caption saved in this session gets the structure button its row lacks', () => {
+    // vocal_caption.js builds the row in JS, and that markup has only edit and delete;
+    // the server-rendered row has the structure button. Without this the button only
+    // turned up after a reload.
+    const actions = {
+        children: [],
+        querySelector(selector) {
+            if (selector === '.btn-structure-caption') {
+                return this.children.find((c) => c.className.includes('btn-structure-caption')) || null;
+            }
+            if (selector === '.btn-edit-caption') return this.edit;
+            return null;
+        },
+        insertBefore(node) { this.children.push(node); },
+        appendChild(node) { this.children.push(node); },
+    };
+    actions.edit = { className: 'btn-edit-caption' };
+    const row = { querySelector: () => actions };
+    const document = {
+        addEventListener() {},
+        createElement: () => ({ dataset: {}, className: '', innerHTML: '', type: '' }),
+        getElementById() { return null; },
+        querySelector(selector) {
+            return selector.indexOf('caption-item-compact') !== -1 ? row : null;
+        },
+        querySelectorAll() { return []; },
+    };
+    const controller = new (loadWithDocument(document).Controller)();
+    controller.panel = {};
+
+    controller.decorateRow({ id: 12, modality: 'urology-mri', text_caption: 'typed' });
+    assert.equal(actions.children.length, 1);
+    assert.equal(actions.children[0].dataset.captionId, 12);
+    assert.equal(actions.children[0].dataset.modality, 'urology-mri');
+
+    // Twice must not mean two buttons.
+    actions.children[0].className = 'btn btn-outline-primary btn-sm btn-structure-caption';
+    controller.decorateRow({ id: 12, modality: 'urology-mri', text_caption: 'typed' });
+    assert.equal(actions.children.length, 1);
+});
+
+test('a row gets no structure button where structuring is unavailable', () => {
+    const document = {
+        addEventListener() {},
+        createElement: () => ({ dataset: {}, className: '', innerHTML: '' }),
+        getElementById() { return null; },
+        querySelector() { throw new Error('must not look for a row'); },
+        querySelectorAll() { return []; },
+    };
+    const controller = new (loadWithDocument(document).Controller)();
+    controller.panel = null;   // the panel is absent when structuring_available is false
+
+    assert.doesNotThrow(() => controller.decorateRow({ id: 3, text_caption: 'typed' }));
+});

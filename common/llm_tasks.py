@@ -48,7 +48,10 @@ Rules for the output:
 - Use one "## <section-key>" heading per section, spelled exactly as given, in the order given.
 - Write the section text as plain prose. No markdown lists, no bold, no nested headings.
 - Include a section only if the dictation says something about it. Omit the rest.
-- Put anything that was said but fits no section under "## {uncategorised}".
+- Put anything that was said but fits no section under "## {uncategorised}": stray
+  words, test phrases and asides belong there, never in a clinical section.
+- A clinical statement always belongs in the section it describes. Do not leave it
+  under "## {uncategorised}" because the wording is not an exact match.
 - Write no preamble, no closing remarks and no commentary outside the sections.
 """.strip()
 
@@ -141,12 +144,13 @@ def render_field_list(fields):
 SECTION_RE = re.compile(r"^\s{0,3}#{1,6}\s*(?P<key>[A-Za-z0-9_\-]+)\s*$", re.M)
 
 
-def parse_sections(raw_text, field_keys, labels=None):
+def parse_sections(raw_text, field_keys, labels=None, omit=()):
     """``(structured, rendered, warnings)`` from the model's sectioned plain text.
 
     ``labels`` maps a section key to the heading a reader should see; anything missing
     falls back to the key read as words. ``structured`` stays keyed by the section key,
     because that is what a rerun, a later edit and the template itself refer to.
+    ``omit`` names sections that are parsed and kept but left out of the rendered report.
 
     Tolerant on purpose. A free-tier model gets the format nearly right nearly always,
     and "nearly" must not lose a clinician's dictation:
@@ -205,7 +209,7 @@ def parse_sections(raw_text, field_keys, labels=None):
 
     ordered = [key for key in field_keys if key in structured]
     ordered += [key for key in structured if key not in ordered]
-    rendered = render_sections(structured, ordered, labels)
+    rendered = render_sections(structured, ordered, labels, omit=omit)
     return structured, rendered, warnings
 
 
@@ -219,16 +223,22 @@ def humanize_key(key):
     return words[:1].upper() + words[1:] if words else ""
 
 
-def render_sections(structured, ordered, labels=None):
+def render_sections(structured, ordered, labels=None, omit=()):
     """The report as a clinician reads it: a heading per section, then its text.
 
     No ``##`` and no section keys. Those belong to the wire format the model writes and
     the parser splits on; carrying them into the report shows the reader a markdown
     artefact and an identifier where their template's own wording should be.
+
+    ``omit`` keeps a section out of the report without discarding it: it stays in
+    ``structured``, where a warning and a later reader can still reach it.
     """
     labels = labels or {}
+    omit = set(omit or ())
     blocks = []
     for key in ordered:
+        if key in omit:
+            continue
         heading = labels.get(key) or humanize_key(key)
         blocks.append(f"{heading}\n{structured[key]}" if heading else structured[key])
     return "\n\n".join(blocks)
@@ -279,7 +289,7 @@ class LlmTask:
     """One thing the platform asks a model to do."""
 
     def __init__(self, slug, label, *, service_slug, prompt_slug, builder, parser,
-                 labeller=None, description=""):
+                 labeller=None, omit_sections=(), description=""):
         self.slug = slug
         self.label = label
         self.service_slug = service_slug
@@ -289,6 +299,10 @@ class LlmTask:
         # Optional: what to call each section in a finished report. Without one the
         # sections are headed by their keys read as words.
         self.labeller = labeller
+        # Sections this task parses and stores but keeps out of the report a clinician
+        # reads. The endpoint forwards them so the streaming view agrees with the
+        # finished report about what is in it.
+        self.omit_sections = tuple(omit_sections)
         self.description = description
 
     def build_messages(self, prompt, context):
@@ -335,20 +349,47 @@ def _caption_parser(raw_text, context):
     fields = context.get("fields") or []
     field_keys = [field["key"] for field in fields]
     structured, rendered, warnings = parse_sections(
-        raw_text, field_keys, caption_section_labels(context)
+        raw_text,
+        field_keys,
+        caption_section_labels(context),
+        # The report is the template's own headings and nothing else. Whatever fitted
+        # none of them is still parsed and stored -- it is the clinician's dictation --
+        # but a report is a clinical document, and a trailing "other findings" heading
+        # holding stray words is not part of one.
+        omit=(UNCATEGORISED_KEY,),
     )
+
+    leftover = (structured.get(UNCATEGORISED_KEY) or "").strip()
+    if leftover:
+        warnings.append({
+            "code": "not_filed",
+            "detail": (
+                "Some of the dictation fitted no field of this template and was left "
+                "out of the report: " + _shorten(leftover)
+            ),
+        })
 
     same_language = (
         context.get("source_language")
         and context.get("source_language") == context.get("report_language")
     )
     if same_language:
+        # Coverage is judged on what the report actually says, so text that only ever
+        # reached the omitted section counts as missing rather than as covered.
+        reported = {
+            key: value for key, value in structured.items() if key != UNCATEGORISED_KEY
+        }
         coverage = coverage_warning(
-            context.get("caption"), structured, context.get("report_language")
+            context.get("caption"), reported, context.get("report_language")
         )
         if coverage:
             warnings.append(coverage)
     return structured, rendered, warnings
+
+
+def _shorten(text, limit=160):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def caption_section_labels(context):
@@ -376,6 +417,7 @@ CAPTION_TO_TEMPLATE = LlmTask(
     builder=_caption_builder,
     parser=_caption_parser,
     labeller=caption_section_labels,
+    omit_sections=(UNCATEGORISED_KEY,),
     description=(
         "Files a dictated caption under the headings of the patient's report template, "
         "repairing transcription errors without changing what was said."

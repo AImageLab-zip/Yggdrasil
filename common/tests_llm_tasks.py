@@ -315,3 +315,75 @@ class RenderedReportTests(TestCase):
         self.assertEqual(
             llm_tasks.CAPTION_TO_TEMPLATE.section_labels(context)["side"], "Sede"
         )
+
+class CatchAllIsNotPartOfTheReportTests(TestCase):
+    """A report carries the template's clinical sections and nothing else.
+
+    What fitted no field is still parsed and stored -- it is the clinician's dictation
+    and discarding it is the one thing forbidden -- but it is not rendered into the
+    report, and a warning says it was left out so nobody discovers the omission by
+    comparing two documents.
+    """
+
+    def _parse(self, raw, caption="", language="it"):
+        context = {
+            "fields": [
+                {"key": "side", "label": "Sede della lesione"},
+                {"key": "size", "label": "Dimensioni"},
+            ],
+            "caption": caption,
+            "source_language": language,
+            "report_language": language,
+        }
+        return llm_tasks.CAPTION_TO_TEMPLATE.parse(raw, context)
+
+    def test_the_catch_all_never_reaches_the_report(self):
+        raw = "## side\nA sinistra.\n\n## uncategorised\nciao ciao prova pippo"
+        structured, rendered, warnings = self._parse(raw)
+        self.assertEqual(rendered, "Sede della lesione\nA sinistra.")
+        self.assertNotIn("Altri rilievi", rendered)
+        self.assertNotIn("ciao", rendered)
+        # Kept, not discarded.
+        self.assertEqual(structured[llm_tasks.UNCATEGORISED_KEY], "ciao ciao prova pippo")
+        self.assertIn("not_filed", [w["code"] for w in warnings])
+
+    def test_the_warning_quotes_what_was_left_out(self):
+        raw = "## side\nA sinistra.\n\n## uncategorised\nprova pippo"
+        _structured, _rendered, warnings = self._parse(raw)
+        detail = next(w["detail"] for w in warnings if w["code"] == "not_filed")
+        self.assertIn("prova pippo", detail)
+
+    def test_no_warning_when_everything_was_filed(self):
+        raw = "## side\nA sinistra.\n\n## size\nDodici millimetri."
+        _structured, rendered, warnings = self._parse(raw)
+        self.assertIn("Dimensioni", rendered)
+        self.assertNotIn("not_filed", [w["code"] for w in warnings])
+
+    def test_unfiled_text_counts_as_missing_for_coverage(self):
+        """Coverage judges the report, not the parse: an omitted section is not in it."""
+        caption = (
+            "La lesione e a sinistra e misura dodici millimetri con margini irregolari "
+            "e segnale disomogeneo nella porzione apicale destra della ghiandola."
+        )
+        raw = (
+            "## side\nA sinistra.\n\n## uncategorised\nmisura dodici millimetri con "
+            "margini irregolari e segnale disomogeneo nella porzione apicale destra "
+            "della ghiandola."
+        )
+        _structured, rendered, warnings = self._parse(raw, caption=caption)
+        codes = [w["code"] for w in warnings]
+        self.assertNotIn("misura", rendered)
+        self.assertIn("not_filed", codes)
+        self.assertIn("coverage", codes)
+
+    def test_an_answer_that_is_entirely_unfiled_leaves_an_empty_report(self):
+        """No coverage percentage needed: "none of it was filed" is the whole story."""
+        caption = (
+            "La lesione e a sinistra e misura dodici millimetri con margini irregolari "
+            "e segnale disomogeneo."
+        )
+        _structured, rendered, warnings = self._parse(
+            "## uncategorised\n" + caption, caption=caption
+        )
+        self.assertEqual(rendered, "")
+        self.assertIn("not_filed", [w["code"] for w in warnings])
