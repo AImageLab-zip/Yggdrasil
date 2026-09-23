@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 #: field or quietly discard the sentence, and discarding is the one thing forbidden.
 UNCATEGORISED_KEY = "uncategorised"
 
+#: What that section is called in a finished report. The key is a wire format -- the
+#: model writes it and the parser splits on it -- but a clinician reading the report
+#: should see a heading, not an identifier, so the rendered text never shows the key.
+UNCATEGORISED_LABELS = {
+    "it": "Altri rilievi",
+    "en": "Other findings",
+    "de": "Weitere Befunde",
+}
+
 #: The output contract. **Code owns this, not the admin.** The parser depends on it, and
 #: an admin edit that broke it would break structuring for every domain at once, with the
 #: symptom "my report came back as prose".
@@ -132,8 +141,12 @@ def render_field_list(fields):
 SECTION_RE = re.compile(r"^\s{0,3}#{1,6}\s*(?P<key>[A-Za-z0-9_\-]+)\s*$", re.M)
 
 
-def parse_sections(raw_text, field_keys):
+def parse_sections(raw_text, field_keys, labels=None):
     """``(structured, rendered, warnings)`` from the model's sectioned plain text.
+
+    ``labels`` maps a section key to the heading a reader should see; anything missing
+    falls back to the key read as words. ``structured`` stays keyed by the section key,
+    because that is what a rerun, a later edit and the template itself refer to.
 
     Tolerant on purpose. A free-tier model gets the format nearly right nearly always,
     and "nearly" must not lose a clinician's dictation:
@@ -192,8 +205,33 @@ def parse_sections(raw_text, field_keys):
 
     ordered = [key for key in field_keys if key in structured]
     ordered += [key for key in structured if key not in ordered]
-    rendered = "\n\n".join(f"## {key}\n{structured[key]}" for key in ordered)
+    rendered = render_sections(structured, ordered, labels)
     return structured, rendered, warnings
+
+
+def humanize_key(key):
+    """``subject_specific_findings`` -> ``Subject specific findings``.
+
+    Only ever a fallback: a section the model invented has no label to look up, and its
+    key is still better read as words than as an identifier.
+    """
+    words = str(key or "").replace("_", " ").replace("-", " ").strip()
+    return words[:1].upper() + words[1:] if words else ""
+
+
+def render_sections(structured, ordered, labels=None):
+    """The report as a clinician reads it: a heading per section, then its text.
+
+    No ``##`` and no section keys. Those belong to the wire format the model writes and
+    the parser splits on; carrying them into the report shows the reader a markdown
+    artefact and an identifier where their template's own wording should be.
+    """
+    labels = labels or {}
+    blocks = []
+    for key in ordered:
+        heading = labels.get(key) or humanize_key(key)
+        blocks.append(f"{heading}\n{structured[key]}" if heading else structured[key])
+    return "\n\n".join(blocks)
 
 
 def _tokens(text, language):
@@ -241,13 +279,16 @@ class LlmTask:
     """One thing the platform asks a model to do."""
 
     def __init__(self, slug, label, *, service_slug, prompt_slug, builder, parser,
-                 description=""):
+                 labeller=None, description=""):
         self.slug = slug
         self.label = label
         self.service_slug = service_slug
         self.prompt_slug = prompt_slug
         self.builder = builder
         self.parser = parser
+        # Optional: what to call each section in a finished report. Without one the
+        # sections are headed by their keys read as words.
+        self.labeller = labeller
         self.description = description
 
     def build_messages(self, prompt, context):
@@ -256,6 +297,14 @@ class LlmTask:
 
     def parse(self, raw_text, context):
         return self.parser(raw_text, context)
+
+    def section_labels(self, context):
+        """``{section key: heading}``, for a caller that renders before the parse.
+
+        The streaming endpoint needs this: it is forwarding the model's own text, which
+        is keyed, while the reader wants headings.
+        """
+        return self.labeller(context) if self.labeller else {}
 
     def __str__(self):  # pragma: no cover - admin/debug convenience
         return self.label
@@ -283,8 +332,11 @@ def _caption_builder(task, prompt, context):
 
 
 def _caption_parser(raw_text, context):
-    field_keys = [field["key"] for field in (context.get("fields") or [])]
-    structured, rendered, warnings = parse_sections(raw_text, field_keys)
+    fields = context.get("fields") or []
+    field_keys = [field["key"] for field in fields]
+    structured, rendered, warnings = parse_sections(
+        raw_text, field_keys, caption_section_labels(context)
+    )
 
     same_language = (
         context.get("source_language")
@@ -299,6 +351,23 @@ def _caption_parser(raw_text, context):
     return structured, rendered, warnings
 
 
+def caption_section_labels(context):
+    """The heading for every section this task can produce, in the report's language.
+
+    The template's own wording for its fields -- which the clinician recognises, because
+    it is what they were reading while dictating -- plus a name for the catch-all.
+    """
+    labels = {
+        field["key"]: field.get("label") or humanize_key(field["key"])
+        for field in (context.get("fields") or [])
+    }
+    language = context.get("report_language") or "it"
+    labels[UNCATEGORISED_KEY] = UNCATEGORISED_LABELS.get(
+        language, UNCATEGORISED_LABELS["en"]
+    )
+    return labels
+
+
 CAPTION_TO_TEMPLATE = LlmTask(
     "caption_to_template",
     "Dictated caption into the report template",
@@ -306,6 +375,7 @@ CAPTION_TO_TEMPLATE = LlmTask(
     prompt_slug="caption_to_template",
     builder=_caption_builder,
     parser=_caption_parser,
+    labeller=caption_section_labels,
     description=(
         "Files a dictated caption under the headings of the patient's report template, "
         "repairing transcription errors without changing what was said."

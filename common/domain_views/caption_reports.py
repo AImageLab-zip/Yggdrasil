@@ -134,6 +134,10 @@ def structure_caption(request, patient_id, caption_id):
             "attempt": report.attempt,
             "model": report.model_name,
             "template": report.template.name if report.template_id else "",
+            # The headings the browser should show while the answer streams in. The model
+            # writes section *keys*; without these the clinician watches "## pi_rads_score"
+            # appear and then be replaced by the finished report a moment later.
+            "sections": task.section_labels(context),
         })
         try:
             for fragment in caption_structuring.run(report, service, prompt, context):

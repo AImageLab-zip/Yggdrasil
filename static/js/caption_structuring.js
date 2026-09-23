@@ -116,6 +116,24 @@
         return availableSlugs.indexOf(bare) !== -1;
     }
 
+    /**
+     * The model writes "## <section-key>"; a clinician should read a heading.
+     *
+     * Applied to the whole answer so far rather than to each fragment, because a
+     * heading routinely arrives split across two reads ("## pi_" then "rads_score").
+     * Unknown keys fall back to their own words, the way the server does.
+     */
+    function prettifySections(text, labels) {
+        labels = labels || {};
+        var HEADING = /^#{1,6}[ \t]*([^\s#][^\r\n]*?)[ \t]*$/gm;
+        return String(text || "").replace(HEADING, function (whole, key) {
+            var trimmed = key.trim();
+            if (labels[trimmed]) return labels[trimmed];
+            var words = trimmed.replace(/[_-]+/g, ' ').trim();
+            return words ? words.charAt(0).toUpperCase() + words.slice(1) : whole;
+        });
+    }
+
     function escapeHtml(value) {
         return String(value === null || value === undefined ? '' : value)
             .replace(/&/g, '&amp;')
@@ -166,6 +184,8 @@
         this.hardTimer = null;
         this.currentCaptionId = null;
         this.availableModalities = [];
+        this.sectionLabels = {};
+        this.rawAnswer = '';
     }
 
     CaptionStructuringController.prototype.init = function () {
@@ -403,9 +423,12 @@
         if (!event || !event.type) return;
 
         if (event.type === 'start') {
+            this.sectionLabels = event.sections || {};
+            this.rawAnswer = '';
             this.setStatus(event.replayed ? 'Already structured' : 'Model working…', !event.replayed);
         } else if (event.type === 'delta') {
-            report.value += event.text || '';
+            this.rawAnswer += event.text || '';
+            report.value = prettifySections(this.rawAnswer, this.sectionLabels);
             report.scrollTop = report.scrollHeight;
         } else if (event.type === 'done') {
             this.complete(event.report);
@@ -495,6 +518,7 @@
         structuringErrorMessage: structuringErrorMessage,
         shouldEnableStructureButton: shouldEnableStructureButton,
         templateAvailableFor: templateAvailableFor,
+        prettifySections: prettifySections,
         renderStructuredBlock: renderStructuredBlock,
         escapeHtml: escapeHtml,
         Controller: CaptionStructuringController,

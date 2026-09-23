@@ -142,7 +142,9 @@ class SectionParsingTests(TestCase):
         self.assertEqual(structured["side"], "On the left.")
         self.assertEqual(structured["size"], "Twelve millimetres.")
         self.assertEqual(warnings, [])
-        self.assertIn("## side", rendered)
+        # The wire format does not survive into the report: no hashes, no keys.
+        self.assertNotIn("#", rendered)
+        self.assertNotIn("## side", rendered)
 
     def test_any_heading_level_is_accepted(self):
         raw = "# side\nLeft.\n\n### size\n12 mm."
@@ -193,7 +195,8 @@ class SectionParsingTests(TestCase):
     def test_the_rendered_form_follows_the_template_order(self):
         raw = "## size\n12 mm.\n\n## side\nLeft."
         _structured, rendered, _warnings = llm_tasks.parse_sections(raw, self.keys)
-        self.assertLess(rendered.index("## side"), rendered.index("## size"))
+        # Headings are the labels now, and with none given, the keys read as words.
+        self.assertLess(rendered.index("Side"), rendered.index("Size"))
 
 
 class CoverageCheckTests(TestCase):
@@ -255,4 +258,60 @@ class TaskRegistryTests(TestCase):
         self.assertNotEqual(
             llm_tasks.fingerprint("text", ["a"], 1),
             llm_tasks.fingerprint("text", ["a", "b"], 1),
+        )
+
+
+class RenderedReportTests(TestCase):
+    """What the clinician reads: their template's wording, and no markdown.
+
+    ``## <section-key>`` is the format the model writes and the parser splits on. It has
+    no business in the finished report -- a heading of "## pi_rads_score" is an
+    identifier and a markdown artefact standing where the template's own label belongs.
+    """
+
+    keys = ["side", "pi_rads_score"]
+    labels = {"side": "Sede della lesione", "pi_rads_score": "Punteggio PI-RADS"}
+
+    def test_each_section_is_headed_by_the_template_wording(self):
+        raw = "## side\nA sinistra.\n\n## pi_rads_score\nPI-RADS 4."
+        _structured, rendered, _warnings = llm_tasks.parse_sections(
+            raw, self.keys, self.labels
+        )
+        self.assertEqual(
+            rendered,
+            "Sede della lesione\nA sinistra.\n\nPunteggio PI-RADS\nPI-RADS 4.",
+        )
+
+    def test_a_key_with_no_label_is_read_as_words(self):
+        raw = "## subject_specific_findings\nQualcosa."
+        _structured, rendered, _warnings = llm_tasks.parse_sections(raw, [], {})
+        self.assertEqual(rendered, "Subject specific findings\nQualcosa.")
+
+    def test_the_catch_all_is_named_in_the_report_language(self):
+        context = {
+            "fields": [{"key": "side", "label": "Sede"}],
+            "report_language": "it",
+        }
+        labels = llm_tasks.caption_section_labels(context)
+        self.assertEqual(labels[llm_tasks.UNCATEGORISED_KEY], "Altri rilievi")
+        self.assertEqual(labels["side"], "Sede")
+
+        context["report_language"] = "de"
+        self.assertEqual(
+            llm_tasks.caption_section_labels(context)[llm_tasks.UNCATEGORISED_KEY],
+            "Weitere Befunde",
+        )
+
+    def test_the_stored_sections_are_still_keyed(self):
+        """Only the rendering changes: a rerun and the template speak in keys."""
+        raw = "## side\nA sinistra."
+        structured, _rendered, _warnings = llm_tasks.parse_sections(
+            raw, self.keys, self.labels
+        )
+        self.assertEqual(structured, {"side": "A sinistra."})
+
+    def test_the_task_carries_its_own_labels(self):
+        context = {"fields": [{"key": "side", "label": "Sede"}], "report_language": "it"}
+        self.assertEqual(
+            llm_tasks.CAPTION_TO_TEMPLATE.section_labels(context)["side"], "Sede"
         )

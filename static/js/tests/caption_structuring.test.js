@@ -273,3 +273,33 @@ test('runStructuring gives up quietly when the panel has no textarea', () => {
     assert.doesNotThrow(() => controller.runStructuring('7'));
     assert.equal(controller.inFlight, false);
 });
+// ------------------------------------------------------- headings, not keys
+
+test('a section heading is shown as the template own wording', () => {
+    const out = CS.prettifySections('## pi_rads_score\nPI-RADS 4.', { pi_rads_score: 'Punteggio PI-RADS' });
+    assert.equal(out, 'Punteggio PI-RADS\nPI-RADS 4.');
+});
+
+test('a key with no label is read as words rather than shown raw', () => {
+    const out = CS.prettifySections('### subject_specific_findings\nSomething.', {});
+    assert.equal(out, 'Subject specific findings\nSomething.');
+});
+
+test('every heading in a multi-section answer loses its hashes', () => {
+    const out = CS.prettifySections('## a\none\n\n## b\ntwo', { a: 'First', b: 'Second' });
+    assert.equal(out, 'First\none\n\nSecond\ntwo');
+    assert.ok(!out.includes('#'));
+});
+
+test('a hash inside the body is left alone', () => {
+    // Only a line that is itself a heading is rewritten; prose is what was dictated.
+    const out = CS.prettifySections('## notes\ntooth #14 is missing', { notes: 'Notes' });
+    assert.equal(out, 'Notes\ntooth #14 is missing');
+});
+
+test('a half-arrived heading is not mangled once the rest turns up', () => {
+    // Deltas split anywhere, so the whole answer is re-rendered on every one.
+    const labels = { pi_rads_score: 'Punteggio PI-RADS' };
+    assert.equal(CS.prettifySections('## pi_', labels), 'Pi');
+    assert.equal(CS.prettifySections('## pi_rads_score', labels), 'Punteggio PI-RADS');
+});
