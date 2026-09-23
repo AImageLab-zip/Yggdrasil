@@ -20,6 +20,7 @@ S3-compatible object storage, Cornerstone3D viewers). Everything runs in Docker.
 | `brain/` | Brain-tumour MRI (`/brain/`) |
 | `laparoscopy/` | Surgical video (`/laparoscopy/`) |
 | `urology/` | Urology imaging: MRI, digital pathology / WSI, confocal laser endomicroscopy (`/urology/`) |
+| `cardiology/` | ECG review: client-side clinical-grid plots and rhythm classification (`/cardiology/`) |
 
 Each app has its own `README.md` stating what it owns, what it must not own, and
 where its boundary with `common/` runs — read the relevant one before adding a
@@ -31,7 +32,7 @@ domain apps do not import each other. `common/` must never import a domain app o
 `apps.get_model(...)`. CI enforces this with `lint-imports` (`pyproject.toml`
 lists today's exceptions; never add one).
 
-`maxillo`, `brain`, `laparoscopy`, and `urology` are *domains*, registered in exactly one
+`maxillo`, `brain`, `laparoscopy`, `urology`, and `cardiology` are *domains*, registered in exactly one
 place (`common/domains.py`). Behaviour derives from that registry — never add an
 `if domain == "…"` branch (`common/tests_domain_registry.py` caps them).
 

@@ -1,6 +1,6 @@
 # Adding a new project type
 
-A "project type" is a Django app like `maxillo/`, `brain/`, `laparoscopy/`, or `urology/` — each is a separate imaging workflow (its own patients, modalities, folders) mounted under its own URL prefix. There's no generator for this: the current practice is to copy an existing app and wire it into the shared code. Be realistic about the size: adding urology touched about 30 shared files outside `urology/`, and `common/tests_domain_registry.py` exists because some were still missed. Run it (step 7) — it lists what a domain must provide.
+A "project type" is a Django app like `maxillo/`, `brain/`, `laparoscopy/`, `urology/`, or `cardiology/` — each is a separate imaging workflow (its own patients, modalities, folders) mounted under its own URL prefix. There's no generator for this: the current practice is to copy an existing app and wire it into the shared code. Be realistic about the size: adding urology touched about 30 shared files outside `urology/`, and `common/tests_domain_registry.py` exists because some were still missed. Run it (step 7) — it lists what a domain must provide.
 
 Most of the per-domain wiring is driven by a single registry (`common/domains.py`) and a set of abstract base models (`common/base_models.py`), so there is far less hardcoded branching than there used to be. The remaining hardcoded piece is the per-app FK columns on the shared `Job`/`ProcessingJob`/`FileRegistry` tables and on `annotations.AnnotationSet` (see step 4).
 
@@ -35,6 +35,7 @@ Give it the same shape as `brain/`/`laparoscopy/`:
 
 - `yggdrasil/settings.py` — add `"endo"` to `INSTALLED_APPS`.
 - `yggdrasil/urls.py` — add `path("endo/", include("endo.urls"))` next to the `brain`/`laparoscopy` lines.
+- `pyproject.toml` — add `"endo"` to import-linter's `root_packages` and to the domain layer (`"maxillo : brain : … : endo"`). `lint-imports` then holds your app to the import direction; where shared code needs something only your app can compute, register it from your `AppConfig.ready()` (e.g. `common.export_catalog.register_collector` for a database-backed export artifact) instead of importing your app from `common/`.
 
 ## 4. Register the domain (`common/domains.py` + `common/models.py`)
 
@@ -53,7 +54,7 @@ This is the one piece that still needs a shared-table edit — the `Job`, `Proce
    ```
    (`DOMAIN_CHOICES` is imported from `common.domains` — do **not** redefine it here.)
 
-Then:
+Then generate the migrations. The `annotations` migration that adds `AnnotationSet.endo_patient` must list the `common` migration adding your FileRegistry/Job/ProcessingJob columns among its dependencies (`makemigrations` usually adds it; keep it). On a fresh database that edge is what applies your columns before `annotations/0005`, which reads those tables through the live models. Never add the dependency to `0005` itself: production has it applied, and `migrate` would stop with `InconsistentMigrationHistory`.
 
 ```bash
 docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py makemigrations
