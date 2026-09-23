@@ -36,18 +36,15 @@ class Command(BaseCommand):
         modality, created = Modality.objects.get_or_create(slug=modality_data['slug'], defaults=modality_data)
         if created:
             self.stdout.write(self.style.SUCCESS(f'Created modality: {modality.name}'))
+            project.modalities.add(modality)
         else:
-            for key, value in modality_data.items():
-                if key != 'slug':
-                    setattr(modality, key, value)
-            modality.save()
+            # Seeds create what is missing and never overwrite: an existing row may
+            # carry admin edits, and re-running a seed used to revert them silently.
             self.stdout.write(self.style.WARNING(f'Modality already exists: {modality.name}'))
-        project.modalities.add(modality)
 
-        # Categorical AF/NSR/Other/NI call is cardiology-specific; the text-note
-        # annotation reuses the common "voice_caption" method every domain shares.
-        # See common/migrations/0043_backfill_project_domain_and_roles.py, whose
-        # one-time backfill this mirrors for a domain that did not exist yet.
+        # The categorical AF/NSR/Other/NI call is cardiology's own method; the text
+        # notes reuse the "voice_caption" method every domain shares. Added, never
+        # `set()`, so a method an admin switched off elsewhere stays as they left it.
         classification_method, _ = AnnotationMethod.objects.get_or_create(
             slug='ecg_classification',
             defaults={
@@ -57,11 +54,14 @@ class Command(BaseCommand):
                 'icon': 'fas fa-heart-pulse',
             },
         )
-        common_methods = AnnotationMethod.objects.filter(domain='')
-        domain_methods = AnnotationMethod.objects.filter(domain='cardiology')
-        project.annotation_methods.set(domain_methods | common_methods)
-        self.stdout.write(self.style.SUCCESS(
-            f'Enabled annotation methods: {", ".join(project.annotation_methods.values_list("slug", flat=True))}'
-        ))
+        voice_caption, _ = AnnotationMethod.objects.get_or_create(
+            slug='voice_caption',
+            defaults={'name': 'Voice Captions', 'is_active': True},
+        )
+        if project_created:
+            project.annotation_methods.add(classification_method, voice_caption)
+            self.stdout.write(self.style.SUCCESS(
+                f'Enabled annotation methods: {classification_method.slug}, {voice_caption.slug}'
+            ))
 
         self.stdout.write(self.style.SUCCESS('\nSuccessfully configured Cardiology project'))

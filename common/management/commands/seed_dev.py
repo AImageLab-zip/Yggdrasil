@@ -33,6 +33,7 @@ class Command(BaseCommand):
         call_command("setup_brain_modalities")
         call_command("setup_laparoscopy_modalities")
         call_command("setup_urology_modalities")
+        call_command("setup_cardiology_modalities")
 
         admin_user = None
         if not options["skip_superuser"]:
@@ -44,6 +45,7 @@ class Command(BaseCommand):
         self._seed_brain(admin_user)
         self._seed_laparoscopy(admin_user)
         self._seed_urology(admin_user)
+        self._seed_cardiology(admin_user)
 
         self.stdout.write(self.style.SUCCESS("Dev seed complete."))
         if admin_user is not None:
@@ -134,3 +136,22 @@ class Command(BaseCommand):
         )
         if created:
             self.stdout.write(f"Created urology demo patient {patient.patient_id}.")
+
+    def _seed_cardiology(self, admin_user):
+        # Resolved by name: `common` may not import a domain app (import-linter).
+        from django.apps import apps
+
+        from common.models import Project
+
+        Folder = apps.get_model("cardiology", "Folder")
+        Patient = apps.get_model("cardiology", "Patient")
+        project = Project.objects.filter(slug="cardiology").first()
+        folder, _ = Folder.objects.get_or_create(
+            name="Demo", parent=None, project=project,
+            defaults={"created_by": admin_user},
+        )
+        patient, created = Patient.objects.get_or_create(
+            name="Demo Patient", folder=folder, project=project
+        )
+        if created:
+            self.stdout.write(f"Created cardiology demo patient {patient.patient_id}.")

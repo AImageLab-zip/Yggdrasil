@@ -6,7 +6,6 @@ from django.db import models
 from common.models import Modality, Project
 from common.base_models import (
     ActivePatientManager,
-    ClassificationBase,
     ExportBase,
     FolderAccessBase,
     FolderBase,
@@ -180,36 +179,6 @@ class VoiceCaption(VoiceCaptionBase):
             models.Index(fields=['user']),
         ]
 
-
-class Classification(ClassificationBase):
-    VALUE_CHOICES = [
-        ('AF', 'AF'),
-        ('NSR', 'NSR'),
-        ('Other', 'Other'),
-        ('NI', 'NI'),
-    ]
-
-    classifier = models.CharField(max_length=10, choices=ClassificationBase.CLASSIFIER_CHOICES, default='manual')
-    value = models.CharField(max_length=10, choices=VALUE_CHOICES)
-    annotator = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='cardiology_classifications_authored',
-    )
-
-    class Meta:
-        db_table = 'cardiology_classification'
-        ordering = ['-timestamp']
-        unique_together = ('patient', 'classifier')
-        indexes = [
-            models.Index(fields=['patient', 'classifier']),
-            models.Index(fields=['classifier']),
-        ]
-
-    def __str__(self):
-        return f"Classification {self.id} - {self.get_value_display()}"
 
 
 class Export(ExportBase):

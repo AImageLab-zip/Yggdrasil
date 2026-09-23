@@ -28,7 +28,6 @@
                      data-ecg-url="{{ ecg_data.url }}"
                      data-ecg-filename="{{ ecg_data.filename }}"
                      data-ecg-save-url="{{ ecg_data.saveUrl }}"
-                     data-ecg-algorithm-version="{{ ecg_data.algorithmVersion }}"
                      data-ecg-has-processed="{{ ecg_data.hasProcessed|yesno:'true,false' }}"
                      data-ecg-can-save="{{ can_modify|yesno:'true,false' }}">
                     <p class="text-muted">Loading ECG…</p>
@@ -42,25 +41,29 @@
 
     <div class="side-panel">
         <div class="side-panel__tabs" role="tablist">
-            <button type="button" class="side-tab is-active" data-tab-target="classification">Classification</button>
-            <button type="button" class="side-tab" data-tab-target="captions">Captions</button>
+            <button type="button" class="side-tab {% if default_tab == 'classification' %}is-active{% endif %}" data-tab-target="classification">Classification</button>
+            {% if captions_enabled %}
+            <button type="button" class="side-tab {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-target="captions">Captions</button>
+            {% endif %}
         </div>
         <div class="side-panel__body">
-            <div class="side-tab-pane is-active" data-tab-pane="classification">
+            <div class="side-tab-pane {% if default_tab == 'classification' %}is-active{% endif %}" data-tab-pane="classification">
                 {% if classification_enabled %}
-                <div id="cardiologyClassificationButtons" class="btn-group flex-wrap" role="group" style="row-gap: 0.4rem;" data-update-url="{% url 'cardiology:classification_update' patient_id=patient.patient_id %}">
-                    {% for value, label in classification_choices %}
+                <div id="cardiologyClassificationButtons" class="btn-group flex-wrap" role="group" style="row-gap: 0.4rem;"
+                     data-update-url="{% url 'cardiology:classification_update' patient_id=patient.patient_id %}"
+                     data-revision="{{ rhythm.revision }}">
+                    {% for value, label in rhythm_choices %}
                     <button type="button"
-                            class="btn btn-outline-primary {% if classification.value == value %}active{% endif %}"
+                            class="btn btn-outline-primary {% if rhythm.value == value %}active{% endif %}"
                             data-value="{{ value }}"
                             {% if not can_modify %}disabled{% endif %}>
                         {{ label }}
                     </button>
                     {% endfor %}
                 </div>
-                {% if classification %}
+                {% if rhythm.value %}
                 <p class="text-muted small mt-2 mb-0">
-                    Last set by {{ classification.annotator.username|default:"unknown" }} on {{ classification.timestamp|date:"M d, H:i" }}
+                    Last set by {{ rhythm.annotator.username|default:"unknown" }} on {{ rhythm.timestamp|date:"M d, H:i" }}
                 </p>
                 {% endif %}
                 {% else %}
@@ -68,9 +71,11 @@
                 {% endif %}
             </div>
 
-            <div class="side-tab-pane" data-tab-pane="captions">
+            {% if captions_enabled %}
+            <div class="side-tab-pane {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-pane="captions">
                 {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
             </div>
+            {% endif %}
         </div>
     </div>
 </div>

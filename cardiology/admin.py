@@ -4,7 +4,6 @@ from common.admin import DomainFolderAdmin, DomainProjectAdmin
 
 from .models import (
     CardiologyProject,
-    Classification,
     Export,
     Folder,
     Patient,
@@ -39,15 +38,6 @@ class PatientAdmin(admin.ModelAdmin):
     search_fields = ['patient_id', 'name']
     autocomplete_fields = ['project', 'folder', 'uploaded_by']
     filter_horizontal = ['modalities', 'tags']
-
-
-@admin.register(Classification)
-class ClassificationAdmin(admin.ModelAdmin):
-    list_display = ['id', 'patient', 'classifier', 'value', 'annotator', 'timestamp']
-    list_filter = ['classifier', 'value', 'timestamp']
-    list_select_related = ['patient', 'annotator']
-    search_fields = ['patient__patient_id', 'patient__name']
-    autocomplete_fields = ['patient', 'annotator']
 
 
 @admin.register(VoiceCaption)

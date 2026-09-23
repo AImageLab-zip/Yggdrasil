@@ -48,6 +48,7 @@ main.landing {
     --ygg-brain: #14a38b;
     --ygg-laparoscopy: #e0785f;
     --ygg-urology: #8b5cf6;
+    --ygg-cardiology: #e04868;
     --ygg-accent2: var(--ygg-green-600);
 }
 .landing-bar__word { font-weight: 700; font-size: 15px; letter-spacing: 0.01em; }
@@ -258,6 +259,11 @@ main.landing {
     --accent: var(--ygg-urology);
     --grad: var(--ygg-urology-grad);
     --soft: var(--ygg-urology-soft);
+}
+.domain--cardiology {
+    --accent: var(--ygg-cardiology);
+    --grad: var(--ygg-cardiology-grad);
+    --soft: var(--ygg-cardiology-soft);
 }
 
 .domain__bar {

@@ -69,6 +69,7 @@ class AnnotationSet(DomainFKAccessorMixin, models.Model):
         ("voice_caption", "Voice caption"),
         ("volume_segmentation", "Volume segmentation"),
         ("measurements", "Measurements"),
+        ("ecg_rhythm_classification", "ECG rhythm classification"),
     ]
 
     kind = models.CharField(max_length=40, choices=KIND_CHOICES)
