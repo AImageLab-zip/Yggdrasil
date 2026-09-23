@@ -347,11 +347,15 @@ class CatchAllIsNotPartOfTheReportTests(TestCase):
         self.assertEqual(structured[llm_tasks.UNCATEGORISED_KEY], "ciao ciao prova pippo")
         self.assertIn("not_filed", [w["code"] for w in warnings])
 
-    def test_the_warning_quotes_what_was_left_out(self):
+    def test_the_warning_does_not_repeat_the_dictation(self):
+        """Naming the words puts them back on screen beside a report that leaves
+        them out, which is the opposite of the point."""
         raw = "## side\nA sinistra.\n\n## uncategorised\nprova pippo"
         _structured, _rendered, warnings = self._parse(raw)
         detail = next(w["detail"] for w in warnings if w["code"] == "not_filed")
-        self.assertIn("prova pippo", detail)
+        self.assertNotIn("prova", detail)
+        self.assertNotIn("pippo", detail)
+        self.assertIn("fitted no field", detail)
 
     def test_no_warning_when_everything_was_filed(self):
         raw = "## side\nA sinistra.\n\n## size\nDodici millimetri."

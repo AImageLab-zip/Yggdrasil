@@ -275,6 +275,25 @@ def run(report, service, prompt, context):
     )
 
 
+def _warnings_for_display(warnings):
+    """The warnings minus their diagnostic payload.
+
+    ``coverage`` carries the list of tokens it could not find, which is useful when
+    someone is investigating why a report looks thin -- and is exactly what should not
+    be put in front of a clinician, who would be reading fragments of a dictation
+    alongside a report that leaves them out. The list stays on the row.
+    """
+    display = []
+    for warning in warnings or []:
+        if isinstance(warning, dict):
+            display.append({
+                key: value for key, value in warning.items() if key != "missing"
+            })
+        else:  # pragma: no cover - defensive, warnings are always dicts
+            display.append(warning)
+    return display
+
+
 def serialize(report):
     """The shape the browser reads, for both the stream's last frame and the GET."""
     if report is None:
@@ -285,7 +304,7 @@ def serialize(report):
         "status": report.status,
         "structured": report.structured,
         "structured_text": report.structured_text,
-        "warnings": report.warnings,
+        "warnings": _warnings_for_display(report.warnings),
         "error": report.error_message,
         "template": report.template.name if report.template_id else "",
         "report_language": report.report_language,

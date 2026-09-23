@@ -361,11 +361,14 @@ def _caption_parser(raw_text, context):
 
     leftover = (structured.get(UNCATEGORISED_KEY) or "").strip()
     if leftover:
+        # The text itself is kept in ``structured`` and not repeated here: a warning
+        # that quotes the dictation puts clinical wording back on screen next to a
+        # report that deliberately leaves it out.
         warnings.append({
             "code": "not_filed",
             "detail": (
-                "Some of the dictation fitted no field of this template and was left "
-                "out of the report: " + _shorten(leftover)
+                "Part of the dictation fitted no field of this template and is not in "
+                "the report."
             ),
         })
 
@@ -385,11 +388,6 @@ def _caption_parser(raw_text, context):
         if coverage:
             warnings.append(coverage)
     return structured, rendered, warnings
-
-
-def _shorten(text, limit=160):
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def caption_section_labels(context):

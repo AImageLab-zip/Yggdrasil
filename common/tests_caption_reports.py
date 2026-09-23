@@ -436,3 +436,27 @@ class UrologyModalityTests(TestCase):
             caption, patient, user=user, task=llm_tasks.CAPTION_TO_TEMPLATE
         )
         self.assertEqual(context["template"], template)
+
+class WarningsShownToTheClinicianTests(TestCase):
+    """The panel is told that something was left out, never what it was."""
+
+    def test_the_serialized_warnings_carry_no_word_list(self):
+        report = CaptionReport(
+            warnings=[
+                {"code": "coverage", "detail": "About 40% ...", "missing": ["lesione"]},
+                {"code": "not_filed", "detail": "Part of the dictation ..."},
+            ]
+        )
+        serialized = caption_structuring.serialize(report)
+        self.assertEqual(
+            [w["code"] for w in serialized["warnings"]], ["coverage", "not_filed"]
+        )
+        for warning in serialized["warnings"]:
+            self.assertNotIn("missing", warning)
+
+    def test_the_row_keeps_the_diagnostic_list(self):
+        """It is still there for whoever is investigating a thin-looking report."""
+        report = CaptionReport(
+            warnings=[{"code": "coverage", "detail": "x", "missing": ["lesione"]}]
+        )
+        self.assertEqual(report.warnings[0]["missing"], ["lesione"])

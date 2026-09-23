@@ -142,6 +142,19 @@
         return out.join("\n").replace(/\s+$/, "");
     }
 
+    /**
+     * The height a report wants, in pixels, bounded at both ends.
+     *
+     * A fixed box makes a twelve-section report a scrolling keyhole and a two-line one
+     * mostly empty. The cap keeps the controls under it on screen: past that, scrolling
+     * inside the box is the lesser evil.
+     */
+    function reportHeight(contentHeight, viewportHeight) {
+        var min = 220;
+        var max = Math.max(min, Math.round((viewportHeight || 800) * 0.6));
+        return Math.min(Math.max(contentHeight || 0, min), max);
+    }
+
     function humanizeKey(key) {
         var words = String(key || "").replace(/[_-]+/g, " ").trim();
         return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
@@ -478,6 +491,7 @@
         } else if (event.type === 'delta') {
             this.rawAnswer += event.text || '';
             report.value = prettifySections(this.rawAnswer, this.sectionLabels, this.omitSections);
+            this.fitReport();
             report.scrollTop = report.scrollHeight;
         } else if (event.type === 'done') {
             this.complete(event.report);
@@ -489,6 +503,7 @@
     CaptionStructuringController.prototype.complete = function (report) {
         var textarea = document.getElementById('structuredCaptionText');
         if (report && report.structured_text) textarea.value = report.structured_text;
+        this.fitReport();
         this.setStatus('Structured', false);
         this.setWarnings((report && report.warnings) || []);
         document.getElementById('structuredCaptionActions').classList.remove('d-none');
@@ -509,6 +524,17 @@
         if (!status) return;
         status.innerHTML = (busy ? '<i class="fas fa-spinner fa-spin me-1"></i>' : '')
             + escapeHtml(text);
+    };
+
+    CaptionStructuringController.prototype.fitReport = function () {
+        var report = document.getElementById('structuredCaptionText');
+        if (!report) return;
+        report.style.height = 'auto';
+        var wanted = reportHeight(
+            report.scrollHeight,
+            typeof window !== 'undefined' ? window.innerHeight : 0
+        );
+        report.style.height = wanted + 'px';
     };
 
     CaptionStructuringController.prototype.setWarnings = function (warnings) {
@@ -568,6 +594,7 @@
         shouldEnableStructureButton: shouldEnableStructureButton,
         templateAvailableFor: templateAvailableFor,
         prettifySections: prettifySections,
+        reportHeight: reportHeight,
         renderStructuredBlock: renderStructuredBlock,
         escapeHtml: escapeHtml,
         Controller: CaptionStructuringController,

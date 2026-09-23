@@ -85,8 +85,15 @@
                             <summary><small class="text-muted">Dictated text</small></summary>
                             <small class="text-muted" id="structuredCaptionSourceText"></small>
                         </details>
+                        {% comment %}
+                          Starts at a sensible height and grows with the report; a full
+                          template can run to twelve sections, and eight rows of a
+                          scrolling box is no way to read one. caption_structuring.js
+                          caps the growth so a long report never pushes the controls
+                          below the fold.
+                        {% endcomment %}
                         <textarea id="structuredCaptionText" class="form-control form-control-sm"
-                                  rows="8" readonly></textarea>
+                                  rows="12" readonly></textarea>
                         <div id="structuredCaptionWarnings" class="mt-1"></div>
                         <div class="d-flex gap-1 mt-2 d-none" id="structuredCaptionActions">
                             <button type="button" class="btn btn-outline-primary btn-sm" id="structuredCaptionRerun">

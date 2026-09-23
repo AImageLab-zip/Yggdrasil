@@ -375,3 +375,23 @@ test('a row gets no structure button where structuring is unavailable', () => {
 
     assert.doesNotThrow(() => controller.decorateRow({ id: 3, text_caption: 'typed' }));
 });
+
+
+// ------------------------------------------------------ how tall the report box is
+
+test('a long report is given room rather than a scrolling keyhole', () => {
+    // 60% of an 900px viewport = 540.
+    assert.equal(CS.reportHeight(2000, 900), 540);
+});
+
+test('a short report still gets a usable minimum', () => {
+    assert.equal(CS.reportHeight(40, 900), 220);
+});
+
+test('a report between the two is shown at its own height', () => {
+    assert.equal(CS.reportHeight(360, 900), 360);
+});
+
+test('a tiny viewport never produces a box smaller than the minimum', () => {
+    assert.equal(CS.reportHeight(2000, 200), 220);
+});
