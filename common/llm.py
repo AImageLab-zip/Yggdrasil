@@ -110,10 +110,21 @@ def _payload(service, messages, *, stream, temperature, max_tokens):
     # which looks like "the model said nothing" rather than "the model ran out of room".
     # Filing dictated text under headings needs very little reasoning, so this is asked
     # for explicitly rather than left to the provider's default.
+    #
+    # ``exclude`` is separate from how much thinking to do: it says the thinking must
+    # not come back in the response. Without it a provider may stream the scratchpad as
+    # ordinary content -- "We need to extract clinical statements and map them to
+    # sections..." -- which the parser then files into the report as if a clinician had
+    # said it. Nothing downstream can tell that text from an answer, so it is refused
+    # wherever a reasoning model is being asked for. An endpoint that was never told to
+    # reason is left alone: `reasoning` is an OpenRouter extension, and a plain
+    # OpenAI-compatible server may reject a field it does not know.
     effort = service.parameter("reasoning_effort")
     if effort:
         payload["reasoning"] = (
-            {"enabled": False} if effort == "none" else {"effort": effort}
+            {"enabled": False}
+            if effort == "none"
+            else {"effort": effort, "exclude": True}
         )
     return payload
 

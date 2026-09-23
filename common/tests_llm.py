@@ -309,7 +309,10 @@ class ReasoningBudgetTests(SimpleTestCase):
             "common.llm.requests.post", return_value=response(payload=completion())
         ) as post:
             llm.chat(service(parameters={"reasoning_effort": "low"}), [])
-        self.assertEqual(post.call_args.kwargs["json"]["reasoning"], {"effort": "low"})
+        self.assertEqual(
+            post.call_args.kwargs["json"]["reasoning"],
+            {"effort": "low", "exclude": True},
+        )
 
     def test_effort_none_disables_reasoning_rather_than_asking_for_none_of_it(self):
         with mock.patch(
@@ -317,6 +320,19 @@ class ReasoningBudgetTests(SimpleTestCase):
         ) as post:
             llm.chat(service(parameters={"reasoning_effort": "none"}), [])
         self.assertEqual(post.call_args.kwargs["json"]["reasoning"], {"enabled": False})
+
+    def test_the_thinking_is_never_returned(self):
+        """Excluded, not merely limited.
+
+        A provider may stream its scratchpad as ordinary content -- "We need to extract
+        clinical statements and map them to sections..." -- and nothing downstream can
+        tell that from an answer, so it lands in the report as if it were dictated.
+        """
+        with mock.patch(
+            "common.llm.requests.post", return_value=response(payload=completion())
+        ) as post:
+            llm.chat(service(parameters={"reasoning_effort": "medium"}), [])
+        self.assertIs(post.call_args.kwargs["json"]["reasoning"]["exclude"], True)
 
     def test_no_reasoning_parameter_is_sent_when_unset(self):
         with mock.patch(
