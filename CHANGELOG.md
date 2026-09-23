@@ -11,6 +11,46 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-09-23
+
+A security and reliability release. Most of it is invisible when things work; where
+you will notice it, it is because something that used to be allowed is now refused.
+
+### Security
+- **Every remaining screen decides access by the record's own project.** Viewing,
+  editing, deleting, re-running and moving patients, their files, captions,
+  measurements, segmentations and landmarks are all judged against the project the
+  patient belongs to, never against the project you happen to have open. A patient in
+  a project you cannot see now answers "not found". **After upgrading, some actions
+  that used to succeed will be refused; that is the fix.**
+- **Only project administrators can publish an export link**, and a link that
+  anyone can open always expires. Existing never-expiring public links now expire 30
+  days after the upgrade. Link addresses are no longer written to the server logs.
+- **Uploaded files are served so they cannot run in your browser.** Photos, videos
+  and scans display as before; anything else is downloaded instead of opened.
+  Photo uploads accept image formats only (including HEIC, BMP and TIFF).
+- **Slide labels and macro images are never shown.** Pathology slide files carry a
+  photo of the slide label, which often shows the patient's name or barcode; it is
+  no longer offered as a zoom level or used for the minimap.
+- **Repeated failed sign-ins lock that account from that address for 30 minutes**,
+  and you stay signed in for up to a week instead of two.
+- **Processing jobs on the cluster no longer receive the platform's storage keys**;
+  each job can read only its own inputs and write only its own results.
+
+### Changed
+- **Large downloads no longer strain the server.** Scans, videos and export ZIPs are
+  sent as they are read, so several multi-gigabyte downloads at once no longer risk
+  running a server process out of memory.
+- **Re-running a setup command keeps what administrators changed.** Modality names,
+  settings and project links edited in the admin are no longer reset.
+
+### Fixed
+- **Urology is included everywhere the other workflows are**: processing that
+  should hide raw files until it finishes now does so for urology too, and urology
+  annotations are filed under the right patient.
+- **A processing job is only handed to the cluster once it has been saved**, so a
+  job can no longer be picked up before it exists.
+
 ## [3.1.0] - 2026-09-22
 
 The Urology multimodal imaging release: digital pathology Whole Slide Images, multiparametric prostate MRI, and confocal endomicroscopy.
