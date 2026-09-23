@@ -10,7 +10,7 @@ import re
 import threading
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
-from PIL import Image, ImageOps, TiffImagePlugin
+from PIL import Image, TiffImagePlugin
 
 # Set a safe high ceiling (250 megapixels) for high-resolution pathology slides while protecting against decompression bombs
 Image.MAX_IMAGE_PIXELS = 250_000_000
@@ -64,6 +64,54 @@ def _extract_mpp(img: Image.Image) -> Optional[float]:
     return None
 
 
+_PYRAMID_CACHE: Dict[str, Tuple[Tuple[int, ...], int]] = {}
+_PYRAMID_CACHE_LOCK = threading.Lock()
+
+
+def _is_pyramid_level(img, base_w: int, base_h: int) -> bool:
+    """Whether the current IFD is a resolution level of the scanned slide itself.
+
+    Scanner files carry extra images alongside the pyramid: Aperio SVS stores the
+    slide **label** and a **macro** photo of the whole glass as the last IFDs, and
+    both routinely show the patient's name or barcode. They are refused here by
+    their ImageDescription and, for writers that do not label them, by an aspect
+    ratio that does not match the scan; transparency masks by NewSubfileType.
+    """
+    tag_v2 = getattr(img, "tag_v2", {}) or {}
+    description = str(tag_v2.get(270, "") or "").lower()
+    if "label" in description or "macro" in description:
+        return False
+    if int(tag_v2.get(254, 0) or 0) & 4:  # transparency mask
+        return False
+    w, h = img.size
+    if not (w and h and base_w and base_h):
+        return False
+    return abs((w / h) / (base_w / base_h) - 1) <= 0.05
+
+
+def pyramid_frames(file_source: Any, slide_key: Optional[str] = None) -> Tuple[Tuple[int, ...], int]:
+    """``(IFD indices that are slide pyramid levels, total IFD count)``."""
+    if slide_key:
+        with _PYRAMID_CACHE_LOCK:
+            if slide_key in _PYRAMID_CACHE:
+                return _PYRAMID_CACHE[slide_key]
+    if hasattr(file_source, "seek"):
+        file_source.seek(0)
+    with Image.open(file_source) as img:
+        n_frames = getattr(img, "n_frames", 1)
+        base_w, base_h = img.size
+        frames = [0]
+        for frame in range(1, n_frames):
+            img.seek(frame)
+            if _is_pyramid_level(img, base_w, base_h):
+                frames.append(frame)
+    result = (tuple(frames), n_frames)
+    if slide_key:
+        with _PYRAMID_CACHE_LOCK:
+            _PYRAMID_CACHE[slide_key] = result
+    return result
+
+
 def _get_or_build_tiff_tile_info(file_source: Any, slide_key: Optional[str]) -> Optional[Dict[int, Dict[str, Any]]]:
     """Read and cache tile offsets and JPEG tables for each pyramid level."""
     if slide_key:
@@ -74,9 +122,9 @@ def _get_or_build_tiff_tile_info(file_source: Any, slide_key: Optional[str]) -> 
     try:
         with Image.open(file_source) as img:
             tile_info_by_level: Dict[int, Dict[str, Any]] = {}
-            n_frames = getattr(img, "n_frames", 1)
+            allowed_frames, _ = pyramid_frames(file_source, slide_key)
 
-            for frame_idx in range(n_frames):
+            for frame_idx in allowed_frames:
                 img.seek(frame_idx)
                 w, h = img.size
                 tag_v2 = getattr(img, "tag_v2", {})
@@ -144,6 +192,9 @@ def get_wsi_metadata(file_source: Any, cache_key: Optional[str] = None) -> Dict[
             try:
                 img.seek(frame)
                 w, h = img.size
+                if frame and not _is_pyramid_level(img, base_w, base_h):
+                    frame += 1
+                    continue
 
                 # Detect tile size if explicitly tiled, otherwise default to 256
                 tile_size = 256
@@ -245,6 +296,10 @@ def get_wsi_tile(
     Uses high-performance direct byte slicing for tiled JPEG BigTIFFs, and
     semaphore-serialized decoded frame caching for untiled slides.
     """
+    allowed_frames, n_frames = pyramid_frames(file_source, slide_key)
+    if level < n_frames and level not in allowed_frames:
+        return _make_blank_tile(tile_size, image_format)
+
     # 1. Fast path: check in-memory loaded frame cache for sub-millisecond slicing
     if slide_key:
         with _FRAME_CACHE_LOCK:
@@ -462,10 +517,13 @@ def get_wsi_tile(
 
 def get_wsi_thumbnail(file_source: Any, max_dim: int = 512, image_format: str = "JPEG") -> bytes:
     """Extract or generate a slide overview thumbnail for the minimap navigator."""
+    allowed_frames, _ = pyramid_frames(file_source)
+    if hasattr(file_source, "seek"):
+        file_source.seek(0)
     with Image.open(file_source) as img:
-        if getattr(img, "n_frames", 1) > 1:
-            # Seek to lowest resolution frame for instantaneous downscaling
-            img.seek(img.n_frames - 1)
+        # The lowest-resolution *pyramid* level: the last IFD of a scanner file is
+        # usually its macro or label image.
+        img.seek(allowed_frames[-1])
         thumb = img.convert("RGB")
         thumb.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)
 

@@ -162,17 +162,22 @@ class ExportShareUpdateExpiryTests(ExportShareTestBase):
         self.assertEqual(response.status_code, 200)
         self.assert_days_from_now(response.json()["expires_at"], 7)
 
-    def test_never_allowed_for_admin(self):
+    def test_never_allowed_for_admin_on_login_required_links(self):
         export = self.make_export(
             expires_at=timezone.now() + timedelta(days=3)
         )
         response = self.update(
-            export, {"share_mode": "public", "expires_in_days": "never"}
+            export, {"share_mode": "authenticated", "expires_in_days": "never"}
         )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["expires_at"])
         export.refresh_from_db()
         self.assertIsNone(export.expires_at)
+
+    def test_never_refused_for_public_links_even_for_admin(self):
+        export = self.make_export(expires_at=timezone.now() + timedelta(days=3))
+        response = self.update(export, {"share_mode": "public", "expires_in_days": "never"})
+        self.assertEqual(response.status_code, 400)
 
     def test_invalid_expiry_rejected(self):
         export = self.make_export()

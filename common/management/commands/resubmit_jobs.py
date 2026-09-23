@@ -22,7 +22,7 @@ Examples::
 """
 
 from django.apps import apps
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 
 from common.domains import DOMAINS, fk_fields_for
 from common.job_routing import is_runner_enabled_for_modality

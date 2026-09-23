@@ -12,7 +12,6 @@ from common.models import (
     ProjectAccess,
 )
 from maxillo.models import (
-    Classification,
     Folder,
     Patient,
 )

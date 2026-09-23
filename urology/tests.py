@@ -8,7 +8,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from common.models import FileRegistry, Modality, Project, ProjectAccess
-from urology.models import Folder, Patient, Tag, UrologyProject, VoiceCaption
+from urology.models import Folder, Patient, VoiceCaption
 
 
 class UrologyDomainTests(TestCase):

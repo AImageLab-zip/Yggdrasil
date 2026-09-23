@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from ..models import Invitation
+from common.models import Invitation
 from ..forms import InvitationForm, InvitedUserCreationForm
 from common.models import ProjectAccess   
 

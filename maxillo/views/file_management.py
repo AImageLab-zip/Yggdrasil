@@ -14,7 +14,7 @@ from django.contrib.auth.decorators import login_required
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.models import FileRegistry, Job, Modality
 from common.models import Project
-from common.permissions import user_can_write_annotations, user_is_project_admin
+from common.permissions import get_patient_for
 from common.object_storage import get_object_storage
 
 from .domain import get_domain_models, get_namespace
@@ -154,13 +154,7 @@ def _raw_lock_response(patient):
 def add_raw_file(request, patient_id):
     Patient = get_domain_models(request)["Patient"]
     domain = get_namespace(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-    if user_is_project_admin(request.user, request):
-        can_modify = True
-    if not can_modify:
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     locked = _raw_lock_response(patient)
     if locked:
@@ -235,13 +229,7 @@ def add_raw_file(request, patient_id):
 def delete_raw_file(request, patient_id, file_id):
     Patient = get_domain_models(request)["Patient"]
     domain = get_namespace(request)
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-
-    can_modify = bool(patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-    if user_is_project_admin(request.user, request):
-        can_modify = True
-    if not can_modify:
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     locked = _raw_lock_response(patient)
     if locked:

@@ -40,14 +40,14 @@ A central design requirement is maximizing the use of **CornerstoneJS** while re
    - Uses `@cornerstonejs/core` and `@cornerstonejs/tools` directly.
    - Streams 3D NIfTI volumes via Cornerstone's volume loader and WebGL volume viewports.
    - Manages window/level, zoom, pan, camera rotation, crosshairs, and multi-planar reformatting (MPR).
-2. **Cornerstone Image Loader Registration (`wsi:`)**:
-   - In `frontend/imaging/wsi/wsiLoader.js`, the `wsi:` scheme is registered directly into Cornerstone's global image loader registry:
-     ```javascript
-     imageLoader.registerImageLoader("wsi", createWsiImageLoader({
-         voxelManagerFactory: utilities?.VoxelManager?.createImageVoxelManager,
-     }));
-     ```
-   - Each tile is wrapped in Cornerstone's `IImage` interface with its `voxelManager`, scalar pixel arrays, `slope`, `intercept`, `windowCenter`, `windowWidth`, and `voiLUTFunction`.
+2. **No Cornerstone image loader for WSI** (there used to be a `wsi:` loader; it was removed):
+   - `frontend/imaging/wsi/wsiLoader.js` now only builds tile URLs (`wsiTileUrl`) and holds the
+     client tile cache (`globalWsiTileCache`), used by `entries/wsi-viewer.js` and
+     `wsiViewport.js`. The slide is drawn by the dedicated Canvas2D tiling viewport
+     described in section B, not by a Cornerstone viewport.
+   - The server offers only the slide's pyramid levels (`urology/wsi_reader.pyramid_frames`):
+     label and macro images stored in the same file are never listed, tiled or used as the
+     thumbnail.
 3. **Cornerstone Annotations & Measurements Schema**:
    - In `frontend/imaging/wsi/wsiMeasurements.js`, all tools (`Length`, `RectangleROI`, `CircleROI`, `SplineROI`, `Label`) serialize their data structures to exact Cornerstone3D annotation objects (`metadata: { toolName, ... }, data: { handles: { points } }`).
    - These payloads pass directly into `annotations/adapters/cornerstone.py` using the standard Cornerstone `image_pixel` coordinate system, fully interoperable with the backend revision store.

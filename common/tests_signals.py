@@ -32,17 +32,28 @@ class JobEnqueueSignalTests(TestCase):
         )
 
     def test_pending_job_creation_enqueues_once(self):
-        job = Job.objects.create(domain="maxillo", modality_slug="demo")
+        with self.captureOnCommitCallbacks(execute=True):
+            job = Job.objects.create(domain="maxillo", modality_slug="demo")
         self.mock_send_task.assert_called_once_with(
             self._task_name(), args=[job.id], queue="runner"
         )
 
     @override_settings(RUNNER_QUEUE_BY_MODALITY={"demo": "gpu-q"})
     def test_enqueue_respects_modality_queue_map(self):
-        job = Job.objects.create(domain="maxillo", modality_slug="demo")
+        with self.captureOnCommitCallbacks(execute=True):
+            job = Job.objects.create(domain="maxillo", modality_slug="demo")
         self.mock_send_task.assert_called_once_with(
             self._task_name(), args=[job.id], queue="gpu-q"
         )
+
+    def test_dispatch_waits_for_the_creating_transaction_to_commit(self):
+        # The runner claims by id; sent before commit, it could find no row.
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            Job.objects.create(domain="maxillo", modality_slug="demo")
+        self.mock_send_task.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+        self.mock_send_task.assert_called_once()
 
     def test_processing_job_creation_does_not_enqueue(self):
         Job.objects.create(domain="maxillo", modality_slug="demo", status="processing")
@@ -68,7 +79,8 @@ class JobEnqueueSignalTests(TestCase):
         self.mock_send_task.assert_not_called()
 
         job.status = "pending"
-        job.save()
+        with self.captureOnCommitCallbacks(execute=True):
+            job.save()
 
         self.mock_send_task.assert_called_once_with(
             self._task_name(), args=[job.id], queue="runner"

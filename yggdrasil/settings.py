@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 import json as _json
+from datetime import timedelta
 from pathlib import Path
 from decouple import config
 
@@ -83,6 +84,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
+    "axes",
     "common",
     "annotations",
     "maxillo",
@@ -103,9 +105,12 @@ WHISPER_CA_CERT = config(
 WHISPER_CONNECT_TIMEOUT = config("WHISPER_CONNECT_TIMEOUT", default=10, cast=int)
 
 MIDDLEWARE = [
+    # Outermost, so it sees the final response body (see its docstring).
+    "yggdrasil.middleware.AsyncStreamingMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "yggdrasil.middleware.CrossOriginIsolationMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "yggdrasil.middleware.ContentSecurityPolicyMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -119,6 +124,8 @@ MIDDLEWARE = [
     "yggdrasil.middleware.ActiveProfileMiddleware",
     "yggdrasil.middleware.DemoGuestReadOnlyMiddleware",
     "yggdrasil.middleware.PresenceMiddleware",
+    # Last, per django-axes: turns a lockout raised during authentication into a response.
+    "axes.middleware.AxesMiddleware",
 ]
 
 ROOT_URLCONF = "yggdrasil.urls"
@@ -258,6 +265,23 @@ CSRF_USE_SESSIONS = True  # Store CSRF token in session for better security
 CSRF_COOKIE_HTTPONLY = True  # Prevent XSS attacks on CSRF cookie
 CSRF_COOKIE_SAMESITE = "Strict"  # Prevent CSRF attacks
 SESSION_COOKIE_HTTPONLY = True  # Prevent XSS attacks on session cookie
+# Sessions last a working week instead of Django's two; expired rows are purged
+# nightly by common.tasks.clear_expired_sessions.
+SESSION_COOKIE_AGE = config("SESSION_COOKIE_AGE", default=7 * 24 * 3600, cast=int)
+
+# Login throttling (django-axes): after AXES_FAILURE_LIMIT failed logins for one
+# username from one address, that pair is locked out for AXES_COOLOFF_TIME. The
+# client address comes from X-Forwarded-For, which only the proxy can set now
+# that the web port is bound to loopback (docker-compose.yml).
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+AXES_FAILURE_LIMIT = config("AXES_FAILURE_LIMIT", default=10, cast=int)
+AXES_COOLOFF_TIME = timedelta(minutes=config("AXES_COOLOFF_MINUTES", default=30, cast=int))
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_RESET_ON_SUCCESS = True
+AXES_IPWARE_META_PRECEDENCE_ORDER = ["HTTP_X_FORWARDED_FOR", "REMOTE_ADDR"]
 SESSION_COOKIE_SAMESITE = "Strict"  # Prevent session fixation attacks
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -367,6 +391,11 @@ if MAINTENANCE_QUEUE in _runner_queues:
 BACKUP_KEEP_DAILY = config("BACKUP_KEEP_DAILY", default=14, cast=int)
 BACKUP_KEEP_WEEKLY = config("BACKUP_KEEP_WEEKLY", default=8, cast=int)
 BACKUP_KEY_PREFIX = config("BACKUP_KEY_PREFIX", default="backups/mysql/")
+# Optional separate bucket (and key) for database backups; see
+# common.object_storage.get_backup_storage. Unset: backups stay in OBJECT_STORAGE_BUCKET.
+BACKUP_STORAGE_BUCKET = config("BACKUP_STORAGE_BUCKET", default="")
+BACKUP_STORAGE_ACCESS_KEY_ID = config("BACKUP_STORAGE_ACCESS_KEY_ID", default="")
+BACKUP_STORAGE_SECRET_ACCESS_KEY = config("BACKUP_STORAGE_SECRET_ACCESS_KEY", default="")
 
 from celery.schedules import crontab  # noqa: E402
 
@@ -374,6 +403,11 @@ CELERY_BEAT_SCHEDULE = {
     "backup-database-daily": {
         "task": "common.tasks.backup_database",
         "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": MAINTENANCE_QUEUE},
+    },
+    "clear-expired-sessions-daily": {
+        "task": "common.tasks.clear_expired_sessions",
+        "schedule": crontab(hour=3, minute=40),
         "options": {"queue": MAINTENANCE_QUEUE},
     },
 }
@@ -417,6 +451,8 @@ SLURM_SSH_PORT = config("SLURM_SSH_PORT", default=22, cast=int)
 SLURM_SSH_USER = config("SLURM_SSH_USER", default="")
 SLURM_SSH_KEY = config("SLURM_SSH_KEY", default="")  # path to the private key
 SLURM_SSH_PASSWORD = config("SLURM_SSH_PASSWORD", default="")
+# Pinned host keys for the login node (paramiko RejectPolicy). Empty: ~/.ssh/known_hosts.
+SLURM_KNOWN_HOSTS = config("SLURM_KNOWN_HOSTS", default="")
 # Directory on the cluster holding one subdir per algo, each with a run.sbatch
 # (ProcessingStep.algo_name is resolved against this: ALGO_BASE_DIR/<algo_name>/run.sbatch).
 ALGO_BASE_DIR = config("ALGO_BASE_DIR", default="")
@@ -425,6 +461,20 @@ SLURM_STAGE_DIR = config("SLURM_STAGE_DIR", default="")
 # sacct polling cadence and the wall-clock ceiling before a job is declared stuck.
 SLURM_POLL_INTERVAL = config("SLURM_POLL_INTERVAL", default=15, cast=int)
 SLURM_MAX_WALL_SECONDS = config("SLURM_MAX_WALL_SECONDS", default=24 * 3600, cast=int)
+# How a SLURM job reaches object storage (common/runner/run.py):
+#   "presigned"   (default) the job gets presigned GET URLs for exactly its inputs and
+#                 a POST policy limited to its output prefix -- no storage credentials
+#                 leave this deployment. Needs ygg-stage >= 0.2 on the cluster.
+#   "credentials" legacy: the job gets the app's OBJECT_STORAGE_* keys. Only for a
+#                 cluster whose ygg-stage has not been upgraded yet.
+RUNNER_STAGE_MODE = config("RUNNER_STAGE_MODE", default="presigned")
+if RUNNER_STAGE_MODE not in {"presigned", "credentials"}:
+    raise ValueError("RUNNER_STAGE_MODE must be 'presigned' or 'credentials'")
+# Lifetime of those URLs. They must outlive queueing plus the run; SigV4 caps it at 7 days.
+RUNNER_PRESIGN_TTL_SECONDS = min(
+    config("RUNNER_PRESIGN_TTL_SECONDS", default=SLURM_MAX_WALL_SECONDS + 2 * 24 * 3600, cast=int),
+    7 * 24 * 3600,
+)
 # How long an id may stay invisible to sacct before poll() gives up. Covers the
 # submit -> accounting lag on the happy path, and bounds a reattach to an allocation
 # sacct has already purged (which would otherwise burn the full wall clock).
@@ -483,11 +533,15 @@ LOGGING = {
             "style": "{",
         },
     },
+    "filters": {
+        "redact_share_tokens": {"()": "yggdrasil.log_filters.RedactShareTokens"},
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "detailed",
             "level": LOG_LEVEL,
+            "filters": ["redact_share_tokens"],
         },
         "file": {
             # Rotating, not plain FileHandler: this file is long-lived on the
@@ -499,6 +553,7 @@ LOGGING = {
             "backupCount": LOG_BACKUP_COUNT,
             "formatter": "detailed",
             "level": LOG_LEVEL,
+            "filters": ["redact_share_tokens"],
         },
     },
     "loggers": {

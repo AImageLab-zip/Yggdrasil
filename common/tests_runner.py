@@ -235,6 +235,7 @@ class RunHelperTests(SimpleTestCase):
         }))
         self.assertEqual(set(keys), {"p/u.stl", "p/seg.nii.gz"})
 
+    @override_settings(RUNNER_STAGE_MODE="credentials")
     def test_render_creds_env_has_storage_and_io(self):
         body = run_mod.render_creds_env(["p/a.stl", "p/b.stl"], "proj/processed/ios/job_5")
         self.assertIn("export OBJECT_STORAGE_ENDPOINT_URL=", body)
@@ -556,3 +557,67 @@ class SerializerTests(SimpleTestCase):
         with mock.patch("common.modality_config.get_step", return_value=None):
             cfg = _step_dispatch_config(job)
         self.assertEqual(cfg, {"algo_name": ""})
+
+
+class StageModeTests(SimpleTestCase):
+    """What a SLURM job is handed to reach object storage (review C3)."""
+
+    def _env(self, **settings_overrides):
+        import shlex
+
+        with override_settings(**settings_overrides):
+            body = run_mod.render_creds_env(["p/a.nii.gz", "p/b.stl"], "proj/processed/cbct/job_7")
+        env = {}
+        for line in body.splitlines():
+            name, _, value = line.removeprefix("export ").partition("=")
+            env[name] = shlex.split(value)[0] if value else ""
+        return env
+
+    def test_presigned_mode_hands_out_no_storage_credentials(self):
+        import json
+
+        env = self._env(RUNNER_STAGE_MODE="presigned")
+        self.assertEqual(env["YGG_STAGE_MODE"], "presigned")
+        self.assertFalse([name for name in env if name.startswith("OBJECT_STORAGE_")])
+        grants = json.loads(env["YGG_STAGE_GRANTS"])
+        self.assertEqual(sorted(grants["inputs"]), ["p/a.nii.gz", "p/b.stl"])
+        self.assertEqual(grants["output"]["prefix"], "proj/processed/cbct/job_7")
+        self.assertTrue(grants["output"]["key_prefix"].endswith("proj/processed/cbct/job_7/"))
+        self.assertNotIn("secret", json.dumps(grants).lower())
+
+    def test_credentials_mode_is_the_explicit_legacy_path(self):
+        env = self._env(RUNNER_STAGE_MODE="credentials")
+        self.assertEqual(env["YGG_STAGE_MODE"], "credentials")
+        self.assertIn("OBJECT_STORAGE_SECRET_ACCESS_KEY", env)
+
+    def test_a_failed_submission_removes_the_stage_file(self):
+        api = mock.MagicMock()
+        api.claim.return_value = {"algo_name": "sn", "project_slug": "maxillo",
+                                  "modality_slug": "ios", "input_files": {}}
+        ssh = mock.MagicMock()
+        ssh.__enter__.return_value = ssh
+        ssh.__exit__.return_value = False
+        ssh.sbatch.side_effect = RuntimeError("sbatch: invalid partition")
+        with override_settings(SLURM_STAGE_DIR="/stage", ALGO_BASE_DIR="/algo"), \
+             mock.patch.object(run_mod, "JobApiClient", return_value=api), \
+             mock.patch.object(run_mod.SlurmSSH, "from_settings", return_value=ssh):
+            self.assertEqual(run_mod.run_job(8), "failed:runner")
+        ssh.remove_file.assert_called_once_with("/stage/job_8/creds.env")
+        ssh.mkdirs.assert_any_call("/stage/job_8", mode=0o700)
+
+
+class SftpWriteModeTests(SimpleTestCase):
+    def test_mode_is_set_before_the_secret_is_written(self):
+        from common.runner.ssh import SlurmSSH
+
+        calls = []
+        handle = mock.MagicMock()
+        handle.__enter__.return_value = handle
+        handle.chmod.side_effect = lambda mode: calls.append(("chmod", mode))
+        handle.write.side_effect = lambda data: calls.append(("write", data))
+        client = mock.MagicMock()
+        client.open_sftp.return_value.file.return_value = handle
+        ssh = SlurmSSH.__new__(SlurmSSH)
+        ssh._client = client
+        ssh.sftp_write("/stage/creds.env", "secret")
+        self.assertEqual(calls, [("chmod", 0o600), ("write", "secret")])

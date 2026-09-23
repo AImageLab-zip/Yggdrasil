@@ -72,7 +72,10 @@ def _user_can_access_job(user, job):
 
 
 def _apply_job_acl_filter(jobs_qs, user, domain):
-    if user_is_project_admin(user, domain):
+    # Only staff see every job. A project admin sees the jobs of the projects
+    # they hold access to, like everyone else -- being admin of *a* project is
+    # not being admin of the domain.
+    if user.is_staff:
         return jobs_qs
 
     project_ids = ProjectAccess.objects.filter(user=user).values_list(
@@ -114,8 +117,8 @@ class ProcessingJobListView(View):
         try:
             modality = request.GET.get("job_type")
             status = request.GET.get("status")
-            limit = int(request.GET.get("limit", 50))
-            offset = int(request.GET.get("offset", 0))
+            limit = min(max(int(request.GET.get("limit", 50)), 1), 500)
+            offset = max(int(request.GET.get("offset", 0)), 0)
 
             domain = _request_domain(request)
             jobs = Job.objects.filter(domain=domain).select_related(

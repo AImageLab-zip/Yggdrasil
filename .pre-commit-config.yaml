@@ -1,0 +1,23 @@
+# Optional local hooks mirroring the CI lint job. Install once:
+#   pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20  # keep in step with ruff== in requirements-dev.txt
+    hooks:
+      - id: ruff
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+        exclude: ^static/vendor/cornerstone/  # the committed bundle (CONTRIBUTING.md)
+      - id: detect-private-key
+      - id: check-merge-conflict
+  - repo: local
+    hooks:
+      - id: lint-imports
+        name: import direction (lint-imports)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]

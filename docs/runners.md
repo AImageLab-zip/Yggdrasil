@@ -37,9 +37,9 @@ curl -X POST http://localhost:$WEB_EXTERNAL_PORT/api/runner/jobs/123/claim/ \
 
 ## Setting up a worker node
 
-Worker nodes run the Yggdrasil Celery app (`python -m celery -A yggdrasil worker`) pointed at this app's public/host-published Redis endpoint (`REDIS_PASSWORD`, `REDIS_EXTERNAL_PORT`) and using matching queue names / `RUNNER_TASK_NAME`.
+Worker nodes run the Yggdrasil Celery app (`python -m celery -A yggdrasil worker`) against this deployment's Redis broker, with matching queue names / `RUNNER_TASK_NAME`. Redis is published on **loopback only** (`127.0.0.1:${REDIS_EXTERNAL_PORT}`), so a worker must run inside the deployment's Docker network or on the host, or reach it through a tunnel. Do not publish Redis to other hosts: broker access can enqueue to any queue, including the maintenance queue.
 
-The compose `runner-worker` is intentionally not attached to `app-net-$DOCKER_SUFFIX`; it uses Docker's default bridge network and must reach both Redis and the web API through externally routable URLs from `.env.worker`. Set `RUNNER_API_BASE_URL` to the public HTTPS API URL in production. uvicorn does not force HTTPS by itself; redirects come from Django settings or the reverse proxy.
+The compose `runner-worker` is attached to `app-net-$DOCKER_SUFFIX` and reaches Redis and the web API by service name (`RUNNER_API_BASE_URL`, `CELERY_BROKER_URL` in `.env.worker`). It does **not** load the web app's `.env`: it gets `.env.worker` plus the object-storage settings it presigns job grants with, and runs as `${UID}:${GID}` (see `docker-compose.yml`). The SLURM key and pinned host keys are mounted under `/run/secrets/` and must be readable by that user.
 
 Do not put inline comments after values in `.env.worker`: `python-decouple` treats the comment text as part of the value.
 

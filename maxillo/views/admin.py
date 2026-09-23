@@ -4,7 +4,6 @@ The queueing itself lives in ``common.rerun`` so every domain shares one
 implementation; these views own the permission check and the response shape.
 """
 
-from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.views.decorators.http import require_POST
@@ -13,7 +12,7 @@ import json
 import logging
 
 from .domain import get_domain_models
-from common.permissions import user_can_perform_bulk_operations
+from common.permissions import get_patient_for, user_is_patient_admin
 from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 
 logger = logging.getLogger(__name__)
@@ -37,10 +36,9 @@ def rerun_processing(request, patient_id):
     run for this patient is created and queued, not skipped -- see
     ``common.rerun``.
     """
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_patient_for(request.user, Patient, patient_id, "admin")
     try:
-        Patient = get_domain_models(request)["Patient"]
-        patient = get_object_or_404(Patient, patient_id=patient_id)
-
         data = _requested_jobs(request)
         requested_jobs = data.get("jobs")
         if requested_jobs is None:
@@ -80,12 +78,6 @@ def rerun_processing(request, patient_id):
 def bulk_rerun_processing(request):
     """Queue the selected processing steps across several patients (admin only)."""
     try:
-        if not user_can_perform_bulk_operations(request.user, request):
-            return JsonResponse(
-                {"success": False, "error": "You do not have permission to bulk rerun jobs."},
-                status=403,
-            )
-
         Patient = get_domain_models(request)["Patient"]
         data = _requested_jobs(request)
         scan_ids = data.get("scan_ids", [])
@@ -106,7 +98,15 @@ def bulk_rerun_processing(request):
         if not valid_scan_ids:
             return JsonResponse({"success": False, "error": "No valid scan_ids provided"}, status=400)
 
-        patients = list(Patient.objects.filter(patient_id__in=valid_scan_ids))
+        # Each patient is authorized against its own project; ids the user does
+        # not administer are dropped exactly like ids that do not exist.
+        patients = [
+            patient
+            for patient in Patient.objects.select_related("project").filter(
+                patient_id__in=valid_scan_ids
+            )
+            if user_is_patient_admin(request.user, patient)
+        ]
         if not patients:
             return JsonResponse({"success": False, "error": "No valid scans found"}, status=404)
 

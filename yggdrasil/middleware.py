@@ -12,6 +12,81 @@ from django.shortcuts import redirect
 logger = logging.getLogger(__name__)
 
 
+_STREAM_END = object()
+
+
+def _async_chunks(sync_iterable):
+    """Pull ``sync_iterable`` one chunk at a time on a worker thread."""
+    from asgiref.sync import sync_to_async
+
+    iterator = iter(sync_iterable)
+    next_chunk = sync_to_async(next, thread_sensitive=False)
+
+    async def chunks():
+        while True:
+            chunk = await next_chunk(iterator, _STREAM_END)
+            if chunk is _STREAM_END:
+                return
+            yield chunk
+
+    return chunks()
+
+
+class AsyncStreamingMiddleware(MiddlewareMixin):
+    """Stream file downloads under ASGI instead of buffering them whole.
+
+    Django's ASGI handler cannot iterate a *synchronous* streaming body without
+    blocking the event loop, so it first collects the entire iterator into a
+    list (``sync_to_async(list)``) and only then sends it. Every download here
+    streams object storage through a sync generator, so a multi-GB CBCT, video
+    or export ZIP was held in one worker's RAM in full before the first byte
+    left. Wrapping the body in an async iterator that pulls one chunk at a time
+    keeps memory at a chunk per download. WSGI (and the test client) iterate
+    synchronously already and are left alone. Storage iterators never touch the
+    ORM, which is what makes the non-thread-sensitive executor safe here.
+    """
+
+    def process_response(self, request, response):
+        from django.core.handlers.asgi import ASGIRequest
+
+        if (
+            isinstance(request, ASGIRequest)
+            and getattr(response, "streaming", False)
+            and not getattr(response, "is_async", False)
+        ):
+            response.streaming_content = _async_chunks(response.streaming_content)
+        return response
+
+
+class ContentSecurityPolicyMiddleware(MiddlewareMixin):
+    """Site-wide Content-Security-Policy.
+
+    Enforced: only directives nothing on the site relies on breaking -- no
+    plugins, no <base> hijack, no framing (matching X-Frame-Options DENY), forms
+    post to this origin only. Report-only: the script/style policy the templates
+    are expected to meet (they still carry inline scripts), so violations show in
+    the browser console before it is enforced. A response that already sets its
+    own policy (stored files: ``common.file_access.FILE_RESPONSE_CSP``) keeps it.
+    """
+
+    ENFORCED = "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    REPORT_ONLY = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; media-src 'self' blob:; "
+        "connect-src 'self' wss: blob:; worker-src 'self' blob:; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    )
+
+    def process_response(self, request, response):
+        if "Content-Security-Policy" not in response:
+            response["Content-Security-Policy"] = self.ENFORCED
+        if "Content-Security-Policy-Report-Only" not in response:
+            response["Content-Security-Policy-Report-Only"] = self.REPORT_ONLY
+        return response
+
+
 class CrossOriginIsolationMiddleware(MiddlewareMixin):
     """Cross-origin isolation for the upload page and the workers it starts.
 

@@ -1,24 +1,20 @@
 """File serving and registry API endpoints."""
 
-from django.http import JsonResponse, Http404, StreamingHttpResponse
+from django.http import JsonResponse, Http404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.db import models
-import contextlib
-import os
-import re
 import logging
 import traceback
 import mimetypes
 from common.models import FileRegistry
-from common.permissions import (
-    filter_patients_for_user,
-    user_is_project_admin,
-)
+from common.permissions import filter_patients_for_user
 from common.file_access import (
     authorize_file_read,
     exists as artifact_exists,
+    parse_byte_range,
+    range_response,
     streaming_response,
 )
 
@@ -150,47 +146,27 @@ def serve_file(request, file_id, filename=None, bundle_key=None):
                 else f"file_{file_obj.id}"
             )
         )
-        safe_filename = filename.replace("\n", " ").replace("\r", " ")
-
         # Video and audio files need Range-request support so browsers can seek.
         if content_type and (content_type.startswith("video/") or content_type.startswith("audio/")):
             total_size = file_obj.file_size or 0
-            range_header = request.META.get("HTTP_RANGE", "").strip()
-
-            if range_header and total_size > 0:
-                m = re.match(r"bytes=(\d+)-(\d*)", range_header)
-                if m:
-                    start = int(m.group(1))
-                    end = int(m.group(2)) if m.group(2) else total_size - 1
-                    end = min(end, total_size - 1)
-                    length = end - start + 1
-                    try:
-                        from common.object_storage import get_object_storage as _get_os
-                        body, _ = _get_os().get_range(resolved_file_path, f"bytes={start}-{end}")
-                        def _iter(b, chunk=512 * 1024):
-                            try:
-                                while True:
-                                    data = b.read(chunk)
-                                    if not data:
-                                        break
-                                    yield data
-                            finally:
-                                with contextlib.suppress(Exception):
-                                    b.close()
-                        resp = StreamingHttpResponse(_iter(body), status=206, content_type=content_type)
-                        resp["Content-Range"] = f"bytes {start}-{end}/{total_size}"
-                        resp["Content-Length"] = str(length)
-                        resp["Accept-Ranges"] = "bytes"
-                        resp["Content-Disposition"] = f'inline; filename="{safe_filename}"'
-                        return resp
-                    except Exception as e:
-                        logger.warning(f"Range fetch failed for file {file_id}, falling back: {e}")
+            byte_range = parse_byte_range(request.META.get("HTTP_RANGE", ""), total_size)
+            if byte_range:
+                try:
+                    return range_response(
+                        path_or_key=resolved_file_path,
+                        content_type=content_type,
+                        filename=filename,
+                        byte_range=byte_range,
+                        total_size=total_size,
+                    )
+                except Exception as e:
+                    logger.warning(f"Range fetch failed for file {file_id}, falling back: {e}")
 
             # Full response — still advertise Range support and Content-Length
             resp = streaming_response(
                 path_or_key=resolved_file_path,
                 content_type=content_type,
-                filename=safe_filename,
+                filename=filename,
                 as_attachment=False,
             )
             resp["Accept-Ranges"] = "bytes"
@@ -228,14 +204,15 @@ def get_file_registry(request):
         # Query parameters
         file_type = request.GET.get("file_type")
         patient_id = request.GET.get("patient_id")
-        limit = int(request.GET.get("limit", 50))
-        offset = int(request.GET.get("offset", 0))
+        limit = min(max(int(request.GET.get("limit", 50)), 1), 500)
+        offset = max(int(request.GET.get("offset", 0)), 0)
 
         # Build query with authorization filtering
         files = FileRegistry.objects.select_related("patient")
 
         files = files.filter(domain='maxillo')
-        is_admin = user_is_project_admin(request.user, 'maxillo')
+        # Staff only: a project admin is filtered to their own projects below.
+        is_admin = request.user.is_staff
         files = files.filter(models.Q(patient__isnull=True) | models.Q(patient__deleted=False))
         if not is_admin:
             files = files.filter(patient__isnull=False)

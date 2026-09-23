@@ -1,7 +1,6 @@
 from django.urls import path, include
 from django.shortcuts import redirect
 from django.contrib.auth.decorators import login_required
-from django.contrib import messages
 from common.models import Project
 from common.permissions import entry_project_for
 from laparoscopy import views as laparo_views

@@ -71,6 +71,7 @@ Full instructions: [docs/setup.md](docs/setup.md).
 - [docs/admin-tasks.md](docs/admin-tasks.md) — production operations: superusers, backups, maintenance modes, sweeps
 - [docs/new-project-type.md](docs/new-project-type.md) — adding a new project app
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Docker quickstart, tests, CI, migrations, and the invariants
+- [STUDENTS.md](STUDENTS.md) — where new work goes: free, through review, or maintainers only
 - [CLAUDE.md](CLAUDE.md) — orientation for AI coding agents
 
 Each app also carries its own README describing what it owns and where its

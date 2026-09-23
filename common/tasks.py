@@ -12,7 +12,7 @@ from pathlib import Path
 from celery import shared_task
 from django.conf import settings
 
-from common.object_storage import get_object_storage
+from common.object_storage import get_backup_storage
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def backup_database():
             details["uncompressed_bytes"] = _verify_gzip(dump_path)
             details["compressed_bytes"] = dump_path.stat().st_size
 
-            storage = get_object_storage()
+            storage = get_backup_storage()
             storage.upload_file(
                 str(dump_path), key=key, content_type="application/gzip"
             )
@@ -146,7 +146,7 @@ def backup_database():
 
 def prune_backups():
     """Apply the daily/weekly retention policy; returns deleted keys."""
-    storage = get_object_storage()
+    storage = get_backup_storage()
     keys = list(storage.list_keys(settings.BACKUP_KEY_PREFIX))
     to_delete = select_backups_to_delete(
         keys,
@@ -164,6 +164,14 @@ def prune_backups():
 # maintenance worker. The explicit task name keeps it clear of the
 # "common.tasks.*" -> MAINTENANCE_QUEUE route; it is enqueued by common.signals with
 # name settings.RUNNER_TASK_NAME (default 'yggdrasil.runner.process_job').
+@shared_task(name="common.tasks.clear_expired_sessions")
+def clear_expired_sessions():
+    """Delete expired sessions (Django never purges them on its own)."""
+    from django.core.management import call_command
+
+    call_command("clearsessions")
+
+
 @shared_task(name="yggdrasil.runner.process_job", bind=True)
 def process_job(self, job_id):
     """Execute one Job on the SLURM cluster. See common.runner.run.run_job."""

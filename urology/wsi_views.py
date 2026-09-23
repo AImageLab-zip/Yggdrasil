@@ -1,6 +1,5 @@
 """Urology WSI tile, metadata, and file serving API views."""
 
-import io
 import json
 import logging
 import mimetypes

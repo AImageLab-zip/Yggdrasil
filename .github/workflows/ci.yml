@@ -12,10 +12,13 @@ jobs:
     container: python:3.11-slim
     steps:
       - uses: actions/checkout@v4
-      - name: Install ruff
-        run: pip install --no-cache-dir "$(grep '^ruff==' requirements-dev.txt)"
+      - name: Install ruff and import-linter
+        run: pip install --no-cache-dir "$(grep '^ruff==' requirements-dev.txt)" "$(grep '^import-linter==' requirements-dev.txt)"
       - name: Ruff check
         run: ruff check .
+      # Static: builds the import graph from source, needs no Django setup.
+      - name: Import direction (lint-imports)
+        run: lint-imports
 
   test:
     runs-on: [self-hosted, linux]
