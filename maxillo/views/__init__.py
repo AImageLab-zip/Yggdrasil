@@ -70,7 +70,7 @@ from .admin import rerun_processing, bulk_rerun_processing
 from .metadata import get_nifti_metadata, update_nifti_metadata
 
 # Profile
-from .profile import user_profile
+from common.domain_views.profile import user_profile
 
 # Export
 from common.domain_views.export import (

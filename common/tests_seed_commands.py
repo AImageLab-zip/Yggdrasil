@@ -17,6 +17,7 @@ SEEDS = {
     "brain": "setup_brain_modalities",
     "laparoscopy": "setup_laparoscopy_modalities",
     "urology": "setup_urology_modalities",
+    "cardiology": "setup_cardiology_modalities",
 }
 
 

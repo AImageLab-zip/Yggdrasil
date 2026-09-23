@@ -17,8 +17,9 @@ this file explains the shape they protect.
 | `brain/` | Brain-tumour MRI (T1, T1c, T2, FLAIR, segmentation) | `/brain/` |
 | `laparoscopy/` | Surgical video | `/laparoscopy/` |
 | `urology/` | Urology imaging (multiparametric prostate MRI, digital pathology WSI, confocal laser endomicroscopy) | `/urology/` |
+| `cardiology/` | ECG review (client-side clinical-grid plots, rhythm classification) | `/cardiology/` |
 
-`maxillo`, `brain`, `laparoscopy` and `urology` are **domains**. A domain is registered in
+`maxillo`, `brain`, `laparoscopy`, `urology` and `cardiology` are **domains**. A domain is registered in
 exactly one place, `common/domains.py` (`DOMAIN_CHOICES`, `DOMAIN_FK_FIELDS`);
 permissions and job routing derive from that registry, so adding a domain is a
 registry entry plus per-domain FK columns on the three shared tables — never a
@@ -84,7 +85,7 @@ request
   │
   ├─ ProjectSessionMiddleware     keeps session['current_project_id'] pointing at a project
   │                               *of the domain being browsed*. Only acts under the domain
-  │                               prefixes (/maxillo/, /brain/, /laparoscopy/, /urology/).
+  │                               prefixes (every domain in common/domains.py).
   │                               The session project is domain-scoped: crossing domains
   │                               must re-resolve it.
   │
@@ -103,7 +104,7 @@ request
 Two consequences worth internalising:
 
 - **`request.user.profile` is created by `ActiveProfileMiddleware`, and only
-  under `/maxillo/`, `/brain/`, `/laparoscopy/` and `/urology/`.** Anything under the global
+  under the domain prefixes (`/maxillo/`, `/brain/`, …, one per registered domain).** Anything under the global
   `/api/` namespace never gets it. A view there that reads `user.profile` will
   `AttributeError`, and — more dangerously — a view there that *assumes*
   middleware did an access check has no access check at all. **The view's own
@@ -213,8 +214,9 @@ downloads.
 
 Key prefixes are **not** uniform, and not simply the domain:
 `common.uploads.raw_key_prefix_for()` uses `project_slug_from_patient()`, which
-returns `laparoscopy` for laparoscopy and `maxillo` for every other domain (so
-urology uploads land under `maxillo/`); brain's own upload path writes
+reads `common.domains.storage_prefix_for()`: `laparoscopy` and `cardiology` have their
+own prefix and every other domain uses `maxillo` (so urology uploads land under
+`maxillo/`); brain's own upload path writes
 `brain/patients/<id>/...`; SLURM job outputs go under
 `<project slug>/processed/<modality>/job_<id>` (`common/runner/run.py`). Do not
 change a prefix rule in place: prefixes only apply to new uploads, so a change

@@ -192,3 +192,37 @@ def without_panoramic_arch(patients, *, algorithm_version=None):
             )
         )
     )
+
+
+def _latest_revisions_with_rhythm():
+    """Revisions that are the newest on their set *and* carry an ECG rhythm call."""
+    from annotations.services.ecg_rhythm import RHYTHM_KIND
+
+    return _latest_revisions(RHYTHM_KIND, eventannotationitems__isnull=False)
+
+
+def with_ecg_rhythm(patients):
+    """Narrow a cardiology ``Patient`` queryset to those with a rhythm call."""
+    return patients.filter(
+        Exists(
+            _latest_revisions_with_rhythm().filter(
+                annotation_set__cardiology_patient=OuterRef("pk")
+            )
+        )
+    )
+
+
+def ecg_rhythm_values(patients):
+    """``{patient_pk: rhythm code}`` for these patients, in one query.
+
+    What a patient list shows per row; a patient with no call is absent.
+    """
+    from annotations.models import EventAnnotationItem
+    from annotations.services.ecg_rhythm import RHYTHM_EVENT
+
+    rows = EventAnnotationItem.objects.filter(
+        revision__in=_latest_revisions_with_rhythm(),
+        revision__annotation_set__cardiology_patient__in=patients,
+        event_type=RHYTHM_EVENT,
+    ).values_list("revision__annotation_set__cardiology_patient_id", "value")
+    return dict(rows)

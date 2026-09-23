@@ -342,6 +342,8 @@ class AdminStructureTests(TestCase):
         The purpose-ordered index removed the app heading that used to tell them
         apart, so a section drawing on several domains groups its rows instead.
         """
+        from common.domains import DOMAIN_CHOICES
+
         staff = User.objects.create_superuser("group-admin", "g@example.invalid", "x")
         request = RequestFactory().get("/admin/")
         request.user = staff
@@ -352,14 +354,15 @@ class AdminStructureTests(TestCase):
         self.assertNotIn(None, clinical)
         # Each domain forms one contiguous run, in registry order.
         runs = [g for i, g in enumerate(clinical) if i == 0 or clinical[i - 1] != g]
-        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy", "Urology"])
+        domain_labels = [label for _slug, label in DOMAIN_CHOICES]
+        self.assertEqual(runs, domain_labels)
 
         # Shared models come first, before the per-domain runs.
         access = [entry["group"] for entry in sections["Projects & access"]["models"]]
         self.assertIsNone(access[0])
         self.assertEqual(
             [g for i, g in enumerate(access) if i == 0 or access[i - 1] != g],
-            [None, "Maxillo", "Brain", "Laparoscopy", "Urology"],
+            [None, *domain_labels],
         )
 
         # A section drawing on one app has nothing to disambiguate.

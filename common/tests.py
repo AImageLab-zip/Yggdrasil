@@ -67,10 +67,16 @@ class SeedDevCommandTests(TestCase):
     @override_settings(DEBUG=True)
     def test_seed_is_idempotent(self):
         from brain.models import Patient as BrainPatient
+        from django.apps import apps
+
         from common.models import Project
         from laparoscopy.models import Patient as LaparoscopyPatient
         from maxillo.models import Patient as MaxilloPatient
         from urology.models import Patient as UrologyPatient
+
+        # By name: a new import from `common` into a domain app needs an import-linter
+        # exception, and those are not added.
+        CardiologyPatient = apps.get_model("cardiology", "Patient")
 
         with mock.patch("common.signals.celery_app.send_task"):
             call_command("seed_dev")
@@ -78,16 +84,16 @@ class SeedDevCommandTests(TestCase):
 
         self.assertEqual(
             set(Project.objects.values_list("slug", flat=True)),
-            {"maxillo", "brain", "laparoscopy", "urology"},
+            {"maxillo", "brain", "laparoscopy", "urology", "cardiology"},
         )
-        for model in (MaxilloPatient, BrainPatient, LaparoscopyPatient, UrologyPatient):
+        for model in (MaxilloPatient, BrainPatient, LaparoscopyPatient, UrologyPatient, CardiologyPatient):
             self.assertEqual(model.objects.filter(name="Demo Patient").count(), 1)
 
         from django.contrib.auth.models import User
 
         admin = User.objects.get(username="admin")
         self.assertTrue(admin.is_superuser)
-        self.assertEqual(admin.project_access.count(), 4)
+        self.assertEqual(admin.project_access.count(), 5)
 
 
 class UrlSmokeTests(TestCase):
@@ -102,7 +108,7 @@ class UrlSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_app_indexes_redirect_anonymous_user_to_login(self):
-        for path in ("/maxillo/", "/brain/", "/laparoscopy/", "/urology/"):
+        for path in ("/maxillo/", "/brain/", "/laparoscopy/", "/urology/", "/cardiology/"):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 302)

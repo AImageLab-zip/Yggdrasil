@@ -1,12 +1,10 @@
 import logging
 
+from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 
-
+from common.domains import DOMAIN_CHOICES
 from laparoscopy.export_processor import LaparoscopyExportProcessor
-from laparoscopy.models import Export as LaparoscopyExport
-
-from ...models import Export as MaxilloExport
 from common.export_processing import ExportProcessor
 
 
@@ -18,34 +16,22 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('export_id', type=int)
-        parser.add_argument('--domain', choices=['maxillo', 'laparoscopy', 'brain'])
+        parser.add_argument('--domain', choices=[slug for slug, _ in DOMAIN_CHOICES])
 
     def handle(self, *args, **options):
-        from brain.models import Export as BrainExport
-
         export_id = options['export_id']
         domain = options.get('domain')
 
         export = None
-        if domain == 'laparoscopy':
-            export = LaparoscopyExport.objects.filter(id=export_id).first()
-        elif domain == 'brain':
-            export = BrainExport.objects.filter(id=export_id).first()
-        elif domain == 'maxillo':
-            export = MaxilloExport.objects.filter(id=export_id).first()
+        if domain:
+            export = apps.get_model(domain, 'Export').objects.filter(id=export_id).first()
         else:
-            # No domain given: probe each table and infer the domain.
-            export = MaxilloExport.objects.filter(id=export_id).first()
-            if export:
-                domain = 'maxillo'
-            else:
-                export = LaparoscopyExport.objects.filter(id=export_id).first()
+            # No domain given: probe each domain's table and infer the domain.
+            for slug, _label in DOMAIN_CHOICES:
+                export = apps.get_model(slug, 'Export').objects.filter(id=export_id).first()
                 if export:
-                    domain = 'laparoscopy'
-                else:
-                    export = BrainExport.objects.filter(id=export_id).first()
-                    if export:
-                        domain = 'brain'
+                    domain = slug
+                    break
 
         if not export:
             raise CommandError(f'Export {export_id} not found')

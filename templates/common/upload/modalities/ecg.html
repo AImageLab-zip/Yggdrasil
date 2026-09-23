@@ -1,0 +1,10 @@
+<article class="upload-modality upload-modality--wide">
+    <div class="upload-modality__head"><i class="fas fa-heart-pulse" aria-hidden="true"></i><h3>ECG recording</h3></div>
+    <label class="upload-dropzone" for="{{ patient_upload_form.ecg.id_for_label }}">
+        {{ patient_upload_form.ecg }}
+        <i class="fas fa-file-medical" aria-hidden="true"></i>
+        <strong>Drop an ECG JSON file</strong><small>JSON</small>
+        <span class="upload-file-summary" data-file-summary>No file selected</span>
+    </label>
+    {% for error in patient_upload_form.ecg.errors %}<small class="upload-error">{{ error }}</small>{% endfor %}
+</article>

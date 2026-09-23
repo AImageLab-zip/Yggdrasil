@@ -86,3 +86,54 @@ def upload_error_response(request, message, status=400):
     if not wants_json(request):
         return None
     return JsonResponse({'ok': False, 'error': message}, status=status)
+
+
+def bulk_upload_url_for(request, namespace: str):
+    """URL of the bulk-upload screen, or None when it is out of reach.
+
+    Bulk ingestion is administrators-only, needs a selected project, and is not
+    routed in every domain, so resolve it here and let templates render the
+    entry point with a plain ``{% if bulk_upload_url %}``.
+    """
+    from common.permissions import current_project, user_is_project_admin
+
+    if not request.session.get('current_project_id'):
+        return None
+    if not user_is_project_admin(request.user, current_project(request)):
+        return None
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and profile.can_upload_scans()):
+        return None
+    try:
+        return reverse(f'{namespace}:bulk_upload_patients')
+    except NoReverseMatch:
+        return None
+
+
+def frameable_by_same_origin(view):
+    """Let a page load inside a same-origin ``<iframe>``.
+
+    The warmup pages (maxillo's panoramics, cardiology's ECG plots) generate each
+    patient's browser-made artifact by loading its detail page in a hidden iframe.
+    The site-wide defaults forbid all framing -- ``X-Frame-Options: DENY`` and the
+    enforced CSP's ``frame-ancestors 'none'`` -- so that frame never loaded and every
+    patient timed out. This relaxes both to the site's own origin, for the decorated
+    view only; the CSP middleware keeps a policy a response already carries.
+    """
+    from functools import wraps
+
+    from django.views.decorators.clickjacking import xframe_options_sameorigin
+
+    from yggdrasil.middleware import ContentSecurityPolicyMiddleware as csp
+
+    def same_origin(policy):
+        return policy.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        response = view(request, *args, **kwargs)
+        response.setdefault("Content-Security-Policy", same_origin(csp.ENFORCED))
+        response.setdefault("Content-Security-Policy-Report-Only", same_origin(csp.REPORT_ONLY))
+        return response
+
+    return xframe_options_sameorigin(wrapped)

@@ -41,13 +41,13 @@ ignore = ["S110", "S112"]
 # Import direction (CLAUDE.md, docs/architecture.md): domain apps -> annotations ->
 # common, and domain apps do not import each other. Checked in CI by `lint-imports`.
 [tool.importlinter]
-root_packages = ["common", "annotations", "maxillo", "brain", "laparoscopy", "urology"]
+root_packages = ["common", "annotations", "maxillo", "brain", "laparoscopy", "urology", "cardiology"]
 
 [[tool.importlinter.contracts]]
 id = "layers"
 name = "Domain apps -> annotations -> common"
 type = "layers"
-layers = ["maxillo : brain : laparoscopy : urology", "annotations", "common"]
+layers = ["maxillo : brain : laparoscopy : urology : cardiology", "annotations", "common"]
 ignore_imports = [
     # Existing violations, listed so that only NEW ones fail CI. Remove a line when
     # its import is fixed; never add one without a maintainer's sign-off.
@@ -55,7 +55,6 @@ ignore_imports = [
     "annotations.management.commands.annotations_crosscheck -> brain.models",
     "annotations.services.video -> laparoscopy.models",
     "annotations.views -> maxillo.ios_meshes",
-    "brain.views -> maxillo.views.profile",
     "common.admin -> annotations.models",
     "common.annotation_lock -> annotations.models",
     "common.annotation_lock -> maxillo.models",
@@ -73,13 +72,10 @@ ignore_imports = [
     "common.management.commands.seed_dev -> urology.models",
     "laparoscopy.file_utils -> maxillo.file_utils",
     "maxillo.file_utils -> laparoscopy.video_probe",
-    "maxillo.management.commands.run_export -> brain.models",
     "maxillo.management.commands.run_export -> laparoscopy.export_processor",
-    "maxillo.management.commands.run_export -> laparoscopy.models",
     "maxillo.views.domain -> laparoscopy.forms",
     "maxillo.views.patient_detail -> laparoscopy.video_probe",
     "maxillo.views.patient_upload -> laparoscopy.file_utils",
-    "urology.views -> maxillo.views.profile",
     "annotations.management.commands.annotations_convert_legacy -> brain.models",
     "annotations.management.commands.annotations_convert_legacy -> maxillo.models",
     "annotations.management.commands.annotations_crosscheck -> laparoscopy.models",
@@ -156,7 +152,6 @@ ignore_imports = [
     "annotations.management.commands.annotations_crosscheck -> brain.models",
     "annotations.services.video -> laparoscopy.models",
     "annotations.views -> maxillo.ios_meshes",
-    "brain.views -> maxillo.views.profile",
     "common.admin -> annotations.models",
     "common.annotation_lock -> annotations.models",
     "common.annotation_lock -> maxillo.models",
@@ -174,13 +169,10 @@ ignore_imports = [
     "common.management.commands.seed_dev -> urology.models",
     "laparoscopy.file_utils -> maxillo.file_utils",
     "maxillo.file_utils -> laparoscopy.video_probe",
-    "maxillo.management.commands.run_export -> brain.models",
     "maxillo.management.commands.run_export -> laparoscopy.export_processor",
-    "maxillo.management.commands.run_export -> laparoscopy.models",
     "maxillo.views.domain -> laparoscopy.forms",
     "maxillo.views.patient_detail -> laparoscopy.video_probe",
     "maxillo.views.patient_upload -> laparoscopy.file_utils",
-    "urology.views -> maxillo.views.profile",
     "annotations.management.commands.annotations_convert_legacy -> brain.models",
     "annotations.management.commands.annotations_convert_legacy -> maxillo.models",
     "annotations.management.commands.annotations_crosscheck -> laparoscopy.models",

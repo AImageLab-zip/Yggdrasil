@@ -69,6 +69,7 @@ class AnnotationSet(DomainFKAccessorMixin, models.Model):
         ("voice_caption", "Voice caption"),
         ("volume_segmentation", "Volume segmentation"),
         ("measurements", "Measurements"),
+        ("ecg_rhythm_classification", "ECG rhythm classification"),
     ]
 
     kind = models.CharField(max_length=40, choices=KIND_CHOICES)
@@ -96,6 +97,13 @@ class AnnotationSet(DomainFKAccessorMixin, models.Model):
     )
     urology_patient = models.ForeignKey(
         "urology.Patient",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="annotation_sets",
+    )
+    cardiology_patient = models.ForeignKey(
+        "cardiology.Patient",
         on_delete=models.CASCADE,
         null=True,
         blank=True,
@@ -155,6 +163,7 @@ class AnnotationSet(DomainFKAccessorMixin, models.Model):
             models.Index(fields=["brain_patient", "kind"]),
             models.Index(fields=["laparoscopy_patient", "kind"]),
             models.Index(fields=["urology_patient", "kind"]),
+            models.Index(fields=["cardiology_patient", "kind"]),
             # The raw-data lock's query: "does this patient have annotation work?"
             models.Index(fields=["domain", "ever_annotated"]),
         ]
