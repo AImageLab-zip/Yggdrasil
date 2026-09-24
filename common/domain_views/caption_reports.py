@@ -18,10 +18,13 @@ The row is written before the call, so nothing here depends on the browser stayi
 connected: an abandoned tab still finds its report on the next GET.
 """
 
+import asyncio
 import json
 import logging
+import threading
 import uuid
 
+from asgiref.sync import sync_to_async
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
@@ -37,6 +40,81 @@ logger = logging.getLogger(__name__)
 
 def _sse(event):
     return f"data: {json.dumps(event)}\n\n"
+
+
+#: Seconds of silence after which the server sends a keepalive of its own. Well inside
+#: the browser's 30-second stall watchdog (``static/js/caption_structuring.js``), which
+#: re-arms on any bytes and ignores comment lines. A reasoning model can think for
+#: minutes before its first word; without this the browser aborted every such run.
+KEEPALIVE_SECONDS = 10
+
+#: An SSE comment: keeps the connection and the watchdog alive, and every SSE reader --
+#: ours included -- skips it.
+KEEPALIVE_FRAME = ": keepalive\n\n"
+
+_KEEPALIVE = object()
+_END = object()
+
+
+async def _relay(service, messages, *, keepalive_seconds):
+    """Run ``llm.stream_chat`` on a worker thread; yield what it yields, or ``_KEEPALIVE``.
+
+    The model call is a blocking ``requests`` read, so it cannot run on the event loop.
+    It runs on the loop's executor instead, handing each item across a queue, and the
+    loop waits on that queue with a timeout -- which is what lets the server say
+    something while the model is saying nothing. The keepalive therefore comes from the
+    server's own clock and does not depend on the provider sending any of its own.
+
+    The worker never touches the database, so it needs no connection of its own.
+    """
+    loop = asyncio.get_running_loop()
+    queue = asyncio.Queue()
+    stop = threading.Event()
+
+    def put(item):
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+        except RuntimeError:
+            # The loop is gone: the response was torn down while the model was still
+            # answering. Nobody is left to read this, so there is nothing to do.
+            pass
+
+    def pump():
+        try:
+            for item in llm.stream_chat(service, messages):
+                put(item)
+                if stop.is_set():
+                    break  # closes the upstream response via stream_chat's finally
+        except BaseException as exc:  # handed across and re-raised on the loop
+            put(exc)
+        finally:
+            put(_END)
+
+    loop.run_in_executor(None, pump)
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), keepalive_seconds)
+            except asyncio.TimeoutError:
+                yield _KEEPALIVE
+                continue
+            if item is _END:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        stop.set()
+
+
+async def _once(*frames):
+    """An async iterator over fixed frames.
+
+    Under ASGI a *synchronous* iterator is drained to a list before anything is sent, so
+    every response from this module is asynchronous, including the trivial ones.
+    """
+    for frame in frames:
+        yield frame
 
 
 def _streaming_response(generator):
@@ -104,12 +182,12 @@ def structure_caption(request, patient_id, caption_id):
         if replayed is not None:
             # A retried request, not a second opinion: hand back what that key already
             # produced rather than paying for the same answer twice.
-            return _streaming_response(iter([
+            return _streaming_response(_once(
                 _sse({"type": "start", "caption_id": voice_caption.id,
                       "replayed": True, "model": replayed.model_name}),
                 _sse({"type": "done",
                       "report": caption_structuring.serialize(replayed)}),
-            ]))
+            ))
 
         context = caption_structuring.build_context(
             voice_caption, patient, user=request.user, task=task,
@@ -126,37 +204,77 @@ def structure_caption(request, patient_id, caption_id):
             {"error": refusal.message, "code": refusal.code}, status=refusal.status
         )
 
-    def stream():
-        yield _sse({
-            "type": "start",
-            "caption_id": voice_caption.id,
-            "report_id": report.id,
-            "attempt": report.attempt,
-            "model": report.model_name,
-            "template": report.template.name if report.template_id else "",
-            # The headings the browser should show while the answer streams in. The model
-            # writes section *keys*; without these the clinician watches "## pi_rads_score"
-            # appear and then be replaced by the finished report a moment later.
-            "sections": task.section_labels(context),
-            "omit": list(task.omit_sections),
-        })
+    # Built here, on the request thread: the stream below runs on the event loop, where a
+    # lazy foreign-key read such as ``report.template.name`` is a SynchronousOnlyOperation.
+    start = _sse({
+        "type": "start",
+        "caption_id": voice_caption.id,
+        "report_id": report.id,
+        "attempt": report.attempt,
+        "model": report.model_name,
+        "template": report.template.name if report.template_id else "",
+        # The headings the browser should show while the answer streams in. The model
+        # writes section *keys*; without these the clinician watches "## pi_rads_score"
+        # appear and then be replaced by the finished report a moment later.
+        "sections": task.section_labels(context),
+        "omit": list(task.omit_sections),
+    })
+
+    def settle():
+        """``serialize`` the stored report after a refresh -- database work, so sync."""
+        report.refresh_from_db()
+        return caption_structuring.serialize(report)
+
+    async def stream():
+        """The response body. **Asynchronous on purpose.**
+
+        This used to be a plain generator, and under uvicorn Django drains a synchronous
+        iterator completely -- ``sync_to_async(list)`` in ``StreamingHttpResponse`` --
+        before sending a byte. Nothing streamed: the browser received every frame at once
+        when the model finished, and its 30-second stall watchdog killed any run whose
+        model took longer to think. The test client iterates synchronously, so no test
+        ever saw it. ``tests_caption_reports.AsgiStreamingTests`` pins it now.
+        """
+        settled = False
         try:
-            for fragment in caption_structuring.run(report, service, prompt, context):
-                yield _sse({"type": "delta", "text": fragment})
+            # Inside the try: a browser can leave while this very frame is in flight, and
+            # the row must still be closed off rather than left at "processing".
+            yield start
+            messages = await sync_to_async(caption_structuring.begin)(report, prompt, context)
+            result = None
+            async for item in _relay(
+                service, messages, keepalive_seconds=KEEPALIVE_SECONDS
+            ):
+                if item is _KEEPALIVE:
+                    yield KEEPALIVE_FRAME
+                elif isinstance(item, llm.ChatResult):
+                    result = item
+                else:
+                    yield _sse({"type": "delta", "text": item})
+            await sync_to_async(caption_structuring.finish)(report, context, result)
+            settled = True
         except llm.LlmError as exc:
             logger.warning("Structuring caption %s failed: %s", voice_caption.id, exc)
+            await sync_to_async(report.mark_failed)(str(exc))
+            settled = True
             yield _sse({"type": "error", "code": _error_code(exc), "detail": str(exc)})
             return
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  # noqa: BLE001 - reported, then shown as a failure
             logger.exception("Structuring caption %s crashed", voice_caption.id)
-            report.mark_failed(str(exc))
+            await sync_to_async(report.mark_failed)(str(exc))
+            settled = True
             yield _sse({"type": "error", "code": "failed", "detail": "Structuring failed."})
             return
+        finally:
+            if not settled:
+                # The browser went away mid-run -- Stop, its watchdog, or a closed tab --
+                # and the response is being torn down. Shielded because this cleanup may
+                # itself be running inside a cancellation.
+                await asyncio.shield(sync_to_async(caption_structuring.abandon)(report))
 
         # "done" carries the parsed, stored report, so the browser never has to trust its
         # own concatenation of the fragments above.
-        report.refresh_from_db()
-        yield _sse({"type": "done", "report": caption_structuring.serialize(report)})
+        yield _sse({"type": "done", "report": await sync_to_async(settle)()})
 
     return _streaming_response(stream())
 

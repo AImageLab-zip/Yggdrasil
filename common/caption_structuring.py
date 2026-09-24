@@ -235,43 +235,50 @@ def replay(voice_caption, generation_uuid, task_slug):
     )
 
 
-def run(report, service, prompt, context):
-    """Do the call, yielding each fragment as it arrives, then record the outcome.
+# A run is three steps, and only the middle one talks to the model. They are separate
+# functions because the view streams asynchronously: the database steps run through
+# ``sync_to_async`` on the request's own thread, while the model call blocks a worker
+# thread of its own (``common/domain_views/caption_reports.py``). A single generator
+# that did all three could not be split across those two threads.
 
-    A generator, not a function with a callback: the view has to *yield* each piece to
-    the browser as it lands, and a callback cannot yield out of the generator that called
-    it. Collecting the fragments and emitting them afterwards would produce a response
-    that looks streamed and is not -- the clinician would still wait for the whole answer
-    before seeing the first word.
 
-    The report is completed from the accumulated text here rather than in the view, so a
-    browser that disconnects mid-stream still leaves a finished row behind.
-    """
-    task = context["task"]
-    messages, rendered_user = task.build_messages(prompt, context)
+def begin(report, prompt, context):
+    """Build the messages and record exactly what is about to be sent."""
+    messages, rendered_user = context["task"].build_messages(prompt, context)
     report.prompt_rendered = rendered_user
     report.save(update_fields=["prompt_rendered", "updated_at"])
+    return messages
 
-    try:
-        result = None
-        for item in llm.stream_chat(service, messages):
-            if isinstance(item, llm.ChatResult):
-                result = item
-                break
-            yield item
-        if result is None:
-            raise llm.LlmMalformedResponse("The stream ended without a result")
-    except llm.LlmError as exc:
-        report.mark_failed(str(exc))
-        raise
 
-    structured, rendered, warnings = task.parse(result.text, context)
+def finish(report, context, result):
+    """Parse the model's answer and complete the row."""
+    if result is None:
+        raise llm.LlmMalformedResponse("The stream ended without a result")
+    structured, rendered, warnings = context["task"].parse(result.text, context)
     report.mark_completed(
         structured,
         rendered,
         warnings=warnings,
         usage=result.usage,
         model_name=result.model,
+    )
+    return report
+
+
+def abandon(report):
+    """Close a run the browser walked away from -- Stop, its watchdog, or navigation.
+
+    Marked failed rather than left at ``processing``: a row stuck there reads as "still
+    working" on the next page load, and it holds the in-flight lock, so *Run again* is
+    refused until the lock's timeout lapses. An update conditioned on the status, so a
+    run that finished in the same instant is not overwritten.
+    """
+    from django.utils import timezone
+
+    return CaptionReport.objects.filter(pk=report.pk, status="processing").update(
+        status="failed",
+        error_message="Stopped before the report was finished.",
+        completed_at=timezone.now(),
     )
 
 

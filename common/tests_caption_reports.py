@@ -8,8 +8,11 @@ No network: ``common.llm.stream_chat`` is patched. The permission tests do not e
 that far.
 """
 
+import asyncio
 import json
+import time
 import uuid
+import warnings
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -35,6 +38,35 @@ DICTATION = (
     "The lesion is on the left side and measures about twelve millimetres, "
     "with irregular margins and no restricted diffusion."
 )
+
+
+def consume(response):
+    """The whole body of a streaming response, read the way the sync test client can.
+
+    The structuring stream is an *async* iterator (see the ``stream`` docstring in
+    ``common/domain_views/caption_reports.py``), so ``streaming_content`` is async too and
+    cannot be joined directly. Iterating the response itself makes Django collect it with
+    ``async_to_sync`` -- and warn that it is doing so, which is the expected price of the
+    sync client and is silenced here rather than in every test.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="StreamingHttpResponse must consume asynchronous iterators"
+        )
+        return b"".join(response).decode()
+
+
+def slow_stream(delay, text="## side\nOn the left."):
+    """A model that thinks for ``delay`` seconds before its first word.
+
+    ``time.sleep`` on purpose: the real call is a blocking read on a worker thread, and
+    this is what that looks like from the event loop.
+    """
+    def _stream(service, messages, **kwargs):
+        time.sleep(delay)
+        yield text
+        yield llm.ChatResult(text, usage={"total_tokens": 5}, model="test/model")
+    return _stream
 
 
 def fake_stream(text="## side\nOn the left.\n\n## size\nAbout twelve millimetres."):
@@ -148,7 +180,7 @@ class StructuringEndpointTests(TestCase):
                 content_type="application/json", **kwargs
             )
             if getattr(response, "streaming", False):
-                response.body = b"".join(response.streaming_content).decode()
+                response.body = consume(response)
             return response
 
     def events(self, response):
@@ -460,3 +492,126 @@ class WarningsShownToTheClinicianTests(TestCase):
             warnings=[{"code": "coverage", "detail": "x", "missing": ["lesione"]}]
         )
         self.assertEqual(report.warnings[0]["missing"], ["lesione"])
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class AsgiStreamingTests(TestCase):
+    """What a browser behind uvicorn actually receives, and when.
+
+    The first version of this endpoint returned a *synchronous* generator. Under ASGI,
+    Django drains one of those with ``sync_to_async(list)`` before sending anything, so
+    the "stream" arrived all at once when the model finished -- measured against the
+    running server, every frame landed at t = 9.05s, the ``start`` frame included. A
+    model thinking for more than 30 seconds therefore tripped the browser's stall
+    watchdog every time. None of the tests above could see it: the sync test client
+    iterates the response synchronously, one frame at a time.
+
+    These go through ``StreamingHttpResponse.__aiter__`` -- the path ``ASGIHandler`` uses
+    -- and time each frame. Revert the view to a plain generator and the first test fails.
+    """
+
+    # The same fixture as the endpoint tests; borrowed rather than inherited so that
+    # class's tests do not run twice.
+    setUp = StructuringEndpointTests.setUp
+    url = StructuringEndpointTests.url
+
+    def patched(self, stream, **extra):
+        patches = [
+            mock.patch.dict("os.environ", {"TEST_LLM_KEY": "k"}),
+            mock.patch("common.caption_structuring.llm.stream_chat", stream),
+        ]
+        patches += [mock.patch(target, value) for target, value in extra.items()]
+        return patches
+
+    async def open_and_read(self, stream, **extra):
+        """POST through the async client and read the body as ASGI would."""
+        patches = self.patched(stream, **extra)
+        for patch in patches:
+            patch.start()
+        try:
+            await self.async_client.aforce_login(self.user)
+            response = await self.async_client.post(
+                self.url(), data="{}", content_type="application/json"
+            )
+            started = time.monotonic()
+            frames, buffer = [], ""
+            async for chunk in response:  # StreamingHttpResponse.__aiter__
+                buffer += chunk.decode()
+                while "\n\n" in buffer:
+                    frame, buffer = buffer.split("\n\n", 1)
+                    frames.append((time.monotonic() - started, frame))
+            return frames
+        finally:
+            for patch in reversed(patches):
+                patch.stop()
+
+    async def test_the_first_frame_leaves_before_the_model_answers(self):
+        """The regression test for the buffering bug, with a model that takes 0.8s."""
+        frames = await self.open_and_read(slow_stream(0.8))
+
+        first_at, first = frames[0]
+        self.assertIn('"type": "start"', first)
+        self.assertLess(first_at, 0.4, "the start frame waited for the model: buffered")
+        done_at = next(at for at, frame in frames if '"type": "done"' in frame)
+        self.assertGreaterEqual(done_at, 0.8)
+
+    async def test_silence_is_filled_with_keepalives(self):
+        """A model silent for longer than the interval gets keepalives in the meantime.
+
+        Scaled down: a 0.1s interval against a 0.55s think, standing in for 10s against
+        the minutes a reasoning model can take.
+        """
+        frames = await self.open_and_read(
+            slow_stream(0.55),
+            **{"common.domain_views.caption_reports.KEEPALIVE_SECONDS": 0.1},
+        )
+        keepalives = [at for at, frame in frames if frame.startswith(": keepalive")]
+        self.assertGreaterEqual(len(keepalives), 3)
+        # Spread across the silence, not bunched at the end.
+        self.assertLess(keepalives[0], 0.3)
+
+        report = await CaptionReport.objects.aget()
+        self.assertEqual(report.status, "completed")
+
+    async def test_a_prompt_model_gets_no_keepalives(self):
+        frames = await self.open_and_read(slow_stream(0.0))
+        self.assertFalse([f for _at, f in frames if f.startswith(": keepalive")])
+        self.assertTrue(any('"type": "done"' in f for _at, f in frames))
+
+    async def test_a_browser_that_leaves_mid_run_frees_the_caption(self):
+        """Stop, the watchdog or a closed tab must not leave the row at "processing".
+
+        A row stuck there reads as "still working" on reload and holds the in-flight
+        lock, so Run again would be refused until the lock timed out.
+        """
+        patches = self.patched(slow_stream(1.0))
+        for patch in patches:
+            patch.start()
+        try:
+            await self.async_client.aforce_login(self.user)
+            response = await self.async_client.post(
+                self.url(), data="{}", content_type="application/json"
+            )
+            # The body ASGIHandler iterates and closes. Django hands it back as bytes; a
+            # cancellation of its pending read reaches the view's generator underneath.
+            body = response._iterator
+            first = await body.__anext__()
+            self.assertIn(b'"type": "start"', first if isinstance(first, bytes) else first.encode())
+
+            waiting = asyncio.ensure_future(body.__anext__())  # now blocked on the model
+            await asyncio.sleep(0.2)
+            waiting.cancel()  # what Django does to the response when the client leaves
+            with self.assertRaises(asyncio.CancelledError):
+                await waiting
+            await body.aclose()
+        finally:
+            for patch in reversed(patches):
+                patch.stop()
+
+        report = await CaptionReport.objects.aget()
+        self.assertEqual(report.status, "failed")
+        self.assertIn("Stopped before", report.error_message)
+
+        # And the caption is free again: a second run goes through at once.
+        frames = await self.open_and_read(fake_stream())
+        self.assertTrue(any('"type": "done"' in frame for _at, frame in frames))
