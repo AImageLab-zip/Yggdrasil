@@ -423,3 +423,43 @@ class NothingFiledTests(TestCase):
         self.assertIn("not_filed", codes)
         self.assertNotIn("nothing_filed", codes)
         self.assertTrue(rendered)
+
+
+class PlaceholderBodyTests(TestCase):
+    """A section whose whole body is a placeholder is an empty section.
+
+    Seen live with reasoning off: the model wrote "## intraductal_carcinoma" followed by
+    the literal "<No content provided for this section>", and the parser filed it as a
+    finding -- which the clinician would then have read in their report under a clinical
+    heading. The rule is narrow in the other direction too, because a real negative
+    ("None.") is the commonest single thing a clinician says about a field.
+    """
+
+    keys = ["intraductal_carcinoma", "haemorrhage", "size"]
+
+    def test_the_placeholder_seen_live_is_dropped(self):
+        raw = (
+            "## intraductal_carcinoma\n<No content provided for this section>\n\n"
+            "## size\n14 mm."
+        )
+        structured, rendered, _warnings = llm_tasks.parse_sections(raw, self.keys)
+        self.assertNotIn("intraductal_carcinoma", structured)
+        self.assertNotIn("No content provided", rendered)
+        self.assertEqual(structured["size"], "14 mm.")
+
+    def test_the_format_examples_own_placeholder_is_dropped(self):
+        structured, _rendered, _w = llm_tasks.parse_sections("## size\n<text>", self.keys)
+        self.assertEqual(structured, {})
+
+    def test_a_real_negative_is_kept(self):
+        """"None." is a finding: intratumoral haemorrhage, none."""
+        for negative in ("None.", "No.", "Absent.", "Not seen.", "N/A"):
+            structured, _rendered, _w = llm_tasks.parse_sections(
+                f"## haemorrhage\n{negative}", self.keys
+            )
+            self.assertEqual(structured.get("haemorrhage"), negative, negative)
+
+    def test_inequalities_are_content_not_placeholders(self):
+        for body in ("<5 mm.", "Size < 2 cm, margins > 1 mm.", "Less than <3 mm> apart, per the clinician."):
+            structured, _rendered, _w = llm_tasks.parse_sections(f"## size\n{body}", self.keys)
+            self.assertEqual(structured.get("size"), body, body)

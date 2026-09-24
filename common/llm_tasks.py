@@ -165,6 +165,22 @@ def render_field_list(fields):
 
 SECTION_RE = re.compile(r"^\s{0,3}#{1,6}\s*(?P<key>[A-Za-z0-9_\-]+)\s*$", re.M)
 
+#: A body that is nothing but one angle-bracketed token: "<text>", "<No content provided
+#: for this section>". That is template-placeholder syntax -- the format example echoed
+#: back, or the model's way of saying "nothing here" -- and no clinician dictates it.
+PLACEHOLDER_RE = re.compile(r"^<[^<>\n]{1,200}>$")
+
+
+def is_placeholder(body):
+    """Whether a section body is a placeholder rather than content.
+
+    Narrow on purpose. It must never swallow a real negative: "None.", "No.", "Absent."
+    and "Not seen." are findings -- "intratumoral haemorrhage: none" is exactly what a
+    clinician dictates -- so only the bracket syntax counts, and only when it is the
+    whole body. "<5 mm" and "size < 2 cm, margins > 1 mm" are content and are kept.
+    """
+    return bool(PLACEHOLDER_RE.match((body or "").strip()))
+
 
 def parse_sections(raw_text, field_keys, labels=None, omit=()):
     """``(structured, rendered, warnings)`` from the model's sectioned plain text.
@@ -217,7 +233,7 @@ def parse_sections(raw_text, field_keys, labels=None, omit=()):
             end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
             key = match.group("key").strip()
             body = text[match.end():end].strip()
-            if not body:
+            if not body or is_placeholder(body):
                 continue
             if key not in known:
                 warnings.append({
