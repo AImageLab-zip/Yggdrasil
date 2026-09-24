@@ -7,6 +7,8 @@
 {% endcomment %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
 <div class="ygg-topbar">
+    {# Phones only (theme.css): the rail is off-canvas there, and this opens it as a drawer (nav.js). #}
+    <button type="button" class="ygg-icon-btn ygg-rail-toggle" data-mobile-toggle aria-expanded="false" aria-controls="ygg-rail" aria-label="Open navigation">{% icon 'bars' %}</button>
     <div class="ygg-breadcrumb">
         {% block breadcrumb %}
             <span class="capitalize">{{ current_project_name|default:ns }}</span>
@@ -21,9 +23,10 @@
     </div>
     <div class="flex items-center gap-2">
         {% if is_demo_guest %}
-            <span class="badge-ygg badge-neutral">Public demo — read-only</span>
+            <span class="badge-ygg badge-neutral"><span class="ygg-desktop-only">Public demo — read-only</span><span class="ygg-mobile-only">Demo</span></span>
             <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-                <button type="submit" class="ygg-icon-btn" title="Exit demo / Log in">{% icon 'sign-in-alt' %}</button>
+                {# Phones cannot sign in (common/mobile.py), so there the button only exits. #}
+                <button type="submit" class="ygg-icon-btn" title="{% if is_mobile_client %}Exit demo{% else %}Exit demo / Log in{% endif %}" aria-label="Exit demo">{% icon 'sign-out-alt' %}</button>
             </form>
         {% elif user.is_authenticated %}
             <button type="button" class="ygg-icon-btn" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">

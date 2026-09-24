@@ -2178,3 +2178,48 @@
     border-color: var(--ygg-primary);
     color: var(--ygg-primary);
 }
+
+/* ---- Phones: the public demo only (common/mobile.py) -------------------- */
+/* The page already stacks viewer over side panel below 1100px. On a phone one
+   finger scrolls the page even over a viewer and two work the view
+   (runtime/touch.js, theme.css), and the laparoscopy tutorial --
+   a walkthrough of *drawing* regions, which the read-only guest cannot do -- is
+   not offered. */
+@media (max-width: 640px) {
+    #laparoscopy-tour-btn { display: none !important; }
+    .patient-view-grid { gap: 12px; }
+    /* A toolbar group is a row of icon buttons plus a labelled switch or two --
+       wider than a phone on the IOS viewer, so let it wrap like the bar does. */
+    .viewer-toolbar__group { flex-wrap: wrap; }
+    /* The modality strip and each viewer's toolbar stay on screen while the
+       stacked viewers scroll under them (static/js/sticky_viewer_bars.js sets
+       the offsets). The strip pins under the topbar; a toolbar pins under the
+       strip, and only while its own viewer is on screen -- sticky is bounded by
+       the parent, so each photo toolbar lets go at the end of its photo. */
+    .modality-tabs,
+    .modality-chips-bar {
+        position: sticky;
+        top: var(--ygg-sticky-top, 3.5rem);
+        z-index: 30;
+    }
+    .modality-tabs {
+        display: flex;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .modality-tabs .modality-toggle { flex-shrink: 0; }
+    .modality-chips-bar {
+        padding: 6px 8px;
+        border: 1px solid var(--ygg-border);
+        border-radius: 10px;
+        background: var(--ygg-surface);
+    }
+    .viewer-toolbar {
+        position: sticky;
+        top: calc(var(--ygg-sticky-top, 3.5rem) + var(--ygg-sticky-strip, 0px));
+        z-index: 29;
+    }
+    /* The side panel sits under the viewer here, so it scrolls with the page
+       rather than as a second scroll area inside it. */
+    .side-panel__body { max-height: none; }
+}

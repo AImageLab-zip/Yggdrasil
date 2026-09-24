@@ -11,6 +11,32 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-09-24
+
+Yggdrasil now works on a phone -- as the public demo.
+
+### Added
+- **The public demo on your phone.** Opening any Yggdrasil link on a phone takes you
+  straight into the read-only demo, no account needed, on the page the link points to.
+  Signing in and registering stay on computers and tablets; on a phone you are shown the
+  demo instead of a sign-in form.
+- **Viewers that follow your fingers.** On a phone one finger scrolls the page, even over
+  an image, and two fingers pinch to zoom and drag to move it -- in the CBCT and MRI
+  grids, the photographs, the panoramic, the 3D intraoral scans and the pathology slides.
+- **Drag a brain series onto a window with your finger**, or tap the series and then the
+  window it should open in.
+
+### Changed
+- **Pages laid out for a phone.** The side menu opens from a button at the top and names
+  each entry, including Home; patients are listed as cards you can tap anywhere; and the
+  modality tabs and viewer controls stay at the top of the screen while you scroll.
+- **"Best viewed on a bigger screen" is now shown only to signed-in users** on a phone,
+  for the pages that still need a computer. Visitors and the demo no longer see it.
+
+### Fixed
+- **Administrators are notified of new registrations again.** The notification email
+  failed silently on every sign-up.
+
 ## [3.2.1] - 2026-09-23
 
 Cardiology joins the platform, inviting people is easy to find again, and the

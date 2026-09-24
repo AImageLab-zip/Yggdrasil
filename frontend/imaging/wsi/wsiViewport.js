@@ -8,6 +8,7 @@
  */
 
 import { wsiTileUrl, globalWsiTileCache } from './wsiLoader.js';
+import { installPhoneTouchPolicy, isPhoneViewport, trackPinch } from '../runtime/touch.js';
 
 export function createWsiViewport({
     element,
@@ -21,6 +22,13 @@ export function createWsiViewport({
     element.style.position = 'relative';
     element.style.overflow = 'hidden';
     element.style.userSelect = 'none';
+    // The viewer handles its own drags and pinches (below). On a phone one finger is
+    // the page's and two are the slide's (`runtime/touch.js`); `data-touch-view` opts
+    // this surface into that, and theme.css relaxes this `none` there so the page can
+    // scroll from it.
+    element.style.touchAction = 'none';
+    element.dataset.touchView = '';
+    installPhoneTouchPolicy();
     element.style.backgroundColor = '#111827'; // Dark clinical backdrop
 
     // 1. Primary tile canvas
@@ -595,8 +603,25 @@ export function createWsiViewport({
     let dragStartCenterX = 0;
     let dragStartCenterY = 0;
 
+    // Two-finger pinch (`runtime/touch.js`). Registered before the one-finger
+    // handlers so that, by the time they see the second finger, it already counts:
+    // they stand aside and the pinch owns the gesture until a finger lifts.
+    const pinch = trackPinch(element, (scale, centre, previousCentre) => {
+        const rect = element.getBoundingClientRect();
+        // Pan by the fingers' drift, then zoom about where they are now.
+        centerX -= (centre.x - previousCentre.x) / zoom;
+        centerY -= (centre.y - previousCentre.y) / zoom;
+        zoomAt(centre.x - rect.left, centre.y - rect.top, scale);
+    });
+
     element.addEventListener('pointerdown', (e) => {
         if (e.target.closest('.wsi-minimap-box')) return;
+        if (pinch.isPinching()) {
+            isDragging = false;
+            return;
+        }
+        // One finger on a phone scrolls the page; it neither pans nor draws.
+        if (e.pointerType === 'touch' && isPhoneViewport()) return;
         if (currentTool === 'Pan' || e.button === 1 || e.button === 2) {
             isDragging = true;
             dragStartX = e.clientX;
@@ -676,6 +701,7 @@ export function createWsiViewport({
     });
 
     element.addEventListener('pointermove', (e) => {
+        if (pinch.isPinching()) return;
         if (isDragging) {
             const dx = e.clientX - dragStartX;
             const dy = e.clientY - dragStartY;
@@ -708,6 +734,12 @@ export function createWsiViewport({
         }
     });
 
+    // The browser takes a touch back (a page scroll, a system gesture) with
+    // pointercancel and no pointerup; without this the next move would still pan.
+    element.addEventListener('pointercancel', () => {
+        isDragging = false;
+    });
+
     element.addEventListener('dblclick', (e) => {
         if (activeDrawing && activeDrawing.toolName === 'SplineROI') {
             finalizeActiveDrawing();
@@ -720,11 +752,13 @@ export function createWsiViewport({
     element.addEventListener('wheel', (e) => {
         e.preventDefault();
         const rect = element.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const [slideX, slideY] = screenToSlide(mouseX, mouseY);
+        zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.25 : 0.8);
+    }, { passive: false });
 
-        const zoomFactor = e.deltaY < 0 ? 1.25 : 0.8;
+    /** Zoom by `zoomFactor` about a point given in element pixels. */
+    function zoomAt(mouseX, mouseY, zoomFactor) {
+        const rect = element.getBoundingClientRect();
+        const [slideX, slideY] = screenToSlide(mouseX, mouseY);
         const nextZoom = Math.max(minZoom, Math.min(maxZoom, zoom * zoomFactor));
 
         // Keep cursor position stable under zoom
@@ -732,7 +766,7 @@ export function createWsiViewport({
         centerX = slideX - (mouseX - rect.width / 2) / zoom;
         centerY = slideY - (mouseY - rect.height / 2) / zoom;
         render();
-    }, { passive: false });
+    }
 
     function finalizeActiveDrawing() {
         if (!activeDrawing) return;
@@ -1125,6 +1159,7 @@ export function createWsiViewport({
             pendingFetches.clear();
             resizeObserver.disconnect();
             window.removeEventListener('resize', resize);
+            pinch.destroy();
             delete element.__wsiViewport;
             element.innerHTML = '';
         },

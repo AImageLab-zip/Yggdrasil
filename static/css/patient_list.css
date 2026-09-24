@@ -490,3 +490,53 @@
 @media (max-width: 640px) {
     .perm-form { grid-template-columns: 1fr; }
 }
+
+/* ---- Phone: rows become cards ----------------------------------------- */
+/* Phones reach this page only as the read-only demo guest (common/mobile.py),
+   so selection, tagging and the other write controls are dropped rather than
+   squeezed, and the 850px grid table turns into one card per patient. The DOM
+   is unchanged, so the patient_list.js contract above still holds. */
+@media (max-width: 640px) {
+    .patient-list { overflow-x: visible; }
+    .patient-list-header { display: none; }
+    .patient-row {
+        min-width: 0;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "name    actions"
+            "status  status"
+            "tags    tags"
+            "meta    folder";
+        row-gap: 8px;
+        padding: 12px 14px;
+    }
+    .patient-row:first-of-type { border-top: 0; }
+    .patient-row .col-check,
+    .patient-row .btn-add-tag,
+    .patient-row .btn-remove-tag-inline,
+    .patient-row .btn-edit-name-list { display: none; }
+    .patient-row .scan-name { grid-area: name; }
+    .patient-row .processing-status { grid-area: status; }
+    .patient-row .tags-col { grid-area: tags; }
+    .patient-row .tags-col:not(:has(.tag-badge)) { display: none; }
+    .patient-row .uploader { grid-area: meta; font-size: 12px; color: var(--ygg-text-muted); }
+    .patient-row .privacy { grid-area: folder; justify-self: end; }
+    .patient-row .actions { grid-area: actions; }
+    .scan-name-text { white-space: normal; }
+
+    /* The whole card opens the patient, not only the name: the name link is
+       stretched over the card, and the few controls that keep a job of their
+       own (open button, modality pills and their tooltips, tags) sit above it. */
+    .patient-row { position: relative; }
+    .patient-row .scan-name-text::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+    }
+    .patient-row .actions,
+    .patient-row .status-pill,
+    .patient-row .tag-badge {
+        position: relative;
+        z-index: 1;
+    }
+}

@@ -87,13 +87,16 @@
        The old ygg-nav top bar was removed with the 3.0 release. {% endcomment %}
     {% block chrome %}{% endblock %}{# chrome #}
 
-    {% comment %} Desktop-only gate. Yggdrasil's working pages are Cornerstone3D
-       viewers and dense tables; below phone width the icon rail is off-canvas
-       with no way back, so instead of a silently broken page we paint an honest
-       interstitial. Pure CSS (theme.css) -- shown/hidden by media query alone,
-       and deliberately free of context variables so 500.html, which renders
-       without context processors, still gets it. {% endcomment %}
+    {% comment %} Desktop-only gate. Phones get the public demo and nothing else
+       (common/mobile.py): public pages and the demo guest have a phone layout,
+       and `mobile_ok` lifts the gate for them. A real signed-in user's working
+       pages (upload, editors, admin) were never laid out for a 390px column, so
+       there the gate still paints an honest interstitial. Shown/hidden by media
+       query alone (theme.css). The test is `not mobile_ok` rather than a
+       positive flag on purpose: 500.html renders without context processors,
+       and an undefined variable must keep the gate, not drop it. {% endcomment %}
     {% block mobile_gate %}
+    {% if not mobile_ok %}
     <div class="ygg-desktop-gate" role="alertdialog" aria-labelledby="ygg-gate-title">
         <div class="ygg-desktop-gate__card">
             <img class="ygg-desktop-gate__logo" src="{% static 'icons/logo-yggdrasil.png' %}" alt="">
@@ -105,6 +108,7 @@
             </p>
         </div>
     </div>
+    {% endif %}
     {% endblock %}{# mobile_gate #}
 
     {% block messages %}

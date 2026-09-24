@@ -5,8 +5,11 @@ from common.models import Project, ProjectAccess, SiteMaintenance
 
 def app_meta(request):
     from common.demo import demo_domain_cards, is_demo_guest, landing_demo_url
+    from common.mobile import is_mobile_request
 
     user = getattr(request, 'user', None)
+    guest = is_demo_guest(user)
+    signed_in = user is not None and getattr(user, 'is_authenticated', False)
     # `demo_url` is the "try it without an account" CTA, so it is only ever
     # rendered to anonymous visitors -- landing and login both need it, which is
     # why it lives here rather than in one view. Skipping the lookup when signed
@@ -19,7 +22,12 @@ def app_meta(request):
             demo_domains = demo_domain_cards()
     return {
         'app_version': getattr(settings, 'APP_VERSION', ''),
-        'is_demo_guest': is_demo_guest(user),
+        'is_demo_guest': guest,
+        # Phones get the demo only (common/mobile.py). `mobile_ok` is what lifts
+        # base.html's desktop gate: public pages and the guest have a phone
+        # layout, a real signed-in user's working pages do not.
+        'is_mobile_client': is_mobile_request(request),
+        'mobile_ok': guest or not signed_in,
         'demo_url': demo_url,
         'demo_domains': demo_domains,
     }

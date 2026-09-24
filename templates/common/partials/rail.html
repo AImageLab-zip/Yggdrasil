@@ -8,7 +8,7 @@
 {% endcomment %}
 {% firstof request.resolver_match.namespace 'maxillo' as ns %}
 {% with un=request.resolver_match.url_name %}
-<nav class="ygg-rail" aria-label="Primary">
+<nav class="ygg-rail" id="ygg-rail" aria-label="Primary">
     <a class="ygg-rail-logo" href="/" title="Yggdrasil">
         <img src="{% static 'icons/logo-yggdrasil.png' %}" alt="Yggdrasil" style="width:20px;height:20px;object-fit:contain">
     </a>
@@ -39,4 +39,5 @@
         <span class="ygg-avatar" title="{{ user.username }}">{{ user.username|slice:':2' }}</span>
     {% endif %}
 </nav>
+<div class="ygg-rail-backdrop" data-rail-close aria-hidden="true"></div>
 {% endwith %}

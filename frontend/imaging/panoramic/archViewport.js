@@ -27,6 +27,7 @@
 
 import { indexToWorldLps } from '../geometry/orientation.js';
 import { ARCH_SPLINE, archSplineConfiguration } from './archSpline.js';
+import { enableTwoFingerNavigation } from '../runtime/touch.js';
 
 /** The viewport this surface owns on the shared engine. */
 export const VIEWPORT_ID = 'ygg-panoramic-axial';
@@ -222,6 +223,7 @@ export function createArchViewport({
         toolGroup.setToolActive(tools.ZoomTool.toolName, {
             bindings: [{ mouseButton: toolsEnums.MouseBindings.Secondary }],
         });
+        enableTwoFingerNavigation(toolGroup, tools.ZoomTool.toolName);
         return toolGroup;
     }
 

@@ -18,6 +18,12 @@
  *   - **`dragleave` ignores a `relatedTarget` still inside the window.** Without it the
  *     highlight flickers off every time the pointer crosses a child boundary.
  *
+ * **Touch has its own path.** HTML5 drag-and-drop does not start from a finger on most
+ * phone browsers, so on the public demo (common/mobile.py) the chips were inert again.
+ * A touch or pen pointer on a chip is tracked with pointer events instead: drag it
+ * onto a window and let go, or tap it (it is *armed*) and then tap a window. The mouse
+ * keeps the native path above, untouched.
+ *
  * Pure DOM: the grid is passed in. `node --test` can drive all of it.
  */
 
@@ -26,6 +32,12 @@ export const CHIP_SELECTOR = '.modality-chip[data-modality]';
 
 /** Class the CSS already defines for a window under the pointer. */
 export const DRAG_OVER_CLASS = 'drag-over';
+
+/** A chip tapped on a touch screen, waiting for the window it goes to. */
+export const ARMED_CLASS = 'is-armed';
+
+/** How far a finger travels on a chip before a tap becomes a drag, in CSS px. */
+export const TOUCH_DRAG_THRESHOLD_PX = 8;
 
 /** The MIME type the payload travels under, plus a plain-text fallback. */
 const JSON_TYPE = 'application/json';
@@ -68,6 +80,8 @@ export function bindDragDrop({ doc, elements, onDrop }) {
         on(chip, 'dragend', () => chip.classList.remove('is-dragging'));
     }
 
+    bindTouchDragDrop({ doc, chips, elements, onDrop, on });
+
     for (const element of elements) {
         if (!element) {
             continue;
@@ -106,6 +120,112 @@ export function bindDragDrop({ doc, elements, onDrop }) {
     }
 
     return () => bound.forEach((unbind) => unbind());
+}
+
+/**
+ * The finger's half of `bindDragDrop`: pointer events, for touch and pen only.
+ *
+ * `setPointerCapture` keeps every move and the release on the chip, however far the
+ * finger travels, so the window under it is found with `elementFromPoint` rather than
+ * from the event target -- which, under capture, is always the chip.
+ */
+function bindTouchDragDrop({ doc, chips, elements, onDrop, on }) {
+    const windows = elements.filter(Boolean);
+    let armed = null;
+    let gesture = null;
+    let hovered = null;
+
+    const isTouch = (event) => event.pointerType === 'touch' || event.pointerType === 'pen';
+
+    const windowAt = (x, y) => {
+        const hit = resolveWindowDropTarget(doc.elementFromPoint?.(x, y) ?? null);
+        return hit && windows.includes(hit) ? hit : null;
+    };
+    const hover = (windowEl) => {
+        if (hovered === windowEl) {
+            return;
+        }
+        hovered?.classList.remove(DRAG_OVER_CLASS);
+        hovered = windowEl;
+        hovered?.classList.add(DRAG_OVER_CLASS);
+    };
+    const disarm = () => {
+        armed?.classList.remove(ARMED_CLASS);
+        armed = null;
+    };
+    const drop = (windowEl, slug) => {
+        const windowIndex = Number(windowEl.dataset.windowIndex);
+        if (slug && Number.isInteger(windowIndex)) {
+            onDrop(windowIndex, slug);
+        }
+    };
+
+    for (const chip of chips) {
+        on(chip, 'pointerdown', (event) => {
+            if (!isTouch(event)) {
+                return;
+            }
+            gesture = { chip, pointerId: event.pointerId, x: event.clientX, y: event.clientY, dragging: false };
+            chip.setPointerCapture?.(event.pointerId);
+        });
+        on(chip, 'pointermove', (event) => {
+            if (!gesture || gesture.chip !== chip || event.pointerId !== gesture.pointerId) {
+                return;
+            }
+            const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
+            if (!gesture.dragging && moved >= TOUCH_DRAG_THRESHOLD_PX) {
+                gesture.dragging = true;
+                disarm();
+                chip.classList.add('is-dragging');
+            }
+            if (gesture.dragging) {
+                event.preventDefault?.();
+                hover(windowAt(event.clientX, event.clientY));
+            }
+        });
+        const finish = (event, cancelled) => {
+            if (!gesture || gesture.chip !== chip || event.pointerId !== gesture.pointerId) {
+                return;
+            }
+            const { dragging } = gesture;
+            gesture = null;
+            chip.classList.remove('is-dragging');
+            hover(null);
+            if (cancelled) {
+                return;
+            }
+            if (dragging) {
+                const target = windowAt(event.clientX, event.clientY);
+                if (target) {
+                    drop(target, chip.dataset.modality);
+                }
+                return;
+            }
+            // A tap: arm this chip, or disarm it if it already was.
+            const wasArmed = armed === chip;
+            disarm();
+            if (!wasArmed) {
+                armed = chip;
+                chip.classList.add(ARMED_CLASS);
+            }
+        };
+        on(chip, 'pointerup', (event) => finish(event, false));
+        on(chip, 'pointercancel', (event) => finish(event, true));
+    }
+
+    // The second tap of tap-to-place. Capture, for the same reason as the drag
+    // handlers above: the canvas and overlay sit on top of the window.
+    for (const element of windows) {
+        on(element, 'pointerup', (event) => {
+            if (!armed || !isTouch(event)) {
+                return;
+            }
+            const windowEl = resolveWindowDropTarget(event.target) || element;
+            const slug = armed.dataset.modality;
+            disarm();
+            drop(windowEl, slug);
+        }, true);
+    }
 }
 
 /**
