@@ -133,6 +133,32 @@ class PromptCompositionTests(TestCase):
         self.assertTrue(user.startswith("|") or "the same language" in user)
 
 
+class ShippedPromptTests(TestCase):
+    """The rules in the shipped instruction that a live evaluation showed to matter.
+
+    Wording is the admin's to change, so this pins meaning, not phrasing. Each assertion
+    is here because the prompt once got it wrong in a way no parser can repair.
+    """
+
+    def test_a_self_correction_keeps_the_approximation_it_came_with(self):
+        # The example once turned "circa nove millimetri, no, undici" into "11 mm" --
+        # teaching by example the opposite of the rule two bullets above it, and "about
+        # 7 mm" came back as "7 mm" in every run of a held-out dictation.
+        self.assertIn('is "circa 11 mm"', llm_tasks.DEFAULT_SYSTEM_PROMPT)
+        self.assertNotIn('is "11 mm"', llm_tasks.DEFAULT_SYSTEM_PROMPT)
+
+    def test_approximations_are_kept_like_hedges(self):
+        for word in ('"about"', '"approximately"', '"circa"'):
+            self.assertIn(word, llm_tasks.DEFAULT_SYSTEM_PROMPT)
+
+    def test_the_model_may_not_derive_a_value_nobody_said(self):
+        # A PSA and a volume invite a PSA density; a Gleason score invites a grade group.
+        # Either would be a number in a clinical report that the clinician never said.
+        prompt_text = llm_tasks.DEFAULT_SYSTEM_PROMPT
+        self.assertIn("Calculate, derive or convert", prompt_text)
+        self.assertIn("PSA density", prompt_text)
+
+
 class SectionParsingTests(TestCase):
     keys = ["side", "size"]
 
