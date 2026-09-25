@@ -10,6 +10,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils.text import slugify
 
+from common import external_services
 from common.domains import (
 	DOMAIN_CHOICES,
 	DOMAIN_FK_FIELDS,
@@ -263,6 +264,515 @@ class ProcessingStep(models.Model):
 		if not self.slug:
 			self.slug = slugify(self.name)
 		super().save(*args, **kwargs)
+
+
+class ExternalService(models.Model):
+    """An admin-owned declaration of a real-time external service.
+
+    ``ProcessingStep`` does this for cluster jobs: where the work runs and how it is
+    routed are rows, not constants. Services that answer while the user waits -- live
+    dictation, and now an LLM -- had no equivalent, so their endpoints, tokens and tuning
+    lived in ``settings`` and could only be changed by editing ``.env`` and restarting.
+
+    The *kind* (``common/external_services.py``) says what this class of service needs and
+    which parameters it accepts; this row is one instance of a kind. Nothing reads this
+    table directly: ``common/external_config.py`` resolves a row (or the environment
+    fallback) into a frozen value object, and refuses rather than half-configuring.
+
+    **The API key is not here.** ``api_key_env`` names an environment variable and the
+    value is read from the process environment at call time. A key column would be in
+    every nightly database dump, in ``dumpdata``, in the admin's own ``LogEntry`` change
+    messages, and readable by any staff user with change permission on this model. The
+    admin can still repoint or rotate without a deploy by changing which variable is read.
+    """
+
+    slug = models.SlugField(
+        max_length=60, unique=True,
+        help_text='Stable identifier used in code, e.g. "whisper_live".',
+    )
+    name = models.CharField(max_length=100)
+    kind = models.CharField(
+        max_length=30, choices=external_services.kind_choices,
+        help_text='Decides which URL schemes and parameters are valid.',
+    )
+    base_url = models.CharField(
+        max_length=500,
+        help_text='e.g. ws://whisper:9097/ws or https://openrouter.ai/api/v1',
+    )
+    api_key_env = models.CharField(
+        max_length=100, blank=True,
+        help_text=(
+            'NAME of the environment variable holding the key — never the key itself. '
+            'The value is read from the environment at call time and is never stored, '
+            'logged or shown here.'
+        ),
+    )
+    model_name = models.CharField(
+        max_length=200, blank=True,
+        help_text='Model identifier, e.g. nvidia/nemotron-3-super-120b-a12b:free',
+    )
+    parameters = models.JSONField(
+        default=dict, blank=True,
+        help_text='Tuning for this kind. Unknown keys are refused when saving.',
+    )
+    languages = models.JSONField(
+        default=list, blank=True,
+        help_text='Language codes this service accepts. Empty means the code default.',
+    )
+    timeout_seconds = models.PositiveIntegerField(default=60)
+    connect_timeout_seconds = models.PositiveIntegerField(default=10)
+    ca_cert_path = models.CharField(
+        max_length=500, blank=True,
+        help_text='Pinned CA, for a wss:// or https:// endpoint with a self-signed '
+                  'certificate. Ignored for plain ws:// and http://.',
+    )
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text='Unticking this turns the service off completely: it does NOT fall '
+                  'back to the environment.',
+    )
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='external_services',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['kind', 'name']
+        verbose_name = 'External service'
+
+    def __str__(self):
+        return f"{self.name} ({self.slug})"
+
+    @property
+    def service_kind(self):
+        """The declared kind, or ``None`` if this row names one that no longer exists."""
+        return external_services.kind_for(self.kind)
+
+    def clean(self):
+        """Refuse a configuration that would only fail later, in front of a clinician."""
+        from django.core.exceptions import ValidationError
+        from urllib.parse import urlsplit
+
+        super().clean()
+        kind = self.service_kind
+        if kind is None:
+            raise ValidationError({'kind': f'Unknown service kind {self.kind!r}.'})
+
+        scheme = urlsplit(self.base_url or '').scheme
+        if scheme not in kind.allowed_schemes:
+            allowed = ', '.join(f'{s}://' for s in kind.allowed_schemes)
+            raise ValidationError(
+                {'base_url': f'{kind.label} needs a URL starting with {allowed}.'}
+            )
+        if kind.requires_model and not self.model_name:
+            raise ValidationError({'model_name': f'{kind.label} needs a model name.'})
+
+        try:
+            self.parameters = kind.validate_parameters(self.parameters or {})
+        except ValueError as exc:
+            raise ValidationError({'parameters': str(exc)})
+
+        if not isinstance(self.languages, list) or not all(
+            isinstance(code, str) for code in self.languages
+        ):
+            raise ValidationError({'languages': 'Expected a JSON list of language codes.'})
+
+    @property
+    def api_key_is_present(self):
+        """Whether the named environment variable currently holds anything.
+
+        The admin shows this instead of the key, so somebody diagnosing "it says it is
+        not configured" can tell a missing variable from a disabled row without being
+        shown a secret.
+        """
+        import os
+
+        if not self.api_key_env:
+            return False
+        return bool(os.environ.get(self.api_key_env))
+
+
+class ReportTemplate(models.Model):
+    """The structured reporting checklist a clinician dictates against.
+
+    This was 367 lines of hardcoded HTML with an ``{% if ns == 'brain' %}`` ladder in it.
+    Clinical vocabulary is exactly the kind of thing that must not need a deploy to
+    change, and the branch was a standing violation of the registry rule, so both are
+    gone: a template is rows, and which one applies is a lookup.
+
+    Scope narrows in this order, first hit wins (``common/report_templates.py``)::
+
+        (domain, modality, project) -> (domain, modality, None)
+            -> (domain, '', project) -> (domain, '', None) -> nothing
+
+    ``modality_slug`` empty means "every modality of this domain" -- brain and
+    maxillofacial have one checklist each, urology has one per modality. ``project``
+    ``NULL`` means the domain-wide default; a row naming a project overrides it for that
+    project alone. **Nothing means nothing**: a domain with no row renders no panel, which
+    is laparoscopy's state until somebody writes one.
+    """
+
+    domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES)
+    modality_slug = models.CharField(
+        max_length=60, blank=True, default='',
+        help_text='Modality this applies to. Leave empty for every modality of the domain.',
+    )
+    project = models.ForeignKey(
+        'common.Project', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='report_templates',
+        help_text='Leave empty for the domain-wide default.',
+    )
+    #: ``project`` is nullable, and **MySQL treats NULLs as distinct in a unique index**,
+    #: so a constraint naming the FK would happily allow two domain-wide templates for
+    #: the same domain -- exactly what it exists to prevent. This non-null mirror is what
+    #: the constraint actually names. Same family of trap as the conditional constraints
+    #: CONTRIBUTING.md warns about, wearing a different hat.
+    project_key = models.CharField(max_length=20, editable=False, default='')
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=80, unique=True, blank=True)
+    icon = models.CharField(
+        max_length=60, blank=True,
+        help_text='Font Awesome classes for the section header, e.g. "fas fa-magnet me-1".',
+    )
+    subtitle_en = models.CharField(max_length=200, blank=True)
+    subtitle_it = models.CharField(max_length=200, blank=True)
+    subtitle_de = models.CharField(max_length=200, blank=True)
+    is_active = models.BooleanField(default=True)
+    #: ``'1'`` while active, ``NULL`` otherwise: a plain unique constraint over a nullable
+    #: slot, because ``UniqueConstraint(condition=...)`` compiles to nothing on MySQL.
+    active_slot = models.CharField(max_length=1, null=True, blank=True, editable=False)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='report_templates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['domain', 'modality_slug', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['domain', 'modality_slug', 'project_key', 'active_slot'],
+                name='one_active_report_template_per_scope',
+            ),
+        ]
+
+    def __str__(self):
+        scope = self.modality_slug or 'all modalities'
+        return f"{self.domain}/{scope}: {self.name}"
+
+    def subtitle_for(self, language):
+        return getattr(self, f'subtitle_{language}', '') or self.subtitle_en
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(f"{self.domain}-{self.modality_slug or 'all'}-{self.name}")[:80]
+            self.slug = base
+        self.project_key = str(self.project_id) if self.project_id else ''
+        self.active_slot = '1' if self.is_active else None
+        super().save(*args, **kwargs)
+
+
+class ReportTemplateField(models.Model):
+    """One line of a checklist, in every language the platform reports in.
+
+    Per-language columns rather than a translation child table: Django admin has no
+    nested inlines, so a child table would mean authoring a field on one screen and its
+    three translations on three more. Columns give one flat inline where a row is one
+    reporting field in all three languages, which is the thing an admin actually edits.
+    The cost is that a fourth language is a migration -- already true of
+    ``UserPreference.report_language`` and the three buttons in the panel.
+    """
+
+    template = models.ForeignKey(
+        ReportTemplate, on_delete=models.CASCADE, related_name='fields'
+    )
+    key = models.SlugField(
+        max_length=60,
+        help_text=(
+            'Stable identifier a structured report is filed under, and the section '
+            'heading the model is asked to emit. Renaming it orphans that section of '
+            'every report already produced.'
+        ),
+    )
+    order = models.PositiveIntegerField(default=0)
+    label_en = models.CharField(max_length=200)
+    label_it = models.CharField(max_length=200, blank=True)
+    label_de = models.CharField(max_length=200, blank=True)
+    description_en = models.TextField(blank=True)
+    description_it = models.TextField(blank=True)
+    description_de = models.TextField(blank=True)
+    is_required = models.BooleanField(
+        default=False,
+        help_text='Marks the field as expected; it never blocks saving a caption.',
+    )
+
+    class Meta:
+        ordering = ['order', 'id']
+        unique_together = [('template', 'key')]
+
+    def __str__(self):
+        return f"{self.template.slug}:{self.key}"
+
+    def label_for(self, language):
+        """The label in ``language``, falling back to English.
+
+        A half-translated template must still render: an empty ``<summary>`` produces a
+        ``<details>`` that cannot be opened, which reads as a broken page rather than as
+        a missing translation.
+        """
+        return getattr(self, f'label_{language}', '') or self.label_en
+
+    def description_for(self, language):
+        return getattr(self, f'description_{language}', '') or self.description_en
+
+
+class PromptTemplate(models.Model):
+    """The admin-editable half of what an LLM is asked.
+
+    Split deliberately: the admin owns the *instruction* -- the clinical framing, the
+    tone, what must never be changed -- and the code owns the *output contract*, the
+    section format a parser depends on (``common/llm_tasks.py``). A fully editable prompt
+    would let one admin's edit silently break the parser for every domain, and the symptom
+    would be a structured report that comes back as prose.
+
+    ``user_template`` is rendered with ``str.format_map`` over a fixed set of
+    placeholders, never through the Django template engine: an admin text box passed to
+    that engine is server-side template injection, with ``{{ settings }}`` and attribute
+    traversal at the end of it.
+    """
+
+    #: The only placeholders ``user_template`` may use. A typo is a form error rather
+    #: than a ``KeyError`` in front of a clinician.
+    PLACEHOLDERS = ("language", "source_language", "fields", "caption")
+
+    slug = models.SlugField(max_length=60, unique=True)
+    name = models.CharField(max_length=120)
+    system_prompt = models.TextField(
+        help_text='The instruction. A fixed output contract is appended by the code.',
+    )
+    user_template = models.TextField(
+        help_text=(
+            'The message itself. Placeholders: {language}, {source_language}, '
+            '{fields}, {caption}. Literal braces must be doubled: {{ and }}.'
+        ),
+    )
+    version = models.PositiveIntegerField(
+        default=1, editable=False,
+        help_text='Bumped whenever the wording changes; recorded on every report.',
+    )
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} (v{self.version})"
+
+    #: A placeholder is ``{name}`` with a plain identifier inside and nothing else. This
+    #: is deliberately narrower than ``str.format``'s grammar: it cannot match
+    #: ``{% load %}``, ``{{ x }}``, a JSON fragment or a set literal, so none of those
+    #: are mistaken for a placeholder -- in either direction.
+    PLACEHOLDER_RE = r"\{([A-Za-z_][A-Za-z0-9_]*)\}"
+
+    def clean(self):
+        import re
+
+        from django.core.exceptions import ValidationError
+
+        super().clean()
+        used = set(re.findall(self.PLACEHOLDER_RE, self.user_template or ""))
+        unknown = sorted(used - set(self.PLACEHOLDERS))
+        if unknown:
+            allowed = ", ".join("{%s}" % p for p in self.PLACEHOLDERS)
+            raise ValidationError({
+                'user_template': (
+                    f"Unknown placeholder(s): {', '.join('{%s}' % n for n in unknown)}. "
+                    f"Allowed: {allowed}."
+                )
+            })
+        if "{caption}" not in (self.user_template or ""):
+            raise ValidationError({
+                'user_template': 'Must include {caption}, or the dictation is never sent.'
+            })
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = PromptTemplate.objects.filter(pk=self.pk).values(
+                'system_prompt', 'user_template'
+            ).first()
+            if previous and (
+                previous['system_prompt'] != self.system_prompt
+                or previous['user_template'] != self.user_template
+            ):
+                self.version = (self.version or 0) + 1
+        super().save(*args, **kwargs)
+
+    def render_user_message(self, values):
+        """``user_template`` with the whitelisted values substituted.
+
+        Plain replacement, not ``str.format_map``. Format's grammar claims every brace in
+        the string, so an admin who writes ``{% load %}`` or pastes a JSON example gets a
+        ``KeyError`` at call time -- in front of a clinician, on a prompt that saved
+        cleanly. Replacement touches the four placeholders and leaves every other
+        character exactly as typed, which is also what keeps this from being a template
+        engine: nothing here evaluates anything.
+        """
+        text = self.user_template or ""
+        for key in self.PLACEHOLDERS:
+            text = text.replace("{%s}" % key, str(values.get(key, "") or ""))
+        return text
+
+
+class CaptionReport(DomainFKAccessorMixin, models.Model):
+    """A voice caption reorganised into a report template by a language model.
+
+    **It never touches the caption.** The dictation stays exactly as it was recorded, in
+    ``VoiceCaption.text_caption``; this is a separate row beside it. That is the whole
+    reason this is its own model rather than a handful of columns on ``VoiceCaptionBase``:
+    with fields on the caption, one careless ``update()`` overwrites clinical text, and
+    the promise "the raw dictation is never rewritten" would rest on everyone remembering
+    it. Here there is no code path from this feature to ``text_caption`` at all.
+
+    It also keeps vendor bookkeeping -- tokens, model names, rendered prompts -- off the
+    clinical record, and it generalises: ``task_slug`` means a second LLM task needs no
+    new table and no new endpoint.
+
+    **Every run is a new row.** Re-running writes ``attempt`` 2 and leaves attempt 1
+    intact, the way ``edit_history`` and ``AnnotationRevision`` keep their predecessors.
+    A unique constraint would not have worked anyway: it would have to span four nullable
+    FKs, and MySQL treats NULLs as distinct.
+    """
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES)
+    voice_caption = models.ForeignKey(
+        'maxillo.VoiceCaption', on_delete=models.CASCADE,
+        related_name='reports', null=True, blank=True,
+    )
+    brain_voice_caption = models.ForeignKey(
+        'brain.VoiceCaption', on_delete=models.CASCADE,
+        related_name='reports', null=True, blank=True,
+    )
+    laparoscopy_voice_caption = models.ForeignKey(
+        'laparoscopy.VoiceCaption', on_delete=models.CASCADE,
+        related_name='reports', null=True, blank=True,
+    )
+    urology_voice_caption = models.ForeignKey(
+        'urology.VoiceCaption', on_delete=models.CASCADE,
+        related_name='reports', null=True, blank=True,
+    )
+
+    task_slug = models.CharField(max_length=60, default='caption_to_template')
+    generation_uuid = models.UUIDField(null=True, blank=True, db_index=True)
+    attempt = models.PositiveIntegerField(default=1)
+
+    template = models.ForeignKey(
+        'common.ReportTemplate', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reports',
+    )
+    #: The field list actually sent, frozen. A template edited afterwards must not change
+    #: what an existing report is read against -- the same reasoning as an annotation
+    #: revision being a snapshot rather than a delta.
+    template_snapshot = models.JSONField(default=list, blank=True)
+
+    source_text = models.TextField(
+        help_text='The caption text this was produced from, as it was at the time.',
+    )
+    source_fingerprint = models.CharField(max_length=64, blank=True, db_index=True)
+    source_language = models.CharField(
+        max_length=5, blank=True, help_text='The language it was dictated in.',
+    )
+    report_language = models.CharField(
+        max_length=5, default='it', help_text='The language it was written in.',
+    )
+
+    structured = models.JSONField(
+        default=dict, blank=True, help_text='{field key: text}, the canonical form.',
+    )
+    structured_text = models.TextField(blank=True, help_text='The rendered, readable form.')
+    warnings = models.JSONField(default=list, blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    error_message = models.TextField(blank=True)
+
+    service = models.ForeignKey(
+        'common.ExternalService', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='caption_reports',
+    )
+    model_name = models.CharField(max_length=200, blank=True)
+    prompt_template = models.ForeignKey(
+        'common.PromptTemplate', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='caption_reports',
+    )
+    prompt_version = models.PositiveIntegerField(default=0)
+    #: Contains the caption, i.e. clinical text. Kept for explainability, off the admin
+    #: changelist, and never logged.
+    prompt_rendered = models.TextField(blank=True)
+    usage = models.JSONField(default=dict, blank=True)
+
+    requested_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='caption_reports',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['domain', 'task_slug', '-created_at']),
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.task_slug} #{self.attempt} ({self.status})"
+
+    def mark_processing(self):
+        from django.utils import timezone
+
+        self.status = 'processing'
+        self.started_at = timezone.now()
+        self.save(update_fields=['status', 'started_at', 'updated_at'])
+
+    def mark_completed(self, structured, structured_text, *, warnings=None,
+                       usage=None, model_name=''):
+        from django.utils import timezone
+
+        self.status = 'completed'
+        self.completed_at = timezone.now()
+        self.structured = structured or {}
+        self.structured_text = structured_text or ''
+        self.warnings = warnings or []
+        self.usage = usage or {}
+        if model_name:
+            self.model_name = model_name
+        self.save()
+
+    def mark_failed(self, message):
+        from django.utils import timezone
+
+        self.status = 'failed'
+        self.completed_at = timezone.now()
+        self.error_message = str(message)[:2000]
+        self.save(update_fields=[
+            'status', 'completed_at', 'error_message', 'updated_at',
+        ])
 
 
 class UserSession(models.Model):

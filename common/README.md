@@ -14,6 +14,13 @@ their own copy of a thing, it belongs here.
 - **The processing pipeline** — `Modality`, `ProcessingStep`, `Job`,
   `ProcessingJob`, the dispatch signal in `signals.py`, queue selection in
   `job_routing.py`, and the runner worker under `runner/`.
+- **Real-time external services** — `external_services.py` declares the *kinds*
+  (speech-to-text over WebSocket, OpenAI-compatible chat) with the parameters
+  each accepts; `ExternalService` is one admin-owned row per service;
+  `external_config.py` is the only reader, and resolves a slug to a frozen value
+  object or to nothing. An enabled row wins over `settings`; a **disabled** one
+  resolves to nothing and does *not* fall back. API keys live in the
+  environment — a row names the variable, never the value.
 - **Files** — `uploads.py` (bytes in), `FileRegistry` (the row that names them),
   `object_storage.py` (the only boto3 wrapper), `file_access.py`, `deletion.py`.
 - **Export** — `export_catalog.py`, `export_processing.py`, `export_share.py`,

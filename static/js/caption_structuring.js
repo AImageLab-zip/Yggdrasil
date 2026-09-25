@@ -1,0 +1,752 @@
+/*
+ * Filing a dictated caption into the report template.
+ *
+ * A separate file from vocal_caption.js (1400 lines and one class already) because this
+ * is a different concern, and because keeping the decisions in pure functions is what
+ * makes them testable — static/js/tests/caption_structuring.test.js exercises everything
+ * on window.CaptionStructuring that does not touch the DOM.
+ *
+ * Not bundled: plain static/js is loaded directly by the template, so editing this file
+ * needs no `npm run build` (only frontend/ does).
+ *
+ * The transport is POST + fetch + ReadableStream, not EventSource. EventSource is
+ * GET-only (the caption id would ride in URLs and access logs), cannot send a CSRF token,
+ * and reconnects automatically when the server closes the stream — which would silently
+ * buy a second model call every time.
+ */
+(function () {
+    'use strict';
+
+    var STALL_TIMEOUT_MS = 30000;   // no data for this long -> the upstream is gone
+    var HARD_TIMEOUT_MS = 180000;   // nothing legitimate takes this long
+
+    // ---------------------------------------------------------------- pure helpers
+
+    /**
+     * Split a chunk of an SSE body into events, keeping whatever is incomplete.
+     *
+     * The reader hands over arbitrary byte boundaries, so an event routinely arrives in
+     * two pieces; `rest` is what must be prepended to the next chunk. Comment lines
+     * (": keep-alive") and malformed JSON are skipped rather than thrown, because one
+     * bad frame must not abandon a report that is otherwise arriving fine.
+     */
+    function parseSseChunk(buffer) {
+        var events = [];
+        var parts = String(buffer || '').split('\n\n');
+        var rest = parts.pop();
+        parts.forEach(function (block) {
+            block.split('\n').forEach(function (line) {
+                if (!line || line.charAt(0) === ':') return;
+                if (line.indexOf('data:') !== 0) return;
+                var payload = line.slice(5).trim();
+                if (!payload) return;
+                try {
+                    events.push(JSON.parse(payload));
+                } catch (err) {
+                    /* a truncated or malformed frame is not worth losing the rest over */
+                }
+            });
+        });
+        return { events: events, rest: rest };
+    }
+
+    /** Clinician-facing text for a failure code. Mirrors transcriptionCloseMessage(). */
+    function structuringErrorMessage(code) {
+        switch (code) {
+            case 'disabled':
+                return 'Report structuring is not enabled for this project.';
+            case 'permission_denied':
+                return 'You do not have permission to structure this caption.';
+            case 'not_configured':
+                return 'Report structuring is not configured on this server.';
+            case 'no_template':
+                return 'No report template is defined for this modality.';
+            case 'not_complete':
+                return 'This caption is still being processed. Structure it once it is complete.';
+            case 'too_short':
+                return 'This caption is too short to structure.';
+            case 'too_long':
+                return 'This caption is too long to structure.';
+            case 'in_flight':
+                return 'This caption is already being structured.';
+            case 'upstream_timeout':
+                return 'The language model did not respond in time. Try again.';
+            case 'rate_limited':
+                return 'The language model is busy right now. Try again shortly.';
+            case 'upstream_error':
+                return 'The language model could not be reached. Try again.';
+            case 'budget_exhausted':
+                return 'The language model ran out of room before answering. '
+                     + 'Ask an administrator to raise its token budget.';
+            case 'malformed_response':
+                return 'The language model returned something unreadable. Try again.';
+            case 'stalled':
+                return 'The response stopped arriving. Try again.';
+            default:
+                return 'Structuring failed unexpectedly.';
+        }
+    }
+
+    /**
+     * Whether the top-level Structure button should be clickable.
+     *
+     * Written as a pure function of a state object so the truth table is one testable
+     * thing rather than a set of conditions scattered through event handlers.
+     */
+    function shouldEnableStructureButton(state) {
+        if (!state) return false;
+        if (state.isRecording) return false;
+        if (state.inFlight) return false;
+        if (!state.templateForModality) return false;
+        var length = state.textLength || 0;
+        var min = state.minLength || 10;
+        if (length >= min) return true;
+        // Nothing typed: the row buttons act on an existing caption instead.
+        return length === 0 && !!state.hasCaption;
+    }
+
+    /** Does a template cover this modality? `["*"]` means one covers them all. */
+    function templateAvailableFor(modalitySlug, availableSlugs) {
+        if (!availableSlugs || !availableSlugs.length) return false;
+        if (availableSlugs.indexOf('*') !== -1) return true;
+        var slug = String(modalitySlug || '').trim();
+        if (!slug) return false;
+        if (availableSlugs.indexOf(slug) !== -1) return true;
+        // Urology's modalities are "urology-mri" while its templates are filed under
+        // "mri"; the server normalizes the same way (common/report_templates.py).
+        var bare = slug.replace(/^[a-z]+-/, '');
+        return availableSlugs.indexOf(bare) !== -1;
+    }
+
+    /**
+     * The model writes "## <section-key>"; a clinician should read a heading.
+     *
+     * Applied to the whole answer so far rather than to each fragment, because a
+     * heading routinely arrives split across two reads ("## pi_" then "rads_score").
+     * Unknown keys fall back to their own words, the way the server does.
+     */
+    function prettifySections(text, labels, omit) {
+        labels = labels || {};
+        omit = omit || [];
+        var HEADING = /^#{1,6}[ \t]*([^\s#][^\r\n]*?)[ \t]*$/;
+        var skipping = false;
+        var out = [];
+        String(text || "").split(/\r?\n/).forEach(function (line) {
+            var match = HEADING.exec(line);
+            if (match) {
+                var key = match[1].trim();
+                skipping = omit.indexOf(key) !== -1;
+                if (!skipping) out.push(labels[key] || humanizeKey(key) || line);
+                return;
+            }
+            if (!skipping) out.push(line);
+        });
+        return out.join("\n").replace(/\s+$/, "");
+    }
+
+    /**
+     * The height a report wants, in pixels, bounded at both ends.
+     *
+     * A fixed box makes a twelve-section report a scrolling keyhole and a two-line one
+     * mostly empty. The cap keeps the controls under it on screen: past that, scrolling
+     * inside the box is the lesser evil.
+     */
+    function reportHeight(contentHeight, viewportHeight) {
+        var min = 220;
+        var max = Math.max(min, Math.round((viewportHeight || 800) * 0.6));
+        return Math.min(Math.max(contentHeight || 0, min), max);
+    }
+
+    /** A report with no filled section: the panel must say so, not sit blank. */
+    function reportIsEmpty(report) {
+        return !report || !String(report.structured_text || '').trim();
+    }
+
+    function humanizeKey(key) {
+        var words = String(key || "").replace(/[_-]+/g, " ").trim();
+        return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+    }
+
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * The read-only block shown under a caption row once it has a report.
+     *
+     * Everything interpolated here came out of a language model, so every value goes
+     * through escapeHtml. This is the one place in the feature where untrusted text
+     * becomes markup.
+     */
+    function renderStructuredBlock(report) {
+        if (!report || report.status !== 'completed') return '';
+        var when = report.completed_at ? report.completed_at.slice(0, 16).replace('T', ' ') : '';
+        var warningCount = (report.warnings || []).length;
+        return '' +
+            '<div class="caption-structured mt-1" data-structured-for="' + escapeHtml(report.id) + '">' +
+                '<div class="d-flex align-items-center gap-2">' +
+                    '<span class="badge-ygg badge-neutral">' +
+                        '<i class="fas fa-wand-magic-sparkles me-1"></i>' +
+                        (reportIsEmpty(report) ? 'Nothing filed' : 'Structured') +
+                    '</span>' +
+                    '<small class="text-muted">' + escapeHtml(when) + '</small>' +
+                    (report.attempt > 1
+                        ? '<small class="text-muted">attempt ' + escapeHtml(report.attempt) + '</small>'
+                        : '') +
+                    (warningCount
+                        ? '<small class="text-warning">' + escapeHtml(warningCount) + ' to review</small>'
+                        : '') +
+                '</div>' +
+                '<div class="structured-text mt-1"><small class="text-dark" style="white-space:pre-wrap;">' +
+                    escapeHtml(report.structured_text || '') +
+                '</small></div>' +
+            '</div>';
+    }
+
+    // ---------------------------------------------------------------- controller
+
+    // ------------------------------------------------ rerun from the patient list
+
+    /**
+     * Failures that every later caption would hit too, so a rerun stops at the first
+     * rather than spending the rest of a rate-limited quota to be told the same thing.
+     */
+    function stopsRerun(code) {
+        return ['rate_limited', 'not_configured', 'disabled', 'budget_exhausted']
+            .indexOf(code) !== -1;
+    }
+
+    /**
+     * Read one structuring response to its end: `{ok: true, report}` on "done",
+     * `{ok: false, code, detail}` on an "error" frame or an HTTP refusal.
+     *
+     * The same stream the patient page renders as it arrives; the list has nothing to
+     * show mid-report, so it only waits for the outcome. A stream that ends without
+     * either frame is reported as stalled rather than as success.
+     */
+    function drainStructuringResponse(response) {
+        if (!response.ok) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+                return { ok: false, code: body.code || 'failed', detail: body.error || '' };
+            });
+        }
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var outcome = null;
+        function pump() {
+            return reader.read().then(function (chunk) {
+                if (chunk.done) {
+                    return outcome || { ok: false, code: 'stalled', detail: '' };
+                }
+                buffer += decoder.decode(chunk.value, { stream: true });
+                var parsed = parseSseChunk(buffer);
+                buffer = parsed.rest;
+                parsed.events.forEach(function (event) {
+                    if (outcome) return;
+                    if (event.type === 'done') {
+                        outcome = { ok: true, report: event.report };
+                    } else if (event.type === 'error') {
+                        outcome = { ok: false, code: event.code || 'failed', detail: event.detail || '' };
+                    }
+                });
+                return pump();
+            });
+        }
+        return pump();
+    }
+
+    /**
+     * Re-structure every eligible caption of one patient, one at a time.
+     *
+     * Asks the server which captions it would accept (the same checks the Structure
+     * button's request runs), then issues that same per-caption request for each. One
+     * at a time on purpose: a free-tier model is rate-limited per minute and per day, and
+     * a burst would fail most of the batch.
+     *
+     * options: base ("/<ns>/patient/<id>"), token (CSRF), onProgress(index, total),
+     *          fetch (injectable for tests; defaults to window.fetch).
+     * Resolves {total, done, failed: [{id, code}], stoppedBy}.
+     */
+    function rerunPatientCaptions(options) {
+        var doFetch = options.fetch || window.fetch.bind(window);
+        var onProgress = options.onProgress || function () {};
+        var summary = { total: 0, done: 0, failed: [], stoppedBy: null };
+
+        return doFetch(options.base + '/voice-captions/structurable/', {
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+                if (!response.ok) {
+                    summary.stoppedBy = body.code || 'failed';
+                    return [];
+                }
+                return body.captions || [];
+            });
+        }).then(function (captions) {
+            summary.total = captions.length;
+            return captions.reduce(function (chain, caption, index) {
+                return chain.then(function () {
+                    if (summary.stoppedBy) return null;
+                    onProgress(index + 1, captions.length);
+                    return doFetch(
+                        options.base + '/voice-caption/' + caption.id + '/structure/',
+                        {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': options.token,
+                            },
+                            body: JSON.stringify({ generation_uuid: null }),
+                        }
+                    ).then(drainStructuringResponse).then(function (outcome) {
+                        if (outcome.ok) {
+                            summary.done += 1;
+                            return;
+                        }
+                        summary.failed.push({ id: caption.id, code: outcome.code });
+                        if (stopsRerun(outcome.code)) summary.stoppedBy = outcome.code;
+                    }, function () {
+                        summary.failed.push({ id: caption.id, code: 'upstream_error' });
+                    });
+                });
+            }, Promise.resolve());
+        }).then(function () { return summary; });
+    }
+
+    /** `{type, text}` for the toast that reports a finished rerun. */
+    function rerunSummaryMessage(summary) {
+        if (!summary.total && summary.stoppedBy) {
+            return { type: 'error', text: structuringErrorMessage(summary.stoppedBy) };
+        }
+        if (!summary.total) {
+            return { type: 'info', text: 'This patient has no caption that can be structured.' };
+        }
+        var noun = summary.total === 1 ? 'caption' : 'captions';
+        var text = 'Structured ' + summary.done + ' of ' + summary.total + ' ' + noun + '.';
+        if (summary.stoppedBy) {
+            text += ' Stopped: ' + structuringErrorMessage(summary.stoppedBy);
+        } else if (summary.failed.length) {
+            text += ' ' + structuringErrorMessage(summary.failed[0].code);
+        }
+        var type = summary.done === summary.total ? 'success' : (summary.done ? 'warning' : 'error');
+        return { type: type, text: text };
+    }
+
+    function CaptionStructuringController() {
+        this.panel = null;
+        this.inFlight = false;
+        this.controller = null;
+        this.stallTimer = null;
+        this.hardTimer = null;
+        this.currentCaptionId = null;
+        this.availableModalities = [];
+        this.sectionLabels = {};
+        this.omitSections = [];
+        this.rawAnswer = '';
+    }
+
+    CaptionStructuringController.prototype.init = function () {
+        this.panel = document.getElementById('structuredCaptionPanel');
+        if (!this.panel) return;   // structuring is not available on this page
+
+        var config = document.getElementById('caption-structuring-modalities');
+        if (config) {
+            try {
+                this.availableModalities = JSON.parse(config.textContent || '[]');
+            } catch (err) {
+                this.availableModalities = [];
+            }
+        }
+
+        this.bind();
+        this.syncButtonState();
+    };
+
+    CaptionStructuringController.prototype.bind = function () {
+        var self = this;
+
+        var top = document.getElementById('structureCaption');
+        if (top) {
+            top.addEventListener('click', function () { self.structureFromTextarea(); });
+        }
+
+        // Delegated: caption rows are also inserted by vocal_caption.js after a save.
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest && event.target.closest('.btn-structure-caption');
+            if (!button) return;
+            event.preventDefault();
+            self.runStructuring(button.dataset.captionId, { modality: button.dataset.modality });
+        });
+
+        var stop = document.getElementById('structuredCaptionStop');
+        if (stop) stop.addEventListener('click', function () { self.abort('stopped'); });
+
+        var rerun = document.getElementById('structuredCaptionRerun');
+        if (rerun) {
+            rerun.addEventListener('click', function () {
+                if (self.currentCaptionId) self.runStructuring(self.currentCaptionId, { rerun: true });
+            });
+        }
+
+        var close = document.getElementById('structuredCaptionClose');
+        if (close) {
+            close.addEventListener('click', function () { self.panel.classList.add('d-none'); });
+        }
+
+        var textarea = document.getElementById('captionTextArea');
+        if (textarea) {
+            textarea.addEventListener('input', function () { self.syncButtonState(); });
+        }
+
+        document.addEventListener('caption:added', function (event) {
+            // The event fires before vocal_caption.js has inserted the row, and that
+            // row is built in JS without a structure button -- so a caption typed and
+            // saved in this page session had none until the next reload.
+            var caption = event && event.detail;
+            setTimeout(function () {
+                self.decorateRow(caption);
+                self.syncButtonState();
+            }, 0);
+        });
+
+        // A run in flight holds an open request and an unfinished row; leaving the page
+        // without cancelling leaves both until they time out.
+        window.addEventListener('beforeunload', function () {
+            if (self.inFlight) self.abort('navigated');
+        });
+    };
+
+    CaptionStructuringController.prototype.state = function () {
+        var textarea = document.getElementById('captionTextArea');
+        var recorder = window.recorder;
+        var modality = this.selectedModality();
+        return {
+            isRecording: !!(recorder && recorder.isRecording),
+            inFlight: this.inFlight,
+            textLength: textarea ? textarea.value.trim().length : 0,
+            minLength: 10,
+            hasCaption: !!document.querySelector('.caption-item-compact'),
+            templateForModality: templateAvailableFor(modality, this.availableModalities),
+        };
+    };
+
+    CaptionStructuringController.prototype.selectedModality = function () {
+        var checked = document.querySelector('#modalityToggleGroup input:checked');
+        if (checked) return checked.value;
+        var card = document.getElementById('captionUnifiedCard');
+        return card ? (card.dataset.modality || '') : '';
+    };
+
+    /**
+     * Give a client-inserted caption row the same structure button the server renders.
+     *
+     * Only the markup is duplicated: whether the control may exist at all was decided
+     * server-side, and is expressed here by the panel being on the page.
+     */
+    CaptionStructuringController.prototype.decorateRow = function (caption) {
+        if (!this.panel || !caption || !caption.id) return;
+        if (!caption.text_caption) return;
+        var row = document.querySelector('.caption-item-compact[data-caption-id="' + caption.id + '"]');
+        if (!row) return;
+        var actions = row.querySelector('.caption-actions');
+        if (!actions || actions.querySelector('.btn-structure-caption')) return;
+
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline-primary btn-sm btn-structure-caption';
+        button.dataset.captionId = caption.id;
+        button.dataset.modality = caption.modality || '';
+        button.innerHTML = '<i class="fas fa-wand-magic-sparkles" style="font-size: 0.75rem;"></i>';
+        var edit = actions.querySelector('.btn-edit-caption');
+        if (edit) actions.insertBefore(button, edit);
+        else actions.appendChild(button);
+    };
+
+    CaptionStructuringController.prototype.syncButtonState = function () {
+        var button = document.getElementById('structureCaption');
+        if (!button) return;
+        var state = this.state();
+        button.disabled = !shouldEnableStructureButton(state);
+        if (!state.templateForModality) {
+            button.title = 'No report template is defined for this modality.';
+        } else if (state.textLength > 0 && state.textLength < state.minLength) {
+            button.title = 'At least ' + state.minLength + ' characters.';
+        } else {
+            button.title = 'Save this caption and file it into the report template';
+        }
+        var available = this.availableModalities;
+        document.querySelectorAll('.btn-structure-caption').forEach(function (row) {
+            // A row whose modality has no template can only ever produce a 409
+            // no_template, and a control that can only fail is worse than no control
+            // -- the same rule the top button and structuring_context.py already apply.
+            var hasTemplate = templateAvailableFor(row.dataset.modality, available);
+            row.disabled = state.inFlight || !hasTemplate;
+            row.title = hasTemplate
+                ? 'File this caption into the report template'
+                : 'No report template is defined for this modality.';
+        });
+    };
+
+    /**
+     * One click: save whatever is in the textarea, then structure the row it became.
+     *
+     * Structuring operates on a saved caption — a rerun needs a stable identity, the
+     * result must survive a reload, and the server re-checks permissions against a
+     * concrete row. Making the clinician press Save first would just be that requirement
+     * leaking into the UI.
+     */
+    CaptionStructuringController.prototype.structureFromTextarea = function () {
+        var self = this;
+        var textarea = document.getElementById('captionTextArea');
+        var recorder = window.recorder;
+        var text = textarea ? textarea.value.trim() : '';
+
+        if (!text) {
+            var newest = document.querySelector('.caption-item-compact');
+            if (newest) this.runStructuring(newest.dataset.captionId, {});
+            return;
+        }
+        if (!recorder || typeof recorder.saveTextCaption !== 'function') {
+            this.fail('failed');
+            return;
+        }
+        Promise.resolve(recorder.saveTextCaption()).then(function (caption) {
+            if (caption && caption.id) {
+                self.runStructuring(caption.id, {});
+            } else {
+                // The save reported a problem of its own and has already said so.
+                self.syncButtonState();
+            }
+        }).catch(function () { self.fail('failed'); });
+    };
+
+    CaptionStructuringController.prototype.urlFor = function (which, captionId) {
+        var attribute = which === 'report' ? 'reportUrlTemplate' : 'structureUrlTemplate';
+        var template = this.panel ? this.panel.dataset[attribute] : '';
+        // The template is reversed with caption_id=0; swapping the last path segment is
+        // safer than string-building a URL the router may namespace differently.
+        return String(template || '').replace(/\/0\/([a-z-]+)\/$/, '/' + captionId + '/$1/');
+    };
+
+    CaptionStructuringController.prototype.runStructuring = function (captionId, options) {
+        if (!captionId || this.inFlight || !this.panel) return;
+        options = options || {};
+
+        var report = this.panel.querySelector('#structuredCaptionText');
+        // The panel is server-rendered as one block, so a missing textarea means the
+        // markup changed under us; bail rather than throw halfway through a run.
+        if (!report) return;
+        this.currentCaptionId = captionId;
+        this.panel.dataset.captionId = captionId;
+        this.panel.classList.remove('d-none');
+        this.panel.scrollIntoView({ block: 'nearest' });
+
+        var row = document.querySelector('.caption-item-compact[data-caption-id="' + captionId + '"]');
+        var source = row ? row.querySelector('.caption-text-full small, .caption-text-preview small') : null;
+        var sourceText = document.getElementById('structuredCaptionSourceText');
+        if (sourceText) sourceText.textContent = source ? source.textContent.trim() : '';
+
+        report.value = '';
+        report.readOnly = true;
+        this.setStatus('Structuring…', true);
+        this.setWarnings([]);
+        document.getElementById('structuredCaptionActions').classList.add('d-none');
+        document.getElementById('structuredCaptionStop').classList.remove('d-none');
+
+        this.inFlight = true;
+        this.syncButtonState();
+        this.controller = new AbortController();
+        this.armTimers();
+
+        var self = this;
+        fetch(this.urlFor('structure', captionId), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': window.yggCsrfToken(),
+            },
+            body: JSON.stringify({ generation_uuid: options.generationUuid || null }),
+            signal: this.controller.signal,
+        }).then(function (response) {
+            var type = response.headers.get('content-type') || '';
+            if (!response.ok && type.indexOf('application/json') !== -1) {
+                return response.json().then(function (payload) {
+                    self.fail(payload.code, payload.error);
+                });
+            }
+            if (!response.body || !response.body.getReader) {
+                // No streaming support: read it whole and render the final frame.
+                return response.text().then(function (body) {
+                    var parsed = parseSseChunk(body + '\n\n');
+                    parsed.events.forEach(function (event) { self.handleEvent(event); });
+                });
+            }
+            return self.consume(response.body.getReader());
+        }).catch(function (error) {
+            if (error && error.name === 'AbortError') return;   // we cancelled on purpose
+            self.fail('upstream_error');
+        }).then(function () {
+            self.finish();
+        });
+    };
+
+    CaptionStructuringController.prototype.consume = function (reader) {
+        var self = this;
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function pump() {
+            return reader.read().then(function (chunk) {
+                if (chunk.done) return;
+                self.armTimers();
+                buffer += decoder.decode(chunk.value, { stream: true });
+                var parsed = parseSseChunk(buffer);
+                buffer = parsed.rest;
+                parsed.events.forEach(function (event) { self.handleEvent(event); });
+                return pump();
+            });
+        }
+        return pump();
+    };
+
+    CaptionStructuringController.prototype.handleEvent = function (event) {
+        var report = document.getElementById('structuredCaptionText');
+        if (!event || !event.type) return;
+
+        if (event.type === 'start') {
+            this.sectionLabels = event.sections || {};
+            this.omitSections = event.omit || [];
+            this.rawAnswer = '';
+            this.setStatus(event.replayed ? 'Already structured' : 'Model working…', !event.replayed);
+        } else if (event.type === 'delta') {
+            this.rawAnswer += event.text || '';
+            report.value = prettifySections(this.rawAnswer, this.sectionLabels, this.omitSections);
+            this.fitReport();
+            report.scrollTop = report.scrollHeight;
+        } else if (event.type === 'done') {
+            this.complete(event.report);
+        } else if (event.type === 'error') {
+            this.fail(event.code, event.detail);
+        }
+    };
+
+    CaptionStructuringController.prototype.complete = function (report) {
+        var textarea = document.getElementById('structuredCaptionText');
+        var empty = reportIsEmpty(report);
+        textarea.value = empty ? '' : report.structured_text;
+        this.fitReport();
+        this.setStatus(empty ? 'Nothing filed' : 'Structured', false);
+        this.setWarnings((report && report.warnings) || []);
+        document.getElementById('structuredCaptionActions').classList.remove('d-none');
+
+        var row = document.querySelector(
+            '.caption-item-compact[data-caption-id="' + this.currentCaptionId + '"]'
+        );
+        if (row && report) {
+            var existing = row.querySelector('.caption-structured');
+            if (existing) existing.remove();
+            var holder = row.querySelector('.caption-text-compact');
+            if (holder) holder.insertAdjacentHTML('beforeend', renderStructuredBlock(report));
+        }
+    };
+
+    CaptionStructuringController.prototype.setStatus = function (text, busy) {
+        var status = document.getElementById('structuredCaptionStatus');
+        if (!status) return;
+        status.innerHTML = (busy ? '<i class="fas fa-spinner fa-spin me-1"></i>' : '')
+            + escapeHtml(text);
+    };
+
+    CaptionStructuringController.prototype.fitReport = function () {
+        var report = document.getElementById('structuredCaptionText');
+        if (!report) return;
+        report.style.height = 'auto';
+        var wanted = reportHeight(
+            report.scrollHeight,
+            typeof window !== 'undefined' ? window.innerHeight : 0
+        );
+        report.style.height = wanted + 'px';
+    };
+
+    CaptionStructuringController.prototype.setWarnings = function (warnings) {
+        var holder = document.getElementById('structuredCaptionWarnings');
+        if (!holder) return;
+        if (!warnings || !warnings.length) {
+            holder.innerHTML = '';
+            return;
+        }
+        holder.innerHTML = warnings.map(function (warning) {
+            return '<small class="text-warning d-block"><i class="fas fa-triangle-exclamation me-1"></i>'
+                + escapeHtml(warning.detail || warning.code) + '</small>';
+        }).join('');
+    };
+
+    CaptionStructuringController.prototype.fail = function (code, detail) {
+        var message = structuringErrorMessage(code);
+        this.setStatus('Failed', false);
+        this.setWarnings([{ detail: detail && detail !== message ? message : message }]);
+        if (window.appNotify) window.appNotify('error', message);
+        document.getElementById('structuredCaptionActions').classList.remove('d-none');
+    };
+
+    CaptionStructuringController.prototype.armTimers = function () {
+        var self = this;
+        this.clearTimers(true);
+        this.stallTimer = setTimeout(function () { self.abort('stalled'); }, STALL_TIMEOUT_MS);
+        if (!this.hardTimer) {
+            this.hardTimer = setTimeout(function () { self.abort('stalled'); }, HARD_TIMEOUT_MS);
+        }
+    };
+
+    CaptionStructuringController.prototype.clearTimers = function (keepHard) {
+        if (this.stallTimer) { clearTimeout(this.stallTimer); this.stallTimer = null; }
+        if (!keepHard && this.hardTimer) { clearTimeout(this.hardTimer); this.hardTimer = null; }
+    };
+
+    CaptionStructuringController.prototype.abort = function (reason) {
+        if (this.controller) this.controller.abort();
+        if (reason === 'stalled') this.fail('stalled');
+        else this.setStatus('Stopped', false);
+        this.finish();
+    };
+
+    CaptionStructuringController.prototype.finish = function () {
+        this.clearTimers();
+        this.controller = null;
+        this.inFlight = false;
+        var stop = document.getElementById('structuredCaptionStop');
+        if (stop) stop.classList.add('d-none');
+        this.syncButtonState();
+    };
+
+    window.CaptionStructuring = {
+        parseSseChunk: parseSseChunk,
+        structuringErrorMessage: structuringErrorMessage,
+        shouldEnableStructureButton: shouldEnableStructureButton,
+        templateAvailableFor: templateAvailableFor,
+        prettifySections: prettifySections,
+        reportIsEmpty: reportIsEmpty,
+        reportHeight: reportHeight,
+        renderStructuredBlock: renderStructuredBlock,
+        escapeHtml: escapeHtml,
+        stopsRerun: stopsRerun,
+        drainStructuringResponse: drainStructuringResponse,
+        rerunPatientCaptions: rerunPatientCaptions,
+        rerunSummaryMessage: rerunSummaryMessage,
+        Controller: CaptionStructuringController,
+        controller: null,
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        window.CaptionStructuring.controller = new CaptionStructuringController();
+        window.CaptionStructuring.controller.init();
+    });
+})();

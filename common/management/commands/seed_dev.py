@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
-from common.models import Project, ProjectAccess
+from common.models import AnnotationMethod, Project, ProjectAccess
 
 
 class Command(BaseCommand):
@@ -46,12 +46,36 @@ class Command(BaseCommand):
         self._seed_laparoscopy(admin_user)
         self._seed_urology(admin_user)
         self._seed_cardiology(admin_user)
+        self._enable_report_structuring()
 
         self.stdout.write(self.style.SUCCESS("Dev seed complete."))
         if admin_user is not None:
             self.stdout.write(
                 f"Login: {options['admin_username']} / {options['admin_password']}"
             )
+
+    def _enable_report_structuring(self):
+        """Tick "Report structuring" on the dev projects so the button is there to press.
+
+        Deliberately dev-only, and deliberately not part of any seed a deployment runs:
+        structuring sends the dictation to whichever language model the platform points
+        at, so on a real installation that tick is a decision a project administrator
+        makes. Here the whole database is throwaway and the alternative is every
+        developer hand-ticking a checkbox before they can exercise the feature.
+        """
+        method = AnnotationMethod.objects.filter(
+            slug="report_structuring", is_active=True
+        ).first()
+        if method is None:
+            # Migration 0061 creates it; a database that predates it is not fatal here.
+            self.stdout.write(
+                "No report_structuring method found - skipping (run migrate)."
+            )
+            return
+
+        for project in Project.objects.filter(is_active=True):
+            project.annotation_methods.add(method)
+        self.stdout.write("Report structuring enabled on the dev projects.")
 
     def _ensure_superuser(self, username, password):
         user, created = User.objects.get_or_create(

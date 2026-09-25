@@ -1,11 +1,26 @@
-{% firstof request.resolver_match.namespace 'maxillo' as ns %}
-<!--
+{% comment %}
   Shared Report Template panel — rendered UNDER the Voice-caption controls
   (see common/sections/vocal_caption_section.html) so clinicians can read the
-  structured reporting checklist while dictating. Content is per-domain
-  (brain / maxillo), each in EN/IT/DE. Language persists via the
-  cross-app `set_report_language` endpoint + common.UserPreference.
--->
+  structured reporting checklist while dictating.
+
+  Rendered by {% report_template_panel %} (common/templatetags/report_templates.py)
+  from common.ReportTemplate rows, which admins edit. It used to be 367 lines of
+  hardcoded HTML behind an {% if ns == 'brain' %}/{% elif ns == 'urology' %} ladder;
+  the checklists differing per domain, and urology's differing per modality, is now a
+  difference in the number of rows rather than a difference in code.
+
+  Two things this file must keep doing, because other code depends on them:
+
+  * All three languages are rendered and two are hidden with `d-none`. The toggle at
+    the bottom switches classes — no fetch, no reload, nothing blank mid-dictation.
+  * `data-urology-modality` stays on each group. templates/urology/patient_detail_content.html
+    reads it to show only the checklist for the modality on screen.
+
+  Admin-entered text is never marked safe: it is the one untrusted-input path this
+  panel has.
+{% endcomment %}
+
+{% if has_template %}
 <style>
 .report-fields li { list-style: none; margin-bottom: 0.25rem; }
 .report-fields li details summary {
@@ -56,272 +71,26 @@
 
         <div class="card">
             <div class="card-body p-3">
-                {% if ns == 'brain' %}
-                {# ===================== BRAIN ===================== #}
-                <ul class="mb-0 ps-2 report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Side of Tumor Center</summary><p>Anatomical laterality of the tumor center from the barycenter position relative to the brain midline (left, right, midline).</p></details></li>
-                    <li><details><summary>Enhancement Quality</summary><p>Qualitative assessment of CET contrast enhancement — whether enhancement is present and how pronounced.</p></details></li>
-                    <li><details><summary>Enhancing Margin Definition</summary><p>Whether most of the outer margin of the enhancement is well or poorly defined.</p></details></li>
-                    <li><details><summary>Non-Enhancing Margin Definition</summary><p>Whether most of the outer margin of the non-enhancing component is well or poorly defined.</p></details></li>
-                    <li><details><summary>Intratumoral Hemorrhage</summary><p>Whether intrinsic hemorrhage is visible anywhere in the tumor matrix.</p></details></li>
-                    <li><details><summary>Tumor Heterogeneity</summary><p>Degree of heterogeneity of the internal architecture of the tumor.</p></details></li>
-                    <li><details><summary>Number of Lesions</summary><p>Number of independent lesions observed in the brain.</p></details></li>
-                    <li><details><summary>Lesion Type</summary><p>Single, multicentric, or multifocal.</p></details></li>
-                    <li><details><summary>Ependymal Invasion</summary><p>Whether the TC abuts any adjacent ependymal surface.</p></details></li>
-                    <li><details><summary>Depth of TC</summary><p>Cortical, subcortical white matter, deep white matter, or basal nuclei.</p></details></li>
-                    <li><details><summary>Macroarea of Tumor Center</summary><p>Lobe in which the barycenter lies, obtained from the atlas.</p></details></li>
-                    <li><details><summary>Midline Shift (mm)</summary><p>Shift of the midline caused by the tumor mass, in millimeters.</p></details></li>
-                    <li><details><summary>Tumor Shape</summary><p>Approximate shape of the tumor mass.</p></details></li>
-                    <li><details><summary>Tumor Origin</summary><p>Periventricular, gyral, or deep white matter.</p></details></li>
-                    <li><details><summary>Tumor Crosses the Midline</summary><p>Whether the tumor crosses the midline.</p></details></li>
-                    <li><details><summary>Subject-Specific Findings</summary><p>Any findings not covered by a predefined category.</p></details></li>
-                </ul>
-                <ul class="mb-0 ps-2 report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Lato del Centro del Tumore</summary><p>Lateralità anatomica del centro del tumore in base alla posizione del baricentro rispetto alla linea mediana (sinistra, destra, mediana).</p></details></li>
-                    <li><details><summary>Qualità dell'Enhancement</summary><p>Valutazione qualitativa dell'enhancement CET — presenza e intensità.</p></details></li>
-                    <li><details><summary>Definizione del Margine Enhancing</summary><p>Se il margine esterno dell'enhancement è ben definito o scarsamente definito.</p></details></li>
-                    <li><details><summary>Definizione del Margine Non-Enhancing</summary><p>Se il margine esterno della componente non-enhancing è ben definito o scarsamente definito.</p></details></li>
-                    <li><details><summary>Emorragia Intratumorale</summary><p>Se un'emorragia intrinseca è visibile nella matrice tumorale.</p></details></li>
-                    <li><details><summary>Eterogeneità del Tumore</summary><p>Grado di eterogeneità dell'architettura interna del tumore.</p></details></li>
-                    <li><details><summary>Numero di Lesioni</summary><p>Numero di lesioni indipendenti osservate nel cervello.</p></details></li>
-                    <li><details><summary>Tipo di Lesione</summary><p>Singola, multicentrica o multifocale.</p></details></li>
-                    <li><details><summary>Invasione Ependimale</summary><p>Se il TC è a contatto con una superficie ependimale adiacente.</p></details></li>
-                    <li><details><summary>Profondità del TC</summary><p>Corticale, sostanza bianca sottocorticale, sostanza bianca profonda o nuclei della base.</p></details></li>
-                    <li><details><summary>Macroarea del Centro del Tumore</summary><p>Lobo in cui ricade il baricentro, ottenuto dall'atlante.</p></details></li>
-                    <li><details><summary>Spostamento della Linea Mediana (mm)</summary><p>Spostamento della linea mediana causato dalla massa, in millimetri.</p></details></li>
-                    <li><details><summary>Forma del Tumore</summary><p>Forma approssimativa della massa tumorale.</p></details></li>
-                    <li><details><summary>Origine del Tumore</summary><p>Periventricolare, girale o sostanza bianca profonda.</p></details></li>
-                    <li><details><summary>Il Tumore Attraversa la Linea Mediana</summary><p>Se il tumore attraversa la linea mediana.</p></details></li>
-                    <li><details><summary>Reperti Specifici del Soggetto</summary><p>Reperti non coperti da alcuna categoria predefinita.</p></details></li>
-                </ul>
-                <ul class="mb-0 ps-2 report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Seite des Tumorzentrums</summary><p>Anatomische Lateralität des Tumorzentrums anhand des Schwerpunkts relativ zur Mittellinie (links, rechts, Mittellinie).</p></details></li>
-                    <li><details><summary>Anreicherungsqualität</summary><p>Qualitative Beurteilung der CET-Anreicherung — Vorhandensein und Ausprägung.</p></details></li>
-                    <li><details><summary>Definition des anreichernden Randes</summary><p>Ob der äußere Rand der Anreicherung gut oder schlecht abgegrenzt ist.</p></details></li>
-                    <li><details><summary>Definition des nicht-anreichernden Randes</summary><p>Ob der äußere Rand der nicht-anreichernden Komponente gut oder schlecht abgegrenzt ist.</p></details></li>
-                    <li><details><summary>Intratumorale Einblutung</summary><p>Ob eine intrinsische Einblutung in der Tumormatrix sichtbar ist.</p></details></li>
-                    <li><details><summary>Tumorheterogenität</summary><p>Grad der Heterogenität der inneren Architektur des Tumors.</p></details></li>
-                    <li><details><summary>Anzahl der Läsionen</summary><p>Anzahl der unabhängigen Läsionen im Gehirn.</p></details></li>
-                    <li><details><summary>Läsionstyp</summary><p>Solitär, multizentrisch oder multifokal.</p></details></li>
-                    <li><details><summary>Ependymale Invasion</summary><p>Ob das TC an eine angrenzende Ependymoberfläche angrenzt.</p></details></li>
-                    <li><details><summary>Tiefe des TC</summary><p>Kortikal, subkortikale/tiefe weiße Substanz oder Basalganglien.</p></details></li>
-                    <li><details><summary>Makrobereich des Tumorzentrums</summary><p>Lobus, in dem der Schwerpunkt liegt, aus dem Atlas ermittelt.</p></details></li>
-                    <li><details><summary>Mittellinienverlagerung (mm)</summary><p>Durch die Tumormasse verursachte Verlagerung der Mittellinie in mm.</p></details></li>
-                    <li><details><summary>Tumorform</summary><p>Ungefähre Form der Tumormasse.</p></details></li>
-                    <li><details><summary>Tumorursprung</summary><p>Periventrikulär, gyral oder tiefe weiße Substanz.</p></details></li>
-                    <li><details><summary>Tumor überschreitet die Mittellinie</summary><p>Ob der Tumor die Mittellinie überschreitet.</p></details></li>
-                    <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
-                </ul>
-
-                {% elif ns == 'urology' %}
-                {# ===================== UROLOGY ===================== #}
-                <div class="report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}">
-                    <!-- MRI -->
-                    <div class="report-urology-modality" data-urology-modality="mri">
+                {% for language, groups in groups_by_language %}
+                <div class="report-fields report-fields-{{ language }} {% if report_language != language %}d-none{% endif %}">
+                    {% for group in groups %}
+                    <div class="report-group{% if group.modality_slug %} report-urology-modality{% endif %}"
+                         {% if group.modality_slug %}data-urology-modality="{{ group.modality_slug }}"{% endif %}>
+                        {% if group.title %}
                         <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
-                            <span class="report-modality-title">Multiparametric Magnetic Resonance</span>
+                            {% if group.icon %}<i class="{{ group.icon }}"></i>{% endif %}
+                            <span class="report-modality-title">{{ group.title }}</span>
                         </div>
+                        {% endif %}
                         <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Prostate Volume and PSA Density</summary><p>Volumetric measurement of the prostate gland (in cc or ml) and PSA density calculation.</p></details></li>
-                            <li><details><summary>Index Lesion Location and Sector</summary><p>Anatomical site according to the 39-sector map (peripheral zone, transition zone, anterior fibromuscular stroma; apex, mid-gland, base; left or right).</p></details></li>
-                            <li><details><summary>Lesion Dimensions</summary><p>Maximal diameter of the primary target lesion, specifying axial and longitudinal dimensions in millimeters.</p></details></li>
-                            <li><details><summary>PI-RADS Score</summary><p>Overall risk category (1 to 5) assigned to the index lesion and secondary foci according to PI-RADS v2.1 criteria.</p></details></li>
-                            <li><details><summary>T2 Signal and Diffusion Restriction (ADC)</summary><p>Degree of hypointensity on T2 sequences and severity of restricted diffusion on the ADC map and high b-value images.</p></details></li>
-                            <li><details><summary>Dynamic Contrast Enhancement</summary><p>Assessment of contrast enhancement: presence or absence of early and focal wash-in/wash-out compared to normal parenchyma.</p></details></li>
-                            <li><details><summary>Extraprostatic Extension</summary><p>Evidence of capsule transgression: length of capsular contact, bulging, asymmetry, or frank cortical breach.</p></details></li>
-                            <li><details><summary>Seminal Vesicle Invasion</summary><p>Unilateral or bilateral involvement of the base or tubular architecture of the seminal vesicles.</p></details></li>
-                            <li><details><summary>Neurovascular Bundle and Bladder Neck</summary><p>Assessment of contact with or abutment of left/right neurovascular bundles, bladder neck, and external urethral sphincter.</p></details></li>
-                            <li><details><summary>Regional Lymph Nodes and Pelvic Skeleton</summary><p>Presence of suspicious lymphadenopathy in obturator and iliac chains, and any pelvic bone alterations.</p></details></li>
+                            {% for field in group.fields %}
+                            <li><details><summary>{{ field.label }}</summary><p>{{ field.description }}</p></details></li>
+                            {% endfor %}
                         </ul>
                     </div>
-
-                    <!-- Confocale -->
-                    <div class="report-urology-modality" data-urology-modality="confocal">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
-                            <span class="report-modality-title">Fluorescence Confocal Microscopy</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Specimen Adequacy and Core Cellularity</summary><p>Assessment of tissue adequacy, cellularity, and target representation prior to downstream processing.</p></details></li>
-                            <li><details><summary>Glandular Architecture and Acinar Packing</summary><p>Optical evaluation of gland crowding, fused or cribriform acinar structures, and lumen preservation in fresh tissue.</p></details></li>
-                            <li><details><summary>Nuclear Atypia and Cellular Pleomorphism</summary><p>Fluorescence confocal detection of nuclear enlargement, hyperchromasia, prominent nucleoli, and loss of polarity.</p></details></li>
-                            <li><details><summary>Basal Cell Layer Integrity</summary><p>Assessment of basal cell layer preservation versus complete disruption, a key hallmark distinguishing benign glands from carcinoma.</p></details></li>
-                            <li><details><summary>Stromal Infiltration and Desmoplasia</summary><p>Identification of infiltrating neoplastic cords or isolated malignant cells disrupting the fibromuscular stroma.</p></details></li>
-                            <li><details><summary>Real-Time Surgical Margin Status (NeuroSAFE)</summary><p>Intraoperative fresh-tissue margin evaluation for neurovascular bundle-sparing prostatectomy (margin positive vs negative).</p></details></li>
-                        </ul>
-                    </div>
-
-                    <!-- WSI -->
-                    <div class="report-urology-modality" data-urology-modality="wsi">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
-                            <span class="report-modality-title">Digital Histopathology</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Tumor Histotype</summary><p>Histological classification of the neoplasm (usual acinar adenocarcinoma, ductal, mucinous, signet-ring, or neuroendocrine variant).</p></details></li>
-                            <li><details><summary>Gleason Score and ISUP Grade Group</summary><p>Primary and secondary architectural pattern (e.g. 3+4=7 or 4+3=7) and assigned ISUP Grade Group (1 to 5).</p></details></li>
-                            <li><details><summary>Pattern 4 or 5 Percentage and Cribriform Architecture</summary><p>Quantification of poorly differentiated tumor components and presence of cribriform pattern (adverse prognostic factor).</p></details></li>
-                            <li><details><summary>Intraductal Carcinoma</summary><p>Presence or absence of malignant proliferation within pre-existing ducts or acini with preserved basal cells.</p></details></li>
-                            <li><details><summary>Perineural and Vascular Invasion</summary><p>Identification of tumor cells along perineural nerve sheaths and lymphovascular space invasion.</p></details></li>
-                            <li><details><summary>Tumor Extent in Specimen and Surgical Margins</summary><p>Linear millimeters and percentage of tumor tissue per biopsy core; if radical prostatectomy, surgical margin status (R0 negative or R1 positive with extent).</p></details></li>
-                            <li><details><summary>Non-Tumor Parenchyma and Concomitant Lesions</summary><p>Benign or pre-neoplastic findings in surrounding tissue (benign prostatic hyperplasia, prostatitis, atrophy, atypical small acinar proliferation, or high-grade PIN).</p></details></li>
-                        </ul>
-                    </div>
+                    {% endfor %}
                 </div>
-
-                <div class="report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}">
-                    <!-- MRI -->
-                    <div class="report-urology-modality" data-urology-modality="mri">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
-                            <span class="report-modality-title">Risonanza Magnetica Multiparametrica</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Volume Prostatico e Densità del PSA</summary><p>Misurazione volumetrica della ghiandola (in cc o ml) e calcolo correlato della densità del PSA (PSA density).</p></details></li>
-                            <li><details><summary>Sede e Settore della Lesione Indice</summary><p>Localizzazione anatomica secondo la mappa a 39 settori (zona periferica, zona di transizione, stroma fibromuscolare anteriore; apice, medio-ghiandola, base; lato destro o sinistro).</p></details></li>
-                            <li><details><summary>Dimensioni della Lesione</summary><p>Diametro massimo della lesione target principale, espresso in millimetri (dimensione assiale e longitudinale).</p></details></li>
-                            <li><details><summary>Punteggio PI-RADS</summary><p>Categoria di rischio globale (da 1 a 5) assegnata alla lesione indice ed eventuali focolai secondari secondo i criteri PI-RADS v2.1.</p></details></li>
-                            <li><details><summary>Intensità T2 e Restrizione in Diffusione (ADC)</summary><p>Morfologia e grado di ipointensità nelle sequenze T2 (focale, lenticolare o cuneiforme) e intensità della restrizione nella mappa ADC ad alto b-value.</p></details></li>
-                            <li><details><summary>Impregnazione di Contrasto Dinamica</summary><p>Valutazione della perfusione con gadolinio: presenza o assenza di enhancement precoce e focale (wash-in/wash-out) rispetto al parenchima di fondo.</p></details></li>
-                            <li><details><summary>Estensione Extracapsulare</summary><p>Segni di invasione della capsula prostatica: ampiezza del contatto capsulare, bulging, asimmetria o franche interruzioni della corticale.</p></details></li>
-                            <li><details><summary>Invasione delle Vescicole Seminali</summary><p>Coinvolgimento mono o bilaterale della base o della struttura tubulare delle vescicole seminali.</p></details></li>
-                            <li><details><summary>Rapporti con Fasci Neurovascolari e Collo Vescicale</summary><p>Valutazione del contatto o inglobamento dei fasci neurovascolari destro e sinistro, del collo vescicale e dello sfintere uretrale striato.</p></details></li>
-                            <li><details><summary>Linfonodi Regionali e Scheletro del Bacino</summary><p>Presenza di linfoadenopatie sospette nelle stazioni otturatorie e iliache, ed eventuali alterazioni ossee del bacino.</p></details></li>
-                        </ul>
-                    </div>
-
-                    <!-- Confocale -->
-                    <div class="report-urology-modality" data-urology-modality="confocal">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
-                            <span class="report-modality-title">Microscopia Confocale Real-Time</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Adeguatezza del Prelievo e Rappresentatività</summary><p>Valutazione dell'adeguatezza del campione, cellularità e reale rappresentatività del tessuto bersaglio prima del processamento definitivo.</p></details></li>
-                            <li><details><summary>Architettura Ghiandolare ed Orientamento Acinare</summary><p>Valutazione ottica dell'affollamento ghiandolare, presenza di acini fusi o cribriformi e preservazione del lume su tessuto fresco.</p></details></li>
-                            <li><details><summary>Morfologia Nucleare ed Atipia Cellulare</summary><p>Riconoscimento confocale a fluorescenza di ingrandimento nucleare, ipercromasia, nucleoli prominenti e perdita della polarità.</p></details></li>
-                            <li><details><summary>Integrità dello Strato di Cellule Basali</summary><p>Verifica della presenza continua o dell'interruzione/perdita dello strato di cellule basali, criterio cardine di malignità.</p></details></li>
-                            <li><details><summary>Infiltrazione Stromale e Reazione Desmoplastica</summary><p>Identificazione di cordoni neoplastici infiltranti o singole cellule tumorali nello stroma fibromuscolare prostatico.</p></details></li>
-                            <li><details><summary>Margini Chirurgici in Tempo Reale (NeuroSAFE)</summary><p>Valutazione intraoperatoria su tessuto fresco dei margini di resezione per il risparmio dei fasci neurovascolari (margine negativo o positivo).</p></details></li>
-                        </ul>
-                    </div>
-
-                    <!-- WSI -->
-                    <div class="report-urology-modality" data-urology-modality="wsi">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
-                            <span class="report-modality-title">Istopatologia Digitale</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Istotipo Tumorale</summary><p>Classificazione istologica della neoplasia (adenocarcinoma acinare usuale, variante duttale, mucinosa, a cellule ad anello con castone o neuroendocrina).</p></details></li>
-                            <li><details><summary>Gleason Score e Grade Group ISUP</summary><p>Definizione del pattern primario e secondario (es. 3+4=7 o 4+3=7) e assegnazione del rispettivo Grade Group ISUP da 1 a 5.</p></details></li>
-                            <li><details><summary>Percentuale Pattern 4 o 5 e Architettura Cribriforme</summary><p>Quantificazione percentuale delle componenti tumorali scarsamente differenziate e riscontro di pattern cribriforme, importante indicatore prognostico.</p></details></li>
-                            <li><details><summary>Carcinoma Intraduttale</summary><p>Presenza o assenza di proliferazione maligna all'interno di dotti o acini preesistenti con parziale conservazione dello strato basale.</p></details></li>
-                            <li><details><summary>Invasione Perineurale e Vascolare</summary><p>Rilevamento di cellule neoplastiche lungo i tronchi nervosi perineurali e angioinvasione nei vasi ematici o linfatici.</p></details></li>
-                            <li><details><summary>Estensione Tumorale nel Prelievo e Margini Chirurgici</summary><p>Millimetri lineari e percentuale di tessuto tumorale per carota bioptica; in caso di pezzo operatorio, stato dei margini chirurgici (R0 negativo o R1 positivo con sede ed estensione).</p></details></li>
-                            <li><details><summary>Parenchima Non Tumorale e Lesioni Concomitanti</summary><p>Reperti benigni o preneoplastici nel tessuto circostante (iperplasia prostatica benigna, prostatite, atrofia, atipia a piccoli acini o PIN di alto grado).</p></details></li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}">
-                    <!-- MRI -->
-                    <div class="report-urology-modality" data-urology-modality="mri">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-magnet me-1"></i>MRI</span>
-                            <span class="report-modality-title">Multiparametrische Magnetresonanztomographie</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Prostatavolumen und PSA-Dichte</summary><p>Volumetrische Messung der Prostata (in cm³ oder ml) und Berechnung der PSA-Dichte.</p></details></li>
-                            <li><details><summary>Lage und Sektor der Indexläsion</summary><p>Anatomische Lokalisation gemäß 39-Sektoren-Karte (periphere Zone, Transitionszone, anteriores fibromuskuläres Stroma; Apex, Mitteldrüse, Basis; links oder rechts).</p></details></li>
-                            <li><details><summary>Läsionsabmessungen</summary><p>Maximaler Durchmesser der Hauptläsion mit Angabe der axialen und longitudinalen Maße in Millimetern.</p></details></li>
-                            <li><details><summary>PI-RADS-Score</summary><p>Gesamtrisikokategorie (1 bis 5) für die Indexläsion und sekundäre Herde gemäß PI-RADS v2.1.</p></details></li>
-                            <li><details><summary>T2-Signal und Diffusionsrestriktion (ADC)</summary><p>Grad der Hypointensität auf T2-Sequenzen und Ausmaß der Diffusionsrestriktion auf der ADC-Karte.</p></details></li>
-                            <li><details><summary>Dynamische Kontrastmittelanreicherung</summary><p>Beurteilung der Kontrastmittelperfusion: Vorhandensein oder Fehlen einer frühzeitigen fokalen Anreicherung.</p></details></li>
-                            <li><details><summary>Extraprostatische Ausbreitung</summary><p>Kapselüberschreitung: Kapselkontaktlänge, Bulging, Asymmetrie oder Kapseldurchbruch.</p></details></li>
-                            <li><details><summary>Samenblaseninvagination</summary><p>Ein- oder beidseitige Infiltration der Basis oder tubulären Architektur der Samenblasen.</p></details></li>
-                            <li><details><summary>Gefäß-Nerven-Bündel und Blasenhals</summary><p>Verhältnis zum rechten/linken neurovaskulären Bündel, Blasenhals und äußeren Harnröhrensphinkter.</p></details></li>
-                            <li><details><summary>Regionale Lymphknoten und Beckenskelett</summary><p>Verdächtige Lymphknoten in Obturator- und Iliakalstationen sowie eventuelle ossäre Läsionen.</p></details></li>
-                        </ul>
-                    </div>
-
-                    <!-- Confocale -->
-                    <div class="report-urology-modality" data-urology-modality="confocal">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-eye me-1"></i>Confocale</span>
-                            <span class="report-modality-title">Fluoreszenz-Konfokalmikroskopie</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Probenadäquanz und Zellularität</summary><p>Beurteilung der Gewebeadäquanz, Zellularität und Repräsentativität des Zielgewebes vor der definitiven Aufarbeitung.</p></details></li>
-                            <li><details><summary>Drüsenarchitektur und Azinusformation</summary><p>Optische Beurteilung von Drüsendichte, fusionierten oder kribriformen Azinusstrukturen und Lumenerhalt am Frischgewebe.</p></details></li>
-                            <li><details><summary>Zellkernatypien und Pleomorphie</summary><p>Fluoreszenz-konfokaler Nachweis von Kernvergrößerung, Hyperchromasie, prominenten Nukleolen und Polaritätsverlust.</p></details></li>
-                            <li><details><summary>Integrität der Basalzellschicht</summary><p>Überprüfung auf Erhalt oder Unterbrechung/Verlust der Basalzellschicht als zentrales Malignitätskriterium.</p></details></li>
-                            <li><details><summary>Stromainfiltration und desmoplastische Reaktion</summary><p>Nachweis infiltrierender Tumorzellstränge oder Einzelzellen im fibromuskulären Prostatastroma.</p></details></li>
-                            <li><details><summary>Intraoperative Schnittrandbeurteilung (NeuroSAFE)</summary><p>Intraoperative Schnellschnitt-orientierte Beurteilung der Resektionsränder zum Erhalt des Gefäß-Nerven-Bündels (negativ vs. positiv).</p></details></li>
-                        </ul>
-                    </div>
-
-                    <!-- WSI -->
-                    <div class="report-urology-modality" data-urology-modality="wsi">
-                        <div class="report-modality-header">
-                            <span class="badge-ygg badge-neutral"><i class="fas fa-microscope me-1"></i>WSI</span>
-                            <span class="report-modality-title">Digitale Histopathologie</span>
-                        </div>
-                        <ul class="mb-0 ps-2" style="font-size:0.9rem;line-height:1.9;">
-                            <li><details><summary>Tumorhistotyp</summary><p>Histologische Tumorklassifikation (azinäres Adenokarzinom, duktale Variante, muzinös oder neuroendokrin).</p></details></li>
-                            <li><details><summary>Gleason-Score und ISUP-Gradgruppe</summary><p>Primäres und sekundäres Wachstumsmuster (z.B. 3+4=7) und ISUP-Gradgruppe (1 bis 5).</p></details></li>
-                            <li><details><summary>Anteil Pattern 4 oder 5 und kribriforme Architektur</summary><p>Prozentualer Anteil schlecht differenzierter Muster und Nachweis kribriformer Formationen.</p></details></li>
-                            <li><details><summary>Intraduktales Karzinom</summary><p>Vorhandensein oder Fehlen maligner Proliferation in präexistenten Gängen mit erhaltenen Basalzellen.</p></details></li>
-                            <li><details><summary>Perineurale und Vaskuläre Invasion</summary><p>Infiltration perineuraler Spalträume und Nachweis von Angioinvasion in Blut- oder Lymphgefäßen.</p></details></li>
-                            <li><details><summary>Tumorausdehnung im Präparat und Resektionsränder</summary><p>Tumorbefall in Millimetern und Prozent pro Stanzbiopsie; bei Prostatektomie Resektionsrandstatus (R0 oder R1).</p></details></li>
-                            <li><details><summary>Nicht-tumoröses Parenchym und Begleitbefunde</summary><p>Gutartige oder prämaligne Veränderungen (benigne Prostatahyperplasie, Prostatitis, Atrophie, ASAP oder High-Grade-PIN).</p></details></li>
-                        </ul>
-                    </div>
-                </div>
-
-                {% else %}
-                {# ===================== MAXILLO (default) ===================== #}
-                <ul class="mb-0 ps-2 report-fields report-fields-en {% if report_language != 'en' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Skeletal Class (Sagittal)</summary><p>Antero-posterior jaw relationship — Class I, II, or III.</p></details></li>
-                    <li><details><summary>Vertical Pattern</summary><p>Facial growth pattern — hypodivergent, normodivergent, or hyperdivergent.</p></details></li>
-                    <li><details><summary>Transverse Relationship</summary><p>Presence of crossbite or transverse discrepancy between arches.</p></details></li>
-                    <li><details><summary>Dental Midlines</summary><p>Coincidence of upper/lower dental midlines with the facial midline.</p></details></li>
-                    <li><details><summary>Overjet</summary><p>Horizontal overlap of the incisors, in millimeters.</p></details></li>
-                    <li><details><summary>Overbite</summary><p>Vertical overlap of the incisors, in millimeters or as a percentage.</p></details></li>
-                    <li><details><summary>Molar &amp; Canine Relationship</summary><p>Angle classification of molar and canine occlusion, by side.</p></details></li>
-                    <li><details><summary>Crowding / Spacing</summary><p>Space discrepancy in the upper and lower arches.</p></details></li>
-                    <li><details><summary>TMJ Findings</summary><p>Condylar morphology, symmetry and any degenerative signs.</p></details></li>
-                    <li><details><summary>Airway / Soft Tissue</summary><p>Airway patency and relevant soft-tissue profile notes.</p></details></li>
-                    <li><details><summary>Subject-Specific Findings</summary><p>Any findings not covered by a predefined category.</p></details></li>
-                </ul>
-                <ul class="mb-0 ps-2 report-fields report-fields-it {% if report_language != 'it' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Classe Scheletrica (Sagittale)</summary><p>Rapporto antero-posteriore tra le arcate — Classe I, II o III.</p></details></li>
-                    <li><details><summary>Pattern Verticale</summary><p>Pattern di crescita facciale — ipodivergente, normodivergente o iperdivergente.</p></details></li>
-                    <li><details><summary>Rapporto Trasverso</summary><p>Presenza di crossbite o discrepanza trasversale tra le arcate.</p></details></li>
-                    <li><details><summary>Linee Mediane Dentali</summary><p>Coincidenza delle linee mediane superiore/inferiore con la mediana facciale.</p></details></li>
-                    <li><details><summary>Overjet</summary><p>Sovrapposizione orizzontale degli incisivi, in millimetri.</p></details></li>
-                    <li><details><summary>Overbite</summary><p>Sovrapposizione verticale degli incisivi, in millimetri o percentuale.</p></details></li>
-                    <li><details><summary>Rapporto Molare e Canino</summary><p>Classificazione di Angle dell'occlusione molare e canina, per lato.</p></details></li>
-                    <li><details><summary>Affollamento / Spaziatura</summary><p>Discrepanza di spazio nelle arcate superiore e inferiore.</p></details></li>
-                    <li><details><summary>Reperti ATM</summary><p>Morfologia condilare, simmetria ed eventuali segni degenerativi.</p></details></li>
-                    <li><details><summary>Vie Aeree / Tessuti Molli</summary><p>Pervietà delle vie aeree e note sul profilo dei tessuti molli.</p></details></li>
-                    <li><details><summary>Reperti Specifici del Soggetto</summary><p>Reperti non coperti da alcuna categoria predefinita.</p></details></li>
-                </ul>
-                <ul class="mb-0 ps-2 report-fields report-fields-de {% if report_language != 'de' %}d-none{% endif %}" style="font-size:0.9rem;line-height:1.9;">
-                    <li><details><summary>Skelettklasse (Sagittal)</summary><p>Antero-posteriore Kieferrelation — Klasse I, II oder III.</p></details></li>
-                    <li><details><summary>Vertikales Muster</summary><p>Faziales Wachstumsmuster — hypodivergent, normodivergent oder hyperdivergent.</p></details></li>
-                    <li><details><summary>Transversale Relation</summary><p>Vorliegen eines Kreuzbisses oder transversaler Diskrepanz zwischen den Zahnbögen.</p></details></li>
-                    <li><details><summary>Dentale Mittellinien</summary><p>Übereinstimmung der oberen/unteren Mittellinie mit der Gesichtsmittellinie.</p></details></li>
-                    <li><details><summary>Overjet</summary><p>Horizontale Frontzahnstufe in Millimetern.</p></details></li>
-                    <li><details><summary>Overbite</summary><p>Vertikale Frontzahnstufe in Millimetern oder Prozent.</p></details></li>
-                    <li><details><summary>Molaren- &amp; Eckzahnrelation</summary><p>Angle-Klassifikation der Molaren- und Eckzahnokklusion, seitenweise.</p></details></li>
-                    <li><details><summary>Engstand / Lücken</summary><p>Platzdiskrepanz im Ober- und Unterkiefer.</p></details></li>
-                    <li><details><summary>Kiefergelenk-Befunde</summary><p>Kondylenmorphologie, Symmetrie und degenerative Zeichen.</p></details></li>
-                    <li><details><summary>Atemweg / Weichgewebe</summary><p>Atemwegsdurchgängigkeit und relevante Weichteilprofil-Notizen.</p></details></li>
-                    <li><details><summary>Subjektspezifische Befunde</summary><p>Befunde, die keiner vordefinierten Kategorie zugeordnet sind.</p></details></li>
-                </ul>
-                {% endif %}
+                {% endfor %}
             </div>
         </div>
 </div>
@@ -365,3 +134,4 @@
     });
 })();
 </script>
+{% endif %}

@@ -42,6 +42,10 @@ from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from common.view_helpers import patient_list_response, upload_error_response
+from common.structuring_context import (
+    structuring_context,
+    structuring_rerun_availability,
+)
 from .helpers import redirect_with_namespace, render_with_fallback
 from .models import Export, Folder, Patient, Tag
 
@@ -242,6 +246,9 @@ def patient_detail(request, patient_id):
     context["captions_enabled"] = captions_enabled
     context["default_tab"] = "captions" if captions_enabled else "files"
     context["occlusion_enabled"] = False
+    # The same helper the POST endpoint calls, so the button and the refusal
+    # cannot disagree (see common/structuring_context.py).
+    context.update(structuring_context(patient))
 
     # Record for the landing "Continue where you left off" strip (best-effort).
     from common.activity import record_recent
@@ -316,6 +323,8 @@ def patient_list(request):
     patients_with_status = []
     # UI flag for the project the list is showing; each row is checked on its own project.
     is_admin = user_is_project_admin(request.user, session_project(request))
+    # Asked once per project for the whole page, not per row (common/structuring_context.py).
+    structuring_available = structuring_rerun_availability()
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -356,6 +365,10 @@ def patient_list(request):
             "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
             "modality_status_list": modality_status_list,
             "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient),
+            # Offers "Report structuring" in the row's rerun dialog.
+            "structuring_rerun": any(
+                vc.processing_status == "completed" for vc in voice_captions
+            ) and structuring_available(patient),
             "can_delete": bool(user_is_project_admin(request.user, patient.project) or user_can_delete_single_patient(request.user, patient.folder, patient.project)),
         })
 

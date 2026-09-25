@@ -62,6 +62,11 @@ from common.domain_views.voice_captions import (
     edit_voice_caption_transcription,
     update_voice_caption_modality,
 )
+from common.domain_views.caption_reports import (
+    caption_report,
+    structurable_captions,
+    structure_caption,
+)
 
 # Admin
 from .admin import rerun_processing, bulk_rerun_processing
@@ -126,6 +131,10 @@ __all__ = [
     'upload_text_caption',
     'edit_voice_caption_transcription',
     'update_voice_caption_modality',
+    # Report structuring (common/domain_views/caption_reports.py)
+    'structure_caption',
+    'caption_report',
+    'structurable_captions',
     # Deletion
     'delete_patient',
     'bulk_delete_patients',

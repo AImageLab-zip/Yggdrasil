@@ -239,7 +239,7 @@
                     <div class="actions">
                         <a href="{% url request.resolver_match.namespace|add:':patient_detail' p.patient_id %}" class="icon-btn btn-open" title="View" aria-label="View"><i class="fas fa-eye" aria-hidden="true"></i></a>
                         {% if user_profile.is_admin %}
-                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-steps="{% for s in item.rerunnable_steps %}{% if not forloop.first %},{% endif %}{{ s.slug }}{% endfor %}" title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
+                        <button class="icon-btn btn-rerun-processing" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-available-steps="{% for s in item.rerunnable_steps %}{% if not forloop.first %},{% endif %}{{ s.slug }}{% endfor %}"{% if item.structuring_rerun %} data-structuring="1"{% endif %} title="Rerun processing" aria-label="Rerun"><i class="fas fa-rotate" aria-hidden="true"></i></button>
                         {% endif %}
                         {% if item.can_delete %}
                         <button class="icon-btn icon-btn--danger btn-delete-scan" data-scan-id="{{ p.patient_id }}" data-scan-name="{{ p.name|default:'Scan' }}" data-patient-id="{{ p.patient_id }}" title="Delete" aria-label="Delete"><i class="fas fa-trash" aria-hidden="true"></i></button>

@@ -40,6 +40,8 @@ from common.domains import fk_fields_for
 from common.models import (
     ActivityEvent,
     AnnotationMethod,
+    CaptionReport,
+    ExternalService,
     FileRegistry,
     Invitation,
     Job,
@@ -48,7 +50,10 @@ from common.models import (
     ProcessingStep,
     Project,
     ProjectAccess,
+    PromptTemplate,
     RecentlyViewed,
+    ReportTemplate,
+    ReportTemplateField,
     SiteMaintenance,
     SystemCheck,
     UserPreference,
@@ -633,6 +638,198 @@ class ProcessingStepAdmin(admin.ModelAdmin):
         return ", ".join(s.slug for s in obj.depends_on.all()) or "—"
 
 
+class ReportTemplateFieldInline(admin.TabularInline):
+    """One row per reporting field, in all three languages at once.
+
+    Flat and not nested on purpose: Django admin has no nested inlines, so splitting the
+    translations into their own table would mean authoring a field on one screen and its
+    three translations on three more. A row here is the unit an admin actually thinks in.
+    """
+
+    model = ReportTemplateField
+    extra = 1
+    ordering = ("order", "id")
+    fields = (
+        "order", "key",
+        "label_en", "description_en",
+        "label_it", "description_it",
+        "label_de", "description_de",
+        "is_required",
+    )
+
+
+@admin.register(ReportTemplate)
+class ReportTemplateAdmin(admin.ModelAdmin):
+    """The reporting checklist clinicians dictate against.
+
+    This content used to be hardcoded HTML, so changing a word needed a developer and a
+    deploy. It is rows now, and this is where they are edited.
+
+    ``key`` on a field is not cosmetic: it is what a structured report is filed under, so
+    renaming one orphans that section of every report already produced. The column's help
+    text says so, and it is the one thing to be careful with on this page.
+    """
+
+    list_display = (
+        "name", "domain", "modality_scope", "project", "field_count",
+        "is_active", "updated_at",
+    )
+    list_filter = ("domain", "is_active", "modality_slug")
+    list_editable = ("is_active",)
+    search_fields = ("name", "slug", "modality_slug", "fields__label_en")
+    autocomplete_fields = ("project",)
+    readonly_fields = ("created_at", "updated_at")
+    inlines = (ReportTemplateFieldInline,)
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "is_active", "notes")}),
+        ("Scope", {
+            "fields": ("domain", "modality_slug", "project"),
+            "description": (
+                "Leave <em>modality</em> empty to cover every modality of the domain, and "
+                "<em>project</em> empty for the domain-wide default. The narrowest match "
+                "wins: project+modality, then domain+modality, then project, then domain."
+            ),
+        }),
+        ("Section header", {
+            "fields": ("icon", "subtitle_en", "subtitle_it", "subtitle_de"),
+            "description": "Shown above the checklist when a domain has more than one.",
+        }),
+        ("Bookkeeping", {
+            "fields": ("created_by", "created_at", "updated_at"),
+            "classes": ("collapse",),
+        }),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_field_count=Count("fields"))
+
+    @admin.display(description="Modality", ordering="modality_slug")
+    def modality_scope(self, obj):
+        return obj.modality_slug or "all modalities"
+
+    @admin.display(description="Fields", ordering="_field_count")
+    def field_count(self, obj):
+        return obj._field_count
+
+    def save_model(self, request, obj, form, change):
+        _stamp_author(request, obj)
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ExternalService)
+class ExternalServiceAdmin(admin.ModelAdmin):
+    """Real-time external services: speech-to-text, LLMs, anything that answers now.
+
+    The same idea as ``ProcessingStepAdmin`` one screen up -- where work happens is a row,
+    not a constant -- for the services that answer synchronously instead of being queued.
+
+    ``list_editable`` is deliberately just ``is_enabled`` and ``timeout_seconds``. A URL,
+    a model name or a parameter block typed into a grid of inputs and saved by one button
+    is how a clinician ends up watching dictation fail: those are edited on the change
+    form, one service at a time, beside their help text and their validation.
+
+    **No field here holds a secret.** ``api_key_env`` names an environment variable; the
+    "Key" column says whether that variable currently has a value, and never what it is.
+    """
+
+    list_display = (
+        "name", "slug", "kind", "base_url", "model_name",
+        "key_present", "is_enabled", "timeout_seconds", "updated_at",
+    )
+    list_filter = ("kind", "is_enabled")
+    list_editable = ("is_enabled", "timeout_seconds")
+    search_fields = ("name", "slug", "base_url", "model_name")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("created_at", "updated_at", "key_present", "parameter_help")
+    actions = ("check_configuration",)
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "kind", "is_enabled", "notes")}),
+        ("Endpoint", {
+            "fields": ("base_url", "api_key_env", "key_present", "ca_cert_path"),
+        }),
+        ("Behaviour", {
+            "fields": ("model_name", "parameters", "parameter_help", "languages"),
+        }),
+        ("Timeouts", {"fields": ("timeout_seconds", "connect_timeout_seconds")}),
+        ("Bookkeeping", {
+            "fields": ("created_by", "created_at", "updated_at"),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Key", boolean=True)
+    def key_present(self, obj):
+        return obj.api_key_is_present
+
+    @admin.display(description="Accepted parameters")
+    def parameter_help(self, obj):
+        """The kind's parameter schema, so the JSON box is not a guessing game."""
+        kind = obj.service_kind if obj and obj.pk else None
+        if kind is None:
+            return "Save the service once to see the parameters its kind accepts."
+        if not kind.parameters:
+            return "This kind takes no parameters."
+        rows = []
+        for parameter in kind.parameters.values():
+            bounds = []
+            if parameter.minimum is not None:
+                bounds.append(f"min {parameter.minimum}")
+            if parameter.maximum is not None:
+                bounds.append(f"max {parameter.maximum}")
+            if parameter.choices:
+                bounds.append("one of: " + ", ".join(str(c) for c in parameter.choices))
+            if parameter.default is not None:
+                bounds.append(f"default {parameter.default}")
+            rows.append(format_html(
+                "<li><code>{}</code> ({}) — {} {}</li>",
+                parameter.name, parameter.kind, parameter.help, f"[{'; '.join(bounds)}]",
+            ))
+        return format_html("<ul>{}</ul>", format_html("".join(rows)))
+
+    def save_model(self, request, obj, form, change):
+        if not change and obj.created_by_id is None:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+    @admin.action(description="Check configuration")
+    def check_configuration(self, request, queryset):
+        """Report what each selected service resolves to, without calling it.
+
+        Deliberately not a live round trip: a "test connection" button that dials an
+        external endpoint from the admin is a request an admin cannot cancel and a cost
+        they did not agree to. This answers the question that is actually asked when
+        something says "not configured" -- is the row disabled, is the key variable
+        empty, is the URL blank -- and leaves dialling to the feature itself.
+        """
+        from common.external_config import resolve
+
+        for service in queryset:
+            resolved = resolve(service.slug)
+            if resolved is not None:
+                self.message_user(
+                    request,
+                    f"{service.slug}: ready — {resolved.base_url}"
+                    + (f" (model {resolved.model_name})" if resolved.model_name else ""),
+                    messages.SUCCESS,
+                )
+                continue
+            if not service.is_enabled:
+                reason = "the service is disabled"
+            elif not service.base_url:
+                reason = "no base URL is set"
+            elif service.service_kind is None:
+                reason = f"unknown service kind '{service.kind}'"
+            elif service.service_kind.requires_api_key and not service.api_key_is_present:
+                reason = f"${service.api_key_env or '(no variable named)'} is empty"
+            elif service.service_kind.requires_model and not service.model_name:
+                reason = "no model name is set"
+            else:
+                reason = "see the server log"
+            self.message_user(
+                request, f"{service.slug}: not usable — {reason}", messages.WARNING
+            )
+
+
 #: Written into ``Job.error_logs`` by :meth:`JobAdmin.cancel_pending_jobs`.
 #: ``Job.STATUS_CHOICES`` has no ``cancelled`` member, so a cancelled job is
 #: stored as ``failed`` and is otherwise indistinguishable from one the cluster
@@ -1009,6 +1206,81 @@ class SystemCheckAdmin(ReadOnlyAdmin):
     list_display = ("name", "status", "ran_at", "duration_ms")
     list_filter = ("name", "status")
     date_hierarchy = "ran_at"
+
+
+@admin.register(PromptTemplate)
+class PromptTemplateAdmin(admin.ModelAdmin):
+    """What a language model is told, before the caption is handed to it.
+
+    The admin owns the *instruction*; the code owns the *output format* the parser
+    depends on and appends it at call time (``common/llm_tasks.OUTPUT_CONTRACT``). That
+    split is why this page is safe to edit: the worst a bad instruction can do is produce
+    a poor report, not break structuring for every domain at once.
+
+    ``version`` bumps itself whenever the wording changes, and every report records the
+    version it was produced with -- so a report can still be explained after the prompt
+    it came from has been rewritten.
+    """
+
+    list_display = ("name", "slug", "version", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    list_editable = ("is_active",)
+    search_fields = ("name", "slug", "system_prompt")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("version", "created_at", "updated_at", "output_contract")
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "is_active", "version", "notes")}),
+        ("Instruction", {
+            "fields": ("system_prompt",),
+            "description": "What the model is told about the job, before it sees anything.",
+        }),
+        ("Message", {
+            "fields": ("user_template",),
+            "description": (
+                "Placeholders: <code>{language}</code>, <code>{source_language}</code>, "
+                "<code>{fields}</code>, <code>{caption}</code>. "
+                "A literal brace must be doubled. <code>{caption}</code> is required."
+            ),
+        }),
+        ("Fixed output format", {
+            "fields": ("output_contract",),
+            "classes": ("collapse",),
+            "description": "Appended by the code and not editable: the parser depends on it.",
+        }),
+        ("Bookkeeping", {
+            "fields": ("created_at", "updated_at"), "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Appended to every system prompt")
+    def output_contract(self, obj):
+        from common.llm_tasks import OUTPUT_CONTRACT, UNCATEGORISED_KEY
+
+        return format_html(
+            "<pre style='white-space:pre-wrap'>{}</pre>",
+            OUTPUT_CONTRACT.format(uncategorised=UNCATEGORISED_KEY),
+        )
+
+
+@admin.register(CaptionReport)
+class CaptionReportAdmin(ReadOnlyAdmin):
+    """Structured reports produced from dictated captions.
+
+    Read-only: the application writes these, and an admin editing one would be putting
+    words into a clinical record that claims to be a model's reading of a dictation.
+
+    ``prompt_rendered`` embeds the caption -- clinical text -- so it is deliberately kept
+    off the changelist and out of the search fields.
+    """
+
+    list_display = (
+        "id", "domain", "task_slug", "attempt", "status",
+        "report_language", "model_name", "created_at",
+    )
+    list_filter = ("domain", "status", "task_slug", "report_language")
+    search_fields = ("model_name", "template__name")
+    date_hierarchy = "created_at"
+    list_select_related = ("template", "requested_by")
 
 
 @admin.register(SiteMaintenance)

@@ -15,6 +15,7 @@ from common.modality_config import (
     rerunnable_steps_for_patient,
 )
 from common.project_filters import presence_filter_specs
+from common.structuring_context import structuring_rerun_availability
 from common.models import Project, ProjectAccess
 from common.permissions import current_project as session_project
 from common.permissions import (
@@ -271,6 +272,8 @@ def patient_list(request):
     
     # Build patient data efficiently using prefetched data
     patients_with_status = []
+    # Asked once per project for the whole page, not per row (common/structuring_context.py).
+    structuring_available = structuring_rerun_availability()
     for patient in patients_to_process:
         # Get classifications from prefetched data
         classifications = list(patient.classifications.all())
@@ -393,6 +396,10 @@ def patient_list(request):
             'modality_statuses': {ms['slug']: ms['status'] for ms in modality_status_list},
             'modality_status_list': modality_status_list,
             'rerunnable_steps': rerunnable_steps,
+            # Offers "Report structuring" in the row's rerun dialog.
+            'structuring_rerun': any(
+                vc.processing_status == 'completed' for vc in voice_captions
+            ) and structuring_available(patient),
             'can_delete': bool(
                 user_is_project_admin(request.user, patient.project)
                 or user_can_delete_single_patient(request.user, patient.folder, patient.project)

@@ -48,16 +48,18 @@ def storage_prefix_for(domain):
 
 # Parts of the shared voice-caption panel (templates/common/sections/
 # vocal_caption_section.html) that only some domains have: a per-caption modality
-# picker, where a caption can be filed against one of several modalities, and the
-# structured report template, which needs content in report_template_section.html.
+# picker, where a caption can be filed against one of several modalities.
+#
+# Whether a domain shows a report template is *not* here: that is data, a
+# common.ReportTemplate row, and {% report_template_panel %} renders nothing for a
+# domain that has none. A list here would disagree with the admin the moment someone
+# wrote a template for a domain it left out.
 _CAPTION_MODALITY_PICKER = frozenset({"maxillo", "laparoscopy", "urology"})
-_CAPTION_REPORT_TEMPLATE = frozenset({"maxillo", "brain", "urology"})
 
 
 def caption_features(domain):
     return {
         "caption_modality_picker": domain in _CAPTION_MODALITY_PICKER,
-        "caption_report_template": domain in _CAPTION_REPORT_TEMPLATE,
     }
 
 
