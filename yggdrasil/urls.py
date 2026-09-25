@@ -20,6 +20,7 @@ from django.urls import path, include
 from django.contrib.auth import views as auth_views
 from maxillo import views as scans_views
 from common import views as common_views
+from common.mobile import MobileAwareLoginView
 
 urlpatterns = [
     # App-agnostic admin control panel (must come before Django admin route)
@@ -69,7 +70,7 @@ urlpatterns = [
     path("demo/", include("common.demo_urls")),
     # API root
     path("api/", include(("maxillo.api_urls", "api"), namespace="api")),
-    path("login/", auth_views.LoginView.as_view(), name="login"),
+    path("login/", MobileAwareLoginView.as_view(), name="login"),
     path(
         "logout/",
         auth_views.LogoutView.as_view(template_name="registration/logged_out.html"),

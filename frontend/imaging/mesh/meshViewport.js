@@ -42,6 +42,7 @@
 import { cameraFor, distanceForBounds, radiusOf, visibilityFor } from './cameraPresets.js';
 import { displayCoordinates, offsetInElement } from './pickMath.js';
 import { JAWS } from './landmarkDocument.js';
+import { enableTwoFingerNavigation } from '../runtime/touch.js';
 
 /**
  * Per-arch colours: a rose upper and a deep blue lower.
@@ -248,6 +249,7 @@ export function createMeshViewport({
                 { mouseButton: toolsEnums.MouseBindings.Wheel },
             ],
         });
+        enableTwoFingerNavigation(toolGroup, tools.Zoom.toolName);
         toolGroup.addViewport(VIEWPORT_ID, ENGINE_ID);
     }
 

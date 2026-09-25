@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+    ARMED_CLASS,
     CHIP_SELECTOR,
     DRAG_OVER_CLASS,
+    TOUCH_DRAG_THRESHOLD_PX,
     bindDragDrop,
     readDroppedModality,
     resolveWindowDropTarget,
@@ -204,6 +206,98 @@ test('an event on a child resolves to the window that contains it', () => {
     assert.equal(resolveWindowDropTarget(canvas), window0);
     assert.equal(resolveWindowDropTarget(null), null);
     assert.equal(resolveWindowDropTarget({}), null);
+});
+
+// --- touch: pointer events, because HTML5 drag does not start from a finger -------
+
+function touchRig() {
+    const chip = fakeElement({ dataset: { modality: 'braintumor-mri-flair' } });
+    chip.setPointerCapture = () => {};
+    const window0 = fakeElement();
+    window0.dataset.windowIndex = '0';
+    const window2 = fakeElement();
+    window2.dataset.windowIndex = '2';
+    const canvas = { closest: () => window2 };
+    const dropped = [];
+    bindDragDrop({
+        doc: {
+            querySelectorAll: (selector) => (selector === CHIP_SELECTOR ? [chip] : []),
+            // Only window 2 is under the finger past x = 100.
+            elementFromPoint: (x) => (x > 100 ? canvas : null),
+        },
+        elements: [window0, window2],
+        onDrop: (index, slug) => dropped.push([index, slug]),
+    });
+    const fire = (node, type, event) =>
+        node.listeners.get(type)({ pointerId: 7, pointerType: 'touch', preventDefault() {}, ...event });
+    return { chip, window0, window2, canvas, dropped, fire };
+}
+
+test('a finger dragging a chip onto a window loads it there', () => {
+    const { chip, window2, dropped, fire } = touchRig();
+    fire(chip, 'pointerdown', { clientX: 10, clientY: 10 });
+    fire(chip, 'pointermove', { clientX: 150, clientY: 10 });
+    assert.ok(chip.classes.has('is-dragging'));
+    assert.ok(window2.classes.has(DRAG_OVER_CLASS), 'the window under the finger lights up');
+    fire(chip, 'pointerup', { clientX: 150, clientY: 10 });
+    assert.deepEqual(dropped, [[2, 'braintumor-mri-flair']]);
+    assert.ok(!chip.classes.has('is-dragging'));
+    assert.ok(!window2.classes.has(DRAG_OVER_CLASS));
+});
+
+test('a finger let go outside every window drops nothing', () => {
+    const { chip, dropped, fire } = touchRig();
+    fire(chip, 'pointerdown', { clientX: 10, clientY: 10 });
+    fire(chip, 'pointermove', { clientX: 60, clientY: 10 });
+    fire(chip, 'pointerup', { clientX: 60, clientY: 10 });
+    assert.deepEqual(dropped, []);
+});
+
+test('a cancelled touch (the OS took the gesture) drops nothing', () => {
+    const { chip, window2, dropped, fire } = touchRig();
+    fire(chip, 'pointerdown', { clientX: 10, clientY: 10 });
+    fire(chip, 'pointermove', { clientX: 150, clientY: 10 });
+    fire(chip, 'pointercancel', { clientX: 150, clientY: 10 });
+    assert.deepEqual(dropped, []);
+    assert.ok(!window2.classes.has(DRAG_OVER_CLASS));
+});
+
+test('tap a chip, then tap a window: tap-to-place', () => {
+    const { chip, window2, canvas, dropped, fire } = touchRig();
+    fire(chip, 'pointerdown', { clientX: 10, clientY: 10 });
+    // A wobble under the threshold is still a tap.
+    fire(chip, 'pointermove', { clientX: 10 + TOUCH_DRAG_THRESHOLD_PX - 1, clientY: 10 });
+    fire(chip, 'pointerup', { clientX: 12, clientY: 10 });
+    assert.ok(chip.classes.has(ARMED_CLASS));
+    assert.deepEqual(dropped, []);
+
+    fire(window2, 'pointerup', { target: canvas });
+    assert.deepEqual(dropped, [[2, 'braintumor-mri-flair']]);
+    assert.ok(!chip.classes.has(ARMED_CLASS), 'one tap places it once');
+
+    fire(window2, 'pointerup', { target: canvas });
+    assert.equal(dropped.length, 1, 'an unarmed tap on a window does nothing');
+});
+
+test('tapping an armed chip again disarms it', () => {
+    const { chip, fire } = touchRig();
+    fire(chip, 'pointerdown', { clientX: 10, clientY: 10 });
+    fire(chip, 'pointerup', { clientX: 10, clientY: 10 });
+    assert.ok(chip.classes.has(ARMED_CLASS));
+    fire(chip, 'pointerdown', { clientX: 10, clientY: 10 });
+    fire(chip, 'pointerup', { clientX: 10, clientY: 10 });
+    assert.ok(!chip.classes.has(ARMED_CLASS));
+});
+
+test('the mouse keeps the native drag path; pointer events leave it alone', () => {
+    const { chip, window2, dropped, fire } = touchRig();
+    fire(chip, 'pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 10 });
+    fire(chip, 'pointermove', { pointerType: 'mouse', clientX: 150, clientY: 10 });
+    fire(chip, 'pointerup', { pointerType: 'mouse', clientX: 150, clientY: 10 });
+    assert.ok(!chip.classes.has('is-dragging'));
+    assert.ok(!chip.classes.has(ARMED_CLASS));
+    fire(window2, 'pointerup', { pointerType: 'mouse', target: window2 });
+    assert.deepEqual(dropped, []);
 });
 
 // --- the markup the handlers bind to ----------------------------------------------

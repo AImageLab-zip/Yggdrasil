@@ -581,6 +581,9 @@ main.landing {
 .landing-btn--sm { padding: 7px 14px; font-size: 13px; }
 .landing-signin__link { color: var(--ygg-text-muted); text-decoration: underline; }
 .landing-signin__link:hover { color: var(--ygg-primary); }
+/* Phones only (`.ygg-mobile-only`), and only while nothing is published: a phone
+   cannot sign in, so without a demo there is nothing to offer but this. */
+.landing-mobile-note { max-width: 22rem; margin: 0 auto; color: var(--ygg-text-muted); text-align: center; font-size: 14px; }
 
 @media (max-width: 560px) {
     .landing-demo { padding: 24px 22px 22px; }

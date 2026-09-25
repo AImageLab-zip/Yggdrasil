@@ -51,9 +51,10 @@
                     </form>
                 </div>
             </div>
-        {% else %}
-            <a href="{% url 'login' %}" class="landing-btn landing-btn--primary">Login</a>
-            <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost">Register</a>
+        {% elif not is_mobile_client %}
+            {# Phones never sign in (common/mobile.py); the class covers narrow screens the server did not recognise. #}
+            <a href="{% url 'login' %}" class="landing-btn landing-btn--primary ygg-desktop-only">Login</a>
+            <a href="{% url 'register' %}" class="landing-btn landing-btn--ghost ygg-desktop-only">Register</a>
         {% endif %}
     </div>
 </header>
@@ -161,13 +162,20 @@
             </a>
             {% endif %}
 
-            <div class="landing-signin">
+            {% if not is_mobile_client %}
+            <div class="landing-signin ygg-desktop-only">
                 <span class="landing-signin__label">Already have an account?</span>
                 <a href="{% url 'login' %}" class="landing-btn landing-btn--ghost landing-btn--sm">
                     {% icon 'sign-in-alt' %} Sign in
                 </a>
                 <a href="{% url 'register' %}" class="landing-signin__link">Register</a>
             </div>
+            {% endif %}
+            {% if not demo_url %}
+            <p class="landing-mobile-note ygg-mobile-only">
+                The public demo is not available right now. Open Yggdrasil on a laptop or desktop to sign in.
+            </p>
+            {% endif %}
         </div>
     {% endif %}
 </div>

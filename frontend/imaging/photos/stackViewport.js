@@ -30,6 +30,8 @@
  *   shows `W 256 / L 128` with no unit, because there is not one.
  */
 
+import { enableTwoFingerNavigation } from '../runtime/touch.js';
+
 /**
  * Cornerstone ids for one instance of this surface.
  *
@@ -571,6 +573,7 @@ function createToolGroup({ addTool, ToolGroupManager, tools, toolsEnums, toolCon
         toolGroup.setToolActive(tools.Zoom.toolName, {
             bindings: [{ mouseButton: toolsEnums.MouseBindings.Secondary }],
         });
+        enableTwoFingerNavigation(toolGroup, tools.Zoom.toolName);
     }
     // Measurement and segmentation tools start Disabled, matching the grid: both are
     // modes, off by default, so a study being read shows fewer controls than one being

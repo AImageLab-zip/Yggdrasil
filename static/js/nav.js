@@ -4,7 +4,9 @@
  *   [data-dropdown]         wrapper
  *     [data-dropdown-toggle]  button (aria-expanded toggled)
  *     [data-dropdown-menu]    menu (hidden attr toggled)
- *   [data-mobile-toggle] / [data-mobile-nav]  mobile menu
+ *   [data-mobile-toggle]    opens the icon rail as a drawer on phones
+ *                           (body.rail-open; theme.css). A backdrop click, a
+ *                           rail link, or Escape closes it again.
  */
 (function () {
     'use strict';
@@ -61,12 +63,13 @@
 
         var mToggle = e.target.closest('[data-mobile-toggle]');
         if (mToggle) {
-            var panel = document.querySelector('[data-mobile-nav]');
-            if (panel) {
-                panel.hidden = !panel.hidden;
-                mToggle.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
-            }
+            e.preventDefault();
+            setRailOpen(!document.body.classList.contains('rail-open'));
             return;
+        }
+
+        if (e.target.closest('[data-rail-close]') || e.target.closest('.ygg-rail a')) {
+            setRailOpen(false);
         }
 
         if (!e.target.closest('[data-dropdown-menu]')) {
@@ -74,7 +77,17 @@
         }
     });
 
+    function setRailOpen(open) {
+        document.body.classList.toggle('rail-open', open);
+        document.querySelectorAll('[data-mobile-toggle]').forEach(function (btn) {
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    }
+
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') closeAllDropdowns(null);
+        if (e.key === 'Escape') {
+            closeAllDropdowns(null);
+            setRailOpen(false);
+        }
     });
 })();

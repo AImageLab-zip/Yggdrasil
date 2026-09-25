@@ -51,6 +51,7 @@ import { createOverlay, updateOverlay } from './viewportOverlay.js';
 import { formatWindow } from './voi.js';
 import { residualModalityLut } from '../metadata/modalityLutModule.js';
 import { awaitVolumeLoad, fetchHeader, readScalarData } from './volumeLoading.js';
+import { enableTwoFingerNavigation } from '../runtime/touch.js';
 import { describeGeometry } from '../geometry/orientation.js';
 // The same list and filter a save uses: what is hidden, cleared and stored is one set.
 import { MEASUREMENT_TOOLS, NAVIGATION_TOOL, measurementAnnotations } from './measurements.js';
@@ -683,6 +684,8 @@ function createToolGroups({
     twoD.setToolActive(tools.Zoom.toolName, {
         bindings: [{ mouseButton: MouseBindings.Secondary }],
     });
+    // Touch (`runtime/touch.js`): two fingers pinch and pan; one finger is the page's.
+    enableTwoFingerNavigation(twoD, tools.Zoom.toolName);
     twoD.setToolActive(tools.StackScroll.toolName, { bindings: [{ mouseButton: MouseBindings.Wheel }] });
 
     // Window/level on Shift+Primary. It was the default before crosshairs took the
@@ -702,8 +705,13 @@ function createToolGroups({
     threeD.setToolActive(tools.TrackballRotate.toolName, {
         bindings: [{ mouseButton: MouseBindings.Primary }],
     });
-    threeD.setToolActive(tools.Zoom.toolName, { bindings: [{ mouseButton: MouseBindings.Secondary }] });
-    threeD.setToolActive(tools.Pan.toolName, { bindings: [{ mouseButton: MouseBindings.Auxiliary }] });
+    threeD.setToolActive(tools.Zoom.toolName, {
+        bindings: [{ mouseButton: MouseBindings.Secondary }],
+    });
+    enableTwoFingerNavigation(threeD, tools.Zoom.toolName);
+    threeD.setToolActive(tools.Pan.toolName, {
+        bindings: [{ mouseButton: MouseBindings.Auxiliary }],
+    });
 
     // The orientation marker in the corner of the 3D view. `enabled` rather than
     // `active`: it is an indicator, not something to drag.

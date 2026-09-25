@@ -142,23 +142,109 @@ body.has-maintenance-banner .ygg-rail {
 }
 body.has-rail { padding-left: var(--ygg-rail-w); }
 body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
+/* Phone-only drawer controls: invisible at every desktop and tablet width. */
+.ygg-rail-toggle,
+.ygg-rail-backdrop { display: none; }
 @media (max-width: 640px) {
-    /* Collapse the rail off-canvas on very small screens; content reclaims width. */
+    /* Collapse the rail off-canvas on very small screens; content reclaims width.
+       The topbar's hamburger ([data-mobile-toggle], nav.js) sets body.rail-open,
+       which slides it back in as a labelled drawer over a backdrop. */
     body.has-rail { padding-left: 0; }
-    body.has-rail .ygg-rail { transform: translateX(-100%); transition: transform .2s; }
-    body.has-rail.rail-open .ygg-rail { transform: none; }
+    body.has-rail .ygg-rail {
+        transform: translateX(-100%);
+        transition: transform .2s;
+        /* Above the sticky topbar (100) so the drawer covers it, below modals. */
+        z-index: 1010;
+    }
+    body.has-rail.rail-open .ygg-rail {
+        transform: none;
+        width: min(16rem, 80vw);
+        align-items: stretch;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+        box-shadow: var(--ygg-shadow-pop);
+    }
+    /* The rail's items are icon-only with the name in `title`; in the drawer
+       there is room, so print it -- no hover on a phone to reveal a tooltip. */
+    body.has-rail.rail-open .ygg-rail-item {
+        width: auto;
+        justify-content: flex-start;
+        gap: 0.75rem;
+        padding: 0 0.75rem;
+    }
+    body.has-rail.rail-open .ygg-rail-item::after {
+        content: attr(title);
+        font-size: 0.875rem;
+    }
+    /* The logo is the way home; in the drawer it says so, like the items do. */
+    body.has-rail.rail-open .ygg-rail-logo {
+        width: auto;
+        height: 2.25rem;
+        justify-content: flex-start;
+        gap: 0.75rem;
+        padding: 0 0.75rem 0 0.375rem;
+        background: transparent;
+        color: var(--ygg-text-muted);
+        text-decoration: none;
+    }
+    body.has-rail.rail-open .ygg-rail-logo img {
+        box-sizing: content-box;
+        padding: 6px;
+        border-radius: var(--ygg-radius-lg);
+        background: var(--ygg-accent-soft);
+    }
+    body.has-rail.rail-open .ygg-rail-logo::after {
+        content: "Home";
+        font-size: 0.875rem;
+    }
+    body.has-rail .ygg-rail-toggle { display: flex; flex-shrink: 0; }
+    body.has-rail.rail-open .ygg-rail-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 1005;
+        background: rgba(0, 0, 0, 0.4);
+    }
+    body.has-rail.rail-open { overflow: hidden; }
     body.has-rail .ygg-footer { left: 0; }
+
+    /* A fixed footer eats a tenth of a phone screen on every page; let it
+       scroll away with the content instead. */
+    .ygg-footer { position: static; }
+    body { padding-bottom: 0; }
+    .ygg-topbar { padding-left: 0.75rem; padding-right: 0.75rem; gap: 0.5rem; }
+}
+
+/* Phone touch on the viewers (runtime/touch.js): one finger scrolls the page,
+   two work the view. Cornerstone stamps `touch-action: none` inline on every
+   viewport element, which keeps the browser from scrolling at all from there --
+   and on a phone the viewers are most of the page. Letting the browser pan from
+   them is half of it; the script sends two-finger gestures to the view. */
+@media (max-width: 640px) {
+    [data-viewport-uid],
+    [data-touch-view] { touch-action: pan-x pan-y !important; }
+}
+
+/* Device-scoped visibility helpers. Phones get the demo only
+   (common/mobile.py): `.ygg-desktop-only` hides what a phone must not offer --
+   sign-in, register, write controls the read-only guest cannot use -- even when
+   the server did not recognise the device. `.ygg-mobile-only` is the converse. */
+.ygg-mobile-only { display: none; }
+@media (max-width: 640px) {
+    .ygg-desktop-only { display: none !important; }
+    .ygg-mobile-only { display: revert; }
 }
 
 /* ==========================================================================
- * Desktop-only gate — the honest counterpart to the rule above.
+ * Desktop-only gate — for a real signed-in user on a phone.
  *
- * Below phone width the rail is translated off-canvas and nothing reopens it,
- * and the viewers were never laid out for a 390px column. Rather than serve a
- * silently broken page, base.html carries an interstitial that is invisible at
- * desktop widths and paints over everything here. No JS and no User-Agent
- * sniffing: the media query IS the detection. Colours are all --ygg-* tokens,
- * so it follows the data-theme stamp with no dark-mode rules of its own.
+ * Phones get the public demo only (common/mobile.py). Public pages and the
+ * demo guest have a phone layout, so base.html leaves the gate out for them
+ * (`mobile_ok`). A signed-in user's working pages -- upload, the editors, the
+ * admin dashboards -- were never laid out for a 390px column, so there base.html
+ * still carries this interstitial, invisible at desktop widths and painted over
+ * everything here. The media query decides *when* it shows; colours are all
+ * --ygg-* tokens, so it follows the data-theme stamp with no dark rules of its own.
  *
  * The landscape clause catches a rotated phone (~850px wide, so a bare
  * max-width would let it through); max-height keeps laptops out.
@@ -166,7 +252,12 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
 .ygg-desktop-gate { display: none; }
 
 @media (max-width: 640px), (orientation: landscape) and (max-height: 480px) {
-    html, body { overflow: hidden; }
+    /* Lock scrolling only while the gate is actually on the page. It used to be
+       unconditional, which was harmless while every page carried the gate; now
+       the demo pages have none, and a bare `html, body` here froze them at one
+       screen. Without `:has()` the page merely scrolls behind the fixed gate. */
+    html:has(.ygg-desktop-gate),
+    html:has(.ygg-desktop-gate) body { overflow: hidden; }
     .ygg-desktop-gate {
         display: flex;
         position: fixed;
