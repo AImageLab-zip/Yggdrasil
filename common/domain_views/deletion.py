@@ -9,7 +9,6 @@ import logging
 from common.domain_models import get_domain_models
 from common.permissions import (
     user_can_delete_single_patient,
-    user_can_perform_bulk_operations,
     user_is_project_admin,
 )
 
@@ -25,7 +24,7 @@ def delete_patient(request, patient_id):
         patient = get_object_or_404(Patient, patient_id=patient_id)
         # This patient's own project, not the session's: an admin of one project
         # could otherwise delete another project's patient just by knowing its id.
-        can_delete = bool(patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+        can_delete = user_can_delete_single_patient(request.user, patient.folder, patient.project)
         if user_is_project_admin(request.user, patient.project):
             can_delete = True
 
@@ -58,19 +57,12 @@ def bulk_delete_patients(request):
         if not isinstance(scan_ids, list) or not scan_ids:
             return JsonResponse({'error': 'scan_ids list is required'}, status=400)
 
-        if not user_can_perform_bulk_operations(request.user, request):
-            return JsonResponse({
-                'success': False,
-                'error': 'You do not have permission to bulk delete scans.'
-            }, status=403)
-
         scans_to_delete = list(Patient.objects.filter(patient_id__in=scan_ids))
 
         if not scans_to_delete:
             return JsonResponse({'error': 'No valid scans found to delete'}, status=404)
 
-        # The capability gate above is answered against the session; deleting is
-        # answered against each patient's own project, so a list of ids cannot
+        # Answered against each patient's own project, so a list of ids cannot
         # reach across projects.
         for patient in scans_to_delete:
             if not user_is_project_admin(request.user, patient.project):

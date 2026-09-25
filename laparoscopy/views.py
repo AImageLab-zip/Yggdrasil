@@ -29,7 +29,11 @@ from annotations.services.video import (
     save_video_regions,
     video_regions_state,
 )
-from common.permissions import project_allows_annotation
+from common.permissions import (
+    project_allows_annotation,
+    user_can_read_patient,
+    user_can_write_patient_annotations,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -98,19 +102,16 @@ def _patient_model():
     return apps.get_model("laparoscopy", "Patient")
 
 
-def _patient_permissions(profile, patient):
-    if not profile:
-        return False, False
-    can_view = False
-    if profile.is_admin():
-        can_view = True
-    elif profile.is_annotator() and patient.visibility != "debug":
-        can_view = True
-    elif profile.is_student_developer() and patient.visibility == "debug":
-        can_view = True
-    elif patient.visibility == "public":
-        can_view = True
-    return can_view, can_view
+def _patient_permissions(user, patient):
+    """``(can_view, can_modify)`` on the patient's own project.
+
+    Used to read the session's profile, whose role belongs to whichever project
+    the user last selected -- and it answered modify with the view result.
+    """
+    return (
+        user_can_read_patient(user, patient),
+        user_can_write_patient_annotations(user, patient),
+    )
 
 
 def _unprocessed_video_response(patient):
@@ -532,7 +533,7 @@ def patient_quadrant_markers(request, patient_id):
 
     Patient = _patient_model()
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view, can_modify = _patient_permissions(profile, patient)
+    can_view, can_modify = _patient_permissions(request.user, patient)
     if not can_view:
         return JsonResponse({"error": "Permission denied"}, status=403)
 
@@ -609,7 +610,7 @@ def patient_video_annotations(request, patient_id):
 
     Patient = _patient_model()
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view, can_modify = _patient_permissions(profile, patient)
+    can_view, can_modify = _patient_permissions(request.user, patient)
     if not can_view:
         return JsonResponse({"error": "Permission denied"}, status=403)
 
@@ -705,7 +706,7 @@ def worker_session_ready(request):
 
     Patient = _patient_model()
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view, _ = _patient_permissions(profile, patient)
+    can_view, _ = _patient_permissions(request.user, patient)
     if not can_view:
         return JsonResponse({"error": "Permission denied"}, status=403)
 
@@ -984,7 +985,7 @@ def worker_session_prompt(request):
 
     Patient = _patient_model()
     patient = get_object_or_404(Patient, patient_id=patient_id)
-    can_view, _ = _patient_permissions(profile, patient)
+    can_view, _ = _patient_permissions(request.user, patient)
     if not can_view:
         return JsonResponse({"error": "Permission denied"}, status=403)
 

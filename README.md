@@ -5,7 +5,7 @@ studies, an external compute cluster processes them, and the results are viewed,
 annotated and exported — all under one authorization model and one durable
 annotation record.
 
-Four research areas are mounted as their own Django apps:
+Five research areas are mounted as their own Django apps:
 
 | Area | Prefix | What it holds |
 |---|---|---|
@@ -13,6 +13,7 @@ Four research areas are mounted as their own Django apps:
 | **Brain** | `/brain/` | Brain-tumour MRI — T1, T1c, T2, FLAIR and segmentation |
 | **Laparoscopy** | `/laparoscopy/` | Surgical video |
 | **Urology** | `/urology/` | Multimodal urology — multiparametric prostate MRI, digital pathology Whole Slide Images (WSI), confocal laser endomicroscopy |
+| **Cardiology** | `/cardiology/` | ECG review — clinical-grid waveform plots and AF / NSR / Other / NI rhythm classification |
 
 Live instance: <https://yggdrasil.ing.unimore.it>
 
@@ -71,13 +72,14 @@ Full instructions: [docs/setup.md](docs/setup.md).
 - [docs/admin-tasks.md](docs/admin-tasks.md) — production operations: superusers, backups, maintenance modes, sweeps
 - [docs/new-project-type.md](docs/new-project-type.md) — adding a new project app
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Docker quickstart, tests, CI, migrations, and the invariants
+- [STUDENTS.md](STUDENTS.md) — where new work goes: free, through review, or maintainers only
 - [CLAUDE.md](CLAUDE.md) — orientation for AI coding agents
 
 Each app also carries its own README describing what it owns and where its
 boundary with `common/` runs: [common](common/README.md),
 [annotations](annotations/README.md), [maxillo](maxillo/README.md),
 [brain](brain/README.md), [laparoscopy](laparoscopy/README.md),
-[urology](urology/README.md).
+[urology](urology/README.md), [cardiology](cardiology/README.md).
 
 Notes:
 

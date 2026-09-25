@@ -1,9 +1,9 @@
 """View-level tests for export share-link expiry (brain domain).
 
 Brain has its own share views, so expiry enforcement is verified separately
-from maxillo. Brain's share update endpoint is owner-or-project-admin (not
-staff-only), which makes the "never expires is admin-only" rule observable
-here: a non-admin owner must get a 400 for expires_in_days="never".
+from maxillo. Publishing a link (public or login-required) is a project-admin
+decision: a non-admin owner is refused, and "never expires" is admin-only and
+only for login-required links.
 """
 
 import json
@@ -89,25 +89,22 @@ class BrainSharedExpiryTests(BrainExportShareTestBase):
 
 
 class BrainShareUpdateExpiryTests(BrainExportShareTestBase):
-    def test_owner_gets_default_expiry(self):
-        self.client.login(username="brain-owner", password="pw")
-        export = self.make_export(share_token=None, share_mode="private")
+    def test_admin_owner_gets_default_expiry(self):
+        self.client.login(username="brain-staff", password="pw")
+        export = self.make_export(user=self.staff, share_token=None, share_mode="private")
         response = self.update(export, {"share_mode": "public"})
         self.assertEqual(response.status_code, 200)
         export.refresh_from_db()
         self.assertIsNotNone(export.expires_at)
         self.assertIsNotNone(export.share_token)
 
-    def test_owner_cannot_set_never(self):
+    def test_non_admin_owner_cannot_publish(self):
         self.client.login(username="brain-owner", password="pw")
-        export = self.make_export()
-        response = self.update(
-            export, {"share_mode": "public", "expires_in_days": "never"}
-        )
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(
-            "staff or project admins", response.json()["error"]
-        )
+        export = self.make_export(share_token=None, share_mode="private")
+        response = self.update(export, {"share_mode": "public"})
+        self.assertEqual(response.status_code, 403)
+        export.refresh_from_db()
+        self.assertEqual(export.share_mode, "private")
 
     def test_staff_can_set_never(self):
         self.client.login(username="brain-staff", password="pw")
@@ -115,7 +112,7 @@ class BrainShareUpdateExpiryTests(BrainExportShareTestBase):
             expires_at=timezone.now() + timedelta(days=3)
         )
         response = self.update(
-            export, {"share_mode": "public", "expires_in_days": "never"}
+            export, {"share_mode": "authenticated", "expires_in_days": "never"}
         )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["expires_at"])

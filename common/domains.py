@@ -14,6 +14,7 @@ DOMAIN_CHOICES = [
     ("brain", "Brain"),
     ("laparoscopy", "Laparoscopy"),
     ("urology", "Urology"),
+    ("cardiology", "Cardiology"),
 ]
 
 DEFAULT_DOMAIN = DOMAIN_CHOICES[0][0]
@@ -28,7 +29,38 @@ DOMAIN_FK_FIELDS = {
     "brain": ("brain_patient", "brain_voice_caption"),
     "laparoscopy": ("laparoscopy_patient", "laparoscopy_voice_caption"),
     "urology": ("urology_patient", "urology_voice_caption"),
+    "cardiology": ("cardiology_patient", "cardiology_voice_caption"),
 }
+
+
+# Top-level object-storage prefix for each domain's raw/processed keys. Historical:
+# brain and urology share maxillo's prefix, and stored keys must not move, so a
+# domain absent here stays under the default.
+_STORAGE_PREFIXES = {
+    "laparoscopy": "laparoscopy",
+    "cardiology": "cardiology",
+}
+
+
+def storage_prefix_for(domain):
+    return _STORAGE_PREFIXES.get(domain, DEFAULT_DOMAIN)
+
+
+# Parts of the shared voice-caption panel (templates/common/sections/
+# vocal_caption_section.html) that only some domains have: a per-caption modality
+# picker, where a caption can be filed against one of several modalities.
+#
+# Whether a domain shows a report template is *not* here: that is data, a
+# common.ReportTemplate row, and {% report_template_panel %} renders nothing for a
+# domain that has none. A list here would disagree with the admin the moment someone
+# wrote a template for a domain it left out.
+_CAPTION_MODALITY_PICKER = frozenset({"maxillo", "laparoscopy", "urology"})
+
+
+def caption_features(domain):
+    return {
+        "caption_modality_picker": domain in _CAPTION_MODALITY_PICKER,
+    }
 
 
 def normalize_domain(value):
@@ -61,6 +93,7 @@ _DOMAIN_BLURBS = {
     "brain": "Brain tumor MRI — multi-sequence review with AI-assisted captioning.",
     "laparoscopy": "Surgical video annotation — frame-accurate segmentation and tagging.",
     "urology": "Urological oncology — MRI, WSI digital pathology and Confocale microscopy.",
+    "cardiology": "ECG review — clinical-grid waveform plotting and arrhythmia annotation.",
 }
 
 # Default glyph per domain when Project.icon is blank.
@@ -69,6 +102,7 @@ _DOMAIN_ICONS = {
     "brain": "fas fa-brain",
     "laparoscopy": "fas fa-video",
     "urology": "fas fa-microscope",
+    "cardiology": "fas fa-heart-pulse",
 }
 
 # Modality feature tags per domain for the landing cards
@@ -77,6 +111,7 @@ _DOMAIN_TAGS = {
     "brain": ["MRI T1/T2", "FLAIR", "AI Voice"],
     "laparoscopy": ["Video", "Keyframes", "Segmentation"],
     "urology": ["MRI", "WSI", "Confocale"],
+    "cardiology": ["12-lead ECG", "Rhythm", "Captions"],
 }
 
 # Domain specialty overline
@@ -85,6 +120,7 @@ _DOMAIN_OVERLINES = {
     "brain": "Neuroimaging",
     "laparoscopy": "Surgical Vision",
     "urology": "Urological Oncology",
+    "cardiology": "Cardiology",
 }
 
 

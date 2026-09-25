@@ -1,0 +1,88 @@
+{% load static %}
+<script src="{% static 'js/cardiology/ecg_plot.js' %}"></script>
+<script src="{% static 'js/cardiology/cardiology_annotations.js' %}"></script>
+
+{% include 'common/sections/patient_header_section.html' %}
+
+<div class="d-flex justify-content-end mt-2">
+    {% if next_patient_id %}
+    <a href="{% url 'cardiology:patient_detail' patient_id=next_patient_id %}" class="btn btn-primary btn-sm">
+        Next<i class="fas fa-arrow-right ms-2" aria-hidden="true"></i>
+    </a>
+    {% else %}
+    <button type="button" class="btn btn-primary btn-sm" disabled title="No more patients in this batch">
+        Next<i class="fas fa-arrow-right ms-2" aria-hidden="true"></i>
+    </button>
+    {% endif %}
+</div>
+
+<div class="patient-view-grid mt-3">
+    <div class="patient-view-viewer">
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="fas fa-heart-pulse me-2"></i>ECG
+            </div>
+            <div class="card-body">
+                {% if ecg_data %}
+                <div id="ecgPlotContainer"
+                     data-ecg-url="{{ ecg_data.url }}"
+                     data-ecg-filename="{{ ecg_data.filename }}"
+                     data-ecg-save-url="{{ ecg_data.saveUrl }}"
+                     data-ecg-has-processed="{{ ecg_data.hasProcessed|yesno:'true,false' }}"
+                     data-ecg-can-save="{{ can_modify|yesno:'true,false' }}">
+                    <p class="text-muted">Loading ECG…</p>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">No ECG recording uploaded for this patient.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="side-panel">
+        <div class="side-panel__tabs" role="tablist">
+            <button type="button" class="side-tab {% if default_tab == 'classification' %}is-active{% endif %}" data-tab-target="classification">Classification</button>
+            {% if captions_enabled %}
+            <button type="button" class="side-tab {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-target="captions">Captions</button>
+            {% endif %}
+        </div>
+        <div class="side-panel__body">
+            <div class="side-tab-pane {% if default_tab == 'classification' %}is-active{% endif %}" data-tab-pane="classification">
+                {% if classification_enabled %}
+                <div id="cardiologyClassificationButtons" class="btn-group flex-wrap" role="group" style="row-gap: 0.4rem;"
+                     data-update-url="{% url 'cardiology:classification_update' patient_id=patient.patient_id %}"
+                     data-revision="{{ rhythm.revision }}">
+                    {% for value, label in rhythm_choices %}
+                    <button type="button"
+                            class="btn btn-outline-primary {% if rhythm.value == value %}active{% endif %}"
+                            data-value="{{ value }}"
+                            {% if not can_modify %}disabled{% endif %}>
+                        {{ label }}
+                    </button>
+                    {% endfor %}
+                </div>
+                {% if rhythm.value %}
+                <p class="text-muted small mt-2 mb-0">
+                    Last set by {{ rhythm.annotator.username|default:"unknown" }} on {{ rhythm.timestamp|date:"M d, H:i" }}
+                </p>
+                {% endif %}
+                {% else %}
+                <p class="text-muted mb-0">ECG classification is disabled for this project.</p>
+                {% endif %}
+            </div>
+
+            {% if captions_enabled %}
+            <div class="side-tab-pane {% if default_tab == 'captions' %}is-active{% endif %}" data-tab-pane="captions">
+                {% include 'common/sections/vocal_caption_section.html' with vocal_caption_open=True %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="mt-3">
+    {% firstof request.resolver_match.namespace 'cardiology' as ns %}
+    <a href="{% url ns|add:':patient_list' %}" class="btn btn-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Patient List
+    </a>
+</div>

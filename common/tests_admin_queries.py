@@ -342,6 +342,8 @@ class AdminStructureTests(TestCase):
         The purpose-ordered index removed the app heading that used to tell them
         apart, so a section drawing on several domains groups its rows instead.
         """
+        from common.domains import DOMAIN_CHOICES
+
         staff = User.objects.create_superuser("group-admin", "g@example.invalid", "x")
         request = RequestFactory().get("/admin/")
         request.user = staff
@@ -362,14 +364,15 @@ class AdminStructureTests(TestCase):
         runs = [
             g for i, g in enumerate(per_domain) if i == 0 or per_domain[i - 1] != g
         ]
-        self.assertEqual(runs, ["Maxillo", "Brain", "Laparoscopy", "Urology"])
+        domain_labels = [label for _slug, label in DOMAIN_CHOICES]
+        self.assertEqual(runs, domain_labels)
 
         # Shared models come first, before the per-domain runs.
         access = [entry["group"] for entry in sections["Projects & access"]["models"]]
         self.assertIsNone(access[0])
         self.assertEqual(
             [g for i, g in enumerate(access) if i == 0 or access[i - 1] != g],
-            [None, "Maxillo", "Brain", "Laparoscopy", "Urology"],
+            [None, *domain_labels],
         )
 
         # A section drawing on one app has nothing to disambiguate.
@@ -483,7 +486,8 @@ class JobActionSafetyTests(TestCase):
     def test_retry_runs_once_confirmed(self):
         jobs = [self._job("failed") for _ in range(2)]
         self.send_task.reset_mock()
-        response = self._post("retry_failed_jobs", jobs, confirmed="yes")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._post("retry_failed_jobs", jobs, confirmed="yes")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Job.objects.filter(status="retrying").count(), 2)
         self.assertEqual(self.send_task.call_count, 2)

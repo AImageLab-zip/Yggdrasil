@@ -14,9 +14,14 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["GET"])
 def health_check(request):
     """
-    Simple health check endpoint
+    Health check endpoint
     URL: /api/processing/health/
+
+    Anyone gets ``status`` (and 500 when unhealthy), which is all a monitor needs.
+    Job counts and storage error text are operational detail -- raw storage
+    errors name endpoints and buckets -- and are for staff only.
     """
+    detail = bool(getattr(request.user, "is_staff", False))
     try:
         # Check database connectivity
         pending_count = Job.objects.filter(status="pending").count()
@@ -30,23 +35,21 @@ def health_check(request):
             object_storage_ok = True
         except Exception as e:
             object_storage_error = str(e)
+            logger.warning("Health check: object storage unavailable: %s", e)
 
-        return JsonResponse(
-            {
-                "success": True,
-                "status": "healthy",
-                "pending_jobs": pending_count,
-                "processing_jobs": processing_count,
-                "object_storage_ok": object_storage_ok,
-                "object_storage_error": object_storage_error,
-            }
-        )
+        body = {"success": True, "status": "healthy" if object_storage_ok else "degraded"}
+        if detail:
+            body.update(
+                pending_jobs=pending_count,
+                processing_jobs=processing_count,
+                object_storage_ok=object_storage_ok,
+                object_storage_error=object_storage_error,
+            )
+        return JsonResponse(body)
 
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        import traceback
-
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        return JsonResponse(
-            {"success": False, "status": "unhealthy", "error": str(e)}, status=500
-        )
+        logger.exception("Health check failed: %s", e)
+        body = {"success": False, "status": "unhealthy"}
+        if detail:
+            body["error"] = str(e)
+        return JsonResponse(body, status=500)

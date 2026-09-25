@@ -66,11 +66,10 @@
                                 <button type="button" class="btn btn-sm btn-outline-primary" id="selectAllArtifacts">Select all available</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="deselectAllArtifacts">Deselect all</button>
                             </div>
-                            {% if panoramic_warmup_url %}
+                            {% if warmup_url %}
                             <p class="small text-muted">
-                                <i class="fas fa-circle-info me-1"></i>Panoramic images are reconstructed in
-                                the browser, so patients uploaded before anyone opened them may not have one yet.
-                                <a href="{{ panoramic_warmup_url }}">Generate the missing default panoramics</a>.
+                                <i class="fas fa-circle-info me-1"></i>{{ warmup_message }}
+                                <a href="{{ warmup_url }}">{{ warmup_cta|default:"Generate the missing files" }}</a>.
                             </p>
                             {% endif %}
 

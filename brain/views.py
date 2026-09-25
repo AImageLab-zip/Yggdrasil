@@ -6,30 +6,25 @@ import os
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
-from django.views.decorators.http import require_http_methods, require_POST
-from django.http import JsonResponse, Http404, HttpResponseGone
-from django.utils import timezone
-from django.contrib.auth.views import redirect_to_login
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
-from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
-from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
-from common.export_share import is_share_expired, resolve_share_expiry
-from common.file_access import exists as artifact_exists, streaming_response
+from common.domains import landing_domain_cards, order_projects_for_landing
+from common.export_share import is_share_expired
+from common.file_access import exists as artifact_exists
 from common.modality_config import (
     modality_status,
     rerun_step_labels,
     rerunnable_steps_for_patient,
 )
-from common import export_catalog, export_ui
 from common.project_filters import presence_filter_specs
-from common.models import FileRegistry, Job, Modality, Project, ProjectAccess
+from common.models import FileRegistry, Modality, Project, ProjectAccess
 from common.object_storage import get_object_storage
+from common.permissions import current_project as session_project
 from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
@@ -37,19 +32,11 @@ from common.permissions import (
     user_can_edit_caption,
     user_can_view_caption_content,
     user_can_write_patient_annotations,
-    project_allows_annotation,
+    get_patient_for,
     user_has_project_access,
     user_is_project_admin,
 )
 
-from common.export_processing import (
-    ExportProcessor,
-    start_export_processing,
-    build_shared_download_url as _build_shared_download_url,
-    format_file_size,
-    kill_export_processes as _kill_export_processes,
-    recover_stuck_export as _recover_stuck_export,
-)
 from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 from .export_config import install_brain_export_mappings
 from .file_utils import save_brain_modality_file
@@ -334,7 +321,8 @@ def patient_list(request):
                 status_filters[slug] = value
 
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, request)
+    # UI flag for the project the list is showing; each row is checked on its own project.
+    is_admin = user_is_project_admin(request.user, session_project(request))
     # Asked once per project for the whole page, not per row (common/structuring_context.py).
     structuring_available = structuring_rerun_availability()
     for patient in patients:
@@ -381,7 +369,7 @@ def patient_list(request):
             "structuring_rerun": any(
                 vc.processing_status == "completed" for vc in voice_captions
             ) and structuring_available(patient),
-            "can_delete": bool(is_admin or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, patient.project))),
+            "can_delete": bool(user_is_project_admin(request.user, patient.project) or user_can_delete_single_patient(request.user, patient.folder, patient.project)),
         })
 
     if status_filters:
@@ -657,14 +645,14 @@ def bulk_purge_patients(request):
     if not isinstance(scan_ids, list) or not scan_ids:
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
 
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse(
-            {"success": False, "error": "You do not have permission to permanently delete scans."},
-            status=403,
-        )
-
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
-    found_ids = list(patients.values_list("patient_id", flat=True))
+    # Authorized per patient against its own project; ids the user does not
+    # administer are dropped exactly like ids that do not exist.
+    found_ids = [
+        patient.patient_id
+        for patient in Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
+        if user_is_project_admin(request.user, patient.project)
+    ]
+    patients = Patient.objects.filter(patient_id__in=found_ids)
     if not found_ids:
         return JsonResponse({"success": False, "error": "No valid scans found to delete"}, status=404)
 
@@ -765,16 +753,6 @@ def bulk_rerun_processing(request):
     )
 
 
-@login_required
-def user_profile(request, username=None):
-    """The shared profile page, resolved for this namespace.
-
-    The stub this replaces rendered a 35-line template and ignored `username`, so
-    profile/<username>/ always showed your own.
-    """
-    from maxillo.views.profile import user_profile as shared_user_profile
-
-    return shared_user_profile(request, username=username)
 
 
 
@@ -802,12 +780,14 @@ def add_patients_to_folder(request):
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
     if not folder_id or folder_id in ("root", "all"):
         return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patients = Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
+        if not user_is_project_admin(request.user, patient.project):
+            continue
         patient.folder = folder
         patient.project = folder.project
         patient.save(update_fields=["folder", "project"])
@@ -828,13 +808,13 @@ def remove_patients_from_folder(request):
         return JsonResponse({"success": False, "error": "scan_ids list is required"}, status=400)
     if not folder_id or folder_id in ("root", "all"):
         return JsonResponse({"success": False, "error": "A specific folder_id is required"}, status=400)
-    if not user_is_project_admin(request.user, "brain"):
-        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     folder = get_object_or_404(Folder, id=folder_id)
-    patients = Patient.objects.filter(patient_id__in=scan_ids)
+    if not user_is_project_admin(request.user, folder.project):
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
+    patients = Patient.objects.select_related("project").filter(patient_id__in=scan_ids)
     updated = 0
     for patient in patients:
-        if patient.folder_id != folder.id:
+        if patient.folder_id != folder.id or not user_is_project_admin(request.user, patient.project):
             continue
         # Folders are mandatory: removing a folder falls back to the project's
         # default folder rather than leaving the patient folderless.
@@ -863,7 +843,7 @@ def _file_payload(file_obj):
 
 @login_required
 def patient_viewer_data(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     return JsonResponse({"patient_id": patient.patient_id, "files": [_file_payload(item) for item in patient.files.all()]})
 
 
@@ -875,7 +855,7 @@ patient_teleradiography_data = patient_viewer_data
 
 @login_required
 def patient_volume_data(request, patient_id, modality_slug):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     file_obj = patient.files.filter(modality__slug=modality_slug).order_by("-created_at").first()
     if not file_obj:
         return JsonResponse({"error": "File not found"}, status=404)
@@ -884,11 +864,13 @@ def patient_volume_data(request, patient_id, modality_slug):
 
 @login_required
 def get_nifti_metadata(request, patient_id):
+    get_patient_for(request.user, Patient, patient_id, "read")
     return JsonResponse({"metadata": {}})
 
 
 @login_required
 def update_nifti_metadata(request, patient_id):
+    get_patient_for(request.user, Patient, patient_id, "admin")
     return JsonResponse({"ok": True})
 
 

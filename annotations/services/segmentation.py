@@ -165,14 +165,12 @@ def save_tooth_segmentation(
     )
 
 
-#: ``AnnotationSet``'s patient FK for each domain. Tooth segmentation is maxillo-only
-#: today, but resolving it from the model rather than hardcoding ``patient`` is what keeps
-#: this from being the line that breaks when a second domain grows photographs.
-_DOMAIN_FIELDS = {"maxillo": "patient", "brain": "brain_patient"}
-
-
 def _domain_field(patient):
-    return _DOMAIN_FIELDS.get(patient._meta.app_label, "laparoscopy_patient")
+    """``AnnotationSet``'s patient FK for the patient's domain, from the registry."""
+    from common.domains import fk_fields_for
+    from common.uploads import domain_for_patient
+
+    return fk_fields_for(domain_for_patient(patient))[0]
 
 
 def _normalized(teeth):

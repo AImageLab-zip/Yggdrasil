@@ -11,7 +11,7 @@ First-time setup for running Yggdrasil locally with Docker Compose.
 
 Two infrastructure pieces sit outside the Django app's own code and are easy to overlook:
 
-- **Redis** — started as the `redis` service in [docker-compose.yml](../docker-compose.yml) (so `docker compose up` brings it up for you), but it isn't just an internal cache: it's the Celery broker that external distributed runners connect to directly to pick up and report on jobs (see [docs/runners.md](runners.md)). If you change `REDIS_PASSWORD` or `REDIS_EXTERNAL_PORT`, runner nodes need the matching values too.
+- **Redis** — started as the `redis` service in [docker-compose.yml](../docker-compose.yml) (so `docker compose up` brings it up for you), but it isn't just an internal cache: it's the Celery broker the runner worker consumes jobs from (see [docs/runners.md](runners.md)). It is published on loopback only; keep it that way. If you change `REDIS_PASSWORD`, update `CELERY_BROKER_URL` in `.env.worker` too.
 - **Garage** (or any S3-compatible object store, e.g. MinIO) — **not** part of `docker-compose.yml` at all. It's a fully external service that must already be running and reachable from the `yggdrasil-web-$DOCKER_SUFFIX` container at `OBJECT_STORAGE_ENDPOINT_URL` (`.env.example` defaults to `http://garage:3900`). Make sure that container can actually resolve/reach the `garage` host — either join the same Docker network Garage is on, or point `OBJECT_STORAGE_ENDPOINT_URL` at a routable address — otherwise uploads/exports will fail with object storage errors (check `/api/processing/health/`, see [docs/running.md](running.md)).
 
 ## 1. Pick a `DOCKER_SUFFIX`

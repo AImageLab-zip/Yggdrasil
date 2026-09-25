@@ -1,1 +1,1 @@
-[Yggdrasil] You have been invited!
+{% autoescape off %}Your invitation to Yggdrasil{% endautoescape %}

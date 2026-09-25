@@ -845,22 +845,36 @@ function initializeStatusButtonStates() {
 }
 
 function updateButtonTitle(button, filterKey, value) {
+    let newTitle;
     if (filterKey.startsWith('status_')) {
         // data-label carries the modality name: the buttons are icon-only, so
         // textContent is empty and can't supply it.
         const name = button.dataset.label || button.textContent.trim()
             || filterKey.replace('status_', '').toUpperCase();
         const labels = { '': `All ${name} (no filter)`, 'processed': `${name} processed`, 'processing': `${name} processing`, 'failed': `${name} failed` };
-        button.title = labels[value] || labels[''];
+        newTitle = labels[value] || labels[''];
     } else if (filterKey.startsWith('presence_')) {
         const name = button.dataset.label || 'Data';
-        button.title = value === 'yes' ? `Has ${name}` : `All ${name} (no filter)`;
+        newTitle = value === 'yes' ? `Has ${name}` : `All ${name} (no filter)`;
     } else {
         const filterLabels = {
             'reports': { '': 'All Reports (no filter)', 'yes': 'Has Reports' }
         };
         const labels = filterLabels[filterKey];
-        button.title = (labels && (value ? labels[value] : labels[''])) || '';
+        newTitle = (labels && (value ? labels[value] : labels[''])) || '';
+    }
+
+    // ygg-ui.js's Tooltip component strips the `title` attribute at page load
+    // (into `data-ygg-tip-text`) specifically so a stray native browser tooltip
+    // never fires alongside its own custom one. Writing `.title` here put that
+    // attribute right back, so re-hovering a filter button after a click could
+    // trigger the OS-native tooltip on top of (or instead of) the custom one --
+    // one JS doesn't control and can get stuck on screen, showing stale text,
+    // independent of the mouseleave/blur handlers that clear the custom kind.
+    if (button.hasAttribute('data-ygg-tip-text')) {
+        button.setAttribute('data-ygg-tip-text', newTitle);
+    } else {
+        button.title = newTitle;
     }
 }
 

@@ -75,7 +75,7 @@ from .admin import rerun_processing, bulk_rerun_processing
 from .metadata import get_nifti_metadata, update_nifti_metadata
 
 # Profile
-from .profile import user_profile
+from common.domain_views.profile import user_profile
 
 # Export
 from common.domain_views.export import (
@@ -131,6 +131,10 @@ __all__ = [
     'upload_text_caption',
     'edit_voice_caption_transcription',
     'update_voice_caption_modality',
+    # Report structuring (common/domain_views/caption_reports.py)
+    'structure_caption',
+    'caption_report',
+    'structurable_captions',
     # Deletion
     'delete_patient',
     'bulk_delete_patients',

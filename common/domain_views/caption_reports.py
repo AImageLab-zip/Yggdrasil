@@ -34,7 +34,11 @@ from common import caption_structuring, llm, llm_tasks
 from common.caption_structuring import StructuringRefused
 from common.domain_models import get_domain_models
 from common.external_config import llm_service
-from common.permissions import project_allows_annotation, user_can_edit_caption
+from common.permissions import (
+    get_patient_for,
+    project_allows_annotation,
+    user_can_edit_caption,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +135,9 @@ def _streaming_response(generator):
 def _resolve(request, patient_id, caption_id):
     """The patient and caption, after every check. Raises ``StructuringRefused``."""
     domain_models = get_domain_models(request)
-    patient = get_object_or_404(domain_models["Patient"], patient_id=patient_id)
+    # Authorized against the patient's own project: another project's admin gets a 404,
+    # not a confirmation that the id exists (tests_cross_project_matrix).
+    patient = get_patient_for(request.user, domain_models["Patient"], patient_id, "read")
     voice_caption = get_object_or_404(
         domain_models["VoiceCaption"], id=caption_id, patient=patient
     )
@@ -327,7 +333,7 @@ def structurable_captions(request, patient_id):
     per caption this returns.
     """
     domain_models = get_domain_models(request)
-    patient = get_object_or_404(domain_models["Patient"], patient_id=patient_id)
+    patient = get_patient_for(request.user, domain_models["Patient"], patient_id, "read")
     task = llm_tasks.CAPTION_TO_TEMPLATE
     try:
         if not project_allows_annotation(patient, "voice_caption"):

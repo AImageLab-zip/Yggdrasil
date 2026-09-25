@@ -145,10 +145,8 @@ sftp-config.json
 *.sublime-workspace
 *.sublime-project
 
-# .dockerignore was ignored before this cleanup and stays ignored, so the
-# ignored set is unchanged by it. It is arguably a repo file that should be
-# tracked; that is a separate decision.
-.dockerignore
+# .dockerignore is tracked on purpose: without it `COPY . /app` baked .env,
+# .env.worker, secrets/ and SQL dumps into every image.
 
 # --- OS -------------------------------------------------------------------
 .DS_Store
@@ -167,3 +165,9 @@ Thumbs.db
 /iop-compass/
 # Weight files uploaded to algo/iop-compass/weights/ on the cluster.
 /IOP_weights/
+
+# Written by scripts/deploy_prod.sh
+.deployed-ref
+
+# lint-imports cache
+.import_linter_cache/

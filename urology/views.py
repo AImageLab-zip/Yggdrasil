@@ -3,37 +3,24 @@
 import json as _json
 import logging
 import os
-from pathlib import Path
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import redirect_to_login
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q
-from django.http import Http404, HttpResponseGone, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import NoReverseMatch, reverse
-from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from django.middleware.csrf import get_token
 
 from annotations.models import AnnotationSet
 from annotations.constants import PayloadFormat
-from common import export_catalog, export_ui
-from common.activity import log_activity, record_recent
-from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
-from common.export_processing import (
-    ExportProcessor,
-    build_shared_download_url as _build_shared_download_url,
-    format_file_size,
-    kill_export_processes as _kill_export_processes,
-    recover_stuck_export as _recover_stuck_export,
-    start_export_processing,
-)
-from common.export_share import is_share_expired, resolve_share_expiry
-from common.file_access import exists as artifact_exists, streaming_response
+from common.activity import record_recent
+from common.export_share import is_share_expired
+from common.file_access import exists as artifact_exists
 from common.modality_config import (
     modality_status,
     present_modality_slugs,
@@ -44,15 +31,14 @@ from common.models import FileRegistry, Modality, Project, ProjectAccess
 from common.rerun import bulk_rerun_steps, describe, rerun_steps_for_patient
 from common.object_storage import get_object_storage
 from common.annotation_lock import annotation_lock_reasons, lock_message
+from common.permissions import current_project as session_project
 from common.permissions import (
+    get_patient_for,
     filter_folders_for_user,
     filter_patients_for_user,
-    project_allows_annotation,
-    user_can_delete_caption,
     user_can_delete_single_patient,
     user_can_edit_caption,
     user_can_view_caption_content,
-    user_can_write_annotations,
     user_can_write_patient_annotations,
     user_has_project_access,
     user_is_project_admin,
@@ -67,7 +53,7 @@ from .export_config import install_urology_export_mappings
 from .file_utils import save_urology_modality_file
 from .forms import PatientForm, PatientManagementForm, PatientUploadForm
 from .helpers import redirect_with_namespace, render_with_fallback
-from .models import Export, Folder, Patient, Tag, VoiceCaption
+from .models import Export, Folder, Patient, Tag
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +158,8 @@ def patient_list(request):
                 status_filters[slug] = value
 
     patients_with_status = []
-    is_admin = user_is_project_admin(request.user, request)
+    # UI flag for the project the list is showing; each row is checked on its own project.
+    is_admin = user_is_project_admin(request.user, session_project(request))
     # Asked once per project for the whole page, not per row (common/structuring_context.py).
     structuring_available = structuring_rerun_availability()
     for patient in patients:
@@ -978,16 +965,6 @@ def bulk_rerun_processing(request):
     )
 
 
-@login_required
-def user_profile(request, username=None):
-    """The shared profile page, resolved for this namespace.
-
-    The stub this replaces rendered a 35-line template and ignored `username`, so
-    profile/<username>/ always showed your own.
-    """
-    from maxillo.views.profile import user_profile as shared_user_profile
-
-    return shared_user_profile(request, username=username)
 
 
 
@@ -1351,14 +1328,7 @@ def _bulk_urology_response(request, results, error=None):
 @login_required
 @require_POST
 def add_raw_file(request, patient_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    project = getattr(patient, "project", None) or "urology"
-    if not (
-        user_is_project_admin(request.user, project)
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     reasons = annotation_lock_reasons(patient)
     if reasons:
@@ -1394,14 +1364,7 @@ def add_raw_file(request, patient_id):
 @login_required
 @require_POST
 def delete_raw_file(request, patient_id, file_id):
-    patient = get_object_or_404(Patient, patient_id=patient_id)
-    project = getattr(patient, "project", None) or "urology"
-    if not (
-        user_is_project_admin(request.user, project)
-        or (patient.folder and user_can_write_annotations(request.user, patient.folder, request))
-        or user_can_write_patient_annotations(request.user, patient)
-    ):
-        return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
 
     reasons = annotation_lock_reasons(patient)
     if reasons:

@@ -22,6 +22,7 @@ from django.db.models import Count
 from django.utils.html import format_html
 
 from common.admin import ReadOnlyAdmin
+from common.domains import fk_fields_for
 
 from annotations.models import (
     AnnotationPayload,
@@ -120,13 +121,13 @@ class AnnotationSetAdmin(ReadOnlyAdmin):
 
     @admin.display(description="Patient")
     def patient_ref(self, obj):
-        """The patient, without asking which of three FK columns holds it.
+        """The patient, without asking which domain FK column holds it.
 
         Reads the stored ids rather than calling ``get_patient()``: the
         changelist would otherwise be one extra query per row for a label that
         is just a number.
         """
-        pk = obj.patient_id or obj.brain_patient_id or obj.laparoscopy_patient_id
+        pk = getattr(obj, f"{fk_fields_for(obj.domain)[0]}_id", None)
         return f"{obj.domain}#{pk}" if pk else "—"
 
     @admin.display(description="Revisions", ordering="_revisions")

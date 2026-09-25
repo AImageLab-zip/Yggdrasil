@@ -31,7 +31,12 @@ from common.models import (
     ReportTemplate,
     ReportTemplateField,
 )
-from maxillo.models import Patient, VoiceCaption
+from django.apps import apps
+
+# Through the registry, not an import: common/ may not import a domain app, tests
+# included (lint-imports, pyproject.toml).
+Patient = apps.get_model("maxillo", "Patient")
+VoiceCaption = apps.get_model("maxillo", "VoiceCaption")
 
 
 DICTATION = (
@@ -587,7 +592,8 @@ class UrologyModalityTests(TestCase):
     """Urology files templates under bare slugs while captions carry the prefix."""
 
     def test_a_prefixed_caption_modality_finds_its_template(self):
-        from urology.models import Patient as UrologyPatient, VoiceCaption as UrologyCaption
+        UrologyPatient = apps.get_model("urology", "Patient")
+        UrologyCaption = apps.get_model("urology", "VoiceCaption")
 
         project = Project.objects.create(name="Uro", slug="uro", domain="urology")
         user = User.objects.create_user(username="uro", password="x")

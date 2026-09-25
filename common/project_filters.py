@@ -50,6 +50,13 @@ PRESENCE_FILTERS = [
         "label": "Tooth segmentation",
         "icon": "fas fa-draw-polygon",
     },
+    {
+        "key": "presence_ecg_classification",
+        "param": "has_ecg_classification",
+        "method": "ecg_classification",
+        "label": "Classified",
+        "icon": "fas fa-heartbeat",
+    },
 ]
 
 

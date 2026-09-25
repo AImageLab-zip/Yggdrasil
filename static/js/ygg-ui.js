@@ -173,6 +173,12 @@
         el.removeAttribute('title');
 
         function place() {
+            // mouseenter and focus both call this, and a click fires both on
+            // most browsers (hover, then click-to-focus) -- without this guard
+            // the second call overwrites `tip` before the first one is ever
+            // removed, orphaning it in document.body with no reference left to
+            // clean it up. It sits there, showing stale text, until reload.
+            if (tip) return;
             tip = document.createElement('div');
             tip.className = 'ygg-tooltip';
             tip.textContent = el.getAttribute('data-ygg-tip-text');

@@ -9,11 +9,11 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Permissive baseline on purpose: syntax errors and undefined names only,
-# plus the bandit-derived security rules ("S").
+# Permissive baseline on purpose: syntax errors, undefined names and unused
+# imports, plus the bandit-derived security rules ("S").
 # The codebase mixes tabs/spaces and predates any formatter — no style
-# enforcement here. Widening this ruleset is a separate, deliberate PR.
-select = ["E9", "F63", "F7", "F82", "S"]
+# enforcement here. Widen one rule at a time, each with its cleanup.
+select = ["E9", "F63", "F7", "F82", "F401", "S"]
 # S110/S112 (try-except-pass/continue) are a pervasive legacy pattern here,
 # not a security signal; auditing them is style work, not release work.
 ignore = ["S110", "S112"]
@@ -37,3 +37,202 @@ ignore = ["S110", "S112"]
 # Magic Tool worker proxy: target URL comes from settings (WORKER_*_URL),
 # not from the request.
 "laparoscopy/views.py" = ["S310"]
+
+# Import direction (CLAUDE.md, docs/architecture.md): domain apps -> annotations ->
+# common, and domain apps do not import each other. Checked in CI by `lint-imports`.
+[tool.importlinter]
+root_packages = ["common", "annotations", "maxillo", "brain", "laparoscopy", "urology", "cardiology"]
+
+[[tool.importlinter.contracts]]
+id = "layers"
+name = "Domain apps -> annotations -> common"
+type = "layers"
+layers = ["maxillo : brain : laparoscopy : urology : cardiology", "annotations", "common"]
+ignore_imports = [
+    # Existing violations, listed so that only NEW ones fail CI. Remove a line when
+    # its import is fixed; never add one without a maintainer's sign-off.
+    # -- application code
+    "annotations.management.commands.annotations_crosscheck -> brain.models",
+    "annotations.services.video -> laparoscopy.models",
+    "annotations.views -> maxillo.ios_meshes",
+    "common.admin -> annotations.models",
+    "common.annotation_lock -> annotations.models",
+    "common.annotation_lock -> maxillo.models",
+    "common.deletion -> annotations.models",
+    "common.domain_views.export -> annotations.queries",
+    "common.domain_views.export -> laparoscopy.export_processor",
+    "common.domain_views.export -> maxillo.models",
+    "common.export_catalog -> annotations.queries",
+    "common.export_processing -> annotations.services.ios_landmarks",
+    "common.export_processing -> annotations.services.segmentation",
+    "common.export_processing -> maxillo.models",
+    "common.management.commands.seed_dev -> brain.models",
+    "common.management.commands.seed_dev -> laparoscopy.models",
+    "common.management.commands.seed_dev -> maxillo.models",
+    "common.management.commands.seed_dev -> urology.models",
+    "laparoscopy.file_utils -> maxillo.file_utils",
+    "maxillo.file_utils -> laparoscopy.video_probe",
+    "maxillo.management.commands.run_export -> laparoscopy.export_processor",
+    "maxillo.views.domain -> laparoscopy.forms",
+    "maxillo.views.patient_detail -> laparoscopy.video_probe",
+    "maxillo.views.patient_upload -> laparoscopy.file_utils",
+    "annotations.management.commands.annotations_convert_legacy -> brain.models",
+    "annotations.management.commands.annotations_convert_legacy -> maxillo.models",
+    "annotations.management.commands.annotations_crosscheck -> laparoscopy.models",
+    "annotations.management.commands.annotations_crosscheck -> maxillo.models",
+    "annotations.management.commands.annotations_convert_legacy -> laparoscopy.models",
+    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.mask_raster",
+    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.models",
+    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.video_probe",
+    # -- tests (fixtures that build rows in several apps)
+    "annotations.tests_apply -> maxillo.models",
+    "annotations.tests_commands -> laparoscopy.models",
+    "annotations.tests_commands -> maxillo.models",
+    "annotations.tests_ios_landmarks -> maxillo.file_utils",
+    "annotations.tests_ios_landmarks -> maxillo.models",
+    "annotations.tests_model_constraints -> maxillo.models",
+    "annotations.tests_multi_target -> maxillo.models",
+    "annotations.tests_panoramic -> maxillo.models",
+    "annotations.tests_roi_stats_command -> maxillo.models",
+    "annotations.tests_serializers -> maxillo.models",
+    "annotations.tests_services -> maxillo.models",
+    "annotations.tests_tooth_segmentation -> maxillo.models",
+    "annotations.tests_video -> laparoscopy.models",
+    "annotations.tests_views_measurements -> maxillo.models",
+    "common.tests -> brain.models",
+    "common.tests -> laparoscopy.models",
+    "common.tests -> maxillo.models",
+    "common.tests -> urology.models",
+    "common.tests_admin_domain_scope -> brain.admin",
+    "common.tests_admin_domain_scope -> brain.models",
+    "common.tests_admin_domain_scope -> laparoscopy.admin",
+    "common.tests_admin_domain_scope -> laparoscopy.models",
+    "common.tests_admin_domain_scope -> maxillo.admin",
+    "common.tests_admin_domain_scope -> maxillo.models",
+    "common.tests_admin_queries -> annotations.models",
+    "common.tests_admin_queries -> laparoscopy.models",
+    "common.tests_admin_queries -> maxillo.admin",
+    "common.tests_admin_queries -> maxillo.models",
+    "common.tests_export_prefix -> maxillo.file_utils",
+    "common.tests_export_prefix -> maxillo.models",
+    "common.tests_file_response_safety -> maxillo.file_utils",
+    "common.tests_file_response_safety -> maxillo.models",
+    "common.tests_file_serve_acl -> brain.models",
+    "common.tests_file_serve_acl -> laparoscopy.models",
+    "common.tests_file_serve_acl -> maxillo.models",
+    "common.tests_file_serve_bundle -> brain.models",
+    "common.tests_file_serve_bundle -> maxillo.models",
+    "common.tests_folder_deletion -> maxillo.models",
+    "common.tests_live_transcription -> maxillo.models",
+    "common.tests_modality_config -> brain.models",
+    "common.tests_modality_config -> maxillo.models",
+    "common.tests_project_admin_lifecycle -> annotations.models",
+    "common.tests_project_admin_lifecycle -> maxillo.admin",
+    "common.tests_project_admin_lifecycle -> maxillo.models",
+    "common.tests_raw_data_lock -> annotations.models",
+    "common.tests_raw_data_lock -> brain.models",
+    "common.tests_raw_data_lock -> laparoscopy.admin",
+    "common.tests_raw_data_lock -> laparoscopy.models",
+    "common.tests_raw_data_lock -> maxillo.models",
+    "common.tests_runner -> maxillo.runner_api_service",
+    "common.tests_share_links -> maxillo.models",
+    "laparoscopy.tests -> maxillo.models",
+    "maxillo.tests_export_share -> laparoscopy.models",
+]
+
+[[tool.importlinter.contracts]]
+id = "domains-independent"
+name = "Domain apps do not import each other"
+type = "independence"
+modules = ["maxillo", "brain", "laparoscopy", "urology"]
+ignore_imports = [
+    # Existing violations, listed so that only NEW ones fail CI. Remove a line when
+    # its import is fixed; never add one without a maintainer's sign-off.
+    # -- application code
+    "annotations.management.commands.annotations_crosscheck -> brain.models",
+    "annotations.services.video -> laparoscopy.models",
+    "annotations.views -> maxillo.ios_meshes",
+    "common.admin -> annotations.models",
+    "common.annotation_lock -> annotations.models",
+    "common.annotation_lock -> maxillo.models",
+    "common.deletion -> annotations.models",
+    "common.domain_views.export -> annotations.queries",
+    "common.domain_views.export -> laparoscopy.export_processor",
+    "common.domain_views.export -> maxillo.models",
+    "common.export_catalog -> annotations.queries",
+    "common.export_processing -> annotations.services.ios_landmarks",
+    "common.export_processing -> annotations.services.segmentation",
+    "common.export_processing -> maxillo.models",
+    "common.management.commands.seed_dev -> brain.models",
+    "common.management.commands.seed_dev -> laparoscopy.models",
+    "common.management.commands.seed_dev -> maxillo.models",
+    "common.management.commands.seed_dev -> urology.models",
+    "laparoscopy.file_utils -> maxillo.file_utils",
+    "maxillo.file_utils -> laparoscopy.video_probe",
+    "maxillo.management.commands.run_export -> laparoscopy.export_processor",
+    "maxillo.views.domain -> laparoscopy.forms",
+    "maxillo.views.patient_detail -> laparoscopy.video_probe",
+    "maxillo.views.patient_upload -> laparoscopy.file_utils",
+    "annotations.management.commands.annotations_convert_legacy -> brain.models",
+    "annotations.management.commands.annotations_convert_legacy -> maxillo.models",
+    "annotations.management.commands.annotations_crosscheck -> laparoscopy.models",
+    "annotations.management.commands.annotations_crosscheck -> maxillo.models",
+    "annotations.management.commands.annotations_convert_legacy -> laparoscopy.models",
+    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.mask_raster",
+    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.models",
+    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.video_probe",
+    # -- tests (fixtures that build rows in several apps)
+    "annotations.tests_apply -> maxillo.models",
+    "annotations.tests_commands -> laparoscopy.models",
+    "annotations.tests_commands -> maxillo.models",
+    "annotations.tests_ios_landmarks -> maxillo.file_utils",
+    "annotations.tests_ios_landmarks -> maxillo.models",
+    "annotations.tests_model_constraints -> maxillo.models",
+    "annotations.tests_multi_target -> maxillo.models",
+    "annotations.tests_panoramic -> maxillo.models",
+    "annotations.tests_roi_stats_command -> maxillo.models",
+    "annotations.tests_serializers -> maxillo.models",
+    "annotations.tests_services -> maxillo.models",
+    "annotations.tests_tooth_segmentation -> maxillo.models",
+    "annotations.tests_video -> laparoscopy.models",
+    "annotations.tests_views_measurements -> maxillo.models",
+    "common.tests -> brain.models",
+    "common.tests -> laparoscopy.models",
+    "common.tests -> maxillo.models",
+    "common.tests -> urology.models",
+    "common.tests_admin_domain_scope -> brain.admin",
+    "common.tests_admin_domain_scope -> brain.models",
+    "common.tests_admin_domain_scope -> laparoscopy.admin",
+    "common.tests_admin_domain_scope -> laparoscopy.models",
+    "common.tests_admin_domain_scope -> maxillo.admin",
+    "common.tests_admin_domain_scope -> maxillo.models",
+    "common.tests_admin_queries -> annotations.models",
+    "common.tests_admin_queries -> laparoscopy.models",
+    "common.tests_admin_queries -> maxillo.admin",
+    "common.tests_admin_queries -> maxillo.models",
+    "common.tests_export_prefix -> maxillo.file_utils",
+    "common.tests_export_prefix -> maxillo.models",
+    "common.tests_file_response_safety -> maxillo.file_utils",
+    "common.tests_file_response_safety -> maxillo.models",
+    "common.tests_file_serve_acl -> brain.models",
+    "common.tests_file_serve_acl -> laparoscopy.models",
+    "common.tests_file_serve_acl -> maxillo.models",
+    "common.tests_file_serve_bundle -> brain.models",
+    "common.tests_file_serve_bundle -> maxillo.models",
+    "common.tests_folder_deletion -> maxillo.models",
+    "common.tests_live_transcription -> maxillo.models",
+    "common.tests_modality_config -> brain.models",
+    "common.tests_modality_config -> maxillo.models",
+    "common.tests_project_admin_lifecycle -> annotations.models",
+    "common.tests_project_admin_lifecycle -> maxillo.admin",
+    "common.tests_project_admin_lifecycle -> maxillo.models",
+    "common.tests_raw_data_lock -> annotations.models",
+    "common.tests_raw_data_lock -> brain.models",
+    "common.tests_raw_data_lock -> laparoscopy.admin",
+    "common.tests_raw_data_lock -> laparoscopy.models",
+    "common.tests_raw_data_lock -> maxillo.models",
+    "common.tests_runner -> maxillo.runner_api_service",
+    "common.tests_share_links -> maxillo.models",
+    "laparoscopy.tests -> maxillo.models",
+    "maxillo.tests_export_share -> laparoscopy.models",
+]

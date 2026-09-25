@@ -15,7 +15,7 @@ Three things are worth proving here and the rest follows from them.
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from annotations import services
 from annotations.constants import (
@@ -551,3 +551,23 @@ class ResourceKindTests(ServiceTestCase):
         self.assertEqual(as_file.kind, ResourceKind.FILE)
         self.assertEqual(as_volume.kind, ResourceKind.LOGICAL_VOLUME)
         self.assertNotEqual(as_file.pk, as_volume.pk)
+
+
+class PatientFkResolutionTests(SimpleTestCase):
+    """Services pick ``AnnotationSet``'s patient FK from the registry, for every domain.
+
+    A private map covering only maxillo and brain used to send every other domain to
+    ``laparoscopy_patient``, so a urology patient's set was written under the wrong FK.
+    """
+
+    def test_every_domain_resolves_to_its_own_patient_fk(self):
+        from django.apps import apps
+
+        from annotations.services import ios_landmarks, segmentation
+        from common.domains import DOMAINS, fk_fields_for
+
+        for domain in sorted(DOMAINS):
+            patient = apps.get_model(domain, "Patient")()
+            for module in (segmentation, ios_landmarks):
+                with self.subTest(domain=domain, module=module.__name__):
+                    self.assertEqual(module._domain_field(patient), fk_fields_for(domain)[0])

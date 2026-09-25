@@ -1,5 +1,5 @@
 """Patient detail and management views."""
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
@@ -25,6 +25,7 @@ from common.permissions import (
 from .domain import get_domain_forms, get_domain_models, get_namespace
 from .panoramic_state import current_browser_panoramic
 from .helpers import redirect_with_namespace, render_with_fallback
+from common.view_helpers import frameable_by_same_origin
 from ..file_utils import get_file_type_for_modality
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,7 @@ def _call_patient_flag(patient, name):
     return bool(value() if callable(value) else value)
 
 @login_required
+@frameable_by_same_origin
 def patient_detail(request, patient_id):
     domain_models = get_domain_models(request)
     domain_forms = get_domain_forms(request)

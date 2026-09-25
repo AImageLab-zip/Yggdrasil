@@ -25,7 +25,11 @@ from common.models import FileRegistry, Project
 from common.export_share import is_share_expired, resolve_share_expiry
 from common.file_access import exists as artifact_exists, streaming_response
 from common.object_storage import get_object_storage
-from common.permissions import filter_folders_for_user, user_can_create_export, user_is_project_admin
+from common.permissions import (
+    filter_folders_for_user,
+    user_can_create_export,
+    user_is_project_admin,
+)
 from common.domain_models import get_domain_models, get_namespace
 from common.view_helpers import redirect_with_namespace
 from common.export_processing import (
@@ -36,6 +40,7 @@ from common.export_processing import (
 )
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("yggdrasil.audit")
 
 
 def _current_project(request):
@@ -84,6 +89,35 @@ def is_admin(user):
     instead. This stays only for the share-expiry "never expires" privilege.
     """
     return user.is_staff or user.profile.is_admin()
+
+
+def _export_project(request, export):
+    """The project an export was made from, or ``None`` if it cannot be told.
+
+    Recorded in ``query_params["project_id"]``; laparoscopy exports record only
+    their folders, whose project answers instead.
+    """
+    params = export.query_params or {}
+    project_id = params.get("project_id")
+    if project_id:
+        return Project.objects.filter(id=project_id).first()
+    folder_ids = params.get("folder_ids") or []
+    if folder_ids:
+        FolderModel = get_domain_models(request)["Folder"]
+        folder = FolderModel.objects.filter(id__in=folder_ids).select_related("project").first()
+        return getattr(folder, "project", None)
+    return None
+
+
+def _can_publish_share(request, export):
+    """Link sharing beyond the owner is a project-admin decision.
+
+    An export ZIP carries a whole selection of patients; an annotator who could
+    export could also hand it to anyone with a link.
+    """
+    return request.user.is_staff or user_is_project_admin(
+        request.user, _export_project(request, export)
+    )
 
 
 def _require_own_export(request, export_id, *, json_response=False):
@@ -197,7 +231,7 @@ def _can_use_exports(request):
     access is to a sub-folder was previously refused outright -- and narrows to
     the selected project when there is one.
     """
-    if user_is_project_admin(request.user, request):
+    if user_is_project_admin(request.user, _current_project(request)):
         return True
     FolderModel = get_domain_models(request)["Folder"]
     folders = FolderModel.objects.all()
@@ -205,7 +239,7 @@ def _can_use_exports(request):
     if project_id:
         folders = folders.filter(project_id=project_id)
     for folder in folders.only("id", "project"):
-        if user_can_create_export(request.user, folder, request):
+        if user_can_create_export(request.user, folder):
             return True
     return False
 
@@ -297,7 +331,7 @@ def export_new(request):
             messages.error(request, "Select folders from the current project only.")
             return redirect_with_namespace(request, "export_new")
         for folder in selected_folders:
-            if not user_can_create_export(request.user, folder, request):
+            if not user_can_create_export(request.user, folder):
                 messages.error(request, "You do not have permission to export from selected folders.")
                 return redirect_with_namespace(request, "export_new")
 
@@ -358,18 +392,28 @@ def export_new(request):
     patients_in_scope = PatientModel.objects.filter(folder_id__in=visible_folder_ids)
     modalities = export_ui.project_modalities(project)
 
-    # Panoramics are reconstructed in the browser, so already-uploaded patients
-    # may have none to export yet. Point administrators at the batch page rather
-    # than leaving an unexplained zero next to the panoramic artifacts.
+    # Some artifacts are generated in the browser the first time somebody opens the
+    # patient, so already-uploaded patients may have none to export yet. Point
+    # administrators at the domain's batch page rather than leaving an unexplained
+    # zero next to them.
+    warmup = next(
+        (
+            artifact.warmup
+            for artifact in export_catalog.artifacts_for_project(
+                domain, [m.slug for m in modalities]
+            )
+            if artifact.warmup
+        ),
+        None,
+    )
     warmup_url = None
-    if any(m.slug == "cbct" for m in modalities):
-        if user_is_project_admin(request.user, project):
-            from django.urls import NoReverseMatch, reverse
+    if warmup and user_is_project_admin(request.user, project):
+        from django.urls import NoReverseMatch, reverse
 
-            try:
-                warmup_url = reverse(f"{domain}:panoramic_warmup")
-            except NoReverseMatch:
-                warmup_url = None
+        try:
+            warmup_url = reverse(f"{domain}:{warmup[0]}")
+        except NoReverseMatch:
+            warmup_url = None
 
     return render(
         request,
@@ -378,7 +422,9 @@ def export_new(request):
             "project": project,
             "folders": folders,
             "modalities": modalities,
-            "panoramic_warmup_url": warmup_url,
+            "warmup_url": warmup_url,
+            "warmup_message": warmup[1] if warmup else "",
+            "warmup_cta": warmup[2] if warmup else "",
             "artifact_groups": export_ui.artifact_groups(
                 domain, project, patients_in_scope
             ),
@@ -541,6 +587,11 @@ def _preview_totals(domain, patients, artifacts):
             count = tooth_segmentation_image_count(patients)
             file_count += count
             total_size += count * 2048
+        elif export_catalog.domain_collector(artifact.collector):
+            _produce, count_documents = export_catalog.domain_collector(artifact.collector)
+            count, size = count_documents(patients)
+            file_count += count
+            total_size += size
 
     return file_count, total_size
 
@@ -669,6 +720,12 @@ def export_share_update(request, export_id):
         else regenerate_raw
     )
 
+    if share_mode != "private" and not _can_publish_share(request, export):
+        return JsonResponse(
+            {"success": False, "error": "Only project admins can share export links"},
+            status=403,
+        )
+
     export.share_mode = share_mode
     update_fields = ["share_mode"]
 
@@ -687,11 +744,12 @@ def export_share_update(request, export_id):
             }
         )
 
-    # This endpoint is already gated on staff/project-admin (is_admin).
+    # A link anyone can open always expires; "never" is left to staff and
+    # admins, and only for links that still require a login.
     expires_at, expiry_error = resolve_share_expiry(
         data.get("expires_in_days"),
         current=export.expires_at,
-        can_set_never=is_admin(request.user),
+        can_set_never=share_mode == "authenticated" and is_admin(request.user),
     )
     if expiry_error:
         return JsonResponse({"success": False, "error": expiry_error}, status=400)
@@ -756,6 +814,14 @@ def export_shared_download(request, share_token):
     if export.share_mode == "authenticated" and not request.user.is_authenticated:
         return redirect_to_login(request.get_full_path())
 
+    audit_logger.info(
+        "shared export download: export=%s domain=%s mode=%s user=%s ip=%s",
+        export.id,
+        get_namespace(request),
+        export.share_mode,
+        getattr(request.user, "pk", None),
+        request.META.get("REMOTE_ADDR", ""),
+    )
     try:
         filename = (
             os.path.basename((export.file_path or "").rstrip("/"))

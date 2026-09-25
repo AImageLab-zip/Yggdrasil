@@ -7,12 +7,12 @@ import json
 import os
 import logging
 import traceback
-from common.models import Project, Modality, ProjectAccess, FileRegistry
+from common.models import Project, ProjectAccess, FileRegistry
 from common.permissions import (
-    PermissionChecker,
     filter_folders_for_user,
     filter_patients_for_user,
-    user_can_read_folder,
+    user_can_read_patient,
+    user_has_project_access,
     user_can_write_annotations,
     user_is_project_admin,
 )
@@ -45,6 +45,20 @@ def _project_models(project_slug):
 def _upload_form_class(project_slug):
     from ..forms import PatientUploadForm
     return PatientUploadForm
+
+def _accessible_project(request, project_slug):
+    """``(project, None)`` for a project the user may read, else ``(None, response)``.
+
+    404 for a project the user holds no access to, so other projects' slugs are
+    not confirmed to exist.
+    """
+    if not request.user.is_authenticated:
+        return None, JsonResponse({'error': 'Authentication required'}, status=401)
+    project = Project.objects.filter(slug=project_slug).first()
+    if project is None or not user_has_project_access(request.user, project):
+        return None, JsonResponse({'error': 'Project not found'}, status=404)
+    return project, None
+
 
 @require_http_methods(["POST"])
 def project_upload_api(request, project_slug):
@@ -99,7 +113,7 @@ def project_upload_api(request, project_slug):
         patient.save()
         
         # Infer modalities from uploaded file field names using helper
-        from ..modality_helpers import infer_modality_from_field_name, get_modalities_for_uploaded_files
+        from ..modality_helpers import infer_modality_from_field_name
         candidate_slugs = ['ios', 'intraoral-photo']
         
         # Infer from uploaded files
@@ -269,14 +283,9 @@ def get_project_folders(request, project_slug):
     try:
         Folder = _project_models(project_slug)['Folder']
 
-        # Check if project exists
-        try:
-            project = Project.objects.get(slug=project_slug)
-        except Project.DoesNotExist:
-            return JsonResponse({'error': 'Project not found'}, status=404)
-
-        if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Authentication required'}, status=401)
+        project, denied = _accessible_project(request, project_slug)
+        if denied:
+            return denied
         
         # Folders are project-scoped now.
         folders = Folder.objects.filter(parent__isnull=True, project=project).order_by('name')
@@ -337,17 +346,12 @@ def get_project_patients_and_modalities(request, project_slug):
     try:
         Patient = _project_models(project_slug)['Patient']
 
-        # Check if project exists
-        try:
-            project = Project.objects.get(slug=project_slug)
-        except Project.DoesNotExist:
-            return JsonResponse({'error': 'Project not found'}, status=404)
-
-        if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Authentication required'}, status=401)
+        project, denied = _accessible_project(request, project_slug)
+        if denied:
+            return denied
         
         # Get all patients for this project with their modalities
-        patients = Patient.objects.all().prefetch_related('modalities').order_by('patient_id')
+        patients = Patient.objects.filter(project=project).prefetch_related('modalities').order_by('patient_id')
         patients = filter_patients_for_user(request.user, patients, _project_domain(project_slug))
         
         patients_data = []
@@ -405,24 +409,14 @@ def get_patient_files(request, project_slug, patient_id):
         domain = _project_domain(project_slug)
         Patient = _project_models(project_slug)['Patient']
 
-        # Check if project exists
-        try:
-            project = Project.objects.get(slug=project_slug)
-        except Project.DoesNotExist:
-            return JsonResponse({'error': 'Project not found'}, status=404)
-
-        if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Authentication required'}, status=401)
+        project, denied = _accessible_project(request, project_slug)
+        if denied:
+            return denied
         
         # Check if patient exists and belongs to the project
-        try:
-            patient = Patient.objects.get(patient_id=patient_id)
-        except Patient.DoesNotExist:
+        patient = Patient.objects.filter(patient_id=patient_id, project=project).first()
+        if patient is None or not user_can_read_patient(request.user, patient):
             return JsonResponse({'error': 'Patient not found in this project'}, status=404)
-
-        if not user_is_project_admin(request.user, domain):
-            if not patient.folder or not user_can_read_folder(request.user, patient.folder, domain):
-                return JsonResponse({'error': 'Permission denied'}, status=403)
         
         # Get all files for this patient from FileRegistry
         file_filter = {'domain': domain, 'patient': patient}
@@ -486,14 +480,9 @@ def get_multiple_patients_files(request, project_slug):
         domain = _project_domain(project_slug)
         Patient = _project_models(project_slug)['Patient']
 
-        # Check if project exists
-        try:
-            project = Project.objects.get(slug=project_slug)
-        except Project.DoesNotExist:
-            return JsonResponse({'error': 'Project not found'}, status=404)
-
-        if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Authentication required'}, status=401)
+        project, denied = _accessible_project(request, project_slug)
+        if denied:
+            return denied
         
         # Parse request data
         data = json.loads(request.body.decode('utf-8'))
@@ -513,7 +502,7 @@ def get_multiple_patients_files(request, project_slug):
             'files',
             queryset=FileRegistry.objects.filter(domain='maxillo').select_related('modality')
         )
-        patients = Patient.objects.filter(patient_id__in=patient_ids).prefetch_related(files_prefetch).order_by('patient_id')
+        patients = Patient.objects.filter(patient_id__in=patient_ids, project=project).prefetch_related(files_prefetch).order_by('patient_id')
         patients = filter_patients_for_user(request.user, patients, domain)
         
         found_patient_ids = set(patients.values_list('patient_id', flat=True))

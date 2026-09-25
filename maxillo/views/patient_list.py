@@ -8,7 +8,7 @@ from django.db.models import Q
 
 from ..models import Patient as MaxilloPatient, Folder as MaxilloFolder, Tag as MaxilloTag
 from .helpers import bulk_upload_url_for, redirect_with_namespace, render_with_fallback
-from common.domains import landing_cards, landing_domain_cards, order_projects_for_landing
+from common.domains import landing_domain_cards, order_projects_for_landing
 from common.modality_config import (
     modality_status,
     rerun_step_labels,
@@ -17,6 +17,7 @@ from common.modality_config import (
 from common.project_filters import presence_filter_specs
 from common.structuring_context import structuring_rerun_availability
 from common.models import Project, ProjectAccess
+from common.permissions import current_project as session_project
 from common.permissions import (
     filter_folders_for_user,
     filter_patients_for_user,
@@ -109,7 +110,8 @@ def select_project(request, project_id: int):
 @login_required
 def patient_list(request):
     namespace = (getattr(request, 'resolver_match', None) and request.resolver_match.namespace) or 'maxillo'
-    is_admin = user_is_project_admin(request.user, request)
+    # UI flag for the project the list is showing; each row is checked on its own project.
+    is_admin = user_is_project_admin(request.user, session_project(request))
     Patient, Folder, Tag = _get_domain_models(request)
     
     # Import Job model early for use in prefetch
@@ -399,8 +401,8 @@ def patient_list(request):
                 vc.processing_status == 'completed' for vc in voice_captions
             ) and structuring_available(patient),
             'can_delete': bool(
-                is_admin
-                or (patient.folder and user_can_delete_single_patient(request.user, patient.folder, request))
+                user_is_project_admin(request.user, patient.project)
+                or user_can_delete_single_patient(request.user, patient.folder, patient.project)
             ),
         }
         patients_with_status.append(patient_data)

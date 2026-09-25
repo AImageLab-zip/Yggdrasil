@@ -17,8 +17,9 @@ this file explains the shape they protect.
 | `brain/` | Brain-tumour MRI (T1, T1c, T2, FLAIR, segmentation) | `/brain/` |
 | `laparoscopy/` | Surgical video | `/laparoscopy/` |
 | `urology/` | Urology imaging (multiparametric prostate MRI, digital pathology WSI, confocal laser endomicroscopy) | `/urology/` |
+| `cardiology/` | ECG review (client-side clinical-grid plots, rhythm classification) | `/cardiology/` |
 
-`maxillo`, `brain`, `laparoscopy` and `urology` are **domains**. A domain is registered in
+`maxillo`, `brain`, `laparoscopy`, `urology` and `cardiology` are **domains**. A domain is registered in
 exactly one place, `common/domains.py` (`DOMAIN_CHOICES`, `DOMAIN_FK_FIELDS`);
 permissions and job routing derive from that registry, so adding a domain is a
 registry entry plus per-domain FK columns on the three shared tables — never a
@@ -43,6 +44,11 @@ domain already depends on; an import back the other way is a cycle. Where
 `common` needs domain data it goes through the registry (`fk_fields_for`,
 `DomainFKAccessorMixin.get_patient()`) or `apps.get_model(...)`, never a direct
 import.
+
+This is enforced in CI by `lint-imports` (contracts in `pyproject.toml`), which
+also keeps the domain apps from importing each other. The imports that break the
+rule today are listed there as `ignore_imports`; a new one fails the build, and
+fixing one means deleting its line.
 
 ### Why `annotations/` is not part of `common/`
 
@@ -79,7 +85,7 @@ request
   │
   ├─ ProjectSessionMiddleware     keeps session['current_project_id'] pointing at a project
   │                               *of the domain being browsed*. Only acts under the domain
-  │                               prefixes (/maxillo/, /brain/, /laparoscopy/, /urology/).
+  │                               prefixes (every domain in common/domains.py).
   │                               The session project is domain-scoped: crossing domains
   │                               must re-resolve it.
   │
@@ -98,7 +104,7 @@ request
 Two consequences worth internalising:
 
 - **`request.user.profile` is created by `ActiveProfileMiddleware`, and only
-  under `/maxillo/`, `/brain/`, `/laparoscopy/` and `/urology/`.** Anything under the global
+  under the domain prefixes (`/maxillo/`, `/brain/`, …, one per registered domain).** Anything under the global
   `/api/` namespace never gets it. A view there that reads `user.profile` will
   `AttributeError`, and — more dangerously — a view there that *assumes*
   middleware did an access check has no access check at all. **The view's own
@@ -261,9 +267,16 @@ presigning, a streaming download context manager). Keys are recorded in
 database dump without the bucket gives you working patient pages and 404ing
 downloads.
 
-Key prefixes are derived from the **domain**, not the project slug. Do not
-change that: prefixes only apply to new uploads, so a change silently splits one
-patient's files across two layouts.
+Key prefixes are **not** uniform, and not simply the domain:
+`common.uploads.raw_key_prefix_for()` uses `project_slug_from_patient()`, which
+reads `common.domains.storage_prefix_for()`: `laparoscopy` and `cardiology` have their
+own prefix and every other domain uses `maxillo` (so urology uploads land under
+`maxillo/`); brain's own upload path writes
+`brain/patients/<id>/...`; SLURM job outputs go under
+`<project slug>/processed/<modality>/job_<id>` (`common/runner/run.py`). Do not
+change a prefix rule in place: prefixes only apply to new uploads, so a change
+silently splits one patient's files across two layouts. (It also means
+prefix-scoped storage policies cannot be used yet.)
 
 Anything that reads bytes out of the store in bulk is a **management command** —
 never a `RunPython` migration (row counts are unbounded, it blocks the deploy,
@@ -285,7 +298,7 @@ SourceResource                     the thing annotated, addressed by a stable
         │ PROTECT
 AnnotationSet ──1:N──▶ AnnotationTarget ──1:N──▶ AnnotationSelector
   kind, domain,          role ('volume',           kind, coordinate_system
-  patient FK (x3),       'segmentation', …)        (lps | ras | volume_voxel |
+  patient FK (x4),       'segmentation', …)        (lps | ras | volume_voxel |
   annotation_method,     primary_slot (1 or NULL)   resource_local | none),
   label_schema,          status                     frame_index, slice_axis/index,
   status, ever_annotated                            start/end_time_ms (integers),
@@ -355,7 +368,10 @@ Two more properties that surprise people:
 
 ## Imaging frontend
 
-All imaging runs on **Cornerstone3D**, built from `frontend/` with npm +
+Volume, stack, mesh-adjacent and video imaging runs on **Cornerstone3D** (the
+exceptions: the urology WSI viewer is a hand-written Canvas2D tiler, the
+uploaded-panoramic view is a plain `<img>`, and the RGB editor is Canvas2D),
+built from `frontend/` with npm +
 esbuild into a committed bundle under `static/vendor/cornerstone/`. Both npm and
 esbuild are dev-only: deploys need no Node. Templates load a surface with
 `{% cornerstone_entry '<name>' %}` (`common/templatetags/cornerstone.py`), which

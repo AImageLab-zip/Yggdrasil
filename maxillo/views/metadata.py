@@ -11,13 +11,12 @@ import tempfile
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.models import FileRegistry, Job
 from common.object_storage import download_to_tempfile, get_object_storage
-from common.permissions import user_can_edit_metadata, user_can_read_folder, user_is_project_admin
+from common.permissions import get_patient_for, user_can_edit_metadata
 
 from ..models import PanoramicState
 from .domain import get_domain_models
@@ -51,7 +50,7 @@ def _active_cbct_path(patient):
     return _artifact_path(source.get("file"), source.get("file_key"))
 
 
-def _metadata_payload(request, nifti_img):
+def _metadata_payload(request, nifti_img, patient):
     """Build the complete JSON-safe metadata response for a loaded NIfTI image."""
     header = nifti_img.header
     try:
@@ -114,7 +113,7 @@ def _metadata_payload(request, nifti_img):
         "data_type": str(header.get_data_dtype()),
         "units": {"spatial": spatial_unit, "temporal": temporal_unit},
         "description": description,
-        "can_edit": bool(user_is_project_admin(request.user, request)),
+        "can_edit": user_can_edit_metadata(request.user, patient),
     }
 
 
@@ -186,12 +185,9 @@ def _restore_uploaded_objects(storage, attempted):
 
 def _get_nifti_metadata(request, patient_id):
     """Get NIFTI metadata including origin, affine matrix, and orientation"""
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_patient_for(request.user, Patient, patient_id, "read")
     try:
-        Patient = get_domain_models(request)["Patient"]
-        patient = get_object_or_404(Patient, patient_id=patient_id)
-        if not (user_is_project_admin(request.user, request) or (patient.folder and user_can_read_folder(request.user, patient.folder, request))):
-            return JsonResponse({"error": "Permission denied"}, status=403)
-
         # Check if CBCT exists
         if not patient.has_cbct_scan():
             return JsonResponse({"error": "No CBCT scan available"}, status=404)
@@ -205,7 +201,7 @@ def _get_nifti_metadata(request, patient_id):
             suffix = ".nii.gz" if cbct_path.endswith(".nii.gz") else ".nii"
             with download_to_tempfile(cbct_path, suffix=suffix) as tmp_path:
                 nifti_img = nib.load(tmp_path)
-                return JsonResponse(_metadata_payload(request, nifti_img))
+                return JsonResponse(_metadata_payload(request, nifti_img, patient))
 
         except Exception as e:
             logger.error(f"Error loading NIFTI metadata: {e}")
@@ -228,13 +224,9 @@ def get_nifti_metadata(request, patient_id):
 @require_POST
 def update_nifti_metadata(request, patient_id):
     """Update NIFTI metadata (admin only)"""
+    Patient = get_domain_models(request)["Patient"]
+    patient = get_patient_for(request.user, Patient, patient_id, "admin")
     try:
-        Patient = get_domain_models(request)["Patient"]
-        patient = get_object_or_404(Patient, patient_id=patient_id)
-
-        if not user_can_edit_metadata(request.user, patient):
-            return JsonResponse({"error": "Permission denied"}, status=403)
-
         # Rewriting qform/sform re-bases every landmark, spline and polygon ever
         # drawn on this volume: the voxels keep their values but move in patient
         # space, and nothing in the record would say so. Same rule as adding or
@@ -339,7 +331,7 @@ def update_nifti_metadata(request, patient_id):
                     )
 
                 returned_metadata = _metadata_payload(
-                    request, nib.load(prepared[0]["updated_path"])
+                    request, nib.load(prepared[0]["updated_path"]), patient
                 )
                 storage = get_object_storage()
                 attempted = []

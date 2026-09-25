@@ -1,8 +1,8 @@
 """Share-link expiry rules for exports, shared by all domains.
 
-null expires_at = never expires (pre-2.0 behavior for existing shares).
-New/updated shares default to 30 days; "never" is reserved for staff and
-project admins.
+null expires_at = never expires. Links anyone can open always expire (legacy
+never-expiring ones were given an expiry by common migration 0058); "never" is
+reserved for staff and admins, and only for login-required links.
 """
 
 from datetime import timedelta

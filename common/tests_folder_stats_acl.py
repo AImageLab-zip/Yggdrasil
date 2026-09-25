@@ -21,7 +21,7 @@ from django.urls import NoReverseMatch, reverse
 
 from common.models import Project, ProjectAccess
 
-DOMAINS_WITH_FOLDER_STATS = ("maxillo", "brain", "urology")
+DOMAINS_WITH_FOLDER_STATS = ("maxillo", "brain", "urology", "cardiology")
 
 
 class FolderStatsRequiresProjectAdminTests(TestCase):

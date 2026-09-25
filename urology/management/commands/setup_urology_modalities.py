@@ -21,8 +21,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Created project: {project.name}"))
         else:
             self.stdout.write(self.style.WARNING(f"Project already exists: {project.name}"))
-            project.description = "Urological oncology project with MRI, WSI, and Confocale modalities"
-            project.save()
 
         modalities_data = [
             {
@@ -70,16 +68,14 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f"Created modality: {modality.name}"))
             else:
                 self.stdout.write(self.style.WARNING(f"Modality already exists: {modality.name}"))
-                for key, value in modality_data.items():
-                    if key != "slug":
-                        setattr(modality, key, value)
-                modality.save()
-                self.stdout.write(self.style.SUCCESS(f"Updated modality: {modality.name}"))
+                # Seeds create what is missing and never overwrite: an existing row may
+                # carry admin edits, and re-running a seed used to revert them silently.
 
-            project.modalities.add(modality)
-            self.stdout.write(
-                self.style.SUCCESS(f"Linked {modality.name} to {project.name} project")
-            )
+            if created:
+                project.modalities.add(modality)
+                self.stdout.write(
+                    self.style.SUCCESS(f"Linked {modality.name} to {project.name} project")
+                )
 
         voice_caption, _ = AnnotationMethod.objects.get_or_create(
             slug="voice_caption",

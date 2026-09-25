@@ -65,6 +65,7 @@ _KIND_REASONS = {
     "video_quadrants": "quadrant markers",
     "volume_segmentation": "volume segmentation",
     "measurements": "measurements",
+    "ecg_rhythm_classification": "an ECG rhythm classification",
 }
 
 #: The one kind that must not lock the editor that produces it.

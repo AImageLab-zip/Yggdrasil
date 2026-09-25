@@ -14,9 +14,11 @@ if [ "${RUN_DEV_SERVER:-0}" = "1" ]; then
     exec uvicorn yggdrasil.asgi:application --host 0.0.0.0 --port 8000 --reload
 fi
 
+# No uvicorn access log: yggdrasil.middleware.RequestLoggingMiddleware logs every
+# request through Django's LOGGING, where share tokens are redacted.
 exec uvicorn yggdrasil.asgi:application \
     --host 0.0.0.0 \
     --port 8000 \
     --workers "${ASGI_WORKERS:-4}" \
     --timeout-keep-alive "${ASGI_KEEP_ALIVE:-5}" \
-    --access-log
+    --no-access-log

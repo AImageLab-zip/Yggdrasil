@@ -11,27 +11,89 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.2.0] - 2026-09-23
+## [3.2.1] - 2026-09-23
 
-Reporting templates are edited rather than deployed, a caption can be filed into its template with one button, and the services behind both are configured in the administration panel.
+Cardiology joins the platform, inviting people is easy to find again, and the
+home page fits the areas you actually work in.
 
 ### Added
-- **Report templates are edited in the administration panel.** The reporting checklist shown beside the voice-caption controls used to be written into the software, so changing a word — a wording your specialty prefers, a corrected Italian translation, a field nobody uses — meant asking a developer and waiting for a release. It is now ordinary content: *Clinical data → Report templates*, one row per field, English, Italian and German side by side, with a description that becomes the guidance clinicians expand while dictating. The checklists you have been reading are unchanged; they were moved across word for word.
-- **A template can belong to one project.** By default a template covers its whole workflow, and urology keeps one per modality. A project that reports differently can be given its own, and it applies only there.
-- **"Structure" turns a dictation into the report template.** Once a caption is complete, one button sends it to a language model with an instruction to file what was said under the template's headings, fix the mistakes speech recognition makes, and change nothing else. The report appears section by section as it is written, and can be run again as many times as you like — each run is kept, with the time, the model and the attempt number. **Your dictation is never touched.** The structured version is stored beside it, and the words you recorded stay exactly as you said them.
-- **Structuring can be re-run from the patient list.** A patient's *Rerun* button now offers *Report structuring* alongside the processing steps, which files each of that patient's finished captions into its template again, one after another, and reports how many succeeded. Each run is a new attempt kept beside the earlier ones. A caption that is still being processed is never structured, from the list or from the patient page: a report filed from half a dictation would read as the whole of it.
-- **Structuring is enabled per project.** It is off everywhere until a project administrator ticks *Report structuring* on the project, in the same list as voice captions. Until then the button does not appear. This matters: structuring sends the dictated text to whichever language-model service the platform is pointed at, so turning it on is a deliberate decision about where that text may go.
-- **A warning when the report may have lost something.** If the structured version appears to be missing a chunk of what was dictated, it says so instead of quietly presenting a shorter report, and anything that fits no field is kept under a final *Other findings* heading rather than dropped.
-- **External services are configured in the administration panel.** Speech-to-text and the language model are now rows under *Processing → External services*: address, model, languages, timeouts and tuning, editable without a deploy, with a check that reports whether each one is actually usable. Passwords and API keys are **not** stored there — each row names the environment variable to read, so no key ends up in the database or in a backup of it.
+- **Cardiology.** A new area at `/cardiology/` for reviewing ECG recordings. Upload
+  one recording per patient, or a whole folder at once if you administer the
+  project. Each recording is drawn on the familiar clinical grid (25 mm/s, 10 mm/mV)
+  and can be panned by dragging or with the slider, so a 12-lead strip stays
+  readable on a phone. Classify each recording as AF, NSR, Other or NI and add
+  notes; a **Next** button walks you through a folder in list order. The list can
+  be filtered to classified recordings, recordings with notes, or recordings with
+  neither. Exports can include the raw recordings, the plots and the
+  classifications.
+- **Every change to an ECG classification is kept.** If someone else changes it
+  while you have the page open, your change is refused and you are asked to reload,
+  instead of silently replacing theirs.
+- **A recording that cannot be plotted is refused at upload**, with the reason:
+  malformed files, non-numeric samples, and recordings too long to draw at clinical
+  scale (about three minutes for 12 leads).
+- **The invitations page lists every user with their email.** Staff can see each
+  account's name, email, projects and role, when they joined and last signed in, and
+  copy the addresses of all active users in one click to contact them.
 
 ### Changed
-- **Dictation messages no longer name a service that is not at fault.** "Live Whisper is not configured" became "Speech transcription is not configured on this server", and so on.
+- **Invitations are back in the navigation**: an envelope icon in the left bar and
+  an **Invitations** button in the Control Panel (staff only).
+- **Invitation emails look the part.** They now carry the Yggdrasil logo, a short
+  summary of the projects, role and expiry, and an **Accept invitation** button,
+  with a plain-text version for mail clients that do not show formatting.
+- **The home page shows only your areas, centred.** Someone with access to a single
+  area now sees one card in the middle of the page instead of a lone card in the
+  first of four columns; on a wide screen administrators see all five areas in one
+  row.
 
-### Upgrading
-- Run `python manage.py seed_external_services`, `python manage.py seed_report_templates` and `python manage.py seed_llm_prompts` once after upgrading. All three are safe to re-run and none of them overwrites anything an administrator has edited.
-- *Report structuring* appears in the project’s annotation-method list after the
-  migration runs; tick it on a project to turn the feature on there.
-- Report structuring stays off until a project is opted in and an API key is configured, so upgrading changes nothing on its own.
+### Fixed
+- **Deleting an unused invitation works again**; the button used to lead to an
+  error page.
+- **"Generate the missing default panoramics" now works.** The batch page loads each
+  patient in a hidden frame, and the site's security settings refused to be framed,
+  even by itself, so every patient timed out. The patient page now allows framing by
+  Yggdrasil's own pages only. The new ECG plot batch page relies on the same fix.
+
+## [3.2.0] - 2026-09-23
+
+A security and reliability release. Most of it is invisible when things work; where
+you will notice it, it is because something that used to be allowed is now refused.
+
+### Security
+- **Every remaining screen decides access by the record's own project.** Viewing,
+  editing, deleting, re-running and moving patients, their files, captions,
+  measurements, segmentations and landmarks are all judged against the project the
+  patient belongs to, never against the project you happen to have open. A patient in
+  a project you cannot see now answers "not found". **After upgrading, some actions
+  that used to succeed will be refused; that is the fix.**
+- **Only project administrators can publish an export link**, and a link that
+  anyone can open always expires. Existing never-expiring public links now expire 30
+  days after the upgrade. Link addresses are no longer written to the server logs.
+- **Uploaded files are served so they cannot run in your browser.** Photos, videos
+  and scans display as before; anything else is downloaded instead of opened.
+  Photo uploads accept image formats only (including HEIC, BMP and TIFF).
+- **Slide labels and macro images are never shown.** Pathology slide files carry a
+  photo of the slide label, which often shows the patient's name or barcode; it is
+  no longer offered as a zoom level or used for the minimap.
+- **Repeated failed sign-ins lock that account from that address for 30 minutes**,
+  and you stay signed in for up to a week instead of two.
+- **Processing jobs on the cluster no longer receive the platform's storage keys**;
+  each job can read only its own inputs and write only its own results.
+
+### Changed
+- **Large downloads no longer strain the server.** Scans, videos and export ZIPs are
+  sent as they are read, so several multi-gigabyte downloads at once no longer risk
+  running a server process out of memory.
+- **Re-running a setup command keeps what administrators changed.** Modality names,
+  settings and project links edited in the admin are no longer reset.
+
+### Fixed
+- **Urology is included everywhere the other workflows are**: processing that
+  should hide raw files until it finishes now does so for urology too, and urology
+  annotations are filed under the right patient.
+- **A processing job is only handed to the cluster once it has been saved**, so a
+  job can no longer be picked up before it exists.
 
 ## [3.1.0] - 2026-09-22
 

@@ -1,15 +1,18 @@
-"""User profile views."""
-from django.shortcuts import render, get_object_or_404, redirect
+"""The user profile page, the same in every domain.
+
+Resolved per URL namespace through ``common.domain_models``: each domain's
+``app_urls`` routes ``user_profile`` and ``user_profile_by_username`` here.
+"""
+from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib import messages
-from django.db.models import Count, Q, Max
 from django.utils import timezone
 from datetime import timedelta
 
-from .domain import get_domain_models
-from .helpers import render_with_fallback, redirect_with_namespace
+from common.domain_models import get_domain_models
 from common.models import ProjectAccess
+from common.view_helpers import redirect_with_namespace, render_with_fallback
 
 import logging
 logger = logging.getLogger(__name__)

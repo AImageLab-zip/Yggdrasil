@@ -73,6 +73,9 @@
     --ygg-urology: #8b5cf6;
     --ygg-urology-grad: linear-gradient(135deg, #7c3aed, #a78bfa);
     --ygg-urology-soft: #f3e8ff;
+    --ygg-cardiology: #e04868;
+    --ygg-cardiology-grad: linear-gradient(135deg, #c42f52, #f27b95);
+    --ygg-cardiology-soft: #fde8ed;
 
     /* ---- Semantic aliases (what components consume) ----
      * Kit rule: blue leads, green = life/success, gold = runic wordmark only. */
@@ -160,6 +163,7 @@
     --ygg-brain: #35c3a6;
     --ygg-laparoscopy: #f09a80;
     --ygg-urology: #a78bfa;
+    --ygg-cardiology: #f27b95;
 
     /* Soft chip backgrounds on dark */
     --ygg-accent-soft: #16233c;
@@ -167,6 +171,7 @@
     --ygg-warn-soft: #332a15;
     --ygg-danger-soft: #3a1e1a;
     --ygg-urology-soft: #2b1b46;
+    --ygg-cardiology-soft: #3d1a24;
 
     /* Status foregrounds tuned for dark */
     --ygg-ok: #35c3a6;
