@@ -14,8 +14,17 @@
         <div class="flex justify-center mb-1">
             {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
         </div>
+        {% if invited %}
+        <h1 class="text-xl">Accept your invitation on a computer</h1>
+        <hr class="auth-rule">
+        <p class="text-sm text-content-muted mb-4">
+            Accounts are created on a laptop or desktop. Open the invitation link
+            from your email there to create your account.
+        </p>
+        {% else %}
         <h1 class="text-xl">Sign-in is available on desktop</h1>
         <hr class="auth-rule">
+        {% endif %}
 
         {% if demo_url %}
             <p class="text-sm text-content-muted mb-4">

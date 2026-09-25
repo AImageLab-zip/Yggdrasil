@@ -19,7 +19,8 @@ Yggdrasil now works on a phone -- as the public demo.
 - **The public demo on your phone.** Opening any Yggdrasil link on a phone takes you
   straight into the read-only demo, no account needed, on the page the link points to.
   Signing in and registering stay on computers and tablets; on a phone you are shown the
-  demo instead of a sign-in form.
+  demo instead of a sign-in form, and an invitation opened on a phone says to open it on a
+  computer.
 - **Viewers that follow your fingers.** On a phone one finger scrolls the page, even over
   an image, and two fingers pinch to zoom and drag to move it -- in the CBCT and MRI
   grids, the photographs, the panoramic, the 3D intraoral scans and the pathology slides.

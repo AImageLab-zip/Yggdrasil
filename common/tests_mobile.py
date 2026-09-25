@@ -173,6 +173,12 @@ class MobileAuthPolicyTests(TestCase):
         self.assertEqual(r.status_code, 403)
         self.assertFalse(get_user_model().objects.filter(username="mallory").exists())
 
+    def test_phone_opening_an_invitation_is_told_to_use_a_computer(self):
+        r = self.client.get(reverse("register") + "?code=abc", HTTP_USER_AGENT=ANDROID_PHONE)
+        self.assertTemplateUsed(r, LOGIN_MOBILE_TEMPLATE)
+        self.assertContains(r, "Accept your invitation on a computer")
+        self.assertNotContains(r, 'name="password1"')
+
     def test_desktop_register_page_unchanged(self):
         r = self.client.get(reverse("register"), HTTP_USER_AGENT=DESKTOP)
         self.assertTemplateUsed(r, "registration/register.html")
