@@ -65,6 +65,11 @@ urlpatterns = [
         name="caption_report",
     ),
     path(
+        "patient/<int:patient_id>/voice-captions/structurable/",
+        views.structurable_captions,
+        name="structurable_captions",
+    ),
+    path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/update-modality/",
         views.update_voice_caption_modality,
         name="update_voice_caption_modality",

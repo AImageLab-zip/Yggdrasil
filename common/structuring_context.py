@@ -10,7 +10,11 @@ The same ``structuring_enabled_for`` that this calls is what
 and the refusal cannot disagree, because they ask the same question of the same code.
 """
 
-from common.external_config import llm_service, structuring_enabled_for
+from common.external_config import (
+    llm_service,
+    structuring_enabled_for,
+    structuring_enabled_for_project,
+)
 from common.llm_tasks import CAPTION_TO_TEMPLATE
 from common.report_templates import modality_slugs_with_templates
 
@@ -40,3 +44,35 @@ def structuring_context(patient):
         "structuring_available": bool(enabled and configured and modalities),
         "structuring_modalities": modalities,
     }
+
+
+def structuring_rerun_availability():
+    """For a patient list: ``available(patient)``, answered once per project, not per row.
+
+    A row offers "Report structuring" in its rerun dialog when the answer is yes and the
+    patient has at least one caption. The conditions are the page-level half of
+    ``structuring_context``'s -- captions on, structuring ticked, a model configured, a
+    template for the domain -- and every one of them depends on the project, not on the
+    patient, so a page of fifty rows asks each project once. The domain is read off the
+    patient because one list view serves more than one domain (maxillo's also serves
+    laparoscopy). Which captions are actually eligible is decided later, per caption, by
+    the endpoint the dialog calls.
+    """
+    configured = llm_service(CAPTION_TO_TEMPLATE.service_slug) is not None
+    answers = {}
+
+    def available(patient):
+        project = getattr(patient, "project", None)
+        if project is None or not configured:
+            return False
+        key = (patient._meta.app_label, project.pk)
+        if key not in answers:
+            answers[key] = bool(
+                project.allows_annotation("voice_caption")
+                and structuring_enabled_for_project(project)
+                and modality_slugs_with_templates(key[0], project)
+            )
+        return answers[key]
+
+    return available
+

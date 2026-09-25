@@ -201,7 +201,8 @@
                                     {% endif %}
                                     {% if c.text_caption %}
                                     {% if c.can_edit_content %}
-                                    {% if structuring_available %}
+                                    {# Only a finished caption: the server refuses one still processing (not_complete). #}
+                                    {% if structuring_available and c.processing_status == 'completed' %}
                                     <button class="btn btn-outline-primary btn-sm btn-structure-caption"
                                             data-caption-id="{{ c.id }}"
                                             data-modality="{{ c.modality }}"

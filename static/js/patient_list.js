@@ -277,6 +277,7 @@ function initAdminActions() {
                 patientId: scanId,
                 patientName: this.dataset.scanName || `Scan #${scanId}`,
                 steps: this.dataset.availableSteps,
+                structuring: this.dataset.structuring === '1',
                 onSuccess: (jobs) => {
                     // Reflect the new state without a reload: the rerun rows are now queued.
                     const row = document.querySelector(`.patient-row[data-scan-id="${scanId}"]`) || document.querySelector(`.scan-row[data-scan-id="${scanId}"]`);

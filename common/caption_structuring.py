@@ -96,6 +96,16 @@ def prompt_for(task):
 
 def build_context(voice_caption, patient, *, user, task, language=None):
     """Everything the task needs, resolved. Raises ``StructuringRefused`` if it cannot be."""
+    # Only a finished caption. A caption saved from the text box is complete the moment it
+    # exists, but one still transcribing -- or one whose transcription failed -- holds a
+    # partial text, and a report filed from half a dictation reads as the whole of it.
+    status = getattr(voice_caption, "processing_status", "completed") or "completed"
+    if status != "completed":
+        raise StructuringRefused(
+            "not_complete",
+            "This caption is still being processed. Structure it once it is complete.",
+            status=409,
+        )
     text = caption_text(voice_caption)
     if len(text) < MIN_CAPTION_LENGTH:
         raise StructuringRefused(
@@ -157,6 +167,28 @@ def _source_language(voice_caption):
     tells the model to infer it rather than asserting a language that may be wrong.
     """
     return (getattr(voice_caption, "speech_language", "") or "").strip()
+
+
+def structurable_captions(patient, voice_captions, *, user, task):
+    """The captions of this patient that a Structure request would accept.
+
+    Decided by running the very checks the endpoint runs -- ``build_context`` per
+    caption -- rather than a parallel copy of them, so the patient list can never offer
+    a caption the endpoint would then refuse. Patient-level switches are the caller's to
+    check first (``ensure_allowed``); this is the per-caption half.
+    """
+    from common.permissions import user_can_edit_caption
+
+    eligible = []
+    for voice_caption in voice_captions:
+        if not user_can_edit_caption(user, voice_caption):
+            continue
+        try:
+            build_context(voice_caption, patient, user=user, task=task)
+        except StructuringRefused:
+            continue
+        eligible.append(voice_caption)
+    return eligible
 
 
 def ensure_allowed(patient):

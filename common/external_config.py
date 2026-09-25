@@ -223,7 +223,15 @@ def structuring_enabled_for(patient):
     decides whether to render the button. Commit ``1de0b57`` is what happens when those
     two answers are written twice and drift: the UI said yes while the server said no.
     """
-    project = getattr(patient, "project", None)
+    return structuring_enabled_for_project(getattr(patient, "project", None))
+
+
+def structuring_enabled_for_project(project):
+    """The same answer for a project, for pages that list many patients of it.
+
+    ``structuring_enabled_for`` delegates here, so the patient list and the patient page
+    cannot disagree about a project: there is one rule, asked two ways.
+    """
     if project is None:
         return False
     try:

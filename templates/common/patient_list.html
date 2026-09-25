@@ -14,6 +14,8 @@
 {% endblock %}
 
 {% block extra_js %}
+{# Loaded for its rerun helpers; its patient-page controller finds no panel here and stays idle. #}
+<script src="{% static 'js/caption_structuring.js' %}"></script>
 <script src="{% static 'js/rerun_modal.js' %}"></script>
 <script src="{% static 'js/patient_list.js' %}"></script>
 {% endblock %}

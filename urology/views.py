@@ -58,7 +58,10 @@ from common.permissions import (
     user_is_project_admin,
 )
 from common.project_filters import presence_filter_specs
-from common.structuring_context import structuring_context
+from common.structuring_context import (
+    structuring_context,
+    structuring_rerun_availability,
+)
 
 from .export_config import install_urology_export_mappings
 from .file_utils import save_urology_modality_file
@@ -170,6 +173,8 @@ def patient_list(request):
 
     patients_with_status = []
     is_admin = user_is_project_admin(request.user, request)
+    # Asked once per project for the whole page, not per row (common/structuring_context.py).
+    structuring_available = structuring_rerun_availability()
     for patient in patients:
         voice_captions = list(patient.voice_captions.all())
         patient_files = list(patient.files.all())
@@ -216,6 +221,10 @@ def patient_list(request):
             "rerunnable_steps": rerunnable_steps_for_patient(
                 patient_files, modality_status_list, patient=patient
             ),
+            # Offers "Report structuring" in the row's rerun dialog.
+            "structuring_rerun": any(
+                vc.processing_status == "completed" for vc in voice_captions
+            ) and structuring_available(patient),
             "can_delete": bool(
                 user_is_project_admin(request.user, patient.project)
                 or (

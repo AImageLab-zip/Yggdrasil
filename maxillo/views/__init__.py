@@ -64,6 +64,7 @@ from common.domain_views.voice_captions import (
 )
 from common.domain_views.caption_reports import (
     caption_report,
+    structurable_captions,
     structure_caption,
 )
 

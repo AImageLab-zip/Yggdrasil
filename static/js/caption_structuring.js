@@ -61,6 +61,8 @@
                 return 'Report structuring is not configured on this server.';
             case 'no_template':
                 return 'No report template is defined for this modality.';
+            case 'not_complete':
+                return 'This caption is still being processed. Structure it once it is complete.';
             case 'too_short':
                 return 'This caption is too short to structure.';
             case 'too_long':
@@ -207,6 +209,136 @@
     }
 
     // ---------------------------------------------------------------- controller
+
+    // ------------------------------------------------ rerun from the patient list
+
+    /**
+     * Failures that every later caption would hit too, so a rerun stops at the first
+     * rather than spending the rest of a rate-limited quota to be told the same thing.
+     */
+    function stopsRerun(code) {
+        return ['rate_limited', 'not_configured', 'disabled', 'budget_exhausted']
+            .indexOf(code) !== -1;
+    }
+
+    /**
+     * Read one structuring response to its end: `{ok: true, report}` on "done",
+     * `{ok: false, code, detail}` on an "error" frame or an HTTP refusal.
+     *
+     * The same stream the patient page renders as it arrives; the list has nothing to
+     * show mid-report, so it only waits for the outcome. A stream that ends without
+     * either frame is reported as stalled rather than as success.
+     */
+    function drainStructuringResponse(response) {
+        if (!response.ok) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+                return { ok: false, code: body.code || 'failed', detail: body.error || '' };
+            });
+        }
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var outcome = null;
+        function pump() {
+            return reader.read().then(function (chunk) {
+                if (chunk.done) {
+                    return outcome || { ok: false, code: 'stalled', detail: '' };
+                }
+                buffer += decoder.decode(chunk.value, { stream: true });
+                var parsed = parseSseChunk(buffer);
+                buffer = parsed.rest;
+                parsed.events.forEach(function (event) {
+                    if (outcome) return;
+                    if (event.type === 'done') {
+                        outcome = { ok: true, report: event.report };
+                    } else if (event.type === 'error') {
+                        outcome = { ok: false, code: event.code || 'failed', detail: event.detail || '' };
+                    }
+                });
+                return pump();
+            });
+        }
+        return pump();
+    }
+
+    /**
+     * Re-structure every eligible caption of one patient, one at a time.
+     *
+     * Asks the server which captions it would accept (the same checks the Structure
+     * button's request runs), then issues that same per-caption request for each. One
+     * at a time on purpose: a free-tier model is rate-limited per minute and per day, and
+     * a burst would fail most of the batch.
+     *
+     * options: base ("/<ns>/patient/<id>"), token (CSRF), onProgress(index, total),
+     *          fetch (injectable for tests; defaults to window.fetch).
+     * Resolves {total, done, failed: [{id, code}], stoppedBy}.
+     */
+    function rerunPatientCaptions(options) {
+        var doFetch = options.fetch || window.fetch.bind(window);
+        var onProgress = options.onProgress || function () {};
+        var summary = { total: 0, done: 0, failed: [], stoppedBy: null };
+
+        return doFetch(options.base + '/voice-captions/structurable/', {
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+                if (!response.ok) {
+                    summary.stoppedBy = body.code || 'failed';
+                    return [];
+                }
+                return body.captions || [];
+            });
+        }).then(function (captions) {
+            summary.total = captions.length;
+            return captions.reduce(function (chain, caption, index) {
+                return chain.then(function () {
+                    if (summary.stoppedBy) return null;
+                    onProgress(index + 1, captions.length);
+                    return doFetch(
+                        options.base + '/voice-caption/' + caption.id + '/structure/',
+                        {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': options.token,
+                            },
+                            body: JSON.stringify({ generation_uuid: null }),
+                        }
+                    ).then(drainStructuringResponse).then(function (outcome) {
+                        if (outcome.ok) {
+                            summary.done += 1;
+                            return;
+                        }
+                        summary.failed.push({ id: caption.id, code: outcome.code });
+                        if (stopsRerun(outcome.code)) summary.stoppedBy = outcome.code;
+                    }, function () {
+                        summary.failed.push({ id: caption.id, code: 'upstream_error' });
+                    });
+                });
+            }, Promise.resolve());
+        }).then(function () { return summary; });
+    }
+
+    /** `{type, text}` for the toast that reports a finished rerun. */
+    function rerunSummaryMessage(summary) {
+        if (!summary.total && summary.stoppedBy) {
+            return { type: 'error', text: structuringErrorMessage(summary.stoppedBy) };
+        }
+        if (!summary.total) {
+            return { type: 'info', text: 'This patient has no caption that can be structured.' };
+        }
+        var noun = summary.total === 1 ? 'caption' : 'captions';
+        var text = 'Structured ' + summary.done + ' of ' + summary.total + ' ' + noun + '.';
+        if (summary.stoppedBy) {
+            text += ' Stopped: ' + structuringErrorMessage(summary.stoppedBy);
+        } else if (summary.failed.length) {
+            text += ' ' + structuringErrorMessage(summary.failed[0].code);
+        }
+        var type = summary.done === summary.total ? 'success' : (summary.done ? 'warning' : 'error');
+        return { type: type, text: text };
+    }
 
     function CaptionStructuringController() {
         this.panel = null;
@@ -605,6 +737,10 @@
         reportHeight: reportHeight,
         renderStructuredBlock: renderStructuredBlock,
         escapeHtml: escapeHtml,
+        stopsRerun: stopsRerun,
+        drainStructuringResponse: drainStructuringResponse,
+        rerunPatientCaptions: rerunPatientCaptions,
+        rerunSummaryMessage: rerunSummaryMessage,
         Controller: CaptionStructuringController,
         controller: null,
     };

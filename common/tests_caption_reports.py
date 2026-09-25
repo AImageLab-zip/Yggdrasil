@@ -444,6 +444,145 @@ class StructuringEndpointTests(TestCase):
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
+class FinishedCaptionsOnlyTests(StructuringEndpointTests):
+    """A report is filed from a whole dictation, never from part of one.
+
+    Runs the parent's fixtures; the parent's own tests are not repeated here because
+    ``StructuringEndpointTests`` is excluded below.
+    """
+
+    def test_a_caption_still_processing_is_refused(self):
+        self.caption.processing_status = "processing"
+        self.caption.save(update_fields=["processing_status"])
+        response = self.post()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "not_complete")
+        self.assertEqual(CaptionReport.objects.count(), 0)
+
+    def test_a_caption_whose_transcription_failed_is_refused(self):
+        self.caption.processing_status = "failed"
+        self.caption.save(update_fields=["processing_status"])
+        response = self.post()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "not_complete")
+
+
+class StructurableCaptionsTests(StructuringEndpointTests):
+    """What the patient list's rerun dialog is told it may structure."""
+
+    def list_url(self):
+        return reverse(
+            "maxillo:structurable_captions",
+            kwargs={"patient_id": self.patient.patient_id},
+        )
+
+    def get_list(self):
+        with mock.patch.dict("os.environ", {"TEST_LLM_KEY": "k"}):
+            return self.client.get(self.list_url())
+
+    def test_a_finished_caption_is_offered(self):
+        response = self.get_list()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [c["id"] for c in response.json()["captions"]], [self.caption.id]
+        )
+
+    def test_it_offers_exactly_what_the_endpoint_would_accept(self):
+        """Each exclusion here is a refusal the Structure request would give."""
+        processing = VoiceCaption.objects.create(
+            patient=self.patient, user=self.user, duration=0.0, modality="cbct",
+            text_caption=DICTATION, processing_status="processing",
+        )
+        too_short = VoiceCaption.objects.create(
+            patient=self.patient, user=self.user, duration=0.0, modality="cbct",
+            text_caption="short", processing_status="completed",
+        )
+        ids = [c["id"] for c in self.get_list().json()["captions"]]
+        self.assertIn(self.caption.id, ids)
+        self.assertNotIn(processing.id, ids)
+        self.assertNotIn(too_short.id, ids)
+
+    def test_someone_elses_caption_is_not_offered_to_an_annotator(self):
+        self.client.force_login(self.annotator)
+        self.assertEqual(self.get_list().json()["captions"], [])
+
+    def test_attempts_so_far_are_reported(self):
+        self.post()
+        caption = self.get_list().json()["captions"][0]
+        self.assertEqual(caption["attempts"], 1)
+
+    def test_structuring_off_refuses_the_whole_list(self):
+        self.project.annotation_methods.remove(self.structuring_method)
+        response = self.get_list()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "disabled")
+
+    def test_no_model_refuses_up_front_rather_than_once_per_caption(self):
+        self.service_row.is_enabled = False
+        self.service_row.save(update_fields=["is_enabled"])
+        response = self.get_list()
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "not_configured")
+
+
+class PatientListRerunTests(StructuringEndpointTests):
+    """The list row offers "Report structuring" exactly when it can do something."""
+
+    def availability(self):
+        from common.structuring_context import structuring_rerun_availability
+
+        with mock.patch.dict("os.environ", {"TEST_LLM_KEY": "k"}):
+            return structuring_rerun_availability()
+
+    def test_a_ready_project_is_available(self):
+        self.assertTrue(self.availability()(self.patient))
+
+    def test_structuring_off_is_not_available(self):
+        self.project.annotation_methods.remove(self.structuring_method)
+        self.assertFalse(self.availability()(self.patient))
+
+    def test_captions_off_is_not_available(self):
+        self.project.annotation_methods.remove(self.method)
+        self.assertFalse(self.availability()(self.patient))
+
+    def test_a_domain_with_no_template_is_not_available(self):
+        ReportTemplate.objects.all().delete()
+        self.assertFalse(self.availability()(self.patient))
+
+    def test_a_page_asks_each_project_once(self):
+        """Fifty rows of one project cost the lookup once, not fifty times."""
+        available = self.availability()
+        available(self.patient)
+        second = Patient.objects.create(name="Q", project=self.project)
+        with self.assertNumQueries(0):
+            available(second)
+
+    def _list_page(self):
+        session = self.client.session
+        session["current_project_id"] = self.project.id
+        session.save()
+        with mock.patch.dict("os.environ", {"TEST_LLM_KEY": "k"}):
+            return self.client.get(reverse("maxillo:patient_list"))
+
+    def test_the_row_carries_the_flag(self):
+        response = self._list_page()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-structuring="1"')
+        self.assertContains(response, "js/caption_structuring.js")
+
+    def test_a_patient_with_no_finished_caption_is_not_flagged(self):
+        self.caption.processing_status = "processing"
+        self.caption.save(update_fields=["processing_status"])
+        self.assertNotContains(self._list_page(), 'data-structuring="1"')
+
+
+# The three classes above inherit StructuringEndpointTests for its fixtures only; without
+# this, the parent's whole suite would run once per subclass.
+for _cls in (FinishedCaptionsOnlyTests, StructurableCaptionsTests, PatientListRerunTests):
+    for _name in [n for n in vars(StructuringEndpointTests) if n.startswith("test_")]:
+        setattr(_cls, _name, None)
+
+
 class UrologyModalityTests(TestCase):
     """Urology files templates under bare slugs while captions carry the prefix."""
 

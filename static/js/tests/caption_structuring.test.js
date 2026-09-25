@@ -418,3 +418,179 @@ test('the row badge says nothing was filed instead of claiming a report', () => 
     });
     assert.ok(filled.includes('Structured'));
 });
+
+// ------------------------------------------------ rerun from the patient list
+
+function loadWithStreams() {
+    // TextDecoder is a Node global, not a vm-context one; the browser has it natively.
+    const window = { addEventListener() {} };
+    const document = {
+        addEventListener() {},
+        getElementById() { return null; },
+        querySelector() { return null; },
+        querySelectorAll() { return []; },
+    };
+    const context = { window, document, console, setTimeout, clearTimeout, TextDecoder };
+    vm.createContext(context);
+    vm.runInNewContext(
+        fs.readFileSync(path.join(__dirname, '../caption_structuring.js'), 'utf8'),
+        context
+    );
+    return window.CaptionStructuring;
+}
+
+const RS = loadWithStreams();
+
+function sseResponse(chunks) {
+    const encoder = new TextEncoder();
+    let index = 0;
+    return {
+        ok: true,
+        status: 200,
+        body: {
+            getReader() {
+                return {
+                    read() {
+                        if (index < chunks.length) {
+                            return Promise.resolve({ done: false, value: encoder.encode(chunks[index++]) });
+                        }
+                        return Promise.resolve({ done: true });
+                    },
+                };
+            },
+        },
+    };
+}
+
+function jsonResponse(status, body) {
+    return { ok: status < 400, status, json: () => Promise.resolve(body) };
+}
+
+const DONE = 'data: {"type":"done","report":{"id":1}}\n\n';
+
+test('a done frame split across reads is a success', async () => {
+    const outcome = await RS.drainStructuringResponse(sseResponse([
+        'data: {"type":"start"}\n\n: keepalive\n\ndata: {"type":"do',
+        'ne","report":{"id":9}}\n\n',
+    ]));
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.report.id, 9);
+});
+
+test('an error frame is a failure with its code', async () => {
+    const outcome = await RS.drainStructuringResponse(sseResponse([
+        'data: {"type":"start"}\n\ndata: {"type":"error","code":"rate_limited","detail":"429"}\n\n',
+    ]));
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.code, 'rate_limited');
+});
+
+test('a stream that ends with neither frame is not a success', async () => {
+    const outcome = await RS.drainStructuringResponse(sseResponse(['data: {"type":"delta","text":"x"}\n\n']));
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.code, 'stalled');
+});
+
+test('an HTTP refusal before the stream opens carries its code', async () => {
+    const outcome = await RS.drainStructuringResponse(jsonResponse(409, { code: 'not_complete' }));
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.code, 'not_complete');
+});
+
+function fakeServer(listResponse, outcomes) {
+    const calls = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetch = (url, init) => {
+        calls.push({ url, method: (init && init.method) || 'GET' });
+        if (url.endsWith('/voice-captions/structurable/')) return Promise.resolve(listResponse);
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const response = outcomes.shift();
+        return new Promise((resolve) => setTimeout(() => { inFlight -= 1; resolve(response); }, 5));
+    };
+    return { fetch, calls, maxInFlight: () => maxInFlight };
+}
+
+test('every eligible caption is structured, one at a time', async () => {
+    const server = fakeServer(
+        jsonResponse(200, { captions: [{ id: 3 }, { id: 4 }] }),
+        [sseResponse([DONE]), sseResponse([DONE])]
+    );
+    const progress = [];
+    const summary = await RS.rerunPatientCaptions({
+        base: '/maxillo/patient/7', token: 't', fetch: server.fetch,
+        onProgress: (index, total) => progress.push(`${index}/${total}`),
+    });
+    assert.equal(summary.total, 2);
+    assert.equal(summary.done, 2);
+    assert.deepEqual(progress, ['1/2', '2/2']);
+    assert.deepEqual(server.calls.map((c) => c.url), [
+        '/maxillo/patient/7/voice-captions/structurable/',
+        '/maxillo/patient/7/voice-caption/3/structure/',
+        '/maxillo/patient/7/voice-caption/4/structure/',
+    ]);
+    // A burst would fail most of a rate-limited batch.
+    assert.equal(server.maxInFlight(), 1);
+});
+
+test('a rate limit stops the rerun instead of failing every caption in turn', async () => {
+    const server = fakeServer(
+        jsonResponse(200, { captions: [{ id: 3 }, { id: 4 }, { id: 5 }] }),
+        [sseResponse([DONE]), sseResponse(['data: {"type":"error","code":"rate_limited"}\n\n'])]
+    );
+    const summary = await RS.rerunPatientCaptions({ base: '/b', token: 't', fetch: server.fetch });
+    assert.equal(summary.done, 1);
+    assert.equal(summary.stoppedBy, 'rate_limited');
+    assert.equal(server.calls.filter((c) => c.method === 'POST').length, 2);
+});
+
+test('a caption that fails on its own does not stop the others', async () => {
+    const server = fakeServer(
+        jsonResponse(200, { captions: [{ id: 3 }, { id: 4 }] }),
+        [jsonResponse(409, { code: 'in_flight' }), sseResponse([DONE])]
+    );
+    const summary = await RS.rerunPatientCaptions({ base: '/b', token: 't', fetch: server.fetch });
+    assert.equal(summary.done, 1);
+    assert.equal(summary.stoppedBy, null);
+    assert.deepEqual(JSON.parse(JSON.stringify(summary.failed)), [{ id: 3, code: 'in_flight' }]);
+});
+
+test('a refused list structures nothing and says why', async () => {
+    const server = fakeServer(jsonResponse(403, { code: 'disabled' }), []);
+    const summary = await RS.rerunPatientCaptions({ base: '/b', token: 't', fetch: server.fetch });
+    assert.equal(summary.total, 0);
+    assert.equal(summary.stoppedBy, 'disabled');
+    const message = RS.rerunSummaryMessage(summary);
+    assert.equal(message.type, 'error');
+    assert.match(message.text, /not enabled/);
+});
+
+test('the summary toast matches the outcome', () => {
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(RS.rerunSummaryMessage({ total: 2, done: 2, failed: [], stoppedBy: null }))),
+        { type: 'success', text: 'Structured 2 of 2 captions.' }
+    );
+    assert.equal(
+        RS.rerunSummaryMessage({ total: 2, done: 1, failed: [{ id: 1, code: 'in_flight' }], stoppedBy: null }).type,
+        'warning'
+    );
+    assert.equal(RS.rerunSummaryMessage({ total: 0, done: 0, failed: [], stoppedBy: null }).type, 'info');
+    assert.match(
+        RS.rerunSummaryMessage({ total: 1, done: 1, failed: [], stoppedBy: null }).text,
+        /1 of 1 caption\./
+    );
+});
+
+test('only failures every caption would share stop a rerun', () => {
+    ['rate_limited', 'not_configured', 'disabled', 'budget_exhausted'].forEach((code) => {
+        assert.equal(RS.stopsRerun(code), true, code);
+    });
+    ['in_flight', 'too_short', 'not_complete', 'malformed_response'].forEach((code) => {
+        assert.equal(RS.stopsRerun(code), false, code);
+    });
+});
+
+test('an unfinished caption has its own message', () => {
+    assert.match(CS.structuringErrorMessage('not_complete'), /still being processed/);
+});

@@ -33,6 +33,7 @@ from django.views.decorators.http import require_GET, require_POST
 from common import caption_structuring, llm, llm_tasks
 from common.caption_structuring import StructuringRefused
 from common.domain_models import get_domain_models
+from common.external_config import llm_service
 from common.permissions import project_allows_annotation, user_can_edit_caption
 
 logger = logging.getLogger(__name__)
@@ -312,3 +313,52 @@ def caption_report(request, patient_id, caption_id):
         "caption_id": voice_caption.id,
         "report": caption_structuring.serialize(report),
     })
+
+
+@login_required
+@require_GET
+def structurable_captions(request, patient_id):
+    """This patient's captions that a Structure request would accept.
+
+    What the patient list's rerun dialog asks before it walks them through
+    ``structure_caption`` one at a time. Structuring is deliberately not a pipeline job
+    -- there is no ``Job`` row, and nothing here touches the runner API -- so a rerun
+    from the list is the same per-caption request the patient page makes, issued once
+    per caption this returns.
+    """
+    domain_models = get_domain_models(request)
+    patient = get_object_or_404(domain_models["Patient"], patient_id=patient_id)
+    task = llm_tasks.CAPTION_TO_TEMPLATE
+    try:
+        if not project_allows_annotation(patient, "voice_caption"):
+            raise StructuringRefused(
+                "disabled", "Voice captions are disabled for this project.", status=403
+            )
+        caption_structuring.ensure_allowed(patient)
+        # Refuse up front rather than let every caption fail the same way in turn.
+        if llm_service(task.service_slug) is None:
+            raise StructuringRefused(
+                "not_configured",
+                "No language model is configured on this server.",
+                status=503,
+            )
+    except StructuringRefused as refusal:
+        return JsonResponse(
+            {"error": refusal.message, "code": refusal.code}, status=refusal.status
+        )
+
+    voice_captions = domain_models["VoiceCaption"].objects.filter(
+        patient=patient
+    ).order_by("created_at", "id")
+    eligible = caption_structuring.structurable_captions(
+        patient, voice_captions, user=request.user, task=task
+    )
+    captions = []
+    for voice_caption in eligible:
+        latest = caption_structuring.latest_report(voice_caption, task.slug)
+        captions.append({
+            "id": voice_caption.id,
+            "modality": getattr(voice_caption, "modality", "") or "",
+            "attempts": latest.attempt if latest else 0,
+        })
+    return JsonResponse({"patient_id": patient.patient_id, "captions": captions})

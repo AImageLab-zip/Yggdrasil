@@ -1,6 +1,11 @@
 /*
  * Single-patient rerun picker (#rerunProcessingModal, templates/common/partials/rerun_modal.html).
  *
+ * Two kinds of option. Pipeline steps are Job rows: their slugs go to rerun-processing/
+ * in one POST. "Report structuring" is not a job -- it has no Job row and never touches
+ * the runner API -- so it is run from here instead, caption by caption, through the same
+ * request the patient page's Structure button makes (CaptionStructuring.rerunPatientCaptions).
+ *
  * Both entry points -- a row's rerun button on the patients list and the Rerun button in
  * the patient-detail header -- post the same body to the same endpoint, and differ only in
  * what they do afterwards. So the modal lives here once and each page passes its own
@@ -29,14 +34,25 @@
         return parsed;
     }
 
-    function renderOptions(slugs) {
+    function renderStructuringOption(container) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'check-row';
+        wrapper.innerHTML =
+            '<input class="rerun-structuring-checkbox" type="checkbox" id="rerunReportStructuring">' +
+            '<label for="rerunReportStructuring">Report structuring ' +
+            '<span class="modal-note">(files each finished caption into its report template again)</span></label>';
+        container.appendChild(wrapper);
+    }
+
+    function renderOptions(slugs, structuring) {
         var container = document.getElementById('rerunModalityOptions');
         if (!container) return;
         container.innerHTML = '';
-        if (!slugs.length) {
+        if (!slugs.length && !structuring) {
             container.innerHTML = '<p class="modal-note">No rerunnable processing steps available for this patient.</p>';
             return;
         }
+        if (structuring) renderStructuringOption(container);
         var map = labels();
         slugs.forEach(function (slug, index) {
             var safeSlug = String(slug || '').trim();
@@ -66,29 +82,12 @@
     var modal = null;
     var wired = false;
 
-    function submit(button) {
-        var jobs = Array.prototype.slice
-            .call(document.querySelectorAll('.rerun-modality-checkbox:checked'))
-            .map(function (el) { return el.value; });
-        if (!jobs.length) {
-            notify('error', 'Select at least one job to rerun');
-            return;
-        }
-        var label = button.querySelector('.label');
-        var spinner = button.querySelector('.spinner');
-        button.disabled = true;
-        if (label) label.classList.add('hidden');
-        if (spinner) spinner.classList.remove('hidden');
+    function patientBase() {
+        return '/' + window.projectNamespace + '/patient/' + state.patientId;
+    }
 
-        var token = window.yggCsrfToken();
-        if (!token) {
-            notify('error', 'Security token missing. Please refresh the page.');
-            button.disabled = false;
-            if (label) label.classList.remove('hidden');
-            if (spinner) spinner.classList.add('hidden');
-            return;
-        }
-        fetch('/' + window.projectNamespace + '/patient/' + state.patientId + '/rerun-processing/', {
+    function rerunPipeline(jobs, token) {
+        return fetch(patientBase() + '/rerun-processing/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
             body: JSON.stringify({ jobs: jobs })
@@ -97,20 +96,67 @@
                 throw new Error('Server error (' + response.status + ')');
             });
         }).then(function (data) {
-            if (!data.success) {
-                notify('error', data.error || 'Failed to rerun jobs');
-                return;
-            }
+            if (!data.success) throw new Error(data.error || 'Failed to rerun jobs');
             notify('success', data.message || 'Jobs set to pending');
-            if (modal) modal.hide();
             if (state.onSuccess) state.onSuccess(jobs, data);
-        }).catch(function (error) {
-            notify('error', error.message || 'Network error');
-        }).finally(function () {
-            button.disabled = false;
-            if (label) label.classList.remove('hidden');
-            if (spinner) spinner.classList.add('hidden');
         });
+    }
+
+    function rerunStructuring(token) {
+        var CS = window.CaptionStructuring;
+        if (!CS || !CS.rerunPatientCaptions) {
+            throw new Error('Report structuring is not available on this page.');
+        }
+        var progress = document.getElementById('rerunStructuringProgress');
+        if (progress) {
+            progress.textContent = 'Finding captions to structure…';
+            progress.classList.remove('hidden');
+        }
+        return CS.rerunPatientCaptions({
+            base: patientBase(),
+            token: token,
+            onProgress: function (index, total) {
+                if (progress) progress.textContent = 'Structuring caption ' + index + ' of ' + total + '…';
+            }
+        }).then(function (summary) {
+            var message = CS.rerunSummaryMessage(summary);
+            notify(message.type, message.text);
+        }).finally(function () {
+            if (progress) progress.classList.add('hidden');
+        });
+    }
+
+    function submit(button) {
+        var jobs = Array.prototype.slice
+            .call(document.querySelectorAll('.rerun-modality-checkbox:checked'))
+            .map(function (el) { return el.value; });
+        var structuring = !!document.querySelector('.rerun-structuring-checkbox:checked');
+        if (!jobs.length && !structuring) {
+            notify('error', 'Select at least one job to rerun');
+            return;
+        }
+        var label = button.querySelector('.label');
+        var spinner = button.querySelector('.spinner');
+        function busy(on) {
+            button.disabled = on;
+            if (label) label.classList.toggle('hidden', on);
+            if (spinner) spinner.classList.toggle('hidden', !on);
+        }
+        busy(true);
+
+        var token = window.yggCsrfToken();
+        if (!token) {
+            notify('error', 'Security token missing. Please refresh the page.');
+            busy(false);
+            return;
+        }
+        // Pipeline first: it is one quick POST. Structuring then keeps the dialog open,
+        // with its progress line, until the last caption is done.
+        (jobs.length ? rerunPipeline(jobs, token) : Promise.resolve())
+            .then(function () { return structuring ? rerunStructuring(token) : null; })
+            .then(function () { if (modal) modal.hide(); })
+            .catch(function (error) { notify('error', error.message || 'Network error'); })
+            .finally(function () { busy(false); });
     }
 
     function ensureWired() {
@@ -135,6 +181,7 @@
          * @param {number|string} options.patientId  patient the rerun applies to
          * @param {string}        [options.patientName]  shown as the modal subtitle
          * @param {string[]|string} options.steps   rerunnable step slugs (array or "a,b,c")
+         * @param {boolean}       [options.structuring]  also offer "Report structuring"
          * @param {function}      [options.onSuccess]  called with (jobs, data) after a rerun
          */
         open: function (options) {
@@ -143,7 +190,7 @@
             state.onSuccess = options.onSuccess || null;
             var subtitle = document.getElementById('rerunScanSubtitle');
             if (subtitle) subtitle.textContent = options.patientName || ('Scan #' + options.patientId);
-            renderOptions(normalizeSteps(options.steps));
+            renderOptions(normalizeSteps(options.steps), !!options.structuring);
             modal.show();
         }
     };
