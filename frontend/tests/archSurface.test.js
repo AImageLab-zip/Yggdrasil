@@ -63,6 +63,7 @@ function archSurface() {
                 addViewport() {},
                 addTool: (name, options) => toolOptions.push({ name, options }),
                 setToolActive() {},
+                setToolConfiguration() {},
             }),
         },
         annotation: {

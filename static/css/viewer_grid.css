@@ -1232,3 +1232,29 @@
   opacity: 0.5;
   cursor: grabbing;
 }
+
+/* Touch (grid/dragDrop.js): a finger on a chip drags it instead of scrolling the
+   page, and a tapped chip stays marked until a window is tapped to receive it. */
+.modality-chip[data-modality] {
+  touch-action: none;
+}
+.modality-chip.is-armed {
+  outline: 2px solid var(--ygg-primary, #0d6efd);
+  outline-offset: 2px;
+}
+
+/* Phones (the public demo only, common/mobile.py). The 768px rule above already
+   stacks the four windows; here each gets a near-square slice of the screen. One
+   finger on a window scrolls the page and two work the view (runtime/touch.js,
+   and the touch-action rule in theme.css). */
+@media (max-width: 640px) {
+  .viewer-window {
+    min-height: min(80vw, 380px);
+  }
+  .viewer-grid.viewer-grid--render-focus {
+    height: min(110vw, 560px);
+  }
+  .viewer-tools-bar {
+    flex-wrap: wrap;
+  }
+}

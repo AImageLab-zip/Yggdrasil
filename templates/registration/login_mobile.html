@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% load icons %}
+
+{% block title %}Yggdrasil on your phone{% endblock %}
+
+{% comment %}
+  What a phone gets instead of the sign-in and register forms (common/mobile.py).
+  Phones may explore the public demo but never sign in, so the only action here
+  is the demo -- or, when nothing is published, an honest "use a computer".
+{% endcomment %}
+{% block content %}
+<div class="auth-wrap">
+    <div class="auth-card text-center">
+        <div class="flex justify-center mb-1">
+            {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
+        </div>
+        {% if invited %}
+        <h1 class="text-xl">Accept your invitation on a computer</h1>
+        <hr class="auth-rule">
+        <p class="text-sm text-content-muted mb-4">
+            Accounts are created on a laptop or desktop. Open the invitation link
+            from your email there to create your account.
+        </p>
+        {% else %}
+        <h1 class="text-xl">Sign-in is available on desktop</h1>
+        <hr class="auth-rule">
+        {% endif %}
+
+        {% if demo_url %}
+            <p class="text-sm text-content-muted mb-4">
+                On a phone you can explore the public demo: the real viewers and
+                patients, read-only, no account needed.
+            </p>
+            <a href="{{ demo_url }}" class="btn btn-primary w-full">{% icon 'eye' %}<span>Enter the live demo</span></a>
+        {% else %}
+            <p class="text-sm text-content-muted">
+                The public demo is not available right now. Open Yggdrasil on a
+                laptop or desktop to sign in.
+            </p>
+        {% endif %}
+
+        <p class="text-sm text-content-muted mt-5">
+            <a href="{% url 'home' %}" class="font-medium">Back to the home page</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

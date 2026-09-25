@@ -12,6 +12,7 @@ import { init as toolsInit } from '@cornerstonejs/tools';
 
 import { RENDERING_CONFIG } from './config.js';
 import { detectCapabilities } from './capabilities.js';
+import { installPhoneTouchPolicy } from './touch.js';
 
 let initialized = null;
 
@@ -48,6 +49,8 @@ export function initImaging(options = {}) {
         }
 
         await coreInit(RENDERING_CONFIG);
+        // One finger scrolls the page on a phone, two work the view (`touch.js`).
+        installPhoneTouchPolicy();
         // `toolsInit` *replaces* the config wholesale, so the addons must go in here;
         // there is no later hook that adds one.
         await toolsInit(options.addons ? { addons: options.addons } : undefined);

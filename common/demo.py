@@ -128,6 +128,25 @@ def landing_demo_url():
         return None
 
 
+def login_as_guest(request):
+    """Log ``request`` in as the shared read-only guest, if there is a demo.
+
+    Returns the guest user, or ``None`` when nothing is published or the guest
+    account does not exist. The caller has already applied ``_rate_ok``: this
+    is the one place that decides *whether* the guest can be entered, so
+    ``/demo/`` and the phone auto-entry (common/mobile.py) cannot drift apart.
+    """
+    if not demo_is_published():
+        return None
+    User = get_user_model()
+    try:
+        guest = User.objects.get(username=settings.DEMO_GUEST_USERNAME)
+    except User.DoesNotExist:
+        return None
+    login(request, guest, backend="django.contrib.auth.backends.ModelBackend")
+    return guest
+
+
 # --- views ----------------------------------------------------------------
 
 def demo_index(request):
@@ -140,14 +159,6 @@ def demo_index(request):
     if not _rate_ok(request):
         return HttpResponse("Too many requests", status=429)
 
-    if not demo_is_published():
+    if login_as_guest(request) is None:
         raise Http404("No demo content is available")
-
-    User = get_user_model()
-    try:
-        guest = User.objects.get(username=settings.DEMO_GUEST_USERNAME)
-    except User.DoesNotExist:
-        raise Http404("Demo is not available")
-
-    login(request, guest, backend="django.contrib.auth.backends.ModelBackend")
     return redirect("home")
