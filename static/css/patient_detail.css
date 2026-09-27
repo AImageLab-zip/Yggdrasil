@@ -2222,4 +2222,7 @@
     /* The side panel sits under the viewer here, so it scrolls with the page
        rather than as a second scroll area inside it. */
     .side-panel__body { max-height: none; }
+    /* One finger rotates the mesh here (data-touch-drive, runtime/touch.js), so it
+       is no longer a place to scroll from: keep it shorter than the screen. */
+    #scan-viewer { height: min(85vw, 400px); }
 }

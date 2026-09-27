@@ -223,6 +223,9 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
 @media (max-width: 640px) {
     [data-viewport-uid],
     [data-touch-view] { touch-action: pan-x pan-y !important; }
+    /* Except in a drive container, where one finger rotates or moves the view
+       (maxillo IOS and CBCT): there the page must not scroll under the finger. */
+    [data-touch-drive] [data-viewport-uid] { touch-action: none !important; }
 }
 
 /* Device-scoped visibility helpers. Phones get the demo only

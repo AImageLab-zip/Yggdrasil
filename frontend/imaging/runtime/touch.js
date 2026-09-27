@@ -14,12 +14,17 @@
  *     almost nowhere left to scroll from, which was how it was reported.
  *   - **two fingers work the view**: pinch to zoom and drag to pan, in one gesture
  *     (`ZoomTool`'s pinch with its `pan` option).
+ *   - **except inside `data-touch-drive`**, where one finger is the viewer's too -- it
+ *     does what the left button does (Cornerstone maps a single touch to the Primary
+ *     binding). For surfaces pinch and pan cannot operate: rotating a 3D mesh or volume
+ *     render, dragging the crosshair through a CBCT. The page scrolls from around them.
  *
  * Two halves make that true. {@link installPhoneTouchPolicy} decides, per touch, who
  * gets it -- the page for one finger, the viewer for two -- and `theme.css` lets the
  * browser pan the page from a viewer (Cornerstone stamps `touch-action: none` inline on
- * every viewport element). Both apply at phone width only, so a desktop, a tablet and a
- * touchscreen workstation keep exactly the input they had.
+ * every viewport element) except inside a drive container. Both apply at phone width
+ * only, so a desktop, a tablet and a touchscreen workstation keep exactly the input they
+ * had.
  */
 
 /** The same breakpoint the phone CSS uses (`theme.css`, `viewer_grid.css`). */
@@ -34,6 +39,12 @@ export const VIEW_TOUCH_POINTS = 2;
  * draws itself and opts in with `data-touch-view` (the WSI viewer).
  */
 export const VIEW_SELECTOR = '[data-viewport-uid], [data-touch-view]';
+
+/**
+ * A container whose viewers keep one finger on a phone: the maxillo IOS mesh and CBCT
+ * grid, where one finger is the only way to rotate or move the view.
+ */
+export const DRIVE_SELECTOR = '[data-touch-drive]';
 
 /** Touch bindings for the Zoom tool, to append to its mouse bindings. */
 export function touchZoomBindings() {
@@ -67,9 +78,10 @@ export function isPhoneViewport(matchMedia = globalThis.matchMedia) {
  *
  * A document-level capture listener runs before any viewer sees the touch. One finger
  * on a viewer is stopped from propagating -- no tool starts, so nothing competes with
- * the browser's page scroll. Two or more have their default prevented instead, so the
- * page stays still and the viewer's own handlers (Cornerstone's pinch, the WSI pinch)
- * have the gesture to themselves.
+ * the browser's page scroll -- unless the viewer sits in a {@link DRIVE_SELECTOR}
+ * container, which keeps it (the browser does not scroll there: `theme.css`). Two or
+ * more have their default prevented instead, so the page stays still and the viewer's
+ * own handlers (Cornerstone's pinch, the WSI pinch) have the gesture to themselves.
  *
  * Idempotent per document: every surface calls it, and the first call wins.
  *
@@ -90,6 +102,9 @@ export function installPhoneTouchPolicy(doc = globalThis.document, matchMedia = 
             return;
         }
         if ((event.touches?.length ?? 0) < VIEW_TOUCH_POINTS) {
+            if (event.target.closest(DRIVE_SELECTOR)) {
+                return;
+            }
             event.stopPropagation();
             return;
         }

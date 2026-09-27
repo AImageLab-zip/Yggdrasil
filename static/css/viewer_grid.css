@@ -1257,4 +1257,16 @@
   .viewer-tools-bar {
     flex-wrap: wrap;
   }
+  /* A grid that keeps one finger (data-touch-drive: the maxillo CBCT) cannot be
+     scrolled past from inside, so it stays a 2x2 square rather than four stacked
+     screens; two fingers still pinch and pan each window. */
+  .viewer-grid[data-touch-drive]:not(.viewer-grid--render-focus) {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .viewer-grid[data-touch-drive] .viewer-window {
+    min-height: 0;
+  }
 }

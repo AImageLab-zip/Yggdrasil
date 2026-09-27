@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
+    DRIVE_SELECTOR,
     PHONE_QUERY,
     PINCH_PANS,
     VIEW_SELECTOR,
@@ -71,8 +72,9 @@ function policyRig({ phone = true } = {}) {
     const doc = { addEventListener: (type, fn, opts) => { listeners[type] = { fn, opts }; } };
     installPhoneTouchPolicy(doc, (query) => ({ matches: phone && query === PHONE_QUERY }));
     const inView = { closest: (sel) => (sel === VIEW_SELECTOR ? {} : null) };
+    const inDrive = { closest: (sel) => (sel === VIEW_SELECTOR || sel === DRIVE_SELECTOR ? {} : null) };
     const outside = { closest: () => null };
-    return { doc, listeners, inView, outside };
+    return { doc, listeners, inView, inDrive, outside };
 }
 
 test('on a phone, one finger on a viewer is kept from the viewer so the page scrolls', () => {
@@ -94,6 +96,19 @@ test('on a phone, two fingers on a viewer are the viewer\'s and the page stays s
     listeners.touchstart.fn(e);
     assert.ok(e.prevented);
     assert.ok(!e.stopped, 'the viewer still receives it');
+});
+
+test('on a phone, one finger in a drive container is the viewer\'s (rotate, crosshair)', () => {
+    const { listeners, inDrive } = policyRig();
+    for (const type of ['touchstart', 'touchmove']) {
+        const e = touchEvent(inDrive, 1);
+        listeners[type].fn(e);
+        assert.ok(!e.stopped, `${type}: the viewer receives it`);
+        assert.ok(!e.prevented, `${type}: touch-action, not the policy, keeps the page still`);
+    }
+    const pinch = touchEvent(inDrive, 2);
+    listeners.touchstart.fn(pinch);
+    assert.ok(pinch.prevented && !pinch.stopped, 'two fingers still pinch and pan');
 });
 
 test('the policy ignores touches off the viewers, and everything above phone width', () => {
@@ -120,6 +135,8 @@ test('the policy installs once per document', () => {
 test('the phone CSS lets the browser pan from a viewer despite Cornerstone\'s inline none', () => {
     const css = readFileSync(join(REPO, 'static', 'css', 'theme.css'), 'utf8');
     assert.match(css, /\[data-viewport-uid\],\s*\[data-touch-view\] \{ touch-action: pan-x pan-y !important; \}/);
+    // ...except in a drive container, where the finger belongs to the view.
+    assert.match(css, /\[data-touch-drive\] \[data-viewport-uid\] \{ touch-action: none !important; \}/);
     // And nothing reinstates `none` on a whole viewer window on phones.
     const grid = readFileSync(join(REPO, 'static', 'css', 'viewer_grid.css'), 'utf8');
     assert.doesNotMatch(grid, /\.viewer-window\.loaded \{\s*touch-action: none/);

@@ -211,7 +211,7 @@
                     </section>
                     {% endif %}
                     {{ mesh_landmark_data|json_script:"meshLandmarkData" }}
-                    <div class="ios-scan-stage">
+                    <div class="ios-scan-stage" data-touch-drive>
                         <div id="scan-viewer"></div>
                         <div class="viewer-controls">
                             <div class="btn-group-vertical">
@@ -264,7 +264,7 @@
                     {# black canvas for as long as the volume took to load -- which is       #}
                     {# exactly what a viewer that failed to load looks like. Black is the    #}
                     {# honest empty state; the overlay names each window once it has one.    #}
-                    <div class="viewer-grid">
+                    <div class="viewer-grid" data-touch-drive>
                         <div class="viewer-window" data-window-index="0"></div>
                         <div class="viewer-window" data-window-index="1"></div>
                         <div class="viewer-window" data-window-index="2"></div>
