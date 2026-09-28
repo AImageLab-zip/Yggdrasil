@@ -17,6 +17,7 @@ from common.domains import landing_domain_cards, order_projects_for_landing
 from common.export_share import is_share_expired
 from common.file_access import exists as artifact_exists
 from common.modality_config import (
+    modality_requires_processing,
     modality_status,
     rerun_step_labels,
     rerunnable_steps_for_patient,
@@ -253,9 +254,67 @@ def patient_detail(request, patient_id):
     return render_with_fallback(request, "patient_detail", context)
 
 
+def _modality_status_list(patient, allowed_modalities, requires_processing):
+    """Per-modality status for one list row, from the prefetched files and jobs only.
+
+    ``requires_processing`` maps slug -> `modality_requires_processing`, looked up
+    once per request rather than once per patient.
+    """
+    files_by_modality = {}
+    for file_obj in patient.files.all():
+        if file_obj.modality and file_obj.modality.slug:
+            files_by_modality.setdefault(file_obj.modality.slug, []).append(file_obj)
+    jobs_by_modality = {}
+    for job in patient.jobs.all():
+        jobs_by_modality.setdefault(job.modality_slug, []).append(job)
+    modality_status_list = []
+    for modality in allowed_modalities:
+        slug = modality.slug or ""
+        if slug in {"rawzip", "voice"}:
+            continue
+        status = modality_status(
+            slug,
+            jobs_by_modality.get(slug, []),
+            bool(files_by_modality.get(slug)),
+            requires_processing=requires_processing.get(slug),
+        )
+        modality_status_list.append({
+            "slug": slug,
+            "name": modality.name,
+            "icon": modality.icon or "",
+            "label": modality.label or "",
+            "status": status,
+        })
+    return modality_status_list
+
+
+def _patient_row(request, patient, modality_status_list):
+    """The template's row for one patient.
+
+    Unlike `_modality_status_list` this issues queries of its own (the rerun
+    picker's steps, the delete permission), so it is only ever run for the rows
+    on the page being shown -- see #97.
+    """
+    voice_captions = list(patient.voice_captions.all())
+    return {
+        "patient": patient,
+        "voice_caption_processing": any(vc.processing_status in ["pending", "processing"] for vc in voice_captions),
+        "voice_caption_processed": bool(voice_captions) and all(vc.processing_status == "completed" for vc in voice_captions),
+        "voice_caption_count": len(voice_captions),
+        "voice_annotators": list({vc.user.username for vc in voice_captions}),
+        "tags": patient.tag_names(),
+        "folder": patient.folder,
+        "available_modalities": [m.slug for m in patient.modalities.all()],
+        "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
+        "modality_status_list": modality_status_list,
+        "rerunnable_steps": rerunnable_steps_for_patient(list(patient.files.all()), modality_status_list, patient=patient),
+        "can_delete": bool(user_is_project_admin(request.user, patient.project) or user_can_delete_single_patient(request.user, patient.folder, patient.project)),
+    }
+
+
 @login_required
 def patient_list(request):
-    patients = Patient.objects.select_related("uploaded_by").prefetch_related(
+    patients = Patient.objects.select_related("uploaded_by", "project", "folder").prefetch_related(
         "voice_captions",
         "voice_captions__user",
         "tags",
@@ -313,57 +372,8 @@ def patient_list(request):
             if value in {"processed", "processing", "failed"}:
                 status_filters[slug] = value
 
-    patients_with_status = []
     # UI flag for the project the list is showing; each row is checked on its own project.
     is_admin = user_is_project_admin(request.user, session_project(request))
-    for patient in patients:
-        voice_captions = list(patient.voice_captions.all())
-        patient_files = list(patient.files.all())
-        patient_jobs = list(patient.jobs.all()) if hasattr(patient, "jobs") else []
-        files_by_modality = {}
-        for file_obj in patient_files:
-            if file_obj.modality and file_obj.modality.slug:
-                files_by_modality.setdefault(file_obj.modality.slug, []).append(file_obj)
-        jobs_by_modality = {}
-        for job in patient_jobs:
-            jobs_by_modality.setdefault(job.modality_slug, []).append(job)
-        modality_status_list = []
-        for modality in allowed_modalities:
-            slug = modality.slug or ""
-            if slug in {"rawzip", "voice"}:
-                continue
-            status = modality_status(
-                slug,
-                jobs_by_modality.get(slug, []),
-                bool(files_by_modality.get(slug)),
-            )
-            modality_status_list.append({
-                "slug": slug,
-                "name": modality.name,
-                "icon": modality.icon or "",
-                "label": modality.label or "",
-                "status": status,
-            })
-        patients_with_status.append({
-            "patient": patient,
-            "voice_caption_processing": any(vc.processing_status in ["pending", "processing"] for vc in voice_captions),
-            "voice_caption_processed": bool(voice_captions) and all(vc.processing_status == "completed" for vc in voice_captions),
-            "voice_caption_count": len(voice_captions),
-            "voice_annotators": list({vc.user.username for vc in voice_captions}),
-            "tags": patient.tag_names(),
-            "folder": patient.folder,
-            "available_modalities": [m.slug for m in patient.modalities.all()],
-            "modality_statuses": {item["slug"]: item["status"] for item in modality_status_list},
-            "modality_status_list": modality_status_list,
-            "rerunnable_steps": rerunnable_steps_for_patient(patient_files, modality_status_list, patient=patient),
-            "can_delete": bool(user_is_project_admin(request.user, patient.project) or user_can_delete_single_patient(request.user, patient.folder, patient.project)),
-        })
-
-    if status_filters:
-        patients_with_status = [
-            item for item in patients_with_status
-            if all(item["modality_statuses"].get(slug, "absent") == value for slug, value in status_filters.items())
-        ]
 
     try:
         per_page = int(request.GET.get("per_page", 10))
@@ -371,7 +381,32 @@ def patient_list(request):
         per_page = 10
     if per_page not in {10, 20, 50, 100}:
         per_page = 10
-    page_obj = Paginator(patients_with_status, per_page).get_page(request.GET.get("page"))
+    page_number = request.GET.get("page")
+    requires_processing = {m.slug: modality_requires_processing(m.slug) for m in allowed_modalities if m.slug}
+
+    # Paginate before building rows: a row costs queries of its own, so building
+    # one per patient in the project made every page as slow as the whole
+    # project (#97). A status filter is computed, not stored, so it still has to
+    # look at every matching patient -- but only through the in-memory status,
+    # and the full row is still built for the page alone.
+    if status_filters:
+        candidates = []
+        for patient in patients:
+            modality_status_list = _modality_status_list(patient, allowed_modalities, requires_processing)
+            statuses = {item["slug"]: item["status"] for item in modality_status_list}
+            if all(statuses.get(slug, "absent") == value for slug, value in status_filters.items()):
+                candidates.append((patient, modality_status_list))
+        page_obj = Paginator(candidates, per_page).get_page(page_number)
+        page_obj.object_list = [
+            _patient_row(request, patient, modality_status_list)
+            for patient, modality_status_list in page_obj.object_list
+        ]
+    else:
+        page_obj = Paginator(patients, per_page).get_page(page_number)
+        page_obj.object_list = [
+            _patient_row(request, patient, _modality_status_list(patient, allowed_modalities, requires_processing))
+            for patient in page_obj.object_list
+        ]
     project_id = current_project_id
     folders = filter_folders_for_user(
         request.user,

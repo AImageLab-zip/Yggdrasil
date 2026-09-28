@@ -88,7 +88,7 @@ def modality_is_blocking(modality_slug):
     return modality_requires_processing(modality_slug)
 
 
-def modality_status(modality_slug, jobs, has_files):
+def modality_status(modality_slug, jobs, has_files, requires_processing=None):
     """The patient-row status for one modality's pill.
 
     ``'failed' | 'processing' | 'pending' | 'processed' | 'absent'``, in that
@@ -100,8 +100,14 @@ def modality_status(modality_slug, jobs, has_files):
     makes it green. That is also what clears the debris -- a patient uploaded
     while a step-less modality still spawned a Job carries a 'failed' row that
     no rerun can ever complete, because there is no algo to run.
+
+    ``requires_processing`` is :func:`modality_requires_processing` for the slug,
+    for callers that status many patients at once: it is a query, and asking it
+    per patient made a list's cost grow with the project (#97).
     """
-    if modality_requires_processing(modality_slug):
+    if requires_processing is None:
+        requires_processing = modality_requires_processing(modality_slug)
+    if requires_processing:
         statuses = {getattr(job, "status", "") for job in jobs or ()}
         if "failed" in statuses:
             return "failed"
