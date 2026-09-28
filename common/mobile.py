@@ -67,9 +67,14 @@ def render_desktop_only(request):
     403 and never reaches ``authenticate``, so django-axes does not count it.
     """
     status = 200 if request.method in ("GET", "HEAD") else 403
-    # An invitation email links to /register/?code=...; say how to use it rather
-    # than leave the invitee at a generic card.
-    context = {"invited": bool(request.GET.get("code"))}
+    # An invitation email links to /register/?code=..., and a reset email to
+    # /password-reset/...; say how to use the link rather than leave its
+    # recipient at a generic card.
+    url_name = getattr(getattr(request, "resolver_match", None), "url_name", "") or ""
+    context = {
+        "invited": bool(request.GET.get("code")),
+        "resetting": url_name.startswith("password_reset"),
+    }
     response = render(request, LOGIN_MOBILE_TEMPLATE, context, status=status)
     return mark_mobile_varying(response)
 

@@ -23,6 +23,7 @@
                 <label for="{{ form.password.id_for_label }}" class="form-label">Password</label>
                 <input type="password" class="form-input" name="password" id="{{ form.password.id_for_label }}" required>
                 {% if form.password.errors %}<div class="form-error">{{ form.password.errors }}</div>{% endif %}
+                <div class="flex justify-end mt-2 text-sm"><a href="{% url 'password_reset' %}" class="font-medium">Forgot your password?</a></div>
             </div>
             {% if form.non_field_errors %}
                 <div class="alert-ygg alert-danger mb-4">{% icon 'circle-alert' %}<div>{{ form.non_field_errors }}</div></div>

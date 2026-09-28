@@ -14,7 +14,14 @@
         <div class="flex justify-center mb-1">
             {% include 'common/partials/wordmark.html' with variant='ink' size='lg' %}
         </div>
-        {% if invited %}
+        {% if resetting %}
+        <h1 class="text-xl">Reset your password on a computer</h1>
+        <hr class="auth-rule">
+        <p class="text-sm text-content-muted mb-4">
+            Passwords are reset on a laptop or desktop. Open the link from your
+            email there to choose a new password.
+        </p>
+        {% elif invited %}
         <h1 class="text-xl">Accept your invitation on a computer</h1>
         <hr class="auth-rule">
         <p class="text-sm text-content-muted mb-4">
