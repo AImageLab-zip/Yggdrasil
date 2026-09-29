@@ -1,11 +1,9 @@
 """Authentication and invitation-related views."""
 import logging
 import uuid
-from email.mime.image import MIMEImage
 
 from django.conf import settings
-from django.contrib.staticfiles import finders
-from django.core.mail import EmailMultiAlternatives, get_connection, send_mail
+from django.core.mail import get_connection, send_mail
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import User
@@ -16,6 +14,7 @@ from django.utils import timezone
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
+from common.emails import send_branded_email
 from common.mobile import desktop_auth_only
 from common.models import Invitation
 from ..forms import InvitationForm, InvitedUserCreationForm
@@ -108,33 +107,16 @@ def register(request):
     return render(request, 'registration/register.html', {'form': form})
 
 
-INVITATION_LOGO_CID = 'yggdrasil-logo'
-
-
 def _send_invitation_email(invitation, context, sender_email, connection):
     """Send the invitation as text + HTML, with the logo attached inline (cid:)."""
-    subject = render_to_string('registration/emails/invitation_subject.txt', context).strip()
-    text_body = render_to_string('registration/emails/invitation_body.txt', context)
-    html_body = render_to_string('registration/emails/invitation_body.html', context)
-
-    message = EmailMultiAlternatives(
-        subject, text_body, sender_email, [invitation.email], connection=connection,
+    send_branded_email(
+        render_to_string('registration/emails/invitation_subject.txt', context).strip(),
+        render_to_string('registration/emails/invitation_body.txt', context),
+        render_to_string('registration/emails/invitation_body.html', context),
+        sender_email,
+        [invitation.email],
+        connection=connection,
     )
-    message.attach_alternative(html_body, 'text/html')
-
-    logo_path = finders.find('icons/email-logo.png')
-    if logo_path:
-        # multipart/related keeps clients from listing the inline logo as an attachment.
-        message.mixed_subtype = 'related'
-        with open(logo_path, 'rb') as fh:
-            logo = MIMEImage(fh.read(), 'png')
-        logo.add_header('Content-ID', f'<{INVITATION_LOGO_CID}>')
-        logo.add_header('Content-Disposition', 'inline', filename='yggdrasil-logo.png')
-        message.attach(logo)
-    else:
-        logger.warning('Invitation email logo not found; sending without it')
-
-    message.send(fail_silently=False)
 
 
 @login_required
