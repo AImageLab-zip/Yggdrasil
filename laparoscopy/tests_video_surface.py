@@ -22,10 +22,12 @@ from django.urls import reverse
 from common.models import (
     AnnotationMethod,
     FileRegistry,
+    Job,
     Modality,
     Project,
     ProjectAccess,
 )
+from common.uploads import entity_fk_kwargs
 from laparoscopy.models import TYPE_PALETTE, Folder, Patient, RegionType, RegionTypeUserColor
 
 #: The ids `frontend/imaging/video/bootstrap.js` and `pageControls.js` look up by name.
@@ -262,12 +264,35 @@ class VideoSurfaceRenderTests(TestCase):
         the recording is still processing rather than that none was uploaded.
         """
         self._video(probe=True)
+        self._job("pending")
 
         response, html = self._page()
 
         self.assertEqual(response.context["video_state"], "processing")
         self.assertEqual(self._payload_text(html), "null")
         self.assertIn("still being", html)
+
+    def _job(self, status):
+        return Job.objects.create(
+            modality_slug="video", status=status, **entity_fk_kwargs(self.patient)
+        )
+
+    def test_a_failed_job_is_reported_as_failed_not_processing(self):
+        self._video(probe=True)
+        self._job("failed")
+
+        response, html = self._page()
+
+        self.assertEqual(response.context["video_state"], "failed")
+        self.assertNotIn("still being", html)
+
+    def test_no_job_is_reported_as_such_not_processing_forever(self):
+        self._video(probe=True)
+
+        response, html = self._page()
+
+        self.assertEqual(response.context["video_state"], "no_job")
+        self.assertNotIn("still being", html)
         self.assertNotIn("No video uploaded for this patient.", html)
         # ...and it still plays.
         self.assertTrue(response.context["has_video"])

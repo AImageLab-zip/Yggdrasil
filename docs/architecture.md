@@ -184,7 +184,8 @@ Notes that matter when you touch this:
   the rest; that is exactly what `manage.py resubmit_jobs` does. Bypassing the
   signal bypasses the modality kill switch and the routing table.
 - The web app knows nothing about SLURM and never imports `common/runner/ssh.py`.
-  A `ProcessingStep` with a blank `algo_name` stays on the plain Celery path.
+  A `ProcessingStep` with a blank `algo_name` makes the runner fail its jobs
+  ("No algo_name configured for this step"); every runner step needs one.
 - `Job.slurm_job_id` is observability only; the web app never reads it.
 - The `maintenance` Celery queue (nightly backups) must never overlap
   `RUNNER_DEFAULT_QUEUE` or any `RUNNER_QUEUE_BY_*` value, or an external

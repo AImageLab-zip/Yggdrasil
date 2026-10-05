@@ -252,3 +252,12 @@ class BackfillCommandTests(TestCase):
         self.assertIn("disagree on frame size", message)
         self.assertIn("1280x720", message)
         self.assertIn("1920x1080", message)
+
+
+class ProbeVideoFrameRateTests(TestCase):
+    def test_an_unreadable_frame_rate_is_an_error_not_a_guess(self):
+        out = '{"streams": [{"width": 1920, "height": 1080, "avg_frame_rate": "0/0", "nb_frames": "10"}]}'
+        done = mock.Mock(returncode=0, stdout=out, stderr="")
+        with mock.patch.object(video_probe.subprocess, "run", return_value=done):
+            with self.assertRaisesMessage(RuntimeError, "frame rate"):
+                video_probe.probe_video("/tmp/x.mp4")

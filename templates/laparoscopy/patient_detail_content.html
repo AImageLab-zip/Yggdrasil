@@ -110,6 +110,23 @@
                         processed. Annotation opens once the sampled track is ready — it
                         is what annotations are recorded against, so it has to exist
                         before the first stroke. The video below plays in the meantime.
+                    {% elif video_state == 'failed' %}
+                        <i class="fas fa-triangle-exclamation me-2"></i>Preparing this
+                        recording failed, so it cannot be annotated yet. The video below
+                        plays as uploaded.
+                        {% if is_admin_user %}
+                        <br><span class="small">See the failed video job in the admin; once
+                        the cause is fixed, re-run it.</span>
+                        {% endif %}
+                    {% elif video_state == 'no_job' %}
+                        <i class="fas fa-triangle-exclamation me-2"></i>No preparation job
+                        exists for this recording, so the annotation track will not appear
+                        by waiting. The video below plays as uploaded.
+                        {% if is_admin_user %}
+                        <br><span class="small">Check the <code>video</code> processing step
+                        is enabled (<code>manage.py setup_laparoscopy_modalities</code>) and
+                        resubmit the upload.</span>
+                        {% endif %}
                     {% elif video_state == 'unprobed' %}
                         <i class="fas fa-triangle-exclamation me-2"></i>This video has not
                         been analysed yet, so the annotator cannot open. Its frame rate and

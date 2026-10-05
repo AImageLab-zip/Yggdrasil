@@ -79,6 +79,52 @@ services:
             garage:
                 condition: service_started
 
+    # Drives the SLURM cluster over SSH (config in .env.worker). It presigns the job's
+    # storage grants, so OBJECT_STORAGE_ENDPOINT_URL is the PUBLIC Garage URL the cluster
+    # can reach (Traefik :3900), not http://garage:3900.
+    runner-worker:
+        build: .
+        command: sh -c 'python -m celery -A yggdrasil worker --queues "$${RUNNER_QUEUES:-runner_dev}" --pool=threads --concurrency 4 --loglevel=info'
+        volumes:
+            - .:/app
+            - ./secrets:/run/secrets:ro
+        env_file:
+            - .env.worker
+        extra_hosts:
+            # Containers may not resolve the public name; reach Traefik via the host.
+            - "zip-dgx.ing.unimore.it:host-gateway"
+        environment:
+            PYTHONPATH: /app
+            SECRET_KEY: runner-worker-serves-no-http
+            DB_NAME: none
+            DB_USER: none
+            DB_PASSWORD: none
+            DB_HOST: runner-worker-has-no-database.invalid
+            EMAIL_BACKEND: django.core.mail.backends.dummy.EmailBackend
+            EMAIL_HOST: localhost
+            EMAIL_PORT: "25"
+            EMAIL_HOST_USER: ""
+            EMAIL_HOST_PASSWORD: ""
+            EMAIL_USE_TLS: "false"
+            EMAIL_USE_SSL: "false"
+            DEFAULT_FROM_EMAIL: runner@localhost
+            DEBUG: "true"
+            REDIS_HOST: redis
+            REDIS_PASSWORD: ${REDIS_PASSWORD:-change-me-redis-password}
+            SLURM_KNOWN_HOSTS: /run/secrets/slurm_known_hosts
+            OBJECT_STORAGE_ENDPOINT_URL: https://zip-dgx.ing.unimore.it:3900
+            OBJECT_STORAGE_USE_SSL: "true"
+            OBJECT_STORAGE_REGION: garage
+            OBJECT_STORAGE_ACCESS_KEY_ID: GK31c2f218a2e44f485b94239e
+            OBJECT_STORAGE_SECRET_ACCESS_KEY: 7f2e4d8c1ba9463f5e0d2c8a7b6e9f1d3c5a8e0b4d7f2a6c9e1b3d5f7a0c2e4d
+            OBJECT_STORAGE_BUCKET: yggdrasil
+        user: "${UID:-1000}:${GID:-1000}"
+        depends_on:
+            redis:
+                condition: service_started
+            web:
+                condition: service_started
+
     db:
         image: mysql:8.0
         environment:

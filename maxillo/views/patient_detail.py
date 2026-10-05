@@ -884,7 +884,7 @@ def patient_detail(request, patient_id):
             request, ns, patient, subsampled_file, video_file
         )
         context['video_state'] = _video_state(
-            ns, video_file, subsampled_file, context['video_annotate_data']
+            ns, video_file, subsampled_file, context['video_annotate_data'], patient
         )
         context['video_diagnosis'] = _video_diagnosis(patient, video_candidates, video_file)
     except Exception:
@@ -968,7 +968,7 @@ def _first_probed_video(candidates):
     return None
 
 
-def _video_state(namespace, video_file, subsampled_file, annotate_data):
+def _video_state(namespace, video_file, subsampled_file, annotate_data, patient=None):
     """Why the video surface looks the way it does, for the template to say out loud.
 
     ``absent`` -- there is no video row at all. ``processing`` -- the recording is
@@ -988,13 +988,24 @@ def _video_state(namespace, video_file, subsampled_file, annotate_data):
     sentence, and ``ready`` with a ``null`` payload means the placeholder stays on
     screen still claiming no video was uploaded. ``ready`` means exactly one thing: the
     payload is real and the annotator will mount from it.
+
+    While the track is missing the job decides what is said, because a job that failed
+    or was never created is not "still processing" and waiting will not help:
+    ``failed`` -- the latest video job failed; ``no_job`` -- none exists (the video step
+    is not set up, or the upload predates it).
     """
     if not video_file:
         return 'absent'
     if annotate_data and annotate_data != 'null':
         return 'ready'
     if subsampled_file is None:
-        return 'processing'
+        job = (
+            patient.jobs.filter(modality_slug='video').order_by('-id').first()
+            if patient is not None else None
+        )
+        if job is None:
+            return 'no_job'
+        return 'failed' if job.status == 'failed' else 'processing'
     return 'unprobed'
 
 
