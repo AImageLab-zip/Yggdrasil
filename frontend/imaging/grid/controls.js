@@ -147,6 +147,65 @@ export function applyAnnotationMode({ plan, enabled }) {
 }
 
 /**
+ * Where the annotation switch is remembered, per domain, on this browser.
+ *
+ * Off is still where a first visit opens -- a clinician opening a study is reading it.
+ * But a reader who measures had to find the switch again on every study, and the tools
+ * behind it were reported as "the ruler disappeared". Remembering the last choice keeps
+ * the default for readers and the tools for whoever uses them.
+ *
+ * `localStorage`, not a server preference: it is a convenience, and losing it (a private
+ * window, cleared site data) only means opening read-only, which is the default anyway.
+ */
+export const ANNOTATION_MODE_STORAGE_PREFIX = 'ygg:annotation-mode:';
+
+function defaultStorage() {
+    try {
+        return globalThis.localStorage ?? null;
+    } catch {
+        // Access itself throws when site data is blocked.
+        return null;
+    }
+}
+
+/**
+ * The remembered annotation mode, or null when there is none to honour.
+ *
+ * @param {string} key
+ * @param {Storage|null} storage
+ * @returns {boolean|null}
+ */
+export function readRememberedAnnotationMode(key, storage) {
+    if (!key || !storage) {
+        return null;
+    }
+    try {
+        const value = storage.getItem(ANNOTATION_MODE_STORAGE_PREFIX + key);
+        return value === 'on' ? true : value === 'off' ? false : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Remember the annotation mode. Failure is silent: the switch has already moved.
+ *
+ * @param {string} key
+ * @param {Storage|null} storage
+ * @param {boolean} enabled
+ */
+export function rememberAnnotationMode(key, storage, enabled) {
+    if (!key || !storage) {
+        return;
+    }
+    try {
+        storage.setItem(ANNOTATION_MODE_STORAGE_PREFIX + key, enabled ? 'on' : 'off');
+    } catch {
+        // Quota or blocked storage: the choice simply is not remembered.
+    }
+}
+
+/**
  * Bind the toolbar to a grid.
  *
  * @param {object} options
@@ -158,7 +217,11 @@ export function applyAnnotationMode({ plan, enabled }) {
  *   the clear button, after the user confirms; whatever it returns is toasted.
  * @param {(enabled: boolean) => void} [options.onAnnotationMode] told whenever the mode
  *   changes, and once at bind time with the starting state.
- * @param {boolean} [options.annotationsOn] the starting state. False, deliberately.
+ * @param {boolean} [options.annotationsOn] the starting state when nothing is
+ *   remembered. False, deliberately.
+ * @param {string} [options.rememberAs] remember the switch under this key (the domain);
+ *   omitted, nothing is read or written.
+ * @param {Storage|null} [options.storage] defaults to `localStorage`, when available.
  * @param {(level: string, message: string) => void} [options.notify]
  * @returns {{bound: string[], setStatus: Function, plan: object, setAnnotationMode: Function}}
  */
@@ -169,6 +232,8 @@ export function bindControls({
     onClear,
     onAnnotationMode,
     annotationsOn = false,
+    rememberAs = null,
+    storage = defaultStorage(),
     notify = defaultNotify,
 }) {
     const plan = controlPlan(doc);
@@ -235,8 +300,10 @@ export function bindControls({
     if (plan.annotationMode) {
         // Assert the default rather than trusting the template to have rendered it: the
         // grid is told too, so the two cannot start out disagreeing. Off is the default
-        // -- a clinician opening a study is reading it, not measuring it.
-        const start = annotationsOn === true;
+        // -- a clinician opening a study is reading it, not measuring it -- unless this
+        // browser remembers the user turning it on.
+        const remembered = readRememberedAnnotationMode(rememberAs, storage);
+        const start = remembered ?? annotationsOn === true;
         applyAnnotationMode({ plan, enabled: start });
         onAnnotationMode?.(start);
 
@@ -246,6 +313,7 @@ export function bindControls({
                 // Read the state back from the DOM. See the module note.
                 const enabled = !isAnnotationModeOn(plan);
                 applyAnnotationMode({ plan, enabled });
+                rememberAnnotationMode(rememberAs, storage, enabled);
                 // The grid does the rest, and does it in one call: which tools have a
                 // mode, which annotations are visible, and -- switching off -- putting
                 // the crosshair back on the left button. The order between those is not
@@ -384,6 +452,7 @@ export const ORIENTATION_BUTTON_SELECTOR = '[data-ygg-orientation]';
 export const ORIENTATION_CLASSES = Object.freeze({
     root: 'ygg-orient',
     button: 'ygg-orient__btn',
+    link: 'ygg-orient__link',
 });
 
 /**
@@ -398,6 +467,43 @@ export const ORIENTATION_CHOICES = Object.freeze([
     Object.freeze({ orientation: ORIENTATIONS.SAGITTAL, letter: 'S', title: 'Sagittal view' }),
     Object.freeze({ orientation: ORIENTATIONS.CORONAL, letter: 'C', title: 'Coronal view' }),
 ]);
+
+/**
+ * The free-scroll toggle's two states: what it shows, and what a click would do.
+ *
+ * Pressed means *free*. The icon is the state (a broken link while free) and the title
+ * is the action, so neither has to be read as the other.
+ */
+export const FREE_SCROLL_STATES = Object.freeze({
+    linked: Object.freeze({
+        icon: 'fa-link',
+        title: 'Scrolls with the other windows on this plane. Click to scroll this one on its own.',
+    }),
+    free: Object.freeze({
+        icon: 'fa-link-slash',
+        title: 'Scrolls on its own. Click to re-sync it with the other windows on this plane.',
+    }),
+});
+
+/**
+ * Show whether a window is in free scroll.
+ *
+ * @param {HTMLElement|null} button
+ * @param {boolean} free
+ */
+export function markFreeScroll(button, free) {
+    if (!button) {
+        return;
+    }
+    const look = free ? FREE_SCROLL_STATES.free : FREE_SCROLL_STATES.linked;
+    button.setAttribute('aria-pressed', String(Boolean(free)));
+    button.classList?.toggle('is-active', Boolean(free));
+    button.title = look.title;
+    button.setAttribute('aria-label', look.title);
+    if (button.icon) {
+        button.icon.className = `fas ${look.icon}`;
+    }
+}
 
 /**
  * Show which plane a window is on.
@@ -428,7 +534,7 @@ export function markActiveOrientation(buttons, orientation) {
  * @param {Document} [options.doc]
  * @returns {{root: HTMLElement, buttons: HTMLElement[]}|null}
  */
-export function createOrientationControl(element, { doc = element?.ownerDocument } = {}) {
+export function createOrientationControl(element, { doc = element?.ownerDocument, freeScroll = false } = {}) {
     if (!element || !doc) {
         return null;
     }
@@ -452,6 +558,23 @@ export function createOrientationControl(element, { doc = element?.ownerDocument
         return button;
     });
 
+    // The 2.x free-scroll link, back beside the plane buttons it qualifies: it opts this
+    // window out of slice sync with the other windows on its plane. Only offered where
+    // there is another window to be linked to -- see `bindOrientationControls`.
+    let freeScrollButton = null;
+    if (freeScroll) {
+        freeScrollButton = doc.createElement('button');
+        freeScrollButton.type = 'button';
+        freeScrollButton.className = `${ORIENTATION_CLASSES.button} ${ORIENTATION_CLASSES.link}`;
+        freeScrollButton.dataset.yggFreeScroll = '';
+        const icon = doc.createElement('i');
+        icon.setAttribute('aria-hidden', 'true');
+        freeScrollButton.appendChild(icon);
+        freeScrollButton.icon = icon;
+        markFreeScroll(freeScrollButton, false);
+        root.appendChild(freeScrollButton);
+    }
+
     // **Do not delete these.** Cornerstone binds its mouse handlers to the very element
     // this control sits inside, so without stopping the bubble a press on `S` also
     // starts a window/level drag -- the button works and the image changes brightness
@@ -466,7 +589,7 @@ export function createOrientationControl(element, { doc = element?.ownerDocument
     });
 
     element.appendChild(root);
-    return { root, buttons };
+    return { root, buttons, freeScrollButton };
 }
 
 /**
@@ -479,6 +602,9 @@ export function createOrientationControl(element, { doc = element?.ownerDocument
  * @param {(message: string) => void} [options.setStatus] the toolbar's status line.
  * @param {(windowIndex: number) => string} options.windowOrientation reads the plane a
  *   window is actually on. Injected rather than tracked here -- see below.
+ * @param {(windowIndex: number) => boolean} [options.windowFreeScroll] reads whether a
+ *   window is in free scroll. Without it, or with a single window, no link is offered:
+ *   a window with nothing to scroll with has nothing to unlink from.
  * @returns {{controls: Map<number, object>, refresh: (windowIndex: number) => void}}
  */
 export function bindOrientationControls({
@@ -487,19 +613,24 @@ export function bindOrientationControls({
     doc = globalThis.document,
     setStatus = () => {},
     windowOrientation,
+    windowFreeScroll,
 }) {
     const controls = new Map();
+    const offerFreeScroll = typeof windowFreeScroll === 'function' && elements.length > 1;
 
     /** Repaint one window's buttons from the grid's state. */
     const refresh = (windowIndex) => {
         const control = controls.get(windowIndex);
         if (control) {
             markActiveOrientation(control.buttons, windowOrientation(windowIndex));
+            if (offerFreeScroll) {
+                markFreeScroll(control.freeScrollButton, windowFreeScroll(windowIndex));
+            }
         }
     };
 
     for (const [windowIndex, element] of elements.entries()) {
-        const control = createOrientationControl(element, { doc });
+        const control = createOrientationControl(element, { doc, freeScroll: offerFreeScroll });
         if (!control) {
             continue;
         }
@@ -526,6 +657,17 @@ export function bindOrientationControls({
                 refresh(windowIndex);
             });
         }
+
+        control.freeScrollButton?.addEventListener('click', () => {
+            try {
+                grid.setFreeScroll(windowIndex, !windowFreeScroll(windowIndex));
+                setStatus('');
+            } catch (error) {
+                setStatus(`Free scroll failed: ${error.message}`);
+            }
+            // From the state, for the same reason as the plane buttons above.
+            refresh(windowIndex);
+        });
     }
 
     return { controls, refresh };

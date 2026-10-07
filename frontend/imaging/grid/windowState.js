@@ -200,6 +200,39 @@ export function syncTargets(state, sourceIndex) {
 }
 
 /**
+ * The windows whose slice should follow `sourceIndex` when it scrolls.
+ *
+ * Narrower than {@link syncTargets}, and deliberately: what the brain help promises --
+ * and what the 2.x viewer did -- is that windows *on the same plane* scroll together, so
+ * four axial series of one study stay on the same level. A sagittal window has no slice
+ * in common with an axial one to follow. Free scroll opts out in both directions, and
+ * an empty window has nothing to move.
+ *
+ * **A window that is still loading neither leads nor follows.** Mounting a series sets
+ * its camera to the series' middle slice, and that camera event would otherwise drag
+ * every window the user has already scrolled to wherever the new series happens to
+ * open. The grid aligns it with its peers once the load completes instead.
+ *
+ * @param {object} state
+ * @param {number} sourceIndex
+ * @returns {number[]} window indices, ascending.
+ */
+export function sliceSyncTargets(state, sourceIndex) {
+    const source = windowAt(state, sourceIndex);
+    if (
+        source.freeScroll ||
+        source.loading ||
+        source.volumeId === null ||
+        !isSliceOrientation(source.orientation)
+    ) {
+        return [];
+    }
+    return orientationGroup(state, source.orientation).filter(
+        (index) => index !== sourceIndex && !windowAt(state, index).loading
+    );
+}
+
+/**
  * The windows that may share one window/level setting, or none of them.
  *
  * **Brightness is a property of a volume, not of a grid.** On the fixed CBCT layout every

@@ -41,10 +41,13 @@ import {
     completeLoad,
     createGridState,
     failLoad,
+    setFreeScroll,
     setOrientation,
+    sliceSyncTargets,
     voiSyncGroup,
     windowAt,
 } from './windowState.js';
+import { bindSliceSync } from './sliceSync.js';
 import { modalityWindowFromVoiRange, openingVoi, unitFor } from './voi.js';
 import { DEFAULT_RENDER_MODE, applyLabelmapRenderMode, applyRenderMode } from './renderModes.js';
 import { createOverlay, updateOverlay } from './viewportOverlay.js';
@@ -328,6 +331,15 @@ export function createVolumeGrid({
         }
     }
 
+    // Windows on the same plane scroll together unless one is set to free scroll. Only
+    // the brain layout ever has two windows on one plane, so on the CBCT grid -- one
+    // window per plane -- and on urology's single window the policy names no targets.
+    const sliceSync = bindSliceSync({
+        windows: layout.filter((entry) => !entry.lazy).map((entry) => [entry.window, elements[entry.window]]),
+        viewportFor: (windowIndex) => renderingEngine.getViewport(viewportId(windowIndex)),
+        targetsFor: (windowIndex) => sliceSyncTargets(state, windowIndex),
+    });
+
     // Named rather than returned anonymously: `setAnnotationMode` composes two of the
     // handle's own operations, and calling them through the object is what keeps that
     // composition honest if either one grows.
@@ -366,6 +378,16 @@ export function createVolumeGrid({
             // What the windows hold has just changed, and that is the only thing the VOI
             // synchroniser's membership depends on.
             refreshVoiSync();
+            // A series dropped beside others on its plane joins them at their depth,
+            // rather than opening on its own middle slice. See `sliceSyncTargets`.
+            for (const windowIndex of windowIndices) {
+                const peer = sliceSyncTargets(state, windowIndex).find(
+                    (index) => !windowIndices.includes(index)
+                );
+                if (peer !== undefined) {
+                    sliceSync.syncFrom(peer);
+                }
+            }
             return warning;
         },
 
@@ -382,6 +404,24 @@ export function createVolumeGrid({
             refreshVoiSync();
             refreshOverlay(windowIndex);
             return switched;
+        },
+
+        /**
+         * Opt a window out of slice sync, or back in.
+         *
+         * Back in means *re-synced*: the window jumps to the depth its plane's other
+         * windows are on, which is what the 2.x "Re-sync scrolling" did. Waiting for the
+         * next scroll would leave a window that claims to be linked showing another level.
+         */
+        setFreeScroll: (windowIndex, free) => {
+            setFreeScroll(state, windowIndex, free);
+            if (!free) {
+                const [peer] = sliceSyncTargets(state, windowIndex);
+                if (peer !== undefined) {
+                    sliceSync.syncFrom(peer);
+                }
+            }
+            return windowAt(state, windowIndex).freeScroll;
         },
 
         /** Bind one primary tool to the left mouse button across the 2D group. */

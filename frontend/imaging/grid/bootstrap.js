@@ -556,6 +556,9 @@ async function mountAndLoad({ mount, doc, data, elements }) {
         // state, so a study opens read-only rather than opening editable until
         // something switches it off.
         onAnnotationMode: (enabled) => grid.setAnnotationMode?.(enabled),
+        // Remember the switch per domain on this browser, so whoever measures finds the
+        // tools where they left them; a first visit still opens read-only.
+        rememberAs: namespace,
     });
     // The template marks the navigation tool pressed; make the grid agree rather than
     // trusting two places to say the same thing. Which tool that is depends on the
@@ -582,6 +585,9 @@ async function mountAndLoad({ mount, doc, data, elements }) {
             // no button is pressed until it does. Reading it as a hard property would
             // make an empty grid a TypeError during binding.
             windowOrientation: (windowIndex) => windowAt(grid.state, windowIndex)?.orientation,
+            // The free-scroll link next to A/S/C. Offered only where there is a second
+            // window to scroll with -- `bindOrientationControls` checks the count.
+            windowFreeScroll: (windowIndex) => Boolean(windowAt(grid.state, windowIndex)?.freeScroll),
         });
     }
 
