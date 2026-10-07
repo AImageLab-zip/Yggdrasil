@@ -7,13 +7,17 @@ a stale save overwriting, two markers on one instant, a foreign patient's file.
 import json
 import uuid
 
+from django.apps import apps
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
 from annotations.models import AnnotationSet, LabelSchema
 from common.models import AnnotationMethod, FileRegistry, Project, ProjectAccess
-from laparoscopy.models import Folder, Patient
+
+# Through the registry: annotations must not import a domain app (lint-imports).
+Folder = apps.get_model("laparoscopy", "Folder")
+Patient = apps.get_model("laparoscopy", "Patient")
 
 
 class QuadrantApiTests(TestCase):

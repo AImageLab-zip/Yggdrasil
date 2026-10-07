@@ -254,4 +254,4 @@ class ProbeVideoFrameRateTests(TestCase):
         done = mock.Mock(returncode=0, stdout=out, stderr="")
         with mock.patch.object(video_probe.subprocess, "run", return_value=done):
             with self.assertRaisesMessage(RuntimeError, "frame rate"):
-                video_probe.probe_video("/tmp/x.mp4")
+                video_probe.probe_video("x.mp4")

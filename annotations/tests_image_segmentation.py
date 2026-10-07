@@ -19,6 +19,7 @@ import zlib
 from unittest import mock
 
 import numpy as np
+from django.apps import apps
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
@@ -33,7 +34,10 @@ from annotations.validators.image_segmentation import (
 from common.annotation_lock import raw_data_is_locked
 from common.models import AnnotationMethod, FileRegistry, Project, ProjectAccess
 from common.object_storage import get_object_storage
-from laparoscopy.models import Folder, Patient
+
+# Through the registry: annotations must not import a domain app (lint-imports).
+Folder = apps.get_model("laparoscopy", "Folder")
+Patient = apps.get_model("laparoscopy", "Patient")
 
 W, H = 64, 48
 

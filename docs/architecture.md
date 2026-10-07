@@ -184,8 +184,7 @@ Notes that matter when you touch this:
   the rest; that is exactly what `manage.py resubmit_jobs` does. Bypassing the
   signal bypasses the modality kill switch and the routing table.
 - The web app knows nothing about SLURM and never imports `common/runner/ssh.py`.
-  A `ProcessingStep` with a blank `algo_name` makes the runner fail its jobs
-  ("No algo_name configured for this step"); every runner step needs one.
+  A `ProcessingStep` with a blank `algo_name` stays on the plain Celery path.
 - `Job.slurm_job_id` is observability only; the web app never reads it.
 - The `maintenance` Celery queue (nightly backups) must never overlap
   `RUNNER_DEFAULT_QUEUE` or any `RUNNER_QUEUE_BY_*` value, or an external
@@ -232,8 +231,8 @@ path. The required shape is in [CONTRIBUTING.md](../CONTRIBUTING.md).
 ## The annotation model
 
 `annotations/` is the durable record. Everything an annotator produces —
-landmarks, tooth segmentation, occlusion classification, panoramic arches,
-volume segmentation, measurements, voice captions
+landmarks, tooth segmentation, occlusion classification, panoramic arches, video
+frame segmentation and quadrant markers, volume segmentation, measurements, voice captions
 — is stored here in one shape.
 
 ```
@@ -314,7 +313,7 @@ Two more properties that surprise people:
 
 ## Imaging frontend
 
-Volume, stack and mesh-adjacent imaging runs on **Cornerstone3D** (the
+Volume, stack, mesh-adjacent and video imaging runs on **Cornerstone3D** (the
 exceptions: the urology WSI viewer is a hand-written Canvas2D tiler, the
 uploaded-panoramic view is a plain `<img>`, and the RGB editor is Canvas2D),
 built from `frontend/` with npm +

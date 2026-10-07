@@ -2,7 +2,7 @@
 
 The durable, versioned record of everything an annotator produces: landmarks,
 tooth and volume segmentation, occlusion classification, panoramic arches,
-measurements — all in one shape, for every
+measurements, image segmentation and video quadrant markers — all in one shape, for every
 domain.
 
 ## What it owns

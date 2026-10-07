@@ -37,8 +37,10 @@ import {
 import BrushStrategy from '@cornerstonejs/tools/tools/segmentation/strategies/BrushStrategy';
 import compositions from '@cornerstonejs/tools/tools/segmentation/strategies/compositions/index';
 import { StrategyCallbacks } from '@cornerstonejs/tools/enums';
+import { segmentationRenderingEngine } from '@cornerstonejs/tools/segmentation/SegmentationRenderingEngine';
 
 import { initImaging } from '../imaging/runtime/init.js';
+import { coalesceSegmentationRenders } from '../imaging/runtime/segmentationRenders.js';
 import { enableTwoFingerNavigation } from '../imaging/runtime/touch.js';
 import { askForText } from '../imaging/photos/dialog.js';
 import {
@@ -72,6 +74,9 @@ let prepared = null;
 function prepare() {
     prepared ??= (async () => {
         await initImaging();
+        // Without this a segmentation render can be stranded indefinitely (`segmentationRenders.js`).
+        // Applied here, not in `initImaging`, so the other surfaces keep the stock scheduler.
+        coalesceSegmentationRenders(segmentationRenderingEngine);
         registerPhotoRegistry(records);
         imageLoader.registerImageLoader(
             FRAME_IMAGE_SCHEME,

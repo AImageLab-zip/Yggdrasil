@@ -74,7 +74,6 @@ ignore_imports = [
     # -- tests (fixtures that build rows in several apps)
     "annotations.tests_apply -> maxillo.models",
     "annotations.tests_commands -> laparoscopy.models",
-    "annotations.tests_image_segmentation -> laparoscopy.models",
     "annotations.tests_commands -> maxillo.models",
     "annotations.tests_ios_landmarks -> maxillo.file_utils",
     "annotations.tests_ios_landmarks -> maxillo.models",
@@ -123,7 +122,6 @@ ignore_imports = [
     "common.tests_raw_data_lock -> maxillo.models",
     "common.tests_runner -> maxillo.runner_api_service",
     "common.tests_share_links -> maxillo.models",
-    "laparoscopy.tests -> maxillo.models",
     "maxillo.tests_export_share -> laparoscopy.models",
 ]
 
@@ -164,7 +162,6 @@ ignore_imports = [
     # -- tests (fixtures that build rows in several apps)
     "annotations.tests_apply -> maxillo.models",
     "annotations.tests_commands -> laparoscopy.models",
-    "annotations.tests_image_segmentation -> laparoscopy.models",
     "annotations.tests_commands -> maxillo.models",
     "annotations.tests_ios_landmarks -> maxillo.file_utils",
     "annotations.tests_ios_landmarks -> maxillo.models",
@@ -213,6 +210,5 @@ ignore_imports = [
     "common.tests_raw_data_lock -> maxillo.models",
     "common.tests_runner -> maxillo.runner_api_service",
     "common.tests_share_links -> maxillo.models",
-    "laparoscopy.tests -> maxillo.models",
     "maxillo.tests_export_share -> laparoscopy.models",
 ]

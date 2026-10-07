@@ -9,11 +9,9 @@
 
 import { init as coreInit, Enums as coreEnums } from '@cornerstonejs/core';
 import { init as toolsInit } from '@cornerstonejs/tools';
-import { segmentationRenderingEngine } from '@cornerstonejs/tools/segmentation/SegmentationRenderingEngine';
 
 import { RENDERING_CONFIG } from './config.js';
 import { detectCapabilities } from './capabilities.js';
-import { coalesceSegmentationRenders } from './segmentationRenders.js';
 import { installPhoneTouchPolicy } from './touch.js';
 
 let initialized = null;
@@ -34,9 +32,6 @@ let initialized = null;
  * @param {object} [options]
  * @param {object} [options.env] forwarded to {@link detectCapabilities}, for tests.
  * @param {object} [options.addons] tools add-ons, e.g. `{ polySeg }`.
- * @param {object} [options.toolsConfig] further `@cornerstonejs/tools` config, e.g.
- *   `{ segmentation: { overwriteMode: 'none' } }`. Merged with `addons` for the same reason
- *   `addons` is passed here: `toolsInit` replaces the config wholesale.
  * @returns {Promise<{capabilities: object, enums: object}>}
  * @throws {Error} if WebGL2 is unavailable (decision #13 -- required, not degraded).
  */
@@ -58,13 +53,7 @@ export function initImaging(options = {}) {
         installPhoneTouchPolicy();
         // `toolsInit` *replaces* the config wholesale, so the addons must go in here;
         // there is no later hook that adds one.
-        const toolsConfig = {
-            ...(options.toolsConfig ?? {}),
-            ...(options.addons ? { addons: options.addons } : {}),
-        };
-        await toolsInit(Object.keys(toolsConfig).length ? toolsConfig : undefined);
-        // Without this a segmentation render can be stranded indefinitely (`segmentationRenders.js`).
-        coalesceSegmentationRenders(segmentationRenderingEngine);
+        await toolsInit(options.addons ? { addons: options.addons } : undefined);
 
         return { capabilities, enums: coreEnums };
     })();
