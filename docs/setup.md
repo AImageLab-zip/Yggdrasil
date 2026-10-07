@@ -142,13 +142,3 @@ current certificate contains the IP address but not that DNS name.
 The public reverse proxy must pass WebSocket upgrade requests for
 `/ws/live-transcription/` to the web container. The standard nginx-proxy setup
 used by `docker-compose.yml` handles WebSocket upgrades automatically.
-
-## 8. Optional: laparoscopy AI worker
-
-Laparoscopy's point-prompt segmentation proxies to an external worker service. If you're not running one, those endpoints will fail closed but the rest of the app works fine. To enable it, set in `.env`:
-
-```
-WORKER_BASE_URL=http://your-worker-host:port
-```
-
-(Per-endpoint overrides `WORKER_SESSION_READY_URL` / `WORKER_SESSION_PROMPT_URL` are also available — see `.env.example`.)

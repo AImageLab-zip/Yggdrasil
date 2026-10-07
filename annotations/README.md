@@ -2,7 +2,7 @@
 
 The durable, versioned record of everything an annotator produces: landmarks,
 tooth and volume segmentation, occlusion classification, panoramic arches,
-measurements, video regions and quadrant markers — all in one shape, for every
+measurements, image segmentation and video quadrant markers — all in one shape, for every
 domain.
 
 ## What it owns
@@ -52,3 +52,27 @@ narrow module `common/annotation_lock.py`, not through these models.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the concurrency and schema rules
 (`record_revision`, conditional constraints on MySQL, `is_calibrated`, the
 255-character identity-key cap).
+
+## Image segmentation (`kind = image_segmentation`)
+
+Dense 2D labelmaps for a still image or the frames of a video; the pixels are the record.
+Per revision, one non-canonical `npz_mask` payload **per annotated frame** (`variant`
+`f<fileId>t<timeMs>`; one binary plane per label, so labels may overlap) plus one canonical
+inline manifest listing every frame and a per-label `{area, bbox}` summary. A save names only
+the frames it edited; the rest are carried forward as new payload rows over the *same* files,
+so no bytes are copied. A frame sent with every plane empty is a deletion. Frames are keyed by
+**milliseconds**, so re-encoding a video does not move a mask. The vocabulary is a per-project
+`LabelSchema` (`image-segmentation-project-<pk>`): `value` and `code` never change, a rename or
+recolour cannot move a mask, and labels are retired, never deleted. The browser sends planes as
+`base64(gzip(bytes))`; the server owns the archive format. Routes:
+`api/patients/<id>/image-segmentation/{,state/,frame/,labels/,labels/<code>/}`.
+
+## Video quadrants (`kind = video_quadrants`)
+
+The timeline classification of a surgical video: "from here on, the camera is in quadrant X".
+One `EventAnnotationItem` per marker (`event_type="quadrant"`, `time_ms`, `label` FK); a marker
+is an instant and the span it covers is derived by the reader (to the next marker, or the end),
+so editing one never rewrites its neighbour. The vocabulary is its own per-project
+`LabelSchema` (`quadrant-project-<pk>`), separate from the segmentation labels, with the same
+retire-never-delete rule. A `PUT` replaces the whole marker list as a new revision; it is gated
+by the `image_segmentation` method. Routes: `api/patients/<id>/quadrants/{,labels/,labels/<code>/}`.

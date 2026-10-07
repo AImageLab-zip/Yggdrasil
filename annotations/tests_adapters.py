@@ -15,7 +15,7 @@ in ``resource_local`` rather than a patient frame.
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
-from annotations.adapters import legacy_common, legacy_laparoscopy, legacy_maxillo
+from annotations.adapters import legacy_common, legacy_maxillo
 from annotations.constants import CoordinateSystem, Geometry2DType, Geometry3DType
 
 
@@ -211,104 +211,6 @@ class OcclusionClassificationTests(SimpleTestCase):
     def test_a_row_with_no_facets_is_refused(self):
         with self.assertRaises(ValidationError):
             legacy_maxillo.occlusion_classification({})
-
-
-class FrameTimeConversionTests(SimpleTestCase):
-    def test_seconds_round_to_the_nearest_millisecond(self):
-        self.assertEqual(legacy_laparoscopy.frame_time_to_ms(1.2345), 1234)
-        self.assertEqual(legacy_laparoscopy.frame_time_to_ms(1.2346), 1235)
-
-    def test_rounding_beats_truncation_at_a_frame_boundary(self):
-        """30 fps lands on 33.3ms; truncation would bias toward the last frame."""
-        self.assertEqual(legacy_laparoscopy.frame_time_to_ms(2 / 30), 67)
-        self.assertEqual(int((2 / 30) * 1000), 66)
-
-    def test_zero_is_the_start_of_the_video(self):
-        self.assertEqual(legacy_laparoscopy.frame_time_to_ms(0.0), 0)
-
-    def test_a_negative_or_non_finite_time_is_refused(self):
-        for bad in (-0.5, float("nan"), float("inf"), "1.0", None):
-            with self.subTest(bad=bad):
-                with self.assertRaises(ValidationError):
-                    legacy_laparoscopy.frame_time_to_ms(bad)
-
-
-class RegionAnnotationTests(SimpleTestCase):
-    def _region(self, **kwargs):
-        kwargs.setdefault("tool", "brush")
-        kwargs.setdefault("frame_time", 1.5)
-        kwargs.setdefault("points", [0, 0, 10, 10, 20, 0])
-        return legacy_laparoscopy.region_annotation(**kwargs)
-
-    def test_the_flat_konva_array_becomes_point_pairs(self):
-        out = self._region()
-
-        self.assertEqual(out[0]["points"], [[0, 0], [10, 10], [20, 0]])
-
-    def test_an_odd_length_point_array_is_refused(self):
-        with self.assertRaises(ValidationError):
-            self._region(points=[0, 0, 10])
-
-    def test_an_eraser_stroke_keeps_its_identity(self):
-        """Its effect is destructive, but which tool drew it is still recorded."""
-        brush = self._region(tool="brush")
-        eraser = self._region(tool="eraser")
-
-        self.assertEqual(brush[0]["geometry_type"], eraser[0]["geometry_type"])
-        self.assertEqual(eraser[0]["attributes"]["tool"], "eraser")
-
-    def test_a_polygon_comes_back_closed(self):
-        out = self._region(tool="polygon")
-
-        self.assertEqual(out[0]["geometry_type"], Geometry2DType.POLYGON)
-        self.assertTrue(out[0]["closed"])
-
-    def test_an_unknown_tool_is_refused(self):
-        with self.assertRaises(ValidationError):
-            self._region(tool="magic-wand")
-
-    def test_the_stroke_and_its_prompts_land_in_different_frames(self):
-        """Pixels and [0, 1] fractions; merging them would corrupt one."""
-        out = self._region(
-            prompt_points=[{"x": 0.25, "y": 0.5, "label": 1}, {"x": 0.75, "y": 0.5, "label": 0}]
-        )
-
-        self.assertEqual(out[0]["coordinate_system"], CoordinateSystem.VIDEO_PIXEL)
-        self.assertEqual(out[1]["coordinate_system"], CoordinateSystem.VIDEO_NORMALIZED)
-        self.assertEqual(out[2]["coordinate_system"], CoordinateSystem.VIDEO_NORMALIZED)
-
-    def test_prompt_polarity_survives(self):
-        """SAM2 needs both; losing the distinction would invert half of them."""
-        out = self._region(
-            prompt_points=[{"x": 0.25, "y": 0.5, "label": 1}, {"x": 0.75, "y": 0.5, "label": 0}]
-        )
-
-        self.assertEqual(out[1]["attributes"]["prompt_label"], 1)
-        self.assertEqual(out[2]["attributes"]["prompt_label"], 0)
-
-    def test_everything_from_one_row_shares_one_selector(self):
-        out = self._region(frame_time=2.0, prompt_points=[{"x": 0.5, "y": 0.5}])
-
-        self.assertEqual(out[0]["selector"], out[1]["selector"])
-        self.assertEqual(out[0]["selector"]["start_time_ms"], 2000)
-        self.assertEqual(out[0]["selector"]["end_time_ms"], 2000)
-
-    def test_a_malformed_prompt_point_is_refused(self):
-        with self.assertRaises(ValidationError):
-            self._region(prompt_points=[{"x": 0.5}])
-
-
-class QuadrantMarkerTests(SimpleTestCase):
-    def test_the_timestamp_passes_through_unconverted(self):
-        """Already integer milliseconds -- which is why this table needs no pass."""
-        out = legacy_laparoscopy.quadrant_marker(time_ms=4200, quadrant_name="RUQ")
-
-        self.assertEqual(out[0]["time_ms"], 4200)
-        self.assertEqual(out[0]["value"], "RUQ")
-
-    def test_a_float_timestamp_is_refused(self):
-        with self.assertRaises(ValidationError):
-            legacy_laparoscopy.quadrant_marker(time_ms=4200.0)
 
 
 class VoiceCaptionTests(SimpleTestCase):

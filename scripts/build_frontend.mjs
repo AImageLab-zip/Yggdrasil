@@ -155,7 +155,7 @@ const APP_ENTRIES = [
     'photo-stack',
     'mesh-landmarks',
     'panoramic-cpr',
-    'video-annotate',
+    'image-segment',
     'wsi-viewer',
 ];
 

@@ -232,7 +232,7 @@ path. The required shape is in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 `annotations/` is the durable record. Everything an annotator produces —
 landmarks, tooth segmentation, occlusion classification, panoramic arches, video
-regions and quadrant markers, volume segmentation, measurements, voice captions
+frame segmentation and quadrant markers, volume segmentation, measurements, voice captions
 — is stored here in one shape.
 
 ```

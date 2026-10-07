@@ -36,7 +36,7 @@ Live instance: <https://yggdrasil.ing.unimore.it>
   deep-zoom viewer with synchronized segmentation masks and an in-browser
   WebAssembly (`wasm-vips`) gigapixel pyramidal TIFF converter.
 - **Durable annotations.** Landmarks, segmentations, classifications, panoramic
-  arches, measurements, video regions and quadrant markers are all stored in one
+  arches, measurements, video-frame segmentation and quadrant markers are all stored in one
   versioned model in the `annotations/` app — snapshots with revision numbers,
   never deltas, and never carrying viewer-session identifiers.
 - **Voice captioning.** Live Whisper speech-to-text notes, versioned and

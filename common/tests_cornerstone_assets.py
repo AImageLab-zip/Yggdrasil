@@ -49,14 +49,15 @@ class CommittedBundleTests(SimpleTestCase):
             self.assertIsNotNone(path, name)
             self.assertTrue((static_dir / path).is_file(), f"{name} -> {path}")
 
-    #: The per-surface bundles. Phases 3, 4, 6, 7 and 10 each own one; wsi-viewer
-    #: is the sixth, added with the urology domain for whole-slide imaging, which
-    #: the Cornerstone build has no viewport for.
+    #: The per-surface bundles. Phases 3, 4, 6 and 7 each own one; wsi-viewer
+    #: is the fifth, added with the urology domain for whole-slide imaging, which
+    #: the Cornerstone build has no viewport for. image-segment is the laparoscopy
+    #: Annotation Mode (2D labelmap segmentation of a video frame).
     SURFACE_ENTRIES = [
+        "image-segment",
         "mesh-landmarks",
         "panoramic-cpr",
         "photo-stack",
-        "video-annotate",
         "volume-grid",
         "wsi-viewer",
     ]

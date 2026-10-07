@@ -70,6 +70,7 @@ class AnnotationSet(DomainFKAccessorMixin, models.Model):
         ("volume_segmentation", "Volume segmentation"),
         ("measurements", "Measurements"),
         ("ecg_rhythm_classification", "ECG rhythm classification"),
+        ("image_segmentation", "Image segmentation (labelmaps)"),
     ]
 
     kind = models.CharField(max_length=40, choices=KIND_CHOICES)
