@@ -66,6 +66,7 @@ _KIND_REASONS = {
     "volume_segmentation": "volume segmentation",
     "measurements": "measurements",
     "ecg_rhythm_classification": "an ECG rhythm classification",
+    "image_segmentation": "segmentation masks",
 }
 
 #: The one kind that must not lock the editor that produces it.
@@ -208,10 +209,6 @@ def _legacy_reasons(patient, include_panoramic, converted_kinds):
         # mislabel documented on ``_KIND_REASONS``.
         if uncovered("study notes") and human_classifications().exists():
             yield "an occlusion classification"
-        if uncovered("quadrant markers") and patient.quadrant_markers.exists():
-            yield "quadrant markers"
-        if uncovered("region annotations") and patient.region_annotations.exists():
-            yield "region annotations"
     # brain has no annotation models of its own yet; voice captions are it.
 
 

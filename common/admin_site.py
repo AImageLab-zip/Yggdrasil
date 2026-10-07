@@ -41,8 +41,8 @@ INDEX_TITLE = "Platform administration"
 #: app appears without anyone remembering to edit this file.
 #:
 #: A model may be named once. Names that match no registration are skipped in
-#: silence -- that is what lets this list mention ``laparoscopy.RegionType``
-#: while a deployment that has not registered it still renders.
+#: silence -- that is what lets this list mention a model
+#: a deployment has not registered while it still renders.
 SECTIONS = (
     (
         "projects",
@@ -75,9 +75,6 @@ SECTIONS = (
             ("maxillo", "Classification"),
             ("laparoscopy", "Classification"),
             ("maxillo", "IntraoralToothSegmentation"),
-            ("laparoscopy", "QuadrantType"),
-            ("laparoscopy", "RegionType"),
-            ("laparoscopy", "QuadrantClassificationMarker"),
             ("maxillo", "VoiceCaption"),
             ("brain", "VoiceCaption"),
             ("laparoscopy", "VoiceCaption"),

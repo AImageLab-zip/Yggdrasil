@@ -231,9 +231,11 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
 /* Device-scoped visibility helpers. Phones get the demo only
    (common/mobile.py): `.ygg-desktop-only` hides what a phone must not offer --
    sign-in, register, write controls the read-only guest cannot use -- even when
-   the server did not recognise the device. `.ygg-mobile-only` is the converse. */
+   the server did not recognise the device. `.ygg-mobile-only` is the converse.
+   Touch-only, like the gate below: a desktop window dragged narrow is still a
+   desktop, and hiding Login from it is the gate's bug in miniature. */
 .ygg-mobile-only { display: none; }
-@media (max-width: 640px) {
+@media (pointer: coarse) and (hover: none) and (max-width: 640px) {
     .ygg-desktop-only { display: none !important; }
     .ygg-mobile-only { display: revert; }
 }
@@ -250,11 +252,21 @@ body.has-rail .ygg-footer { left: var(--ygg-rail-w); }
  * --ygg-* tokens, so it follows the data-theme stamp with no dark rules of its own.
  *
  * The landscape clause catches a rotated phone (~850px wide, so a bare
- * max-width would let it through); max-height keeps laptops out.
+ * max-width would let it through).
+ *
+ * **Both clauses also require a touch-only device** (`pointer: coarse` and
+ * `hover: none`). Size alone matched desktops: a landscape window under 480px
+ * tall -- DevTools docked at the bottom, a zoomed or snapped window -- or one
+ * dragged under 640px wide hid the whole app behind "use a computer" from a
+ * user who was on one. The gate is only a fallback for a phone the server did
+ * not recognise (common/mobile.py turns recognised ones away at sign-in), and a
+ * phone is exactly a coarse pointer that cannot hover; a mouse or trackpad never
+ * is, at any window size.
  * ======================================================================== */
 .ygg-desktop-gate { display: none; }
 
-@media (max-width: 640px), (orientation: landscape) and (max-height: 480px) {
+@media (pointer: coarse) and (hover: none) and (max-width: 640px),
+       (pointer: coarse) and (hover: none) and (orientation: landscape) and (max-height: 480px) {
     /* Lock scrolling only while the gate is actually on the page. It used to be
        unconditional, which was harmless while every page carried the gate; now
        the demo pages have none, and a bare `html, body` here froze them at one

@@ -310,7 +310,7 @@ _MAXILLO_ARTIFACTS = [
 _LAPAROSCOPY_ARTIFACTS = [
     Artifact("video.raw", "video", "Uploaded video", BUCKET_RAW, file_types=["video_raw"]),
     Artifact(
-        "video.processed", "video", "Subsampled video and masks", BUCKET_PROCESSED,
+        "video.processed", "video", "Subsampled video", BUCKET_PROCESSED,
         file_types=["video_processed"],
     ),
 ]

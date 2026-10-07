@@ -3,7 +3,6 @@ from django.shortcuts import redirect
 from django.contrib.auth.decorators import login_required
 from common.models import Project
 from common.permissions import entry_project_for
-from laparoscopy import views as laparo_views
 
 
 @login_required
@@ -20,23 +19,6 @@ def set_laparoscopy(request):
 
 urlpatterns = [
     path('', set_laparoscopy, name='laparoscopy_home'),
-
-    # Quadrant classification API
-    path('api/patient/<int:patient_id>/quadrant-markers/', laparo_views.patient_quadrant_markers, name='patient_quadrant_markers'),
-    path('api/quadrant-types/', laparo_views.quadrant_types, name='quadrant_types'),
-    path('api/quadrant-types/<int:pk>/', laparo_views.quadrant_type_detail, name='quadrant_type_detail'),
-
-    # Region annotation API. One whole-state route, GET and PUT: the per-stroke
-    # create/patch/delete endpoints went with the strokes themselves in Phase 10 --
-    # decision #14 makes the labelmap canonical, and there is no "the stroke with id 41"
-    # to address once the eraser has mutated the pixels it drew.
-    path('api/patient/<int:patient_id>/video-annotations/', laparo_views.patient_video_annotations, name='patient_video_annotations'),
-    path('api/region-types/', laparo_views.region_types, name='region_types'),
-    path('api/region-types/<int:pk>/', laparo_views.region_type_detail, name='region_type_detail'),
-
-    # Magic Tool worker proxy API
-    path('api/worker/session-ready/', laparo_views.worker_session_ready, name='worker_session_ready'),
-    path('api/worker/session-prompt/', laparo_views.worker_session_prompt, name='worker_session_prompt'),
 
     path('', include(('maxillo.app_urls', 'maxillo'), namespace='laparoscopy')),
 ]
