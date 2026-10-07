@@ -170,14 +170,8 @@ class BackfillCommandTests(TestCase):
             row.refresh_from_db()
             self.assertEqual(video_probe.recorded_probe(row), PROBE, row.file_type)
 
-    def test_it_reaches_a_patient_with_no_legacy_annotations(self):
-        """`annotations_rasterize_video_masks` cannot: it iterates stroke rows.
-
-        This patient has a video and has never been annotated, which is the shape that
-        could never be repaired before.
-        """
+    def test_it_reaches_a_patient_that_was_never_annotated(self):
         row = self._row("video_raw")
-        self.assertFalse(self.patient.region_annotations.exists())
 
         self._run()
 
@@ -252,3 +246,12 @@ class BackfillCommandTests(TestCase):
         self.assertIn("disagree on frame size", message)
         self.assertIn("1280x720", message)
         self.assertIn("1920x1080", message)
+
+
+class ProbeVideoFrameRateTests(TestCase):
+    def test_an_unreadable_frame_rate_is_an_error_not_a_guess(self):
+        out = '{"streams": [{"width": 1920, "height": 1080, "avg_frame_rate": "0/0", "nb_frames": "10"}]}'
+        done = mock.Mock(returncode=0, stdout=out, stderr="")
+        with mock.patch.object(video_probe.subprocess, "run", return_value=done):
+            with self.assertRaisesMessage(RuntimeError, "frame rate"):
+                video_probe.probe_video("x.mp4")

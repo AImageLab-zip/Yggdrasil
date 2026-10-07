@@ -1415,5 +1415,10 @@ class VocalCaptionRecorder {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // A patient page without the captions section (laparoscopy has none) loads this script
+    // too; building a recorder there only throws on elements that were never rendered.
+    if (!document.getElementById('captionUnifiedCard')) {
+        return;
+    }
     window.recorder = new VocalCaptionRecorder();
 }); 

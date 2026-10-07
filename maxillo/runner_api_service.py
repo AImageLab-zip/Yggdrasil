@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from django.db import transaction
 from django.utils import timezone
 
+from common.job_routing import _project_slug_for_job as _routing_slug_for_job
 from common.models import Job
 from maxillo.file_utils import mark_job_completed, mark_job_failed
 
@@ -11,15 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def _project_slug_for_job(job: Job) -> str:
-    try:
-        patient = getattr(job, "patient", None)
-        project = getattr(patient, "project", None) if patient is not None else None
-        slug = getattr(project, "slug", None) if project is not None else None
-        if slug:
-            return str(slug)
-    except Exception:
-        pass
-    return "maxillo"
+    # Domain-aware: other domains resolve through their own patient FK (job.patient is
+    # the maxillo FK and is None for them), which keeps outputs under their own prefix.
+    return _routing_slug_for_job(job) or "maxillo"
 
 
 def _patient_public_id_for_job(job: Job) -> Optional[int]:
