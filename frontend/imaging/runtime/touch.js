@@ -1,7 +1,7 @@
 /**
  * Touch input for the viewers -- the tool-layer half of decision #13.
  *
- * Phones reach the viewers through the public demo (common/mobile.py). Touch is an
+ * Phones reach the viewers, signed in or through the public demo. Touch is an
  * *input* concern, so it is spelled here and never as a rendering flag:
  * `RENDERING_CONFIG.isMobile` stays false (`config.js`) and the crosshair's `mobile`
  * profile stays off (`grid/layout.js`), because both would also fire on every clinical

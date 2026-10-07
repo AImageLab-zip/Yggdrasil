@@ -2553,7 +2553,7 @@
     .laparoscopy-patient-detail .video-timeline__btn { transition: none; }
 }
 
-/* ---- Phones: the public demo only (common/mobile.py) -------------------- */
+/* ---- Phones -------------------------------------------------------------- */
 /* The page already stacks viewer over side panel below 1100px. On a phone one
    finger scrolls the page even over a viewer and two work the view
    (runtime/touch.js, theme.css). */

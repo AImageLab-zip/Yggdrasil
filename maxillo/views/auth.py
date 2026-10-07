@@ -15,7 +15,6 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from common.emails import send_branded_email
-from common.mobile import desktop_auth_only
 from common.models import Invitation
 from ..forms import InvitationForm, InvitedUserCreationForm
 from common.models import ProjectAccess   
@@ -30,7 +29,6 @@ def _repair_empty_invitation_codes():
         invitation.save(update_fields=['code'])
 
 
-@desktop_auth_only
 def register(request):
     if request.method == 'POST':
         form = InvitedUserCreationForm(request.POST)

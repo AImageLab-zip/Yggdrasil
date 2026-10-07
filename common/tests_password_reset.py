@@ -8,7 +8,6 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from common.mobile import LOGIN_MOBILE_TEMPLATE
 from common.password_reset import RESET_EMAILS_PER_WINDOW
 
 IPHONE = (
@@ -110,10 +109,10 @@ class PasswordResetTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
 
-    def test_a_phone_is_told_to_use_a_computer(self):
+    def test_a_phone_can_reset_its_password_too(self):
+        # Phones sign in since #102, so they recover their password the same way.
         response = self.client.get(reverse("password_reset"), HTTP_USER_AGENT=IPHONE)
-        self.assertTemplateUsed(response, LOGIN_MOBILE_TEMPLATE)
-        self.assertContains(response, "Reset your password on a computer")
+        self.assertTemplateUsed(response, "registration/password_reset_form.html")
 
         self._request(HTTP_USER_AGENT=IPHONE)
-        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(len(mail.outbox), 1)
