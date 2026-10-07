@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 
 import {
     BRAIN_COLOURS,
+    BRATS_COLOURS,
+    PALETTE_SCHEMES,
     goldenHue,
     gridMismatch,
     labelValuesIn,
@@ -49,6 +51,52 @@ test('a label that is absent gets a transparent entry, not the next colour along
 test('an empty label set yields only the transparent background entry', () => {
     assert.deepEqual(paletteFor([]), [[0, 0, 0, 0]]);
     assert.deepEqual(paletteFor([0, -1, 1.5]), [[0, 0, 0, 0]]);
+});
+
+// --- the BraTS palette brain asks for (#105) ---------------------------------------
+
+const GREEN = [0, 255, 0, 255];
+const RED = [255, 0, 0, 255];
+const BLUE = [0, 0, 255, 255];
+const brats = (labels) => paletteFor(labels, { scheme: PALETTE_SCHEMES.BRATS });
+
+test("the platform's masks (2 edema, 3 enhancing, 4 necrotic core) get red, blue, green", () => {
+    // The labels of a real mask from the platform: no 1 at all. With one label above 3
+    // the automatic rule sent every class to the golden-ratio hues (cyan core,
+    // yellow-green edema, magenta rim).
+    const lut = brats([2, 3, 4]);
+    assert.deepEqual(lut[1], [0, 0, 0, 0], 'absent label stays transparent');
+    assert.deepEqual(lut[2], RED);
+    assert.deepEqual(lut[3], BLUE);
+    assert.deepEqual(lut[4], GREEN, 'the necrotic core is green');
+});
+
+test('BraTS 2023 numbering (1 core, 2 SNFH, 3 enhancing) gets the same three colours', () => {
+    const lut = brats([1, 2, 3]);
+    assert.deepEqual([lut[1], lut[2], lut[3]], [GREEN, RED, BLUE]);
+});
+
+test('the classes keep their colours even when other labels are present', () => {
+    const lut = brats([1, 2, 3, 4, 7]);
+    assert.deepEqual([lut[1], lut[2], lut[3], lut[4]], [GREEN, RED, BLUE, GREEN]);
+    // An unexpected label stays visible in its own hue rather than posing as a class.
+    assert.deepEqual(lut[7], [...goldenHue(7), 255]);
+});
+
+test('the BraTS colours are the 1.x green, red and blue', () => {
+    assert.deepEqual(BRATS_COLOURS[1], BRAIN_COLOURS[0]);
+    assert.deepEqual(BRATS_COLOURS[2], BRAIN_COLOURS[1]);
+    assert.deepEqual(BRATS_COLOURS[3], BRAIN_COLOURS[2]);
+});
+
+test('without a scheme the automatic rule is unchanged, label 4 included', () => {
+    // Every other caller: the same LUT, value for value, as before #105.
+    const lut = paletteFor([1, 2, 4]);
+    for (const value of [1, 2, 4]) {
+        assert.deepEqual(lut[value], [...goldenHue(value), 255]);
+    }
+    assert.deepEqual(paletteFor([1, 2, 3]), paletteFor([1, 2, 3], { scheme: null }));
+    assert.deepEqual(paletteFor([1, 2, 3, 11, 12]), paletteFor([1, 2, 3, 11, 12], { scheme: 'unknown' }));
 });
 
 // --- reading the labelmap ---------------------------------------------------------

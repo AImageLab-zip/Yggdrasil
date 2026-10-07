@@ -197,6 +197,10 @@ def patient_detail(request, patient_id):
             "projectNamespace": (request.resolver_match.namespace if request.resolver_match else None) or "brain",
             "modalityFiles": modality_files,
             "segmentationFile": segmentation_file,
+            # BraTS classes keep their 1.x colours whatever labels the mask carries:
+            # green necrotic core, red edema/SNFH, blue enhancing tumour (#105).
+            # `BRATS_COLOURS` in frontend/imaging/grid/segmentation.js.
+            "segmentationPalette": "brats",
             # Stated rather than left to the client's default. Brain is the surface
             # drag-and-drop exists for -- four co-registered sequences and no single
             # primary -- and the flag now decides two things: that the chips are bound,

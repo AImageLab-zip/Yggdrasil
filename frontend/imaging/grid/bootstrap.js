@@ -824,7 +824,9 @@ export function createSegmentationControl({ grid, doc, data, namespace, origin }
             state = { loaded: true, labelValues: result.labelValues };
         }
 
-        const colorLUT = paletteFor(state.labelValues);
+        // The view names the palette when the classes have fixed clinical colours
+        // (brain, `BRATS_COLOURS`); otherwise the automatic rule applies.
+        const colorLUT = paletteFor(state.labelValues, { scheme: data.segmentationPalette ?? null });
         const { shown: reached, colorLUTIndex } = await showSegmentation({
             cornerstone,
             viewports: shown,

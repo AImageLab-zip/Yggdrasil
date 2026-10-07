@@ -114,6 +114,13 @@ class BrainVolumeGridSurfaceTests(TestCase):
         # over whichever series is there.
         self.assertNotIn("braintumor-mri-seg", payload["modalityFiles"])
 
+    def test_the_overlay_is_drawn_in_the_brats_colours(self):
+        """#105: brain names its palette, so the colours follow the class, not the label
+        count -- `BRATS_COLOURS` in frontend/imaging/grid/segmentation.js."""
+        self._file(self.flair, "braintumor_mri_flair_processed")
+        response, _html = self._page()
+        self.assertEqual(response.context["viewer_grid_data"]["segmentationPalette"], "brats")
+
     def test_the_seg_control_is_rendered_when_there_is_a_segmentation(self):
         self._file(self.flair, "braintumor_mri_flair_processed")
         self.patient.modalities.add(self.seg)
