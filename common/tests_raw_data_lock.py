@@ -23,10 +23,6 @@ from common.models import FileRegistry, Modality, Project, ProjectAccess
 from laparoscopy.models import (
     Folder as LaparoFolder,
     Patient as LaparoPatient,
-    QuadrantClassificationMarker,
-    QuadrantType,
-    RegionAnnotation,
-    RegionType,
 )
 from maxillo.models import (
     Classification,
@@ -163,26 +159,6 @@ class LockTriggerTests(TestCase):
         VoiceCaption.objects.create(patient=self.patient, user=self.user, duration=1.0)
         self.assertTrue(panoramic_is_locked(self.patient))
 
-    def test_laparoscopy_markers_and_regions_lock(self):
-        project = _project("lock-laparo-ann", "laparoscopy")
-        folder = LaparoFolder.objects.create(name="F", project=project)
-        marked = LaparoPatient.objects.create(project=project, folder=folder)
-        QuadrantClassificationMarker.objects.create(
-            patient=marked,
-            quadrant_type=QuadrantType.objects.create(project=project, name="Q1"),
-            time_ms=10,
-        )
-        self.assertTrue(raw_data_is_locked(marked))
-
-        regioned = LaparoPatient.objects.create(project=project, folder=folder)
-        RegionAnnotation.objects.create(
-            patient=regioned,
-            region_type=RegionType.objects.create(project=project, name="R1"),
-            tool="brush",
-            points=[[0, 0]],
-        )
-        self.assertTrue(raw_data_is_locked(regioned))
-
     def test_a_brain_voice_caption_locks(self):
         project = _project("lock-brain-ann", "brain")
         patient = BrainPatient.objects.create(
@@ -303,11 +279,11 @@ class LaparoscopyPatientAdminLockTests(TestCase):
         self.open_patient = LaparoPatient.objects.create(
             project=self.project, folder=self.folder
         )
-        QuadrantClassificationMarker.objects.create(
-            patient=self.patient,
-            quadrant_type=QuadrantType.objects.create(project=self.project, name="Q1"),
-            time_ms=10,
-        )
+        from annotations.models import AnnotationSet
+
+        annotation_set = AnnotationSet(kind="video_regions", ever_annotated=True)
+        annotation_set.set_patient(self.patient)
+        annotation_set.save()
         self.staff = User.objects.create_user(
             username="laparo-staff", password="x", is_staff=True
         )

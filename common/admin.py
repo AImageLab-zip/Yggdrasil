@@ -194,11 +194,6 @@ def raw_lock_map(patients):
     elif domain == "laparoscopy":
         human = model("Classification").objects.exclude(classifier="pipeline")
         mark("study_notes", owners(human))
-        mark(
-            "video_quadrants",
-            owners(model("QuadrantClassificationMarker").objects.all()),
-        )
-        mark("video_regions", owners(model("RegionAnnotation").objects.all()))
     # brain has no annotation tables of its own; voice captions are it.
 
     return locked

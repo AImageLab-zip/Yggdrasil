@@ -558,6 +558,19 @@ class SerializerTests(SimpleTestCase):
             cfg = _step_dispatch_config(job)
         self.assertEqual(cfg, {"algo_name": ""})
 
+    def test_project_slug_follows_the_jobs_own_domain(self):
+        """Outputs land under ``<project_slug>/processed/...``; a laparoscopy job's must
+        not go to ``maxillo/``, and a maxillo job keeps its project's slug."""
+        from common.domains import fk_fields_for
+        from maxillo.runner_api_service import _project_slug_for_job
+
+        def job(domain, slug):
+            patient = SimpleNamespace(project=SimpleNamespace(slug=slug))
+            return SimpleNamespace(domain=domain, **{fk_fields_for(domain)[0]: patient})
+
+        self.assertEqual(_project_slug_for_job(job("laparoscopy", "lap-proj")), "laparoscopy")
+        self.assertEqual(_project_slug_for_job(job("maxillo", "maxillo-proj")), "maxillo-proj")
+
 
 class StageModeTests(SimpleTestCase):
     """What a SLURM job is handed to reach object storage (review C3)."""

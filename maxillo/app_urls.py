@@ -5,6 +5,8 @@ app_name = "maxillo"
 from . import views
 from . import api_views
 from annotations import views as annotations_views
+from annotations import views_image_segmentation as image_segmentation_views
+from annotations import views_quadrants as quadrant_views
 
 urlpatterns = [
     path("", views.home, name="home"),
@@ -315,5 +317,49 @@ urlpatterns = [
         "api/patients/<int:patient_id>/ios-landmarks/state/",
         annotations_views.ios_landmarks_state_api,
         name="api_ios_landmarks_state",
+    ),
+    # 2D labelmap segmentation (stills and video frames). Dense masks, one file per frame,
+    # server-owned archive format. See annotations/services/image_segmentation.py.
+    path(
+        "api/patients/<int:patient_id>/image-segmentation/",
+        image_segmentation_views.save_image_segmentation_api,
+        name="api_save_image_segmentation",
+    ),
+    path(
+        "api/patients/<int:patient_id>/image-segmentation/state/",
+        image_segmentation_views.image_segmentation_state_api,
+        name="api_image_segmentation_state",
+    ),
+    path(
+        "api/patients/<int:patient_id>/image-segmentation/frame/",
+        image_segmentation_views.image_segmentation_frame_api,
+        name="api_image_segmentation_frame",
+    ),
+    path(
+        "api/patients/<int:patient_id>/image-segmentation/labels/",
+        image_segmentation_views.image_segmentation_labels_api,
+        name="api_image_segmentation_labels",
+    ),
+    path(
+        "api/patients/<int:patient_id>/image-segmentation/labels/<str:code>/",
+        image_segmentation_views.image_segmentation_label_detail_api,
+        name="api_image_segmentation_label",
+    ),
+    # Video quadrant timeline: instants on the timeline, own vocabulary.
+    # See annotations/services/quadrants.py.
+    path(
+        "api/patients/<int:patient_id>/quadrants/",
+        quadrant_views.quadrants_api,
+        name="api_quadrants",
+    ),
+    path(
+        "api/patients/<int:patient_id>/quadrants/labels/",
+        quadrant_views.quadrant_labels_api,
+        name="api_quadrant_labels",
+    ),
+    path(
+        "api/patients/<int:patient_id>/quadrants/labels/<str:code>/",
+        quadrant_views.quadrant_label_detail_api,
+        name="api_quadrant_label",
     ),
 ]

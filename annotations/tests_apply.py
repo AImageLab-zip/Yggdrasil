@@ -16,8 +16,8 @@ from django.db import transaction
 from django.test import TestCase
 
 from annotations import services
-from annotations.adapters import legacy_laparoscopy, legacy_maxillo
-from annotations.constants import AnnotationOrigin, CoordinateSystem
+from annotations.adapters import descriptors as descriptor_builders, legacy_maxillo
+from annotations.constants import AnnotationOrigin, CoordinateSystem, Geometry2DType
 from annotations.models import AnnotationSelector, LabelDefinition, LabelSchema
 from common.models import FileRegistry, Project
 from maxillo.models import Folder, Patient
@@ -113,16 +113,25 @@ class LabelResolutionTests(ApplyTestCase):
         self.assertIsNone(written[0].label_id)
 
 
+def _video_stroke(time_ms, points=None):
+    """One freehand stroke on the instant ``time_ms`` of a video, with its selector."""
+    return descriptor_builders.geometry_2d(
+        geometry_type=Geometry2DType.FREEHAND,
+        coordinate_system=CoordinateSystem.VIDEO_PIXEL,
+        points=points or [[0, 0], [10, 10]],
+        selector=descriptor_builders.interval_selector(
+            start_time_ms=time_ms,
+            end_time_ms=time_ms,
+            coordinate_system=CoordinateSystem.VIDEO_PIXEL,
+        ),
+    )
+
+
 class SelectorReuseTests(ApplyTestCase):
     def test_one_selector_is_shared_by_everything_on_a_frame(self):
         """A row per descriptor would make "what is on this frame" a scan."""
         _, target, revision = self._prepared("video_regions")
-        descriptors = legacy_laparoscopy.region_annotation(
-            tool="brush",
-            frame_time=2.0,
-            points=[0, 0, 10, 10],
-            prompt_points=[{"x": 0.25, "y": 0.5}, {"x": 0.75, "y": 0.5, "label": 0}],
-        )
+        descriptors = [_video_stroke(2000), _video_stroke(2000, [[1, 1], [2, 2]])]
 
         written = services.apply_descriptors(
             revision, target, descriptors, require_labels=False
@@ -133,24 +142,16 @@ class SelectorReuseTests(ApplyTestCase):
 
     def test_two_frames_get_two_selectors(self):
         _, target, revision = self._prepared("video_regions")
-        first = legacy_laparoscopy.region_annotation(
-            tool="brush", frame_time=1.0, points=[0, 0, 1, 1]
-        )
-        second = legacy_laparoscopy.region_annotation(
-            tool="brush", frame_time=2.0, points=[0, 0, 1, 1]
-        )
 
-        services.apply_descriptors(revision, target, first, require_labels=False)
-        services.apply_descriptors(revision, target, second, require_labels=False)
+        services.apply_descriptors(revision, target, [_video_stroke(1000)], require_labels=False)
+        services.apply_descriptors(revision, target, [_video_stroke(2000)], require_labels=False)
 
         self.assertEqual(AnnotationSelector.objects.filter(target=target).count(), 2)
 
     def test_reapplying_the_same_frame_reuses_the_stored_selector(self):
         """The cache is per call; get_or_create is what makes it idempotent."""
         _, target, revision = self._prepared("video_regions")
-        descriptors = legacy_laparoscopy.region_annotation(
-            tool="brush", frame_time=1.0, points=[0, 0, 1, 1]
-        )
+        descriptors = [_video_stroke(1000)]
 
         services.apply_descriptors(revision, target, descriptors, require_labels=False)
         services.apply_descriptors(revision, target, descriptors, require_labels=False)

@@ -39,7 +39,6 @@ _METHOD_FOR_KIND = {
     "ios_landmarks": "ios_landmarks",
     "intraoral_segmentation": "intraoral_segmentation",
     "occlusion_classification": "classification",
-    "video_regions": "video_regions",
     "voice_caption": "voice_caption",
 }
 
@@ -59,7 +58,7 @@ class Command(BaseCommand):
             action="append",
             help=(
                 "Restrict to one surface: classification, intraoral, panoramic, "
-                "video_regions, quadrants, voice_captions. Repeatable."
+                "voice_captions. Repeatable."
             ),
         )
         parser.add_argument(
@@ -110,9 +109,6 @@ class Command(BaseCommand):
         if "maxillo" in self.domains:
             self._run("intraoral", self._convert_intraoral)
             self._run("panoramic", self._convert_panoramic)
-        if "laparoscopy" in self.domains:
-            self._run("video_regions", self._convert_video_regions)
-            self._run("quadrants", self._convert_quadrant_markers)
         self._run("voice_captions", self._convert_voice_captions)
 
         self.stdout.write(
@@ -130,8 +126,6 @@ class Command(BaseCommand):
             "classification",
             "intraoral",
             "panoramic",
-            "video_regions",
-            "quadrants",
             "voice_captions",
         )
 
@@ -452,107 +446,6 @@ class Command(BaseCommand):
         )
         revision = latest.revisions.order_by("-revision_number").first() if latest else None
         return bool(revision and revision.payloads.exists())
-
-    # --------------------------------------------------------- laparoscopy
-
-    def _region_schema(self, project, extra_codes=()):
-        """The per-project region vocabulary, widened to what this row actually says.
-
-        Delegated to ``annotations.services.video`` in Phase 10: the live save needs the
-        same schema, and two implementations of "which labels does this project have"
-        would make a converted study and an edited one resolve their region names
-        against different rows -- which the cross-check would then report as a gap on
-        every field.
-
-        ``extra_codes`` carries the row's own region name. Region types predate the
-        project registry, so a stored stroke can reference a ``RegionType`` that now
-        belongs to a *different* project than its patient does; without this the
-        conversion aborts on it -- "label code 'Tool' is not defined in schema 3" -- and
-        every later surface goes unconverted behind it.
-        """
-        from annotations.services.video import region_label_schema
-
-        return region_label_schema(project, extra_codes=extra_codes)
-
-    def _convert_video_regions(self):
-        from laparoscopy.models import RegionAnnotation
-
-        rows = (
-            RegionAnnotation.objects.select_related(
-                "patient", "patient__project", "region_type"
-            )
-            .order_by("pk")
-            .iterator()
-        )
-        for row in rows:
-            if self._budget_exhausted():
-                return
-            marker = f"legacy:laparoscopy.region:{row.pk}"
-            if self._already_converted(row.patient, "video_regions", marker=marker):
-                self.skipped += 1
-                continue
-            descriptors = legacy_laparoscopy.region_annotation(
-                tool=row.tool,
-                frame_time=row.frame_time,
-                points=row.points or [],
-                stroke_width=row.stroke_width,
-                prompt_points=row.prompt_points or [],
-                region_name=row.region_type.name if row.region_type else None,
-            )
-
-            def work(row=row, marker=marker, descriptors=descriptors):
-                video = row.patient.files.filter(file_type="video_raw").order_by("pk").first()
-                if video is None:
-                    raise ValidationError(
-                        "the patient has no video_raw file for the strokes to "
-                        "be anchored to"
-                    )
-                resource = services.register_file(video, content_hash=video.file_hash)
-                self._write(
-                    patient=row.patient,
-                    kind="video_regions",
-                    marker=marker,
-                    descriptors=descriptors,
-                    resource=resource,
-                    role="video",
-                    label_schema=self._region_schema(
-                        row.patient.project,
-                        extra_codes=[row.region_type.name] if row.region_type else [],
-                    ),
-                )
-
-            self._attempt(marker, work)
-
-    def _convert_quadrant_markers(self):
-        from laparoscopy.models import QuadrantClassificationMarker
-
-        rows = (
-            QuadrantClassificationMarker.objects.select_related(
-                "patient", "quadrant_type"
-            )
-            .order_by("pk")
-            .iterator()
-        )
-        for row in rows:
-            if self._budget_exhausted():
-                return
-            marker = f"legacy:laparoscopy.quadrant:{row.pk}"
-            if self._already_converted(row.patient, "video_quadrants", marker=marker):
-                self.skipped += 1
-                continue
-            descriptors = legacy_laparoscopy.quadrant_marker(
-                time_ms=row.time_ms,
-                quadrant_name=row.quadrant_type.name if row.quadrant_type else None,
-            )
-            self._attempt(
-                marker,
-                lambda row=row, marker=marker, descriptors=descriptors: self._write(
-                    patient=row.patient,
-                    kind="video_quadrants",
-                    marker=marker,
-                    descriptors=descriptors,
-                ),
-            )
 
     # --------------------------------------------------------------- shared
 

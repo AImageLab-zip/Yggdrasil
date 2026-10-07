@@ -185,7 +185,7 @@ copy to stay server-side.
 Bulk work over stored annotations lives in `annotations/management/commands/`:
 `annotations_normalize_coordinates`, `annotations_materialize_landmarks`,
 `annotations_crosscheck`, `annotations_compute_roi_stats`,
-`annotations_rasterize_video_masks`, `annotations_convert_legacy`.
+`annotations_convert_legacy`.
 
 They share one shape: idempotent, `--dry-run`, `--limit`, and one bad object
 costs its own rows rather than the whole sweep. Run them with `--dry-run` first

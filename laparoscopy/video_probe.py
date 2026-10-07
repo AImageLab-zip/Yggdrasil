@@ -72,7 +72,8 @@ def probe_video(local_video_path):
         except (TypeError, ValueError):
             fps = 0.0
     if not math.isfinite(fps) or fps <= 0:
-        fps = 1.0
+        # Never guess: a wrong frame rate puts every annotation on the wrong frame.
+        raise RuntimeError(f"Could not determine frame rate for {local_video_path}")
 
     frame_count = 0
     for key in ("nb_frames", "nb_read_packets"):

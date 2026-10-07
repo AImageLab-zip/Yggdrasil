@@ -32,14 +32,7 @@ from annotations.models import (
 )
 from common.annotation_lock import raw_data_is_locked
 from common.models import FileRegistry, Modality, Project
-from laparoscopy.models import (
-    Folder as LaparoFolder,
-    Patient as LaparoPatient,
-    QuadrantClassificationMarker,
-    QuadrantType,
-    RegionAnnotation,
-    RegionType,
-)
+from laparoscopy.models import Folder as LaparoFolder, Patient as LaparoPatient
 from maxillo.models import (
     Classification,
     Folder,
@@ -294,56 +287,6 @@ class LaparoscopyConversionTests(TestCase):
             domain="laparoscopy",
             laparoscopy_patient=cls.patient,
         )
-        cls.region_type = RegionType.objects.create(project=cls.project, name="Liver")
-        cls.quadrant_type = QuadrantType.objects.create(project=cls.project, name="RUQ")
-
-    def test_a_region_stroke_converts_with_milliseconds_and_a_project_schema(self):
-        RegionAnnotation.objects.create(
-            patient=self.patient,
-            region_type=self.region_type,
-            tool="brush",
-            frame_time=2 / 30,
-            points=[0, 0, 10, 10, 20, 0],
-            stroke_width=4.0,
-        )
-
-        _run("annotations_convert_legacy", surface=["video_regions"], domain=["laparoscopy"])
-
-        item = Geometry2DItem.objects.get()
-        self.assertEqual(item.selector.start_time_ms, 67)
-        self.assertEqual(item.label.code, "Liver")
-        self.assertEqual(item.label.schema.slug, f"laparoscopy-regions-project-{self.project.pk}")
-        self.assertEqual(item.stroke_width, 4.0)
-
-    def test_a_region_on_a_patient_with_no_video_stops_the_run(self):
-        """Strokes in frame pixels need the frame; anchoring them to nothing
-        would leave coordinates with no resource behind them."""
-        other = LaparoPatient.objects.create(project=self.project, folder=self.folder)
-        RegionAnnotation.objects.create(
-            patient=other,
-            region_type=self.region_type,
-            tool="brush",
-            frame_time=1.0,
-            points=[0, 0, 1, 1],
-        )
-
-        with self.assertRaises(CommandError):
-            _run(
-                "annotations_convert_legacy",
-                surface=["video_regions"],
-                domain=["laparoscopy"],
-            )
-
-    def test_a_quadrant_marker_keeps_its_integer_timestamp(self):
-        QuadrantClassificationMarker.objects.create(
-            patient=self.patient, quadrant_type=self.quadrant_type, time_ms=4200
-        )
-
-        _run("annotations_convert_legacy", surface=["quadrants"], domain=["laparoscopy"])
-
-        event = AnnotationSet.objects.get(kind="video_quadrants").revisions.get().eventannotationitems.get()
-        self.assertEqual(event.time_ms, 4200)
-        self.assertEqual(event.value, "RUQ")
 
     def test_laparoscopy_notes_do_not_become_an_occlusion_classification(self):
         """The two domains share a table name and nothing else."""

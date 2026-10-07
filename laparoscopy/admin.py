@@ -1,6 +1,4 @@
 from django.contrib import admin
-from django.db.models import Count
-from django.utils.html import format_html
 
 from common.admin import DomainFolderAdmin, DomainProjectAdmin, raw_locked_changelist
 from common.annotation_lock import raw_data_is_locked
@@ -11,21 +9,9 @@ from .models import (
     Folder,
     LaparoscopyProject,
     Patient,
-    QuadrantClassificationMarker,
-    QuadrantType,
-    RegionType,
     Tag,
     VoiceCaption,
 )
-
-
-class QuadrantClassificationMarkerInline(admin.TabularInline):
-    model = QuadrantClassificationMarker
-    extra = 0
-    fields = ['time_ms', 'quadrant_type', 'created_by', 'updated_by', 'updated_at']
-    readonly_fields = ['created_by', 'updated_by', 'updated_at']
-    autocomplete_fields = ['quadrant_type']
-    ordering = ['time_ms', 'id']
 
 
 @admin.register(LaparoscopyProject)
@@ -55,7 +41,6 @@ class PatientAdmin(admin.ModelAdmin):
     search_fields = ['patient_id', 'name']
     autocomplete_fields = ['project', 'folder', 'uploaded_by']
     filter_horizontal = ['modalities', 'tags']
-    inlines = [QuadrantClassificationMarkerInline]
 
     # Laparoscopy is the one domain that still keeps raw scans in FileFields on
     # the patient itself rather than in FileRegistry, so the freeze has to be
@@ -110,68 +95,3 @@ class ExportAdmin(admin.ModelAdmin):
     search_fields = ['id', 'user__username', 'query_summary', 'file_path', 'share_token']
     readonly_fields = ['created_at', 'started_at', 'completed_at', 'shared_at']
     autocomplete_fields = ['user']
-
-
-class _TypeAdmin(admin.ModelAdmin):
-    """Shared changelist for the two per-project vocabularies.
-
-    ``RegionType`` and ``QuadrantType`` are the same shape and the same thing to
-    an admin -- a named, coloured label a project offers -- but only
-    ``QuadrantType`` was registered, so half of the pair could not be inspected
-    at all. One class, registered twice.
-    """
-
-    list_display = ['id', 'project', 'name', 'color_preview', 'color', 'order', 'annotation_count']
-    list_filter = ['project']
-    list_select_related = ['project']
-    search_fields = ['name', 'project__name', 'project__slug']
-    autocomplete_fields = ['project']
-    ordering = ['project__name', 'order', 'name']
-
-    #: Reverse accessor counted in the "Uses" column.
-    counted = ""
-
-    def get_queryset(self, request):
-        # One COUNT per page instead of one per row.
-        return super().get_queryset(request).annotate(_uses=Count(self.counted))
-
-    @admin.display(description='Color')
-    def color_preview(self, obj):
-        return format_html(
-            '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:{};border:1px solid #ccc;"></span>',
-            obj.color,
-        )
-
-    @admin.display(description='Uses', ordering='_uses')
-    def annotation_count(self, obj):
-        return getattr(obj, "_uses", 0)
-
-
-@admin.register(QuadrantType)
-class QuadrantTypeAdmin(_TypeAdmin):
-    counted = "markers"
-
-
-@admin.register(RegionType)
-class RegionTypeAdmin(_TypeAdmin):
-    counted = "annotations"
-
-
-@admin.register(QuadrantClassificationMarker)
-class QuadrantClassificationMarkerAdmin(admin.ModelAdmin):
-    list_display = ['id', 'patient', 'patient_name', 'quadrant_type', 'time_seconds', 'created_by', 'updated_by', 'updated_at']
-    list_filter = ['quadrant_type', 'patient__visibility', 'created_at', 'updated_at']
-    # `patient_name` reads through the FK; without `patient` here it is one
-    # query per row.
-    list_select_related = ['patient', 'quadrant_type', 'created_by', 'updated_by']
-    search_fields = ['patient__patient_id', 'patient__name', 'quadrant_type__name']
-    autocomplete_fields = ['patient', 'quadrant_type', 'created_by', 'updated_by']
-    ordering = ['patient_id', 'time_ms', 'id']
-
-    @admin.display(description='Patient Name')
-    def patient_name(self, obj):
-        return obj.patient.name
-
-    @admin.display(description='Time (s)', ordering='time_ms')
-    def time_seconds(self, obj):
-        return f'{obj.time_ms / 1000:.3f}'
