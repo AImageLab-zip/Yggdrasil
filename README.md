@@ -31,12 +31,11 @@ Live instance: <https://yggdrasil.ing.unimore.it>
   `frontend/` into a committed bundle: an orthogonal volume grid with
   measurements and segmentation, a tooth-segmentation surface, an IOS mesh
   viewer, a photo viewer with calibrated measurements, a panoramic
-  reconstruction (arch fit → slab → projection), a frame-accurate video
-  editor, and a digital pathology Whole Slide Image (WSI) multi-resolution
+  reconstruction (arch fit → slab → projection), and a digital pathology Whole Slide Image (WSI) multi-resolution
   deep-zoom viewer with synchronized segmentation masks and an in-browser
   WebAssembly (`wasm-vips`) gigapixel pyramidal TIFF converter.
 - **Durable annotations.** Landmarks, segmentations, classifications, panoramic
-  arches, measurements, video regions and quadrant markers are all stored in one
+  arches and measurements are all stored in one
   versioned model in the `annotations/` app — snapshots with revision numbers,
   never deltas, and never carrying viewer-session identifiers.
 - **Voice captioning.** Live Whisper speech-to-text notes, versioned and

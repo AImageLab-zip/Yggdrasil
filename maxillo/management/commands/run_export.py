@@ -4,7 +4,6 @@ from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 
 from common.domains import DOMAIN_CHOICES
-from laparoscopy.export_processor import LaparoscopyExportProcessor
 from common.export_processing import ExportProcessor
 
 
@@ -40,10 +39,7 @@ class Command(BaseCommand):
             export.mark_processing()
 
         logger.info('Running export %s for domain %s', export_id, domain)
-        if domain == 'laparoscopy':
-            processor = LaparoscopyExportProcessor(export)
-        else:
-            processor = ExportProcessor(export, domain=domain)
+        processor = ExportProcessor(export, domain=domain)
         processor.process_export()
 
         self.stdout.write(self.style.SUCCESS(f'Export {export_id} finished with status {export.status}'))

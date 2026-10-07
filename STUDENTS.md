@@ -12,8 +12,7 @@ maintainer. This page says which is which.
   grants, so it never needs, and never gets, storage credentials. Register it with a
   `ProcessingStep` row in the admin (queue, `algo_name`, dependencies).
 - **Analysis on exports.** Export a dataset from the UI and work on the ZIP.
-- **Configuration.** Projects, modalities, processing steps, annotation methods and
-  laparoscopy region/quadrant types are admin data, not code.
+- **Configuration.** Projects, modalities, processing steps, annotation methods are admin data, not code.
 
 ## Through review: code outside the core
 

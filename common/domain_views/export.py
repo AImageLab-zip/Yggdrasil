@@ -156,73 +156,6 @@ def _require_own_export(request, export_id, *, json_response=False):
     return export, None
 
 
-def _laparoscopy_export_query_summary(folder_count):
-    return ", ".join(
-        [
-            f"{folder_count} folder{'s' if folder_count != 1 else ''}",
-            "Laparoscopy subsampled videos",
-            "Per-frame multilayer NPZ masks",
-            "All subsampled frames",
-        ]
-    )
-
-
-def _laparoscopy_export_new(request, ExportModel):
-    from laparoscopy.export_processor import get_laparoscopy_export_folders
-
-    if request.method == "POST":
-        folder_ids = request.POST.getlist("folder_ids")
-        if not folder_ids:
-            messages.error(request, "Please select at least one folder.")
-            return redirect_with_namespace(request, "export_new")
-
-        query_params = {
-            "domain": "laparoscopy",
-            "export_variant": "video_masks_v1",
-            "folder_ids": folder_ids,
-            "mask_format": "npz_multilayer",
-            "include_all_frames": True,
-            "video_subtype": "subsampled",
-        }
-        export = ExportModel.objects.create(
-            user=request.user,
-            status="pending",
-            query_params=query_params,
-            query_summary=_laparoscopy_export_query_summary(len(folder_ids)),
-        )
-
-        from common.export_processing import start_export_processing
-
-        start_export_processing(export.id, "laparoscopy")
-        messages.success(request, f"Export #{export.id} created and processing started.")
-        return redirect_with_namespace(request, "export_list")
-
-    return render(
-        request,
-        "laparoscopy/export_new.html",
-        {
-            "folders": get_laparoscopy_export_folders(),
-            "ns": get_namespace(request),
-        },
-    )
-
-
-def _laparoscopy_export_preview(folder_ids):
-    from laparoscopy.export_processor import build_laparoscopy_export_preview
-
-    preview = build_laparoscopy_export_preview(folder_ids)
-    size_bytes = int(preview["estimated_size_bytes"] or 0)
-    return JsonResponse(
-        {
-            "success": True,
-            "patient_count": preview["patient_count"],
-            "folder_count": len(folder_ids),
-            "exportable_patient_count": preview["exportable_patient_count"],
-            "file_count": preview["file_count"],
-            "estimated_size": format_file_size(size_bytes),
-            "estimated_size_bytes": size_bytes,
-        }
-    )
 def _can_use_exports(request):
     """Whether the user may use exports at all (a coarse gate).
 
@@ -301,9 +234,6 @@ def export_new(request):
         return redirect_with_namespace(request, "patient_list")
     domain_models = get_domain_models(request)
     ExportModel = domain_models["Export"]
-    if get_namespace(request) == "laparoscopy":
-        return _laparoscopy_export_new(request, ExportModel)
-
     FolderModel = domain_models["Folder"]
     PatientModel = domain_models["Patient"]
     domain = get_namespace(request)
@@ -458,9 +388,6 @@ def export_preview(request):
         if isinstance(folder_ids, str):
             folder_ids = [fid for fid in folder_ids.split(",") if fid]
         folder_ids = [int(fid) for fid in folder_ids if str(fid).strip()]
-
-        if domain == "laparoscopy":
-            return _laparoscopy_export_preview(folder_ids)
 
         artifact_keys = data.get("artifacts", [])
         if isinstance(artifact_keys, str):

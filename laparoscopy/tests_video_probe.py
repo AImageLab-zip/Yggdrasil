@@ -170,14 +170,8 @@ class BackfillCommandTests(TestCase):
             row.refresh_from_db()
             self.assertEqual(video_probe.recorded_probe(row), PROBE, row.file_type)
 
-    def test_it_reaches_a_patient_with_no_legacy_annotations(self):
-        """`annotations_rasterize_video_masks` cannot: it iterates stroke rows.
-
-        This patient has a video and has never been annotated, which is the shape that
-        could never be repaired before.
-        """
+    def test_it_reaches_a_patient_that_was_never_annotated(self):
         row = self._row("video_raw")
-        self.assertFalse(self.patient.region_annotations.exists())
 
         self._run()
 

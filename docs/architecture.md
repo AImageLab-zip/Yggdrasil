@@ -232,8 +232,8 @@ path. The required shape is in [CONTRIBUTING.md](../CONTRIBUTING.md).
 ## The annotation model
 
 `annotations/` is the durable record. Everything an annotator produces —
-landmarks, tooth segmentation, occlusion classification, panoramic arches, video
-regions and quadrant markers, volume segmentation, measurements, voice captions
+landmarks, tooth segmentation, occlusion classification, panoramic arches,
+volume segmentation, measurements, voice captions
 — is stored here in one shape.
 
 ```
@@ -314,7 +314,7 @@ Two more properties that surprise people:
 
 ## Imaging frontend
 
-Volume, stack, mesh-adjacent and video imaging runs on **Cornerstone3D** (the
+Volume, stack and mesh-adjacent imaging runs on **Cornerstone3D** (the
 exceptions: the urology WSI viewer is a hand-written Canvas2D tiler, the
 uploaded-panoramic view is a plain `<img>`, and the RGB editor is Canvas2D),
 built from `frontend/` with npm +

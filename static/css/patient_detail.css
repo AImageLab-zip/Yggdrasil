@@ -1320,157 +1320,6 @@
     background-color: #0b5ed7;
 }
 
-/* Laparoscopy temporal classification timeline */
-.laparoscopy-patient-detail #timeline-class-list .timeline-class-item {
-    cursor: pointer;
-    flex: 1 1 calc(50% - 0.25rem);
-    min-width: 0;
-    border-left: 4px solid transparent;
-}
-
-.laparoscopy-patient-detail #timeline-class-list .timeline-class-name {
-    line-height: 1.2;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-track-wrap {
-    position: relative;
-    height: 30px;
-    border-radius: 8px;
-    background: linear-gradient(180deg, #f8f9fa 0%, #eef1f4 100%);
-    border: 1px solid #ced4da;
-    cursor: pointer;
-    user-select: none;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-track {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    top: 50%;
-    height: 4px;
-    transform: translateY(-50%);
-    border-radius: 999px;
-    background: #adb5bd;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-pins-layer {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    top: 0;
-    bottom: 0;
-    pointer-events: none;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-segments-layer {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    top: 0;
-    bottom: 0;
-    pointer-events: none;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-segment {
-    position: absolute;
-    top: 50%;
-    height: 8px;
-    transform: translateY(-50%);
-    border-radius: 999px;
-    background: var(--segment-color, #6c757d);
-    opacity: 0.7;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin {
-    position: absolute;
-    top: 0;
-    transform: translateX(-50%);
-    width: 14px;
-    height: 30px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    cursor: pointer;
-    pointer-events: auto;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin::before {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 50%;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    transform: translateX(-50%);
-    background: var(--pin-color, #0d6efd);
-    border: 2px solid #fff;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22);
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin::after {
-    content: '';
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    width: 2px;
-    height: 16px;
-    transform: translateX(-50%);
-    background: var(--pin-color, #0d6efd);
-    border-radius: 2px;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-pin.is-selected::before {
-    width: 12px;
-    height: 12px;
-    top: 1px;
-    box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.65);
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-playhead {
-    position: absolute;
-    top: 0;
-    left: 8px;
-    transform: translateX(-50%);
-    width: 12px;
-    height: 30px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    cursor: ew-resize;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-playhead::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 0;
-    width: 2px;
-    height: 30px;
-    transform: translateX(-50%);
-    background: #dc3545;
-    border-radius: 1px;
-}
-
-.laparoscopy-patient-detail #temporal-classification-bar .timeline-playhead::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 0;
-    width: 12px;
-    height: 12px;
-    transform: translateX(-50%);
-    border-radius: 50%;
-    background: #dc3545;
-    border: 2px solid #fff;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
-}
-
-@media (max-width: 768px) {
-    .laparoscopy-patient-detail #temporal-classification-bar #timeline-active-class {
-        margin-left: 0 !important;
-    }
-}
 /* Brain report template field chips */
 .report-field-chip {
     padding: 0.35rem 0.5rem;
@@ -2008,221 +1857,698 @@
 }
 
 /* ==========================================================================
-   Type chips — one component for the two lists of named, coloured things
-   ==========================================================================
+   Annotation Mode (laparoscopy): the frame viewport, its toolbar and the label list.
+   Scoped to `.laparoscopy-patient-detail` so no other domain's page carries it.
+   ========================================================================== */
 
-   The laparoscopy annotator lists *region types* beside the viewer and *quadrant
-   types* under the timeline. They are the same object to a reader: a name, a
-   colour, whether it is the one selected, and a couple of actions on it. They
-   were built twice -- the quadrant list had seventy lines of chip CSS inlined in
-   the template (inside `{% if user_profile.is_admin %}`, so a non-admin's page
-   did not even carry it), and the region list had none, so its rows came out as
-   a Bootstrap outline button with the visibility and edit buttons as separate
-   pills floating beside it. With two regions that reads as four unrelated
-   controls in a row, and nothing says which eye belongs to which name.
-
-   One chip: the actions live *inside* the pill they act on.
-
-   `--chip-color` is the type's own colour and `--chip-ink` the foreground that
-   is readable on it (`pageControls.js::readableOn`); both are set per chip by
-   the renderer, because they come from the database rather than the stylesheet. */
-
-.ygg-type-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.15rem;
-    max-width: 100%;
-    min-height: 1.85rem;
-    padding: 0.15rem 0.25rem 0.15rem 0.15rem;
-    border: 1px solid var(--ygg-border);
-    border-radius: 999px;
-    background: var(--ygg-surface);
-    color: var(--ygg-text);
-    font-size: 0.78rem;
-    line-height: 1;
-    box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-}
-
-/* The selected one is filled with its *own* colour -- the same colour its mask
-   is painted in on the video. Bootstrap's `.active` on an outline button is a
-   faint grey that is the difference between "selected" and "hovered", which was
-   reported as not being able to tell which region was being drawn in at all. */
-.ygg-type-chip.is-active {
-    background: var(--chip-color);
-    border-color: var(--chip-color);
-    color: var(--chip-ink, #fff);
-}
-
-/* Folded away by the reader. Client-side state, so it reads as dimmed rather
-   than as anything the record says. */
-.ygg-type-chip.is-muted {
-    opacity: 0.55;
-}
-
-/* The selectable half: the dot, the name, and the check. A button inside the
-   chip rather than the chip being one, because a chip contains buttons and
-   nested buttons are not markup a browser will honour. */
-.ygg-type-chip__select {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    min-width: 0;
-    padding: 0.15rem 0.35rem;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    line-height: 1;
-}
-
-.ygg-type-chip__dot {
-    width: 0.65rem;
-    height: 0.65rem;
-    flex: 0 0 auto;
-    border-radius: 999px;
-    background: var(--chip-color);
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 25%);
-}
-
-/* On a filled chip the dot is the chip's own colour against itself, so it is
-   drawn in the foreground ink instead -- otherwise it disappears. */
-.ygg-type-chip.is-active .ygg-type-chip__dot {
-    background: var(--chip-ink, #fff);
-    box-shadow: none;
-}
-
-.ygg-type-chip__name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Laid out whether or not it is showing, so picking a chip cannot resize it and
-   reflow the wrapped row around it. */
-.ygg-type-chip__check {
-    flex: 0 0 auto;
-    font-size: 0.7rem;
-    visibility: hidden;
-}
-
-.ygg-type-chip.is-active .ygg-type-chip__check {
-    visibility: visible;
-}
-
-.ygg-type-chip__actions {
-    display: inline-flex;
-    gap: 0.05rem;
-    flex: 0 0 auto;
-}
-
-.ygg-type-chip__btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.4rem;
-    height: 1.4rem;
-    padding: 0;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--ygg-text-muted);
-    font-size: 0.72rem;
-    line-height: 1;
-}
-
-.ygg-type-chip.is-active .ygg-type-chip__btn {
-    color: inherit;
-    opacity: 0.85;
-}
-
-.ygg-type-chip__btn:hover,
-.ygg-type-chip__btn:focus-visible {
-    background: rgb(15 23 42 / 10%);
-    color: var(--ygg-text);
-}
-
-.ygg-type-chip.is-active .ygg-type-chip__btn:hover,
-.ygg-type-chip.is-active .ygg-type-chip__btn:focus-visible {
-    background: rgb(255 255 255 / 22%);
-    color: inherit;
-    opacity: 1;
-}
-
-.ygg-type-chip__btn--danger:hover,
-.ygg-type-chip__btn--danger:focus-visible {
-    background: var(--ygg-danger-soft, #fdecec);
-    color: var(--ygg-danger, #c0392b);
-}
-
-/* The row the chips wrap in, and the dashed "add one" chip that closes it. */
-.ygg-type-chips {
+.laparoscopy-patient-detail .segment-toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
     align-items: center;
-}
-
-.ygg-type-chip-add {
-    min-height: 1.85rem;
-    padding: 0.18rem 0.65rem;
-    border: 1px dashed var(--ygg-text-faint);
-    border-radius: 999px;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
     background: var(--ygg-surface-alt);
-    color: var(--ygg-text-muted);
-    font-size: 0.78rem;
-    line-height: 1;
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text);
+    font-size: 0.8rem;
 }
 
-.ygg-type-chip-add:hover {
+.laparoscopy-patient-detail .segment-toolbar .btn {
+    border-color: var(--ygg-border);
+    background: transparent;
+    color: var(--ygg-text);
+}
+
+.laparoscopy-patient-detail .segment-toolbar .btn:hover:not(:disabled),
+.laparoscopy-patient-detail .segment-toolbar .btn:focus-visible,
+.laparoscopy-patient-detail .segment-toolbar .btn.active {
     border-color: var(--ygg-primary);
+    background: var(--ygg-primary-soft);
     color: var(--ygg-primary);
 }
 
-/* ---- Phones: the public demo only (common/mobile.py) -------------------- */
-/* The page already stacks viewer over side panel below 1100px. On a phone one
-   finger scrolls the page even over a viewer and two work the view
-   (runtime/touch.js, theme.css), and the laparoscopy tutorial --
-   a walkthrough of *drawing* regions, which the read-only guest cannot do -- is
-   not offered. */
+.laparoscopy-patient-detail .segment-toolbar__switch,
+.laparoscopy-patient-detail .segment-toolbar__size {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0;
+}
+
+.laparoscopy-patient-detail .segment-toolbar__size input {
+    width: 7rem;
+}
+
+.laparoscopy-patient-detail .segment-viewport {
+    width: 100%;
+    max-height: 70vh;
+    background: #000;
+    /* The element is a WebGL host: nothing inside should select or scroll the page. */
+    user-select: none;
+    touch-action: none;
+}
+
+/* --- Timeline ----------------------------------------------------------------------
+   One quiet bar: transport, clock, the scrubber (with a green tick wherever a frame already
+   has a mask), and the step buttons. Blue is the interactive colour, green means "annotated"
+   -- the design kit's own rule. Nothing here has its own border; the bar has one. */
+
+.laparoscopy-patient-detail .video-timeline {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--ygg-surface);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+    color: var(--ygg-text);
+}
+
+.laparoscopy-patient-detail .video-timeline__transport,
+.laparoscopy-patient-detail .video-timeline__steps {
+    display: inline-flex;
+    flex: 0 0 auto;
+    background: var(--ygg-surface-alt);
+    border-radius: 0.5rem;
+    padding: 2px;
+}
+
+.laparoscopy-patient-detail .video-timeline__btn {
+    min-width: 2.1rem;
+    height: 1.9rem;
+    padding: 0 0.55rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--ygg-text-muted);
+    font-family: var(--ygg-font-mono);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.laparoscopy-patient-detail .video-timeline__btn:hover:not(:disabled) {
+    background: var(--ygg-surface);
+    color: var(--ygg-primary);
+}
+
+.laparoscopy-patient-detail .video-timeline__btn:focus-visible {
+    outline: 2px solid var(--ygg-primary);
+    outline-offset: 1px;
+}
+
+.laparoscopy-patient-detail .video-timeline__btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.laparoscopy-patient-detail .video-timeline__time {
+    flex: 0 0 auto;
+    min-width: 5.6rem;
+    color: var(--ygg-text);
+    font-family: var(--ygg-font-mono);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.laparoscopy-patient-detail .video-timeline__track {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 6rem;
+    height: 1.9rem;
+}
+
+.laparoscopy-patient-detail .video-timeline__marks {
+    position: absolute;
+    inset: 0 7px;               /* the thumb's half-width, so ticks line up with it */
+    pointer-events: none;
+}
+
+.laparoscopy-patient-detail .video-timeline__mark {
+    position: absolute;
+    top: 50%;
+    width: 3px;
+    height: 12px;
+    margin: -6px 0 0 -1.5px;
+    border-radius: 2px;
+    background: var(--ygg-accent2);
+}
+
+.laparoscopy-patient-detail .video-timeline__range {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+}
+
+.laparoscopy-patient-detail .video-timeline__range:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.laparoscopy-patient-detail .video-timeline__range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ygg-border-strong);
+}
+
+.laparoscopy-patient-detail .video-timeline__range::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ygg-border-strong);
+}
+
+.laparoscopy-patient-detail .video-timeline__range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;           /* centre a 14px thumb on a 4px track */
+    border: 2px solid var(--ygg-surface);
+    border-radius: 50%;
+    background: var(--ygg-primary);
+    box-shadow: 0 0 0 1px var(--ygg-primary);
+}
+
+.laparoscopy-patient-detail .video-timeline__range::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--ygg-surface);
+    border-radius: 50%;
+    background: var(--ygg-primary);
+    box-shadow: 0 0 0 1px var(--ygg-primary);
+}
+
+.laparoscopy-patient-detail .video-timeline__range:focus-visible {
+    outline: 2px solid var(--ygg-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
 @media (max-width: 640px) {
-    #laparoscopy-tour-btn { display: none !important; }
-    .patient-view-grid { gap: 12px; }
-    /* A toolbar group is a row of icon buttons plus a labelled switch or two --
-       wider than a phone on the IOS viewer, so let it wrap like the bar does. */
-    .viewer-toolbar__group { flex-wrap: wrap; }
-    /* The modality strip and each viewer's toolbar stay on screen while the
-       stacked viewers scroll under them (static/js/sticky_viewer_bars.js sets
-       the offsets). The strip pins under the topbar; a toolbar pins under the
-       strip, and only while its own viewer is on screen -- sticky is bounded by
-       the parent, so each photo toolbar lets go at the end of its photo. */
-    .modality-tabs,
-    .modality-chips-bar {
-        position: sticky;
-        top: var(--ygg-sticky-top, 3.5rem);
-        z-index: 30;
+    .laparoscopy-patient-detail .video-timeline {
+        flex-wrap: wrap;
+        gap: 0.5rem 0.75rem;
     }
-    .modality-tabs {
-        display: flex;
-        overflow-x: auto;
-        scrollbar-width: none;
-    }
-    .modality-tabs .modality-toggle { flex-shrink: 0; }
-    .modality-chips-bar {
-        padding: 6px 8px;
-        border: 1px solid var(--ygg-border);
-        border-radius: 10px;
-        background: var(--ygg-surface);
-    }
-    .viewer-toolbar {
-        position: sticky;
-        top: calc(var(--ygg-sticky-top, 3.5rem) + var(--ygg-sticky-strip, 0px));
-        z-index: 29;
-    }
-    /* The side panel sits under the viewer here, so it scrolls with the page
-       rather than as a second scroll area inside it. */
-    .side-panel__body { max-height: none; }
-    /* One finger rotates the mesh here (data-touch-drive, runtime/touch.js), so it
-       is no longer a place to scroll from: keep it shorter than the screen. */
-    #scan-viewer { height: min(85vw, 400px); }
+    .laparoscopy-patient-detail .video-timeline__time { order: 2; margin-left: auto; }
+    .laparoscopy-patient-detail .video-timeline__track { order: 3; flex-basis: 100%; }
+    .laparoscopy-patient-detail .video-timeline__steps { order: 4; margin-left: auto; }
+}
+
+.laparoscopy-patient-detail .segment-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--ygg-surface-alt);
+    border: 1px solid var(--ygg-border);
+    color: var(--ygg-text-muted);
+    font-size: 0.78rem;
+}
+
+/* --- Labels ------------------------------------------------------------------------
+   A row is a colour, a name and an eye. The opacity slider, rename and retire belong to the
+   label being worked on, so they show for the selected row (or one holding focus) rather
+   than six outlined controls on every row. */
+
+.laparoscopy-patient-detail .segment-labels-card {
+    padding: 0.9rem 0.9rem 0.8rem;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+}
+
+.laparoscopy-patient-detail .segment-labels-card__title {
+    margin: 0 0 0.55rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--ygg-text);
+}
+
+.laparoscopy-patient-detail #segment-labels {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row;
+    align-items: start;
+    gap: 2px 0.4rem;
+    max-height: 22rem;
+    overflow-y: auto;
+}
+
+.laparoscopy-patient-detail .segment-label {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 0.6rem;
+    padding: 0.3rem 0.4rem 0.3rem 0.5rem;
+    border-radius: 0.5rem;
+    border-left: 3px solid transparent;
+    transition: background-color 120ms ease;
+}
+
+.laparoscopy-patient-detail .segment-label:hover {
+    background: var(--ygg-surface-alt);
+}
+
+.laparoscopy-patient-detail .segment-label.is-selected {
+    background: var(--ygg-primary-soft);
+    border-left-color: var(--ygg-primary);
+}
+
+/* The selected segmentation label opens its opacity slider and rename/retire *inside its own
+   half-width cell*, so the two-column layout holds while a label is being worked on. The
+   "Opacity" word is dropped (the slider keeps its aria-label) to make room. */
+.laparoscopy-patient-detail #segment-labels .segment-label__more {
+    gap: 0.25rem;
+}
+
+.laparoscopy-patient-detail #segment-labels .segment-label__opacity-field span {
+    display: none;
+}
+
+.laparoscopy-patient-detail #segment-labels .segment-label__opacity {
+    max-width: none;
+}
+
+.laparoscopy-patient-detail #segment-labels .segment-labels__add,
+.laparoscopy-patient-detail #segment-labels .segment-labels__empty {
+    grid-column: 1 / -1;
+}
+
+.laparoscopy-patient-detail .segment-toolbar__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+}
+
+.laparoscopy-patient-detail .segment-toolbar__label select {
+    width: auto;
+    max-width: 12rem;
+}
+
+.laparoscopy-patient-detail .segment-label__swatch {
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    cursor: pointer;
+    box-shadow: 0 0 0 1px var(--ygg-border-strong);
+}
+
+.laparoscopy-patient-detail .segment-label__swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.laparoscopy-patient-detail .segment-label__swatch::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.laparoscopy-patient-detail .segment-label__swatch::-moz-color-swatch { border: 0; border-radius: 50%; }
+
+.laparoscopy-patient-detail .segment-label__swatch:disabled { cursor: default; }
+
+.laparoscopy-patient-detail .segment-label__name {
+    min-width: 0;
+    padding: 0.25rem 0;
+    border: 0;
+    background: none;
+    color: var(--ygg-text);
+    font-size: 0.9rem;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.laparoscopy-patient-detail .segment-label.is-selected .segment-label__name { font-weight: 600; }
+.laparoscopy-patient-detail .segment-label.is-hidden .segment-label__name { color: var(--ygg-text-faint); }
+
+.laparoscopy-patient-detail .segment-label__icon {
+    display: inline-grid;
+    place-items: center;
+    width: 1.8rem;
+    height: 1.8rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--ygg-text-muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.laparoscopy-patient-detail .segment-label__icon:hover { background: var(--ygg-surface); color: var(--ygg-primary); }
+.laparoscopy-patient-detail .segment-label__icon--danger:hover { color: var(--ygg-danger); background: var(--ygg-danger-soft); }
+.laparoscopy-patient-detail .segment-label.is-hidden .segment-label__visibility { color: var(--ygg-text-faint); }
+
+.laparoscopy-patient-detail .segment-label__name:focus-visible,
+.laparoscopy-patient-detail .segment-label__icon:focus-visible,
+.laparoscopy-patient-detail .segment-label__swatch:focus-visible,
+.laparoscopy-patient-detail .segment-labels__add:focus-visible {
+    outline: 2px solid var(--ygg-primary);
+    outline-offset: 1px;
+}
+
+.laparoscopy-patient-detail .segment-label__more {
+    display: none;
+    grid-column: 2 / -1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.15rem 0 0.2rem;
+}
+
+.laparoscopy-patient-detail .segment-label.is-selected .segment-label__more,
+.laparoscopy-patient-detail .segment-label:focus-within .segment-label__more {
+    display: flex;
+}
+
+.laparoscopy-patient-detail .segment-label__opacity-field {
+    display: inline-flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    color: var(--ygg-text-muted);
+    font-size: 0.75rem;
+}
+
+.laparoscopy-patient-detail .segment-label__opacity {
+    flex: 1 1 auto;
+    min-width: 3rem;
+    max-width: 9rem;
+    accent-color: var(--ygg-primary);
+}
+
+.laparoscopy-patient-detail .segment-labels__add {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0.4rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px dashed var(--ygg-border-strong);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--ygg-text-muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.laparoscopy-patient-detail .segment-labels__add:hover {
+    border-color: var(--ygg-primary);
+    color: var(--ygg-primary);
+    background: var(--ygg-primary-soft);
+}
+
+.laparoscopy-patient-detail .segment-labels__empty {
+    margin: 0 0 0.4rem;
+    color: var(--ygg-text-muted);
+    font-size: 0.85rem;
+}
+
+/* Quadrants have no opacity or visibility, so their rows are short: two to a line, with
+   rename and retire on the row itself (on hover, focus or selection) instead of a second
+   line, so selecting one never shifts its neighbours. */
+.laparoscopy-patient-detail #quadrant-labels {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 0.4rem;
+    max-height: 22rem;
+    overflow-y: auto;
+}
+
+.laparoscopy-patient-detail #quadrant-labels .segment-label__more {
+    grid-column: 3;
+    grid-row: 1;
+    padding: 0;
+    gap: 0;
+}
+
+.laparoscopy-patient-detail #quadrant-labels .segment-label:hover .segment-label__more {
+    display: flex;
+}
+
+.laparoscopy-patient-detail #quadrant-labels .segment-labels__add,
+.laparoscopy-patient-detail #quadrant-labels .segment-labels__empty {
+    grid-column: 1 / -1;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__select {
+    width: auto;
+    max-width: 14rem;
+}
+
+.laparoscopy-patient-detail .label-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.6rem;
+    border-bottom: 1px solid var(--ygg-border);
+}
+
+.laparoscopy-patient-detail .label-tab {
+    padding: 0.4rem 0.7rem;
+    margin-bottom: -1px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--ygg-text-muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.laparoscopy-patient-detail .label-tab:hover { color: var(--ygg-text); }
+.laparoscopy-patient-detail .label-tab.is-active {
+    color: var(--ygg-primary);
+    border-bottom-color: var(--ygg-primary);
+    font-weight: 600;
+}
+
+.laparoscopy-patient-detail .label-pane__hint {
+    margin: 0 0 0.5rem;
+    color: var(--ygg-text-muted);
+    font-size: 0.8rem;
+}
+
+/* --- Quadrant timeline: its own block, well clear of the playback timeline ----------- */
+
+.laparoscopy-patient-detail .quadrant-timeline {
+    margin-top: 1.25rem;
+    padding: 0.8rem 0.9rem;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-sm);
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__hint {
+    margin: 0.15rem 0 0.6rem;
+    color: var(--ygg-text-muted);
+    font-size: 0.8rem;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__now {
+    padding: 0.15rem 0.6rem;
+    border-left: 4px solid transparent;
+    background: var(--ygg-surface-2, rgba(127, 127, 127, 0.15));
+    border-radius: 0.25rem;
+    font-size: 0.85rem;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__bar {
+    position: relative;
+    height: 1.25rem;
+    margin: 0.5rem 0.5rem 0.25rem;      /* room for a needle at either end */
+    border-radius: 0.5rem;
+    background: var(--ygg-border);
+    overflow: visible;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__spans {
+    position: absolute;
+    inset: 0;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__span {
+    position: absolute;
+    top: 0;
+    height: 100%;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__playhead {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--ygg-text);
+    border-radius: 1px;
+}
+
+/* A needle: a thin vertical blade in the quadrant's colour with a round grip above it. Its
+   hit area is wider than what is drawn, so it can be picked up without pixel-hunting. */
+.laparoscopy-patient-detail .quadrant-needle {
+    position: absolute;
+    top: -0.45rem;
+    bottom: -0.45rem;
+    width: 14px;
+    margin-left: -7px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: ew-resize;
+    touch-action: none;
+    will-change: left;
+}
+
+.laparoscopy-patient-detail .quadrant-needle::before {          /* the blade */
+    content: "";
+    position: absolute;
+    top: 0.45rem;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--needle-color, var(--ygg-text));
+    box-shadow: 0 0 0 1px var(--ygg-surface);
+}
+
+.laparoscopy-patient-detail .quadrant-needle::after {           /* the grip */
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    border-radius: 50%;
+    background: var(--needle-color, var(--ygg-text));
+    box-shadow: 0 0 0 2px var(--ygg-surface);
+}
+
+.laparoscopy-patient-detail .quadrant-needle:hover::after,
+.laparoscopy-patient-detail .quadrant-needle.is-selected::after {
+    width: 14px;
+    height: 14px;
+    margin-left: -7px;
+    top: -2px;
+}
+
+.laparoscopy-patient-detail .quadrant-needle.is-dragging { cursor: grabbing; }
+
+.laparoscopy-patient-detail .quadrant-needle:focus-visible {
+    outline: 2px solid var(--ygg-primary);
+    outline-offset: 1px;
+    border-radius: 4px;
+}
+
+.laparoscopy-patient-detail .quadrant-menu {
+    position: fixed;
+    z-index: 1080;
+    min-width: 12rem;
+    padding: 0.25rem;
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    border: 1px solid var(--ygg-border-strong, var(--ygg-border));
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.laparoscopy-patient-detail .quadrant-menu__heading {
+    padding: 0.35rem 0.6rem 0.15rem;
+    color: var(--ygg-text-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.laparoscopy-patient-detail .quadrant-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.laparoscopy-patient-detail .quadrant-menu__item:hover:not(:disabled),
+.laparoscopy-patient-detail .quadrant-menu__item:focus-visible {
+    background: var(--ygg-primary-soft);
+    outline: none;
+}
+
+.laparoscopy-patient-detail .quadrant-menu__item:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.laparoscopy-patient-detail .quadrant-menu__item.is-danger:hover:not(:disabled) {
+    background: var(--ygg-danger-soft);
+    color: var(--ygg-danger);
+}
+
+.laparoscopy-patient-detail .quadrant-menu__dot {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+}
+
+.laparoscopy-patient-detail .quadrant-timeline__pins {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+}
+
+.laparoscopy-patient-detail .quadrant-pin {
+    padding: 0.1rem 0.6rem;
+    border: 2px solid var(--ygg-border);
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font-size: 0.8rem;
+}
+
+.laparoscopy-patient-detail button.quadrant-pin:not(:disabled):hover {
+    background: var(--ygg-danger-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .laparoscopy-patient-detail .segment-label,
+    .laparoscopy-patient-detail .segment-label__icon,
+    .laparoscopy-patient-detail .segment-labels__add,
+    .laparoscopy-patient-detail .video-timeline__btn { transition: none; }
 }

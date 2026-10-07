@@ -171,3 +171,4 @@ Thumbs.db
 
 # lint-imports cache
 .import_linter_cache/
+.playwright-mcp/

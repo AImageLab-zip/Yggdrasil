@@ -535,7 +535,9 @@ def patient_detail(request, patient_id):
     # Organize patient files for file management section
     patient_files = {'raw': [], 'processed': [], 'other': []}
     try:
-        all_files = patient_file_rows
+        # `annotation_mask` rows are the storage behind the annotation record -- one per
+        # frame per edit -- not files anybody uploaded or should download from here.
+        all_files = [row for row in patient_file_rows if row.file_type != 'annotation_mask']
         
         for file_obj in all_files:
             # Add computed properties for display
@@ -844,8 +846,9 @@ def patient_detail(request, patient_id):
     try:
         from django.db.models import Case, When, IntegerField as _IntegerField
         from django.urls import reverse as _reverse
-        ns = get_namespace(request)
-        video_candidates = list(patient.files.filter(
+        # Playback remains the compressed derivative; masks are keyed to the separately
+        # mounted subsampled derivative below.
+        video_file = patient.files.filter(
             file_type__in=['video_processed', 'video_raw']
         ).annotate(
             _prio=Case(
@@ -854,57 +857,23 @@ def patient_detail(request, patient_id):
                 default=2,
                 output_field=_IntegerField(),
             )
-        ).order_by('_prio', '-created_at'))
-        # The best file we can *describe* wins over the best file, because the
-        # annotator needs a recorded ffprobe result and there is no point preferring
-        # a compressed derivative nobody has probed over a raw file somebody has.
-        # Falling back to the top-ranked row keeps plain playback working either way;
-        # only the annotator is withheld, and `video_state` says why.
-        video_file = _first_probed_video(video_candidates) or (
-            video_candidates[0] if video_candidates else None
-        )
-        if video_file:
-            context['video_file'] = video_file
-            context['video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': video_file.id})
+        ).order_by('_prio', '-created_at').first()
         context['has_video'] = bool(video_file)
-        subsampled_file = patient.files.filter(
+        context['video_url'] = (
+            _reverse(f'{get_namespace(request)}:api_serve_file', kwargs={'file_id': video_file.id})
+            if video_file else None
+        )
+        annotation_video = patient.files.filter(
             file_type='video_processed', subtype='subsampled'
-        ).order_by('-created_at').first()
-        worker_source_file = subsampled_file or video_file
-        if subsampled_file:
-            context['subsampled_video_url'] = _reverse(f'{ns}:api_serve_file', kwargs={'file_id': subsampled_file.id})
-        if worker_source_file and getattr(worker_source_file, 'file_path', None):
-            context['worker_video_source_ref'] = worker_source_file.file_path
-            context['worker_video_source_file_id'] = worker_source_file.id
-        # **Playback and annotation are two different files, on purpose.** Playback takes
-        # the best thing there is, raw included. Annotation takes the subsampled track and
-        # nothing else -- see `_video_annotate_payload`, which now carries both so the one
-        # surface on the page can watch the first and annotate the second.
-        context['video_annotate_data'] = _video_annotate_payload(
-            request, ns, patient, subsampled_file, video_file
+        ).order_by('-created_at', '-id').first()
+        context['image_segment_data'] = _image_segment_payload(
+            get_namespace(request), patient, annotation_video, can_modify
         )
-        context['video_state'] = _video_state(
-            ns, video_file, subsampled_file, context['video_annotate_data'], patient
-        )
-        context['video_diagnosis'] = _video_diagnosis(patient, video_candidates, video_file)
     except Exception:
-        # Narrow on purpose. This used to be the widest `except` on the page and it
-        # answered every failure inside it -- a mistyped URL name included, see the
-        # comment in `_video_annotate_payload` -- with "this patient has no video",
-        # which is a *claim about the data* made on the strength of a bug in the view.
-        # It still must not take the rest of the patient record down, so it still
-        # catches; what changed is that it now says so where someone will see it.
-        logger.exception(
-            "Could not build the video context for patient %s; the page will render "
-            "without a viewer.", patient.patient_id,
-        )
+        logger.exception("Could not build the video context for patient %s", patient.patient_id)
         context['has_video'] = False
         context['video_url'] = None
-        context['worker_video_source_ref'] = None
-        context['worker_video_source_file_id'] = None
-        context['video_annotate_data'] = 'null'
-        context['video_state'] = 'error'
-        context['video_diagnosis'] = ''
+        context['image_segment_data'] = None
 
     # Record for the landing "Continue where you left off" strip (best-effort).
     from common.activity import record_recent
@@ -952,175 +921,40 @@ def update_patient_name(request, patient_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-def _first_probed_video(candidates):
-    """The highest-ranked video row that carries a recorded probe, or ``None``.
+def _image_segment_payload(namespace, patient, video_file, can_modify):
+    """What the Annotation Mode surface mounts from, or ``None`` to leave it off.
 
-    ``annotations_rasterize_video_masks`` records a probe on the **``video_raw``**
-    row, while this page ranks a ``video_processed`` / ``compressed`` derivative
-    first. Asking only the top-ranked row therefore reported "no probe" on studies
-    that had one, which the surface renders as "No video uploaded for this patient."
+    ``None`` unless the file has a recorded probe: a browser cannot read a video's frame
+    rate, and a guessed one puts every mask on the wrong frame while looking entirely
+    right, so the surface refuses rather than guess. The probe is cached in
+    ``FileRegistry.metadata['probe']`` when the file arrives
+    (``laparoscopy/video_probe.py``); run ``manage.py laparoscopy_probe_videos`` for files
+    that predate it. Read here as plain JSON rather than through that module, which a
+    maxillo view must not import.
+
+    Carries ids and facts only. The frame's pixels are never in this payload.
     """
-    from laparoscopy import video_probe
+    if namespace != 'laparoscopy' or video_file is None:
+        return None
+    probe = (video_file.metadata or {}).get('probe')
+    try:
+        width, height = int(probe['width']), int(probe['height'])
+        fps = float(probe['fps'])
+        frame_count = int(probe['frame_count'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0 or fps <= 0 or frame_count <= 0:
+        return None
+    from django.urls import reverse
 
-    for candidate in candidates:
-        if video_probe.recorded_probe(candidate) is not None:
-            return candidate
-    return None
-
-
-def _video_state(namespace, video_file, subsampled_file, annotate_data, patient=None):
-    """Why the video surface looks the way it does, for the template to say out loud.
-
-    ``absent`` -- there is no video row at all. ``processing`` -- the recording is
-    uploaded and plays, but the job that makes the annotation track has not produced it
-    yet, so there is nothing to annotate *on*. ``unprobed`` -- the track exists but
-    nothing has recorded its frame rate, so the annotator declines rather than guess
-    (run ``manage.py laparoscopy_probe_videos``). ``ready`` -- the annotator has what it
-    needs and will mount.
-
-    Separate sentences because the page had one for all of them, and a stored, playable
-    recording being described as "not uploaded" sends people looking for a lost file
-    instead of waiting for a job or running a command.
-
-    **Derived from the payload, not from the namespace.** The first version answered
-    ``ready`` whenever the namespace was not ``laparoscopy``, which was a way of saying
-    "this surface is not on this page" -- but the template reads this to choose its
-    sentence, and ``ready`` with a ``null`` payload means the placeholder stays on
-    screen still claiming no video was uploaded. ``ready`` means exactly one thing: the
-    payload is real and the annotator will mount from it.
-
-    While the track is missing the job decides what is said, because a job that failed
-    or was never created is not "still processing" and waiting will not help:
-    ``failed`` -- the latest video job failed; ``no_job`` -- none exists (the video step
-    is not set up, or the upload predates it).
-    """
-    if not video_file:
-        return 'absent'
-    if annotate_data and annotate_data != 'null':
-        return 'ready'
-    if subsampled_file is None:
-        job = (
-            patient.jobs.filter(modality_slug='video').order_by('-id').first()
-            if patient is not None else None
-        )
-        if job is None:
-            return 'no_job'
-        return 'failed' if job.status == 'failed' else 'processing'
-    return 'unprobed'
-
-
-def _video_diagnosis(patient, candidates, video_file):
-    """One line naming what the server looked for and what it found, for staff.
-
-    "No video uploaded for this patient." over a file somebody can see in object
-    storage is a claim, and the page had no way to show its working. This is that
-    working, rendered only for an administrator.
-
-    It answers the two questions that actually distinguish the cases, because a
-    ``FileRegistry`` row can exist and still not be found here: it might carry a
-    ``file_type`` this page does not look for, or it might be attached to the wrong
-    patient FK -- a video registered against ``patient`` instead of
-    ``laparoscopy_patient`` is invisible to ``patient.files`` while sitting in the
-    bucket exactly as expected.
-    """
-    if video_file is not None:
-        from laparoscopy import video_probe
-
-        rows = ', '.join(
-            f"#{row.id} {row.file_type}"
-            + (f"/{row.subtype}" if row.subtype else '')
-            + ('' if video_probe.recorded_probe(row) else ' (no probe)')
-            for row in candidates
-        )
-        return f"Video rows for this patient: {rows}. Playing #{video_file.id}."
-
-    types = sorted({row.file_type for row in patient.files.all()})
-    if not types:
-        return "This patient has no registered files at all."
-    return (
-        "No video_raw or video_processed row is registered against this patient. "
-        f"It has {len(types)} other file type(s): {', '.join(types)}. "
-        "A video in object storage that is not registered here, or registered "
-        "against a different patient, will not be found."
-    )
-
-
-def _video_annotate_payload(request, namespace, patient, video_file, playback_file=None):
-    """The JSON the Phase 10 annotator mounts from, or ``'null'``.
-
-    ``null`` is a real answer and the surface handles it: the bootstrap reports that it
-    declined and mounts nothing. The caller turns it into a ``video_state`` the template
-    has a sentence for, because the placeholder left on screen used to read "No video
-    uploaded for this patient." over a stored, playable recording.
-
-    **``video_file`` here is the subsampled track, not whatever plays best.** A raw
-    laparoscopy recording runs at 25-30 fps and the annotator draws a labelmap per
-    *annotated* frame, so opening it on the raw video offers thirty times more frames
-    than anyone can annotate and produces a record whose frames no export can line up
-    with: `laparoscopy/export_processor.py` reads the subsampled track, and the two would
-    be describing different films. So annotation waits for the derivative the video job
-    produces -- one sharpest frame per source second -- and the page says it is
-    processing until then. Playback is unaffected and still takes the best file there is.
-
-    **``playback_file`` is the film to watch, and it is a different one.** The subsampled
-    track is literally one frame per second: pressing play on it steps through stills, and
-    "the video plays the cut frames" is the accurate description of watching a 1 fps film.
-    So the payload carries both -- for patient 15 the subsampled track probes at 1 fps /
-    187 frames and the compressed one at 30 fps / 5608 frames, over the same 187 seconds
-    of surgery -- and the surface watches the compressed film while continuing to file
-    every mask against a subsampled frame. The two are addressable by the same clock,
-    which is what makes the pair safe: stopping at 42.7 s lands on subsampled frame 43,
-    the frame the export writes an NPZ for. Nothing about the record changes.
-
-    ``None`` (or the annotation track itself) means there is no second film, and the
-    surface watches the one it annotates -- which is what every non-laparoscopy caller and
-    any study without a compressed derivative gets.
-
-    The other withholding is a track with **no recorded probe**: ``fps`` is a property of
-    the file that a browser cannot read, and ``laparoscopy/video_probe.py`` caches it
-    when the file arrives. Without it the viewer would have to guess a frame rate, and
-    guessing wrong puts every mask on the wrong frame while looking entirely correct.
-    """
-    import json
-
-    from django.urls import reverse as _reverse
-
-    from laparoscopy import video_probe
-
-    if video_file is None or namespace != 'laparoscopy':
-        return 'null'
-    probe = video_probe.recorded_probe(video_file)
-    if probe is None:
-        logger.info(
-            "Patient %s has a video with no recorded probe; the annotator is not "
-            "mounted. Run `manage.py laparoscopy_probe_videos --patient %s`.",
-            patient.patient_id, patient.patient_id,
-        )
-        return 'null'
-    playback_id = getattr(playback_file, 'id', None)
-    return json.dumps(
-        {
-            'patientId': patient.patient_id,
-            'videoUrl': _reverse(
-                f'{namespace}:api_serve_file', kwargs={'file_id': video_file.id}
-            ),
-            'playbackUrl': (
-                _reverse(f'{namespace}:api_serve_file', kwargs={'file_id': playback_id})
-                if playback_id and playback_id != video_file.id
-                else None
-            ),
-            # Unnamespaced: laparoscopy/urls.py is included without a namespace, and
-            # the `laparoscopy:` prefix belongs to the maxillo app urls it re-includes.
-            # Getting this wrong raised inside the view's broad `except`, which turned a
-            # bad URL name into "this patient has no video" -- a page that renders and
-            # is simply missing its viewer.
-            'endpoint': _reverse(
-                'patient_video_annotations',
-                kwargs={'patient_id': patient.patient_id},
-            ),
-            'width': int(probe['width']),
-            'height': int(probe['height']),
-            'fps': float(probe['fps']),
-            'frameCount': int(probe['frame_count']),
-        }
-    )
+    return {
+        'patientId': patient.patient_id,
+        'projectNamespace': namespace,
+        'fileId': video_file.id,
+        'width': width,
+        'height': height,
+        'fps': fps,
+        'frameCount': frame_count,
+        'videoUrl': reverse(f'{namespace}:api_serve_file', kwargs={'file_id': video_file.id}),
+        'canModify': bool(can_modify),
+    }

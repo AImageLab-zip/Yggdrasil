@@ -28,15 +28,9 @@ ignore = ["S110", "S112"]
 # never from request data. No shell=True anywhere.
 "common/tasks.py" = ["S603", "S607"]
 "common/export_processing.py" = ["S603", "S607"]
-"laparoscopy/export_processor.py" = ["S603"]
-# The same ffprobe call, extracted from export_processor.py in Phase 10 and not
-# given the ignore its origin carried -- so `ruff check .` has been failing on
-# release/3.0 since that commit. argv is a fixed list plus a local path this
-# process just wrote or downloaded; no shell=True.
+# ffprobe call: argv is a fixed list plus a local path this process just wrote or
+# downloaded; no shell=True.
 "laparoscopy/video_probe.py" = ["S603"]
-# Magic Tool worker proxy: target URL comes from settings (WORKER_*_URL),
-# not from the request.
-"laparoscopy/views.py" = ["S310"]
 
 # Import direction (CLAUDE.md, docs/architecture.md): domain apps -> annotations ->
 # common, and domain apps do not import each other. Checked in CI by `lint-imports`.
@@ -53,14 +47,12 @@ ignore_imports = [
     # its import is fixed; never add one without a maintainer's sign-off.
     # -- application code
     "annotations.management.commands.annotations_crosscheck -> brain.models",
-    "annotations.services.video -> laparoscopy.models",
     "annotations.views -> maxillo.ios_meshes",
     "common.admin -> annotations.models",
     "common.annotation_lock -> annotations.models",
     "common.annotation_lock -> maxillo.models",
     "common.deletion -> annotations.models",
     "common.domain_views.export -> annotations.queries",
-    "common.domain_views.export -> laparoscopy.export_processor",
     "common.domain_views.export -> maxillo.models",
     "common.export_catalog -> annotations.queries",
     "common.export_processing -> annotations.services.ios_landmarks",
@@ -72,21 +64,17 @@ ignore_imports = [
     "common.management.commands.seed_dev -> urology.models",
     "laparoscopy.file_utils -> maxillo.file_utils",
     "maxillo.file_utils -> laparoscopy.video_probe",
-    "maxillo.management.commands.run_export -> laparoscopy.export_processor",
     "maxillo.views.domain -> laparoscopy.forms",
-    "maxillo.views.patient_detail -> laparoscopy.video_probe",
     "maxillo.views.patient_upload -> laparoscopy.file_utils",
     "annotations.management.commands.annotations_convert_legacy -> brain.models",
     "annotations.management.commands.annotations_convert_legacy -> maxillo.models",
     "annotations.management.commands.annotations_crosscheck -> laparoscopy.models",
     "annotations.management.commands.annotations_crosscheck -> maxillo.models",
     "annotations.management.commands.annotations_convert_legacy -> laparoscopy.models",
-    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.mask_raster",
-    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.models",
-    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.video_probe",
     # -- tests (fixtures that build rows in several apps)
     "annotations.tests_apply -> maxillo.models",
     "annotations.tests_commands -> laparoscopy.models",
+    "annotations.tests_image_segmentation -> laparoscopy.models",
     "annotations.tests_commands -> maxillo.models",
     "annotations.tests_ios_landmarks -> maxillo.file_utils",
     "annotations.tests_ios_landmarks -> maxillo.models",
@@ -97,7 +85,6 @@ ignore_imports = [
     "annotations.tests_serializers -> maxillo.models",
     "annotations.tests_services -> maxillo.models",
     "annotations.tests_tooth_segmentation -> maxillo.models",
-    "annotations.tests_video -> laparoscopy.models",
     "annotations.tests_views_measurements -> maxillo.models",
     "common.tests -> brain.models",
     "common.tests -> laparoscopy.models",
@@ -150,14 +137,12 @@ ignore_imports = [
     # its import is fixed; never add one without a maintainer's sign-off.
     # -- application code
     "annotations.management.commands.annotations_crosscheck -> brain.models",
-    "annotations.services.video -> laparoscopy.models",
     "annotations.views -> maxillo.ios_meshes",
     "common.admin -> annotations.models",
     "common.annotation_lock -> annotations.models",
     "common.annotation_lock -> maxillo.models",
     "common.deletion -> annotations.models",
     "common.domain_views.export -> annotations.queries",
-    "common.domain_views.export -> laparoscopy.export_processor",
     "common.domain_views.export -> maxillo.models",
     "common.export_catalog -> annotations.queries",
     "common.export_processing -> annotations.services.ios_landmarks",
@@ -169,21 +154,17 @@ ignore_imports = [
     "common.management.commands.seed_dev -> urology.models",
     "laparoscopy.file_utils -> maxillo.file_utils",
     "maxillo.file_utils -> laparoscopy.video_probe",
-    "maxillo.management.commands.run_export -> laparoscopy.export_processor",
     "maxillo.views.domain -> laparoscopy.forms",
-    "maxillo.views.patient_detail -> laparoscopy.video_probe",
     "maxillo.views.patient_upload -> laparoscopy.file_utils",
     "annotations.management.commands.annotations_convert_legacy -> brain.models",
     "annotations.management.commands.annotations_convert_legacy -> maxillo.models",
     "annotations.management.commands.annotations_crosscheck -> laparoscopy.models",
     "annotations.management.commands.annotations_crosscheck -> maxillo.models",
     "annotations.management.commands.annotations_convert_legacy -> laparoscopy.models",
-    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.mask_raster",
-    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.models",
-    "annotations.management.commands.annotations_rasterize_video_masks -> laparoscopy.video_probe",
     # -- tests (fixtures that build rows in several apps)
     "annotations.tests_apply -> maxillo.models",
     "annotations.tests_commands -> laparoscopy.models",
+    "annotations.tests_image_segmentation -> laparoscopy.models",
     "annotations.tests_commands -> maxillo.models",
     "annotations.tests_ios_landmarks -> maxillo.file_utils",
     "annotations.tests_ios_landmarks -> maxillo.models",
@@ -194,7 +175,6 @@ ignore_imports = [
     "annotations.tests_serializers -> maxillo.models",
     "annotations.tests_services -> maxillo.models",
     "annotations.tests_tooth_segmentation -> maxillo.models",
-    "annotations.tests_video -> laparoscopy.models",
     "annotations.tests_views_measurements -> maxillo.models",
     "common.tests -> brain.models",
     "common.tests -> laparoscopy.models",

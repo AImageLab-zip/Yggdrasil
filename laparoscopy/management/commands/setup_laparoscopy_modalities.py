@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from common.models import Project, Modality, ProcessingStep
+from common.models import AnnotationMethod, Project, Modality, ProcessingStep
 
 
 class Command(BaseCommand):
@@ -16,6 +16,20 @@ class Command(BaseCommand):
                 'domain': 'laparoscopy',
             }
         )
+
+        # The page's Annotation Mode button is gated on this method, so a fresh project
+        # must have it (the migration only reaches projects that already existed).
+        method, _ = AnnotationMethod.objects.get_or_create(
+            slug='image_segmentation',
+            defaults={
+                'name': 'Image Segmentation',
+                'description': 'Pixel-accurate label masks on still images and video frames.',
+                'icon': 'fas fa-fill-drip',
+                'domain': 'laparoscopy',
+            },
+        )
+        if project_created:
+            project.annotation_methods.add(method)
 
         if project_created:
             self.stdout.write(self.style.SUCCESS(f'Created project: {project.name}'))
