@@ -25,8 +25,7 @@
         {% if is_demo_guest %}
             <span class="badge-ygg badge-neutral"><span class="ygg-desktop-only">Public demo — read-only</span><span class="ygg-mobile-only">Demo</span></span>
             <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-                {# Phones cannot sign in (common/mobile.py), so there the button only exits. #}
-                <button type="submit" class="ygg-icon-btn" title="{% if is_mobile_client %}Exit demo{% else %}Exit demo / Log in{% endif %}" aria-label="Exit demo">{% icon 'sign-out-alt' %}</button>
+                <button type="submit" class="ygg-icon-btn" title="Exit demo / Log in" aria-label="Exit demo">{% icon 'sign-out-alt' %}</button>
             </form>
         {% elif user.is_authenticated %}
             <button type="button" class="ygg-icon-btn" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">

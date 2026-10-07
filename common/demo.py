@@ -133,8 +133,7 @@ def login_as_guest(request):
 
     Returns the guest user, or ``None`` when nothing is published or the guest
     account does not exist. The caller has already applied ``_rate_ok``: this
-    is the one place that decides *whether* the guest can be entered, so
-    ``/demo/`` and the phone auto-entry (common/mobile.py) cannot drift apart.
+    is the one place that decides *whether* the guest can be entered.
     """
     if not demo_is_published():
         return None

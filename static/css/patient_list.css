@@ -492,10 +492,11 @@
 }
 
 /* ---- Phone: rows become cards ----------------------------------------- */
-/* Phones reach this page only as the read-only demo guest (common/mobile.py),
-   so selection, tagging and the other write controls are dropped rather than
-   squeezed, and the 850px grid table turns into one card per patient. The DOM
-   is unchanged, so the patient_list.js contract above still holds. */
+/* On a phone the 850px grid table turns into one card per patient. Selection,
+   tagging and renaming are dropped rather than squeezed: they are list
+   management, done on a computer, while annotation happens on the patient page,
+   which keeps all of its controls. The DOM is unchanged, so the patient_list.js
+   contract above still holds. */
 @media (max-width: 640px) {
     .patient-list { overflow-x: visible; }
     .patient-list-header { display: none; }

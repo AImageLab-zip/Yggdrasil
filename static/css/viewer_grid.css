@@ -1256,7 +1256,7 @@
   outline-offset: 2px;
 }
 
-/* Phones (the public demo only, common/mobile.py). The 768px rule above already
+/* Phones. The 768px rule above already
    stacks the four windows; here each gets a near-square slice of the screen. One
    finger on a window scrolls the page and two work the view (runtime/touch.js,
    and the touch-action rule in theme.css). */

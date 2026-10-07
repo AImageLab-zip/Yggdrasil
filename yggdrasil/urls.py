@@ -21,7 +21,6 @@ from django.contrib.auth import views as auth_views
 from maxillo import views as scans_views
 from common import views as common_views
 from common import password_reset
-from common.mobile import MobileAwareLoginView, desktop_auth_only
 
 urlpatterns = [
     # App-agnostic admin control panel (must come before Django admin route)
@@ -71,31 +70,31 @@ urlpatterns = [
     path("demo/", include("common.demo_urls")),
     # API root
     path("api/", include(("maxillo.api_urls", "api"), namespace="api")),
-    path("login/", MobileAwareLoginView.as_view(), name="login"),
+    path("login/", auth_views.LoginView.as_view(), name="login"),
     path(
         "logout/",
         auth_views.LogoutView.as_view(template_name="registration/logged_out.html"),
         name="logout",
     ),
-    # Password recovery (#96). Phones get the desktop-only card, as for sign-in.
+    # Password recovery (#96).
     path(
         "password-reset/",
-        desktop_auth_only(password_reset.PasswordResetRequestView.as_view()),
+        password_reset.PasswordResetRequestView.as_view(),
         name="password_reset",
     ),
     path(
         "password-reset/sent/",
-        desktop_auth_only(password_reset.PasswordResetSentView.as_view()),
+        password_reset.PasswordResetSentView.as_view(),
         name="password_reset_done",
     ),
     path(
         "password-reset/<uidb64>/<token>/",
-        desktop_auth_only(password_reset.PasswordResetConfirmView.as_view()),
+        password_reset.PasswordResetConfirmView.as_view(),
         name="password_reset_confirm",
     ),
     path(
         "password-reset/done/",
-        desktop_auth_only(password_reset.PasswordResetCompleteView.as_view()),
+        password_reset.PasswordResetCompleteView.as_view(),
         name="password_reset_complete",
     ),
     path("register/", scans_views.register, name="register"),

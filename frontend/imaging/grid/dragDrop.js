@@ -19,7 +19,7 @@
  *     highlight flickers off every time the pointer crosses a child boundary.
  *
  * **Touch has its own path.** HTML5 drag-and-drop does not start from a finger on most
- * phone browsers, so on the public demo (common/mobile.py) the chips were inert again.
+ * phone browsers, so on a phone the chips were inert again.
  * A touch or pen pointer on a chip is tracked with pointer events instead: drag it
  * onto a window and let go, or tap it (it is *armed*) and then tap a window. The mouse
  * keeps the native path above, untouched.
