@@ -11,6 +11,8 @@ import {
     bindOrientationControls,
     controlPlan,
     isAnnotationModeOn,
+    ANNOTATION_MODE_STORAGE_PREFIX,
+    FREE_SCROLL_STATES,
     ORIENTATION_CHOICES,
     createOrientationControl,
     loadingIndicator,
@@ -708,4 +710,165 @@ test('the control swallows the mouse events Cornerstone would read as a drag', (
     });
     assert.equal(stopped, true);
     assert.equal(defaulted, true);
+});
+
+/* ---------------------------------------------------------------------------
+ * Remembering annotation mode.
+ * ------------------------------------------------------------------------- */
+
+/** A Storage stand-in. `broken` makes every access throw, as blocked site data does. */
+function fakeStorage(initial = {}, { broken = false } = {}) {
+    const items = new Map(Object.entries(initial));
+    return {
+        items,
+        getItem(key) {
+            if (broken) throw new Error('SecurityError');
+            return items.has(key) ? items.get(key) : null;
+        },
+        setItem(key, value) {
+            if (broken) throw new Error('QuotaExceededError');
+            items.set(key, String(value));
+        },
+    };
+}
+
+test('a first visit still opens read-only', () => {
+    const doc = fakeDoc(ALL_IDS, ['Length']);
+    const seen = [];
+    bindControls({ grid: fakeGrid(), doc, onAnnotationMode: (v) => seen.push(v), rememberAs: 'brain', storage: fakeStorage() });
+
+    assert.deepEqual(seen, [false]);
+    assert.equal(doc.elements.get(CONTROL_IDS.annotationTools).hidden, true);
+});
+
+test('turning the mode on is remembered, and the next study opens with the tools out', () => {
+    const storage = fakeStorage();
+    const first = fakeDoc(ALL_IDS, ['Length']);
+    bindControls({ grid: fakeGrid(), doc: first, rememberAs: 'brain', storage });
+    first.elements.get(CONTROL_IDS.annotationMode).handlers.click({});
+
+    assert.equal(storage.items.get(`${ANNOTATION_MODE_STORAGE_PREFIX}brain`), 'on');
+
+    // The next patient page: the ruler is where the user left it.
+    const next = fakeDoc(ALL_IDS, ['Length']);
+    const seen = [];
+    bindControls({ grid: fakeGrid(), doc: next, onAnnotationMode: (v) => seen.push(v), rememberAs: 'brain', storage });
+    assert.deepEqual(seen, [true]);
+    assert.equal(next.elements.get(CONTROL_IDS.annotationTools).hidden, false);
+    assert.equal(next.elements.get(CONTROL_IDS.annotationMode).attributes['aria-checked'], 'true');
+});
+
+test('the mode is remembered per domain', () => {
+    const storage = fakeStorage({ [`${ANNOTATION_MODE_STORAGE_PREFIX}brain`]: 'on' });
+    const seen = [];
+    bindControls({ grid: fakeGrid(), doc: fakeDoc(ALL_IDS), onAnnotationMode: (v) => seen.push(v), rememberAs: 'maxillo', storage });
+    assert.deepEqual(seen, [false]);
+});
+
+test('turning it off again is remembered too', () => {
+    const storage = fakeStorage({ [`${ANNOTATION_MODE_STORAGE_PREFIX}brain`]: 'on' });
+    const doc = fakeDoc(ALL_IDS);
+    bindControls({ grid: fakeGrid(), doc, rememberAs: 'brain', storage });
+    doc.elements.get(CONTROL_IDS.annotationMode).handlers.click({});
+    assert.equal(storage.items.get(`${ANNOTATION_MODE_STORAGE_PREFIX}brain`), 'off');
+});
+
+test('storage that throws costs the memory, never the switch', () => {
+    const doc = fakeDoc(ALL_IDS);
+    const seen = [];
+    bindControls({
+        grid: fakeGrid(),
+        doc,
+        onAnnotationMode: (v) => seen.push(v),
+        rememberAs: 'brain',
+        storage: fakeStorage({}, { broken: true }),
+    });
+    doc.elements.get(CONTROL_IDS.annotationMode).handlers.click({});
+
+    assert.deepEqual(seen, [false, true]);
+    assert.equal(doc.elements.get(CONTROL_IDS.annotationMode).attributes['aria-checked'], 'true');
+});
+
+/* ---------------------------------------------------------------------------
+ * The per-window free-scroll link.
+ * ------------------------------------------------------------------------- */
+
+test('every window of a multi-window grid gets a link, unpressed', () => {
+    const free = [false, false, false, false];
+    const { controls } = bindOrientationControls({
+        grid: {},
+        elements: fakeWindows(),
+        doc: orientationDoc(),
+        windowOrientation: () => 'axial',
+        windowFreeScroll: (index) => free[index],
+    });
+
+    for (const control of controls.values()) {
+        assert.ok(control.freeScrollButton, 'a link per window');
+        assert.equal(control.freeScrollButton.getAttribute('aria-pressed'), 'false');
+        assert.equal(control.freeScrollButton.title, FREE_SCROLL_STATES.linked.title);
+        assert.equal(control.freeScrollButton.icon.className, `fas ${FREE_SCROLL_STATES.linked.icon}`);
+    }
+});
+
+test('a single window has nothing to unlink from, so it gets no link', () => {
+    const { controls } = bindOrientationControls({
+        grid: {},
+        elements: fakeWindows(1),
+        doc: orientationDoc(),
+        windowOrientation: () => 'axial',
+        windowFreeScroll: () => false,
+    });
+    assert.equal(controls.get(0).freeScrollButton, null);
+});
+
+test('clicking the link frees that window, and clicking again re-links it', async () => {
+    const free = [false, false, false, false];
+    const calls = [];
+    const grid = {
+        setFreeScroll(index, value) {
+            calls.push([index, value]);
+            free[index] = value;
+        },
+    };
+    const { controls } = bindOrientationControls({
+        grid,
+        elements: fakeWindows(),
+        doc: orientationDoc(),
+        windowOrientation: () => 'axial',
+        windowFreeScroll: (index) => free[index],
+    });
+    const link = controls.get(2).freeScrollButton;
+
+    link.handlers.click[0]();
+    assert.deepEqual(calls, [[2, true]]);
+    assert.equal(link.getAttribute('aria-pressed'), 'true');
+    assert.equal(link.title, FREE_SCROLL_STATES.free.title);
+    assert.equal(controls.get(1).freeScrollButton.getAttribute('aria-pressed'), 'false');
+
+    link.handlers.click[0]();
+    assert.deepEqual(calls, [[2, true], [2, false]]);
+    assert.equal(link.getAttribute('aria-pressed'), 'false');
+});
+
+test('a link that fails shows the state the window is still in', () => {
+    const messages = [];
+    const { controls } = bindOrientationControls({
+        grid: {
+            setFreeScroll() {
+                throw new Error('no viewport');
+            },
+        },
+        elements: fakeWindows(2),
+        doc: orientationDoc(),
+        setStatus: (message) => messages.push(message),
+        windowOrientation: () => 'axial',
+        windowFreeScroll: () => false,
+    });
+    const link = controls.get(0).freeScrollButton;
+
+    link.handlers.click[0]();
+
+    assert.equal(link.getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(messages, ['Free scroll failed: no viewport']);
 });

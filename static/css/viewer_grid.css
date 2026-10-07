@@ -958,6 +958,19 @@
   color: #fff;
 }
 
+/* The free-scroll link qualifies the plane buttons rather than being one of them, so it
+   sits a little apart. Pressed means this window has left the others on its plane --
+   amber, not the plane buttons' blue, because it is a state to notice, not a choice. */
+.ygg-orient__link {
+  margin-left: 4px;
+  font-size: 0.65rem;
+}
+
+.ygg-orient__link.is-active {
+  background: #d97706;
+  color: #fff;
+}
+
 /* These are keyboard-reachable, and they sit on an image whose brightness the user
    controls -- an outline that only shows on focus-visible is the one ring that is
    legible against both a black slice and a blown-out one. */
