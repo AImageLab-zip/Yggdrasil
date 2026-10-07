@@ -108,6 +108,37 @@ export const BRAIN_COLOURS = Object.freeze([
 ]);
 
 /**
+ * The brain tumour classes, coloured as 1.x coloured them (#105), by label value.
+ *
+ * Keyed by value rather than chosen by how many labels are present, because the
+ * automatic rule below fails exactly on brain: the platform's masks carry labels 2, 3
+ * and 4, and one label above 3 sends *every* class to the golden-ratio hues -- the
+ * clinicians' green core, red edema and blue enhancing rim came out cyan, yellow-green
+ * and magenta.
+ *
+ * The values are the ones the platform's masks actually use, checked on one rather than
+ * assumed from a BraTS edition: label 4 lies inside label 3 and touches it on almost all
+ * of its boundary, and label 3 in turn touches the edema -- core, enhancing rim, edema.
+ *
+ *   1  non-enhancing / necrotic core (NETC, BraTS 2023)  green
+ *   2  edema (ED) -- SNFH in the newer BraTS editions    red
+ *   3  enhancing tumour (ET)                             blue
+ *   4  necrotic core (NECR)                              green
+ *
+ * Any other value keeps its golden-ratio hue, so an unexpected label is still visible
+ * rather than silently painted as one of the three classes.
+ */
+export const BRATS_COLOURS = Object.freeze({
+    1: Object.freeze([0, 255, 0]),
+    2: Object.freeze([255, 0, 0]),
+    3: Object.freeze([0, 0, 255]),
+    4: Object.freeze([0, 255, 0]),
+});
+
+/** The palettes a viewer payload may ask for by name (`segmentationPalette`). */
+export const PALETTE_SCHEMES = Object.freeze({ BRATS: 'brats' });
+
+/**
  * A Cornerstone colour LUT for the labels present, index 0 transparent.
  *
  * Cornerstone indexes a colour LUT by segment index, so the array has to be dense from
@@ -115,10 +146,17 @@ export const BRAIN_COLOURS = Object.freeze([
  * entry. Absent labels get a transparent entry, which costs four bytes each and cannot
  * be seen.
  *
+ * Without a `scheme` this is the automatic rule NiiVue had, unchanged: three or fewer
+ * labels, none above 3, get green/red/blue; anything else walks the golden ratio. With
+ * `scheme: 'brats'` -- which only the brain view sends -- colours are fixed per value by
+ * {@link BRATS_COLOURS}.
+ *
  * @param {number[]} labelValues the values actually present, any order.
+ * @param {object} [options]
+ * @param {string|null} [options.scheme] a {@link PALETTE_SCHEMES} name, or nothing.
  * @returns {number[][]} `[[r, g, b, a], ...]` indexed by segment index.
  */
-export function paletteFor(labelValues) {
+export function paletteFor(labelValues, { scheme = null } = {}) {
     const present = [...new Set(labelValues.map(Number))]
         .filter((value) => Number.isInteger(value) && value > 0)
         .sort((a, b) => a - b);
@@ -134,7 +172,12 @@ export function paletteFor(labelValues) {
             lut.push([0, 0, 0, 0]);
             continue;
         }
-        const [r, g, b] = fixed ? BRAIN_COLOURS[value - 1] : goldenHue(value);
+        const [r, g, b] =
+            scheme === PALETTE_SCHEMES.BRATS
+                ? BRATS_COLOURS[value] ?? goldenHue(value)
+                : fixed
+                  ? BRAIN_COLOURS[value - 1]
+                  : goldenHue(value);
         lut.push([r, g, b, 255]);
     }
     return lut;
