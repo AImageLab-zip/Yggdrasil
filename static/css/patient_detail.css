@@ -1982,22 +1982,6 @@
     height: 1.9rem;
 }
 
-.laparoscopy-patient-detail .video-timeline__marks {
-    position: absolute;
-    inset: 0 7px;               /* the thumb's half-width, so ticks line up with it */
-    pointer-events: none;
-}
-
-.laparoscopy-patient-detail .video-timeline__mark {
-    position: absolute;
-    top: 50%;
-    width: 3px;
-    height: 12px;
-    margin: -6px 0 0 -1.5px;
-    border-radius: 2px;
-    background: var(--ygg-accent2);
-}
-
 .laparoscopy-patient-detail .video-timeline__range {
     position: absolute;
     inset: 0;
@@ -2597,3 +2581,43 @@
        is no longer a place to scroll from: keep it shorter than the screen. */
     #scan-viewer { height: min(85vw, 400px); }
 }
+
+/* Laparoscopy Tutorial (static/js/laparoscopy_tutorial.js): driver.js's popover on the
+   theme tokens, so it follows light/dark. The popover is appended to <body>, hence the
+   popoverClass scope rather than .laparoscopy-patient-detail. */
+.driver-popover.ygg-tour {
+    --driver-popover-font-family: var(--ygg-font-body);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    box-shadow: var(--ygg-shadow-pop);
+    max-width: 340px;
+}
+.ygg-tour .driver-popover-title { font-size: 16px; }
+.ygg-tour .driver-popover-progress-text,
+.ygg-tour .driver-popover-close-btn { color: var(--ygg-text-muted); }
+.ygg-tour .driver-popover-close-btn:hover,
+.ygg-tour .driver-popover-close-btn:focus { color: var(--ygg-text); }
+.ygg-tour .driver-popover-footer-btn {
+    background: var(--ygg-surface-alt);
+    color: var(--ygg-text);
+    border-color: var(--ygg-border-strong);
+    border-radius: var(--ygg-radius-sm);
+    padding: 4px 10px;
+    text-shadow: none;
+}
+.ygg-tour .driver-popover-footer-btn:hover,
+.ygg-tour .driver-popover-footer-btn:focus { background: var(--ygg-surface-3); }
+.ygg-tour .driver-popover-next-btn {
+    background: var(--ygg-primary);
+    border-color: var(--ygg-primary);
+    color: var(--ygg-on-primary);
+}
+.ygg-tour .driver-popover-next-btn:hover,
+.ygg-tour .driver-popover-next-btn:focus { background: var(--ygg-primary-hover); }
+/* Only the arrow's visible side takes the surface colour; the others stay transparent. */
+.ygg-tour .driver-popover-arrow-side-left { border-left-color: var(--ygg-surface); }
+.ygg-tour .driver-popover-arrow-side-right { border-right-color: var(--ygg-surface); }
+.ygg-tour .driver-popover-arrow-side-top { border-top-color: var(--ygg-surface); }
+.ygg-tour .driver-popover-arrow-side-bottom { border-bottom-color: var(--ygg-surface); }

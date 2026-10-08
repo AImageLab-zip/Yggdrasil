@@ -867,7 +867,8 @@ def patient_detail(request, patient_id):
             file_type='video_processed', subtype='subsampled'
         ).order_by('-created_at', '-id').first()
         context['image_segment_data'] = _image_segment_payload(
-            get_namespace(request), patient, annotation_video, can_modify
+            get_namespace(request), patient, annotation_video, can_modify,
+            can_manage_labels=user_is_project_admin(request.user, patient.project),
         )
     except Exception:
         logger.exception("Could not build the video context for patient %s", patient.patient_id)
@@ -921,7 +922,7 @@ def update_patient_name(request, patient_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-def _image_segment_payload(namespace, patient, video_file, can_modify):
+def _image_segment_payload(namespace, patient, video_file, can_modify, can_manage_labels=False):
     """What the Annotation Mode surface mounts from, or ``None`` to leave it off.
 
     ``None`` unless the file has a recorded probe: a browser cannot read a video's frame
@@ -957,4 +958,5 @@ def _image_segment_payload(namespace, patient, video_file, can_modify):
         'frameCount': frame_count,
         'videoUrl': reverse(f'{namespace}:api_serve_file', kwargs={'file_id': video_file.id}),
         'canModify': bool(can_modify),
+        'canManageLabels': bool(can_manage_labels),
     }

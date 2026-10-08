@@ -125,7 +125,8 @@ function element(doc, tag, props = {}) {
  * @param {Document} options.doc
  * @param {object} options.api `createQuadrantsApi(...)`.
  * @param {number} options.fileId the video the markers are filed against.
- * @param {boolean} options.canModify
+ * @param {boolean} options.canModify place and move markers.
+ * @param {boolean} [options.canManage] add, rename and retire quadrants (project admins).
  * @param {() => number} options.getDurationMs
  * @param {() => number} options.getTimeMs the playhead, in ms.
  * @param {Function} [options.ask] themed text prompt.
@@ -139,6 +140,7 @@ export async function mountQuadrants({
     api,
     fileId,
     canModify,
+    canManage = false,
     getDurationMs,
     getTimeMs,
     ask,
@@ -209,7 +211,7 @@ export async function mountQuadrants({
                 selected: active,
                 hidden: new Set(),
                 opacity: () => 1,
-                canEdit: canModify,
+                canManage,
                 noun: 'quadrant',
                 showDisplay: false,
                 selectTitle: 'Use this quadrant for "Mark here"',
@@ -348,7 +350,9 @@ export async function mountQuadrants({
             mark.disabled = !active;
             mark.querySelector('span').textContent = active
                 ? `Mark “${find(active)?.name}” from here`
-                : 'Add a quadrant in Labels';
+                : canManage
+                  ? 'Add a quadrant in Labels'
+                  : 'No quadrants yet — ask a project admin';
         }
         renderBar();
         renderLabels();
@@ -563,7 +567,13 @@ export async function mountQuadrants({
             if (canModify) {
                 items.push({ heading: 'Start a quadrant here' });
                 if (!activeLabels().length) {
-                    items.push({ text: 'No quadrants yet — add one in Labels', disabled: true, run: () => {} });
+                    items.push({
+                        text: canManage
+                            ? 'No quadrants yet — add one in Labels'
+                            : 'No quadrants yet — ask a project admin',
+                        disabled: true,
+                        run: () => {},
+                    });
                 }
                 for (const label of activeLabels()) {
                     items.push({

@@ -929,6 +929,9 @@ class UserPreference(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='ygg_preference')
     report_language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='it')
+    # The colour this user sees a project's label in, overriding the label's own:
+    # {"<project id>:<vocabulary>:<code>": "#rrggbb"}. Display only -- nobody else sees it.
+    label_colors = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

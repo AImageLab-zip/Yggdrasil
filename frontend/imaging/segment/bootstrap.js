@@ -98,7 +98,6 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
     const messages = $(doc, 'segment-message');
     const timeline = $(doc, 'video-timeline-range');
     const timelineTime = $(doc, 'video-timeline-time');
-    const timelineMarks = $(doc, 'video-timeline-marks');
     const timelineControls = [...doc.querySelectorAll('[data-video-seek]')];
     const startButton = $(doc, 'video-start');
     const stopButton = $(doc, 'video-stop');
@@ -167,32 +166,6 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
         quadrants?.showNow();
     }
 
-    /**
-     * Tick the timeline wherever a frame already has a mask, so "where have I worked" is
-     * visible without stepping through 187 frames to find out.
-     */
-    function renderMarks(sources) {
-        if (!timelineMarks) {
-            return;
-        }
-        const frames = sources?.[String(data.fileId)]?.frames ?? {};
-        const duration = data.frameCount / data.fps;
-        timelineMarks.replaceChildren();
-        let count = 0;
-        for (const timeMs of Object.keys(frames)) {
-            const seconds = Number(timeMs) / 1000;
-            if (!Number.isFinite(seconds) || seconds < 0 || seconds > duration) {
-                continue;
-            }
-            const tick = doc.createElement('span');
-            tick.className = 'video-timeline__mark';
-            tick.style.left = `${(seconds / duration) * 100}%`;
-            timelineMarks.appendChild(tick);
-            count += 1;
-        }
-        timelineMarks.title = count === 1 ? '1 annotated frame' : `${count} annotated frames`;
-    }
-
     function setTimelineBusy(isBusy) {
         if (timeline) {
             timeline.disabled = isBusy;
@@ -256,7 +229,7 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
                 selected,
                 hidden,
                 opacity: (code) => session?.opacityOf(code) ?? 0.5,
-                canEdit: Boolean(data.canModify),
+                canManage: Boolean(data.canManageLabels),
                 // Visibility and opacity act on the open frame; with no session there is none.
                 showDisplay: Boolean(session),
             },
@@ -369,7 +342,6 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
         // A frame may be revisited before Annotation Mode closes, so keep the manifest used
         // by openSession current rather than treating this freshly saved frame as empty.
         state.sources = result.sources ?? state.sources;
-        renderMarks(state.sources);
         return { revision: result.revision };
     }
 
@@ -465,10 +437,10 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
             const current = frameSource.nearestFrame(playbackTime);
             const frame = await frameSource.grab(current.frameIndex);
             state = await api.state();
-            renderMarks(state.sources);
             // Painting needs a label, and "no labels yet" under the image was easy to miss,
-            // so a project's first annotation session starts with one.
-            if (data.canModify && !state.labels.some((label) => label.active)) {
+            // so a project's first annotation session starts with one -- when the user is
+            // allowed to add labels at all (project admins).
+            if (data.canManageLabels && !state.labels.some((label) => label.active)) {
                 const { label } = await api.createLabel(FIRST_LABEL_NAME);
                 state.labels.push(label);
             }
@@ -606,14 +578,11 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
         }
     });
     updateTimeline();
-    // The marks are useful before Annotation Mode is opened too; a failed read just leaves
-    // the track plain.
     // The labels are managed from the Labels card at any time, so the vocabulary is read on
     // load rather than when Annotation Mode opens.
     void api.state().then(
         (current) => {
             state = current;
-            renderMarks(current.sources);
             refreshPanel();
         },
         () => {}
@@ -637,6 +606,7 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
         }),
         fileId: data.fileId,
         canModify: Boolean(data.canModify),
+        canManage: Boolean(data.canManageLabels),
         getDurationMs: () => timelineDuration() * 1000,
         getTimeMs: () => (session ? session.frame.timeMs : video.currentTime * 1000),
         ask,

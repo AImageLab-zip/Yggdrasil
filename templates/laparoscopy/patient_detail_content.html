@@ -1,4 +1,4 @@
-{% load cornerstone %}
+{% load cornerstone static %}
 {% include 'common/sections/patient_header_section.html' %}
 
 {% comment %}
@@ -17,9 +17,15 @@
         {% if image_segment_data and 'image_segmentation' in allowed_annotations %}
         <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
             <span id="segment-frame-info" class="small text-muted"></span>
-            <button id="annotation-toggle-btn" type="button" class="btn btn-sm btn-outline-warning">
-                <i class="fas fa-fill-drip me-1"></i>Annotation Mode
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                <button id="tutorial-btn" type="button" class="btn btn-sm btn-outline-secondary"
+                        title="A guided tour of quadrant marking and Annotation Mode">
+                    <i class="fas fa-circle-question me-1"></i>Tutorial
+                </button>
+                <button id="annotation-toggle-btn" type="button" class="btn btn-sm btn-outline-warning">
+                    <i class="fas fa-fill-drip me-1"></i>Annotation Mode
+                </button>
+            </div>
         </div>
         {% endif %}
 
@@ -99,7 +105,6 @@
             </div>
             <output id="video-timeline-time" class="video-timeline__time">0:00 / 0:00</output>
             <div class="video-timeline__track">
-                <div id="video-timeline-marks" class="video-timeline__marks" aria-hidden="true"></div>
                 <input id="video-timeline-range" class="video-timeline__range" type="range"
                        min="0" max="0" step="0.001" value="0" aria-label="Video position">
             </div>
@@ -195,4 +200,15 @@
 {% if image_segment_data and 'image_segmentation' in allowed_annotations %}
 {{ image_segment_data|json_script:"imageSegmentData" }}
 {% cornerstone_entry 'image-segment' %}
+{% comment %}
+    The Tutorial button (static/js/laparoscopy_tutorial.js) runs a driver.js tour that opens
+    Annotation Mode itself, so it exists only alongside it. The script comes pinned + SRI from
+    jsDelivr (CONTRIBUTING: Third-party CDNs); the stylesheet is vendored because the CSP's
+    style-src is 'self' only.
+{% endcomment %}
+<link rel="stylesheet" href="{% static 'vendor/driver.js-1.9.0/driver.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/driver.js@1.9.0/dist/driver.js.iife.js"
+        integrity="sha384-ewyNpQXsRJ43pjJHon2+kFi6VL21pGLmqQWy90ua6Wftxp4v4AfNiB5iI+32snx5"
+        crossorigin="anonymous"></script>
+<script src="{% static 'js/laparoscopy_tutorial.js' %}"></script>
 {% endif %}

@@ -81,6 +81,24 @@ class LaparoscopyPatientPageTests(TestCase):
         self.assertContains(response, "No video uploaded for this patient.")
         self.assertNotContains(response, "<video")
 
+    def test_the_tutorial_comes_with_annotation_mode_and_its_script_pinned_and_sri(self):
+        self._video(**self.PROBE)
+        # The tour opens Annotation Mode itself, so no annotator, no tutorial.
+        self.assertNotContains(self._get(), "tutorial-btn")
+        self.assertNotContains(self._get(), "driver.js")
+
+        self._subsampled_video(**self.PROBE)
+        self._enable()
+        response = self._get()
+
+        self.assertContains(response, 'id="tutorial-btn"')
+        self.assertContains(response, "js/laparoscopy_tutorial.js")
+        self.assertContains(
+            response,
+            '<script src="https://cdn.jsdelivr.net/npm/driver.js@1.9.0/dist/driver.js.iife.js"\n'
+            '        integrity="sha384-',
+        )
+
     def test_a_patient_with_video_gets_a_plain_player_and_no_annotator(self):
         FileRegistry.objects.create(
             domain="laparoscopy",
@@ -166,6 +184,7 @@ class LaparoscopyPatientPageTests(TestCase):
                     "laparoscopy:api_serve_file", kwargs={"file_id": video.pk}
                 ),
                 "canModify": True,
+                "canManageLabels": True,
             },
         )
 
@@ -199,3 +218,11 @@ class LaparoscopyPatientPageTests(TestCase):
         self._enable()
         ProjectAccess.objects.filter(user=self.user).update(role="viewer")
         self.assertFalse(self._get().context["image_segment_data"]["canModify"])
+
+    def test_only_a_project_admin_manages_labels(self):
+        self._video(**self.PROBE)
+        self._subsampled_video(**self.PROBE)
+        self._enable()
+        ProjectAccess.objects.filter(user=self.user).update(role="annotator")
+        payload = self._get().context["image_segment_data"]
+        self.assertEqual((payload["canModify"], payload["canManageLabels"]), (True, False))

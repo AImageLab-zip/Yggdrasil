@@ -12,7 +12,8 @@ format**; the files in object storage are never handed out raw.
 import json
 
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -20,14 +21,15 @@ from annotations.adapters import image_segmentation as codec
 from annotations.constants import CoordinateSystem
 from annotations.services import AnnotationConflict, AnnotationNotAllowed
 from annotations.services import image_segmentation as service
-from annotations.validators.image_segmentation import validate_time_ms
+from annotations.validators.image_segmentation import validate_color, validate_time_ms
 from annotations.views import (
     _BadRequest,
     _checked_file,
     _first_message,
     _patient_model,
 )
-from common.permissions import get_patient_for
+from common.models import UserPreference
+from common.permissions import get_patient_for, user_is_patient_admin
 
 
 def _json_body(request):
@@ -58,13 +60,88 @@ def _project(patient):
     return project
 
 
+# --- Labels: admins manage them, every user picks their own colours ---------------------
+#
+# Adding, renaming, retiring and restoring a label change the project's vocabulary, so they
+# are a project admin's. A colour is a viewing preference: it is stored per user in
+# ``common.UserPreference.label_colors`` and swapped into every label list that user is
+# sent, so the label's own colour is only the default.
+
+
+def _color_key(project, vocabulary, code):
+    return f"{project.pk}:{vocabulary}:{code}"
+
+
+def _personal_colors(user, project, vocabulary, labels):
+    """``labels`` as ``user`` sees them: their own colour wherever they picked one."""
+    preference = UserPreference.objects.filter(user=user).first()
+    mine = preference.label_colors if preference else {}
+    if not mine or project is None:
+        return labels
+    return [
+        {**label, "color": mine.get(_color_key(project, vocabulary, label["code"]), label["color"])}
+        for label in labels
+    ]
+
+
+def _set_personal_color(user, project, vocabulary, code, color):
+    """Store ``user``'s colour for one label; a blank colour goes back to the label's own."""
+    color = validate_color(color)
+    key = _color_key(project, vocabulary, code)
+    with transaction.atomic():
+        preference, _ = UserPreference.objects.select_for_update().get_or_create(user=user)
+        if color:
+            preference.label_colors[key] = color
+        else:
+            preference.label_colors.pop(key, None)
+        preference.save(update_fields=["label_colors", "updated_at"])
+
+
+def label_detail_response(request, patient_id, code, labels, missing):
+    """PATCH (rename/restore: admin; colour: anyone who can read) or DELETE (retire: admin).
+
+    ``labels`` is the service that owns the vocabulary: ``create_label``, ``update_label``,
+    ``list_labels`` and ``VOCABULARY``.
+    """
+    patient = _patient(request, patient_id, "admin" if request.method == "DELETE" else "read")
+    try:
+        project = _project(patient)
+        if request.method == "DELETE":
+            changes, color = {"active": False}, None
+        else:
+            body = _json_body(request)
+            changes = {key: body[key] for key in ("name", "active") if key in body}
+            color = body.get("color")
+            if changes and not user_is_patient_admin(request.user, patient):
+                raise PermissionDenied("Only a project admin can rename, retire or restore labels.")
+        if changes:
+            label = labels.update_label(project, code, **changes)
+        else:
+            label = next((item for item in labels.list_labels(project) if item["code"] == code), None)
+            if label is None:
+                raise LookupError(code)
+        if color is not None:
+            _set_personal_color(request.user, project, labels.VOCABULARY, code, color)
+    except _BadRequest as exc:
+        return JsonResponse({"error": str(exc)}, status=exc.status)
+    except LookupError:
+        return JsonResponse({"error": missing}, status=404)
+    except ValidationError as exc:
+        return JsonResponse({"error": _first_message(exc)}, status=400)
+    [label] = _personal_colors(request.user, project, labels.VOCABULARY, [label])
+    return JsonResponse({"label": label})
+
+
 @login_required
 def image_segmentation_state_api(request, patient_id):
     """The vocabulary, the revision a save must quote, and which frames hold masks."""
     patient = _patient(request, patient_id, "read")
     state = service.image_segmentation_state(patient)
     updated_at = state["updatedAt"]
-    return JsonResponse({**state, "updatedAt": updated_at.isoformat() if updated_at else None})
+    labels = _personal_colors(request.user, patient.project, service.VOCABULARY, state["labels"])
+    return JsonResponse(
+        {**state, "labels": labels, "updatedAt": updated_at.isoformat() if updated_at else None}
+    )
 
 
 @login_required
@@ -173,12 +250,15 @@ def save_image_segmentation_api(request, patient_id):
 @login_required
 @require_http_methods(["GET", "POST"])
 def image_segmentation_labels_api(request, patient_id):
-    """List (read) or create (write) the project's labels."""
-    patient = _patient(request, patient_id, "read" if request.method == "GET" else "write")
+    """List (read) or create (admin) the project's labels."""
+    patient = _patient(request, patient_id, "read" if request.method == "GET" else "admin")
     try:
         project = _project(patient)
         if request.method == "GET":
-            return JsonResponse({"labels": service.list_labels(project)})
+            labels = service.list_labels(project)
+            return JsonResponse(
+                {"labels": _personal_colors(request.user, project, service.VOCABULARY, labels)}
+            )
         body = _json_body(request)
         label = service.create_label(
             project, name=body.get("name"), color=body.get("color", "")
@@ -193,26 +273,9 @@ def image_segmentation_labels_api(request, patient_id):
 @login_required
 @require_http_methods(["PATCH", "DELETE"])
 def image_segmentation_label_detail_api(request, patient_id, code):
-    """Rename/recolour/restore (PATCH) or retire (DELETE) one label.
+    """Rename/restore (PATCH, admin), recolour for yourself (PATCH) or retire (DELETE, admin).
 
     DELETE retires rather than deletes: the label's pixels stay in every revision that has
     them, and a deleted definition would leave planes that name nothing.
     """
-    patient = _patient(request, patient_id, "write")
-    try:
-        project = _project(patient)
-        if request.method == "DELETE":
-            changes = {"active": False}
-        else:
-            body = _json_body(request)
-            changes = {
-                key: body[key] for key in ("name", "color", "active") if key in body
-            }
-        label = service.update_label(project, code, **changes)
-    except _BadRequest as exc:
-        return JsonResponse({"error": str(exc)}, status=exc.status)
-    except LookupError:
-        return JsonResponse({"error": "No such label."}, status=404)
-    except ValidationError as exc:
-        return JsonResponse({"error": _first_message(exc)}, status=400)
-    return JsonResponse({"label": label})
+    return label_detail_response(request, patient_id, code, service, "No such label.")
