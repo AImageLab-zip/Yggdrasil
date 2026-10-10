@@ -169,7 +169,8 @@ else
             revert_build
             printf '\nmigration rehearsal failed, prod unchanged (still serving the old images)\n' >&2
             printf 'log:   %s\nerror:\n' "$REHEARSAL_LOG" >&2
-            grep -E '^[A-Za-z_.]*(Error|Exception)\b|^ERROR:' "$REHEARSAL_LOG" | tail -n 3 | sed 's/^/  /' >&2 || true
+            errors=$(grep -E '^[A-Za-z_.]*(Error|Exception)\b|^ERROR:' "$REHEARSAL_LOG" | tail -n 3 || true)
+            printf '%s\n' "${errors:-(no error line in the log: interrupted? read the log)}" | sed 's/^/  /' >&2
             exit 1
         fi
     fi
