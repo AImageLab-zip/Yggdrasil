@@ -28,6 +28,7 @@ from annotations.queries import with_ecg_rhythm
 from annotations.services.ecg_rhythm import (
     RHYTHM_CHOICES,
     RHYTHM_METHOD_SLUG,
+    clear_ecg_rhythm,
     ecg_rhythm_state,
     save_ecg_rhythm,
 )
@@ -593,6 +594,38 @@ def classification_update(request, patient_id):
         "display_value": state["label"],
         "revision": state["revision"],
     })
+
+
+@login_required
+@require_POST
+def classification_clear(request, patient_id):
+    """Withdraw the rhythm call (the Reset button), refusing a stale request.
+
+    Same revision handshake as :func:`classification_update`: a reset quoting a
+    revision somebody has since moved past is answered 409 with the current call.
+    """
+    patient = get_patient_for(request.user, Patient, patient_id, "write")
+    try:
+        data = _json.loads(request.body)
+    except _json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+    try:
+        expected_revision = int(data.get("revision", 0))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "revision must be an integer"}, status=400)
+
+    try:
+        state = clear_ecg_rhythm(patient, author=request.user, expected_revision=expected_revision)
+    except AnnotationNotAllowed:
+        return JsonResponse({"error": "ECG classification is disabled for this project"}, status=403)
+    except AnnotationConflict:
+        current = ecg_rhythm_state(patient)
+        return JsonResponse({
+            "error": "Somebody else changed this classification. Reload to see it.",
+            "value": current["value"],
+            "revision": current["revision"],
+        }, status=409)
+    return JsonResponse({"success": True, "value": state["value"], "revision": state["revision"]})
 
 
 @login_required

@@ -69,6 +69,36 @@ def save_ecg_rhythm(patient, value, *, author, expected_revision):
     return ecg_rhythm_state(patient)
 
 
+@transaction.atomic
+def clear_ecg_rhythm(patient, *, author, expected_revision):
+    """Withdraw the patient's rhythm call.
+
+    Recorded as a new revision carrying no event, so the withdrawn call and who
+    made it stay on the audit trail and every reader (the page, the list filters,
+    the export) sees "no call". Clearing a patient that has no call is a no-op.
+
+    :raises AnnotationNotAllowed: the patient's project has the method switched off.
+    :raises AnnotationConflict: somebody saved since ``expected_revision``.
+    :returns: the new state, as :func:`ecg_rhythm_state` reports it.
+    """
+    if not ecg_rhythm_state(patient)["value"]:
+        return ecg_rhythm_state(patient)
+    annotation_set = get_or_create_set(
+        patient,
+        RHYTHM_KIND,
+        annotation_method=rhythm_method(),
+        created_by=author,
+    )
+    record_revision(
+        annotation_set,
+        expected_revision=expected_revision,
+        author=author,
+        origin=AnnotationOrigin.MANUAL,
+        note="cleared",
+    )
+    return ecg_rhythm_state(patient)
+
+
 def ecg_rhythm_state(patient):
     """The current call and the revision a save must quote.
 
