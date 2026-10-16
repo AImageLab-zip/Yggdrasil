@@ -221,7 +221,7 @@ class LaparoscopyPatientPageTests(TestCase):
         ProjectAccess.objects.filter(user=self.user).update(role="viewer")
         self.assertFalse(self._get().context["image_segment_data"]["canModify"])
 
-    @override_settings(ASSIST_WORKER_URL="http://djangoworker-api:8000", ASSIST_WORKER_TOKEN="t")
+    @override_settings(ASSIST_WORKER_URL="http://assist-worker.test:8000", ASSIST_WORKER_TOKEN="t")
     def test_assist_needs_the_method_a_configured_worker_and_write_access(self):
         from common.models import AnnotationMethod
 

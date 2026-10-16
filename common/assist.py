@@ -13,9 +13,14 @@ import urllib.request
 
 from django.conf import settings
 
+from common.object_storage import get_object_storage
+
 METHOD_SLUG = "assisted_segmentation"
 MAX_POINTS = 64
 MAX_WINDOW = 50
+# The worker downloads the video once, when its session opens; this only has to outlast
+# that wait (seconds, or minutes behind other sessions' loads).
+LINK_TTL_SECONDS = 600
 
 
 class PromptError(ValueError):
@@ -29,6 +34,15 @@ def is_configured():
 def new_session_id(file_id):
     # New per relay connection: a page reload's late DELETE must not evict the new session.
     return f"lap-{file_id}-{secrets.token_hex(4)}"
+
+
+def video_link(key):
+    """A signed, short-lived download link for one stored video.
+
+    The worker gets this, never storage credentials: it can read this one file, for
+    ``LINK_TTL_SECONDS``, and nothing else in the bucket.
+    """
+    return get_object_storage().presign_get(key, expires_seconds=LINK_TTL_SECONDS)
 
 
 def _base_url():

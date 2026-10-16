@@ -183,10 +183,12 @@ _WORKER_ERRORS = {
 
 @database_sync_to_async
 def _assist_target(user, domain, patient_id, file_id):
-    """``(close_code, None)`` or ``(None, (storage_key, probe))`` for the video to assist on.
+    """``(close_code, None)`` or ``(None, (video_link, probe))`` for the video to assist on.
 
     The video is found from the patient, never taken from the browser: ``fileId`` must name
     *this* patient's subsampled derivative, the file Annotation Mode's frames come from.
+    The worker is sent a signed link to it (``assist.video_link``), never a storage key it
+    would need credentials for.
     """
     if not user or not user.is_authenticated:
         return 4401, None
@@ -206,14 +208,14 @@ def _assist_target(user, domain, patient_id, file_id):
     probe = assist.probe_of(video) if video else None
     if probe is None:
         return 4404, None
-    return None, (video.file_path, probe)
+    return None, (assist.video_link(video.file_path), probe)
 
 
 class AssistSessionConsumer(AsyncWebsocketConsumer):
     """One page visit's assisted-segmentation session, relayed to the GPU worker.
 
     The browser names the patient (URL) and the video (``?fileId=``); everything the worker
-    is told -- the storage key, the session id, the token -- is decided here. The worker
+    is told -- the video link, the session id, the token -- is decided here. The worker
     starts precomputing on connect; leaving the page closes this socket, and that closes the
     worker session at once instead of after its grace period.
     """
@@ -243,7 +245,7 @@ class AssistSessionConsumer(AsyncWebsocketConsumer):
                 f"{user} may not assist on {kwargs['domain']} patient {kwargs['patient_id']} file {file_id}",
             )
             return
-        key, self.probe = target
+        video_link, self.probe = target
         self.session_id = assist.new_session_id(file_id)
         try:
             # Subscribe before /ready: the worker's session_ready is pub/sub, and is lost if
@@ -258,7 +260,7 @@ class AssistSessionConsumer(AsyncWebsocketConsumer):
                 assist.worker_request,
                 "POST",
                 "/api/session/ready/",
-                {"video_id": self.session_id, "video_source": key},
+                {"video_id": self.session_id, "video_source": video_link},
             )
         except Exception as exc:
             logger.warning("Could not open an assist session: %s", exc)

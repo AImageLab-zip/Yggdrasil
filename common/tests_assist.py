@@ -13,6 +13,7 @@ from django.test import SimpleTestCase, TransactionTestCase, override_settings
 from common import assist
 from common.consumers import AssistSessionConsumer
 from common.models import AnnotationMethod, FileRegistry, Project, ProjectAccess
+from common.object_storage import get_object_storage
 from common.routing import websocket_urlpatterns
 
 PROBE = {"width": 16, "height": 8, "fps": 25.0, "frame_count": 100}
@@ -130,7 +131,7 @@ async def _until(predicate):
     raise AssertionError("timed out")
 
 
-@override_settings(ASSIST_WORKER_URL="http://djangoworker-api:8000", ASSIST_WORKER_TOKEN="s3cret")
+@override_settings(ASSIST_WORKER_URL="http://assist-worker.test:8000", ASSIST_WORKER_TOKEN="s3cret")
 class AssistSessionConsumerTests(TransactionTestCase):
     reset_sequences = True
 
@@ -214,11 +215,17 @@ class AssistSessionConsumerTests(TransactionTestCase):
     async def test_opens_a_worker_session_on_the_patients_own_video_and_closes_it_on_leave(self):
         communicator = await self.connected()
         method, path, body = self.calls[0]
-        self.assertEqual((method, path, body["video_source"]), ("POST", "/api/session/ready/", KEY))
+        self.assertEqual((method, path), ("POST", "/api/session/ready/"))
+        # A short-lived signed link to this one video: the worker holds no storage credentials.
+        self.assertEqual(
+            body["video_source"],
+            get_object_storage().presign_get(KEY, expires_seconds=assist.LINK_TTL_SECONDS),
+        )
+        self.assertNotEqual(body["video_source"], KEY)
         session_id = body["video_id"]
         self.assertRegex(session_id, rf"^lap-{self.video.pk}-[0-9a-f]{{8}}$")
         upstream = self.upstreams[0]
-        self.assertEqual(upstream.url, f"ws://djangoworker-api:8000/ws/session/{session_id}/")
+        self.assertEqual(upstream.url, f"ws://assist-worker.test:8000/ws/session/{session_id}/")
         self.assertEqual(upstream.kwargs["additional_headers"], {"Authorization": "Bearer s3cret"})
 
         await communicator.disconnect()
