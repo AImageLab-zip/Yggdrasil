@@ -22,7 +22,7 @@ import numpy as np
 from django.apps import apps
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase, TestCase
+from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from annotations.adapters import image_segmentation as codec
@@ -183,6 +183,11 @@ class ImageSegmentationApiTests(TestCase):
         self.user = User.objects.create_user(username=f"u{uuid.uuid4().hex[:8]}", password="pw")  # noqa: S106
         ProjectAccess.objects.create(user=self.user, project=self.project, role="annotator")
         self.client.force_login(self.user)
+        # Labels are a project admin's to add, rename and retire.
+        admin = User.objects.create_user(username=f"a{uuid.uuid4().hex[:8]}", password="pw")  # noqa: S106
+        ProjectAccess.objects.create(user=admin, project=self.project, role="admin")
+        self.admin_client = Client()
+        self.admin_client.force_login(admin)
         kw = {"patient_id": self.patient.patient_id}
         self.save_url = reverse("laparoscopy:api_save_image_segmentation", kwargs=kw)
         self.state_url = reverse("laparoscopy:api_image_segmentation_state", kwargs=kw)
@@ -194,11 +199,17 @@ class ImageSegmentationApiTests(TestCase):
     # -- helpers ------------------------------------------------------------
 
     def _label(self, name):
-        response = self.client.post(
+        response = self.admin_client.post(
             self.labels_url, json.dumps({"name": name}), content_type="application/json"
         )
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()["label"]["code"]
+
+    def _label_url(self, code):
+        return reverse(
+            "laparoscopy:api_image_segmentation_label",
+            kwargs={"patient_id": self.patient.patient_id, "code": code},
+        )
 
     def _state(self):
         response = self.client.get(self.state_url)
@@ -233,7 +244,7 @@ class ImageSegmentationApiTests(TestCase):
         self.assertNotEqual(labels[0]["color"], labels[1]["color"])
 
     def test_a_duplicate_name_is_refused_case_insensitively(self):
-        response = self.client.post(
+        response = self.admin_client.post(
             self.labels_url, json.dumps({"name": "liver"}), content_type="application/json"
         )
         self.assertEqual(response.status_code, 400)
@@ -243,7 +254,7 @@ class ImageSegmentationApiTests(TestCase):
             "laparoscopy:api_image_segmentation_label",
             kwargs={"patient_id": self.patient.patient_id, "code": self.liver},
         )
-        response = self.client.patch(
+        response = self.admin_client.patch(
             url, json.dumps({"name": "Hepar", "color": "#112233"}), content_type="application/json"
         )
         label = response.json()["label"]
@@ -254,10 +265,46 @@ class ImageSegmentationApiTests(TestCase):
             "laparoscopy:api_image_segmentation_label",
             kwargs={"patient_id": self.patient.patient_id, "code": self.tumour},
         )
-        self.assertFalse(self.client.delete(url).json()["label"]["active"])
+        self.assertFalse(self.admin_client.delete(url).json()["label"]["active"])
         self.assertEqual(self._label("Spleen"), "l3", "retiring must not free a value")
         labels = {label["code"]: label for label in self._state()["labels"]}
         self.assertFalse(labels[self.tumour]["active"])
+
+    def test_only_a_project_admin_adds_renames_retires_or_restores_a_label(self):
+        url = self._label_url(self.liver)
+        refused = [
+            self.client.post(self.labels_url, json.dumps({"name": "Spleen"}), content_type="application/json"),
+            self.client.patch(url, json.dumps({"name": "Hepar"}), content_type="application/json"),
+            self.client.patch(url, json.dumps({"active": False}), content_type="application/json"),
+            self.client.patch(url, json.dumps({"name": "Hepar", "color": "#112233"}), content_type="application/json"),
+            self.client.delete(url),
+        ]
+        self.assertEqual([response.status_code for response in refused], [403] * 5)
+        labels = self.admin_client.get(self.labels_url).json()["labels"]
+        self.assertEqual([(label["name"], label["active"]) for label in labels], [("Liver", True), ("Tumour", True)])
+        mine = {label["code"]: label["color"] for label in self._state()["labels"]}
+        self.assertNotEqual(mine[self.liver], "#112233", "a refused request writes nothing, colour included")
+
+    def test_a_colour_is_the_users_own(self):
+        shared = self.admin_client.get(self.labels_url).json()["labels"][0]["color"]
+        response = self.client.patch(
+            self._label_url(self.liver), json.dumps({"color": "#ABCDEF"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["label"]["color"], "#abcdef")
+        mine = {label["code"]: label["color"] for label in self._state()["labels"]}
+        self.assertEqual(mine[self.liver], "#abcdef")
+        theirs = {label["code"]: label["color"] for label in self.admin_client.get(self.state_url).json()["labels"]}
+        self.assertEqual(theirs[self.liver], shared, "nobody else sees it")
+
+        # A viewer may pick colours too; a blank one goes back to the label's own.
+        ProjectAccess.objects.filter(user=self.user).update(role="viewer")
+        self.client.patch(self._label_url(self.liver), json.dumps({"color": ""}), content_type="application/json")
+        self.assertEqual({label["code"]: label["color"] for label in self._state()["labels"]}[self.liver], shared)
+        bad = self.client.patch(self._label_url(self.liver), json.dumps({"color": "red"}), content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        missing = self.client.patch(self._label_url("l99"), json.dumps({"color": "#000000"}), content_type="application/json")
+        self.assertEqual(missing.status_code, 404)
 
     # -- saving and reading -------------------------------------------------
 

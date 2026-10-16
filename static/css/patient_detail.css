@@ -1982,22 +1982,6 @@
     height: 1.9rem;
 }
 
-.laparoscopy-patient-detail .video-timeline__marks {
-    position: absolute;
-    inset: 0 7px;               /* the thumb's half-width, so ticks line up with it */
-    pointer-events: none;
-}
-
-.laparoscopy-patient-detail .video-timeline__mark {
-    position: absolute;
-    top: 50%;
-    width: 3px;
-    height: 12px;
-    margin: -6px 0 0 -1.5px;
-    border-radius: 2px;
-    background: var(--ygg-accent2);
-}
-
 .laparoscopy-patient-detail .video-timeline__range {
     position: absolute;
     inset: 0;
@@ -2143,18 +2127,6 @@
 .laparoscopy-patient-detail #segment-labels .segment-labels__add,
 .laparoscopy-patient-detail #segment-labels .segment-labels__empty {
     grid-column: 1 / -1;
-}
-
-.laparoscopy-patient-detail .segment-toolbar__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85rem;
-}
-
-.laparoscopy-patient-detail .segment-toolbar__label select {
-    width: auto;
-    max-width: 12rem;
 }
 
 .laparoscopy-patient-detail .segment-label__swatch {
@@ -2596,4 +2568,130 @@
     /* One finger rotates the mesh here (data-touch-drive, runtime/touch.js), so it
        is no longer a place to scroll from: keep it shorter than the screen. */
     #scan-viewer { height: min(85vw, 400px); }
+}
+
+/* Laparoscopy Tutorial (static/js/laparoscopy_tutorial.js): driver.js's popover on the
+   theme tokens, so it follows light/dark. The popover is appended to <body>, hence the
+   popoverClass scope rather than .laparoscopy-patient-detail. */
+.driver-popover.ygg-tour {
+    --driver-popover-font-family: var(--ygg-font-body);
+    background: var(--ygg-surface);
+    color: var(--ygg-text);
+    border: 1px solid var(--ygg-border);
+    border-radius: var(--ygg-radius-md);
+    box-shadow: var(--ygg-shadow-pop);
+    max-width: 340px;
+}
+.ygg-tour .driver-popover-title { font-size: 16px; }
+.ygg-tour .driver-popover-progress-text,
+.ygg-tour .driver-popover-close-btn { color: var(--ygg-text-muted); }
+.ygg-tour .driver-popover-close-btn:hover,
+.ygg-tour .driver-popover-close-btn:focus { color: var(--ygg-text); }
+.ygg-tour .driver-popover-footer-btn {
+    background: var(--ygg-surface-alt);
+    color: var(--ygg-text);
+    border-color: var(--ygg-border-strong);
+    border-radius: var(--ygg-radius-sm);
+    padding: 4px 10px;
+    text-shadow: none;
+}
+.ygg-tour .driver-popover-footer-btn:hover,
+.ygg-tour .driver-popover-footer-btn:focus { background: var(--ygg-surface-3); }
+.ygg-tour .driver-popover-next-btn {
+    background: var(--ygg-primary);
+    border-color: var(--ygg-primary);
+    color: var(--ygg-on-primary);
+}
+.ygg-tour .driver-popover-next-btn:hover,
+.ygg-tour .driver-popover-next-btn:focus { background: var(--ygg-primary-hover); }
+/* Only the arrow's visible side takes the surface colour; the others stay transparent. */
+.ygg-tour .driver-popover-arrow-side-left { border-left-color: var(--ygg-surface); }
+.ygg-tour .driver-popover-arrow-side-right { border-right-color: var(--ygg-surface); }
+.ygg-tour .driver-popover-arrow-side-top { border-top-color: var(--ygg-surface); }
+.ygg-tour .driver-popover-arrow-side-bottom { border-bottom-color: var(--ygg-surface); }
+
+/* Assist (assisted segmentation): the prompt points drawn over the frame. */
+.laparoscopy-patient-detail .segment-viewport-wrap {
+    position: relative;
+}
+.laparoscopy-patient-detail .segment-assist-points {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+.laparoscopy-patient-detail .segment-assist-points circle {
+    stroke: #fff;
+    stroke-width: 2;
+}
+.laparoscopy-patient-detail .segment-assist-points .is-add { fill: var(--ygg-accent2); }
+.laparoscopy-patient-detail .segment-assist-points .is-remove { fill: var(--ygg-danger); }
+.laparoscopy-patient-detail .assist-card__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 0.55rem;
+}
+.laparoscopy-patient-detail .assist-card__head .segment-labels-card__title { margin: 0; }
+/* The relay's state (bootstrap.js describeAssist): a dot plus one word. */
+.laparoscopy-patient-detail .assist-card__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.75rem;
+    color: var(--ygg-text-muted);
+}
+.laparoscopy-patient-detail .assist-card__status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ygg-warn);
+}
+.laparoscopy-patient-detail .assist-card__status[data-state="ready"]::before { background: var(--ygg-ok); }
+.laparoscopy-patient-detail .assist-card__status[data-state="closed"]::before { background: var(--ygg-danger); }
+.laparoscopy-patient-detail .assist-card__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+/* Positive (green) and negative (red) prompt points, matching the dots on the frame. */
+.laparoscopy-patient-detail .assist-mode {
+    display: flex;
+    flex: 1;
+}
+.laparoscopy-patient-detail .assist-mode__btn {
+    --assist-tone: var(--ygg-accent2);
+    flex: 1;
+    border: 1px solid var(--assist-tone);
+    background: transparent;
+    color: var(--assist-tone);
+    padding: 3px 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.laparoscopy-patient-detail .assist-mode__btn.is-add { border-radius: var(--ygg-radius-sm) 0 0 var(--ygg-radius-sm); }
+.laparoscopy-patient-detail .assist-mode__btn.is-remove {
+    --assist-tone: var(--ygg-danger);
+    border-left: 0;
+    border-radius: 0 var(--ygg-radius-sm) var(--ygg-radius-sm) 0;
+}
+.laparoscopy-patient-detail .assist-mode__btn[aria-checked="true"] {
+    background: var(--assist-tone);
+    color: var(--ygg-surface);
+}
+.laparoscopy-patient-detail .assist-window {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--ygg-text-muted);
+    white-space: nowrap;
+}
+.laparoscopy-patient-detail .assist-window input {
+    width: 3.5rem;
 }

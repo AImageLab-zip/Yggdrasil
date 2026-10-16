@@ -66,7 +66,8 @@ function element(doc, tag, props = {}, children = []) {
  * @param {HTMLElement} options.container emptied and refilled.
  * @param {Array<{code, name, color, active}>} options.labels
  * @param {{selected: string|null, hidden: Set<string>, opacity: (code: string) => number,
- *   canEdit: boolean}} options.view
+ *   canManage: boolean}} options.view `canManage`: add, rename and retire (project admins).
+ *   Anyone may change a colour: it is their own, stored per user by the server.
  * @param {object} options.handlers `select(code)`, `toggleVisible(code)`, `opacity(code, alpha)`,
  *   `color(code, hex)`, `rename(code)`, `retire(code)`, `add()`.
  */
@@ -81,7 +82,9 @@ export function renderLabelPanel({ container, labels, view, handlers }) {
         container.appendChild(
             element(doc, 'p', {
                 class: 'segment-labels__empty',
-                text: view.canEdit ? `No ${noun}s yet. Add one to get started.` : `No ${noun}s.`,
+                text: view.canManage
+                    ? `No ${noun}s yet. Add one to get started.`
+                    : `No ${noun}s yet. Ask a project admin to add one.`,
             })
         );
     }
@@ -101,9 +104,8 @@ export function renderLabelPanel({ container, labels, view, handlers }) {
                     type: 'color',
                     class: 'segment-label__swatch',
                     value: label.color || '#3498db',
-                    title: view.canEdit ? 'Change colour' : 'Colour',
+                    title: 'Change colour (only you see it)',
                     'aria-label': `Colour of ${label.name}`,
-                    ...(view.canEdit ? {} : { disabled: 'disabled' }),
                     oninput: (event) => handlers.color(label.code, event.target.value),
                 }),
                 element(doc, 'button', {
@@ -157,7 +159,7 @@ export function renderLabelPanel({ container, labels, view, handlers }) {
                     ])
                           ]
                         : []),
-                    ...(view.canEdit
+                    ...(view.canManage
                         ? [
                               element(
                                   doc,
@@ -191,7 +193,7 @@ export function renderLabelPanel({ container, labels, view, handlers }) {
         container.appendChild(row);
     }
 
-    if (view.canEdit) {
+    if (view.canManage) {
         container.appendChild(
             element(
                 doc,

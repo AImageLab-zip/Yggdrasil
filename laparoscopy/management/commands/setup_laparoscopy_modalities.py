@@ -30,6 +30,17 @@ class Command(BaseCommand):
         )
         if project_created:
             project.annotation_methods.add(method)
+        assist, _ = AnnotationMethod.objects.get_or_create(
+            slug='assisted_segmentation',
+            defaults={
+                'name': 'Assisted Segmentation',
+                'description': 'Masks from clicked points, painted by a model on the GPU worker.',
+                'icon': 'fas fa-wand-magic-sparkles',
+                'domain': 'laparoscopy',
+            },
+        )
+        if project_created:
+            project.annotation_methods.add(assist)
 
         if project_created:
             self.stdout.write(self.style.SUCCESS(f'Created project: {project.name}'))

@@ -105,6 +105,12 @@ WHISPER_CA_CERT = config(
 )
 WHISPER_CONNECT_TIMEOUT = config("WHISPER_CONNECT_TIMEOUT", default=10, cast=int)
 
+# Assisted segmentation: the DjangoWorker GPU worker, reached only from the server
+# (common.consumers.AssistSessionConsumer; docs/setup.md section 8). Empty hides the Assist tool.
+ASSIST_WORKER_URL = config("ASSIST_WORKER_URL", default="")
+ASSIST_WORKER_TOKEN = config("ASSIST_WORKER_TOKEN", default="")
+ASSIST_CONNECT_TIMEOUT = config("ASSIST_CONNECT_TIMEOUT", default=10, cast=int)
+
 MIDDLEWARE = [
     # Outermost, so it sees the final response body (see its docstring).
     "yggdrasil.middleware.AsyncStreamingMiddleware",

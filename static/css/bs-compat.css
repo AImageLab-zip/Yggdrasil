@@ -378,6 +378,10 @@ h1.h6, .h6 { font-size: 0.9rem; font-weight: 600; }
 /* ---- Button group (visually joins adjacent .btn elements) ----------------- */
 .btn-group { display: inline-flex; }
 .btn-group > .btn { border-radius: 0; margin-left: -1px; }
+/* The -1px overlap paints each button's right border under its neighbour: lift the
+   highlighted one above it, as Bootstrap does. */
+.btn-group > .btn { position: relative; }
+.btn-group > .btn:hover, .btn-group > .btn:focus-visible, .btn-group > .btn.active { z-index: 1; }
 .btn-group > .btn:first-child { border-top-left-radius: var(--ygg-radius-md); border-bottom-left-radius: var(--ygg-radius-md); margin-left: 0; }
 .btn-group > .btn:last-child { border-top-right-radius: var(--ygg-radius-md); border-bottom-right-radius: var(--ygg-radius-md); }
 .btn-lg { padding: 0.65rem 1.25rem; font-size: 1rem; }

@@ -16,8 +16,16 @@ from annotations.views_image_segmentation import (
     _integer_or_none,
     _json_body,
     _patient,
+    _personal_colors,
     _project,
+    label_detail_response,
 )
+
+
+def _state(request, patient):
+    state = service.quadrant_state(patient)
+    labels = _personal_colors(request.user, patient.project, service.VOCABULARY, state["labels"])
+    return JsonResponse({**state, "labels": labels})
 
 
 @login_required
@@ -29,7 +37,7 @@ def quadrants_api(request, patient_id):
     """
     patient = _patient(request, patient_id, "read" if request.method == "GET" else "write")
     if request.method == "GET":
-        return JsonResponse(service.quadrant_state(patient))
+        return _state(request, patient)
     try:
         body = _json_body(request)
         expected = _integer_or_none(body, "expectedRevision")
@@ -51,14 +59,14 @@ def quadrants_api(request, patient_id):
         return JsonResponse({"error": str(exc)}, status=403)
     except ValidationError as exc:
         return JsonResponse({"error": _first_message(exc)}, status=400)
-    return JsonResponse(service.quadrant_state(patient))
+    return _state(request, patient)
 
 
 @login_required
 @require_http_methods(["POST"])
 def quadrant_labels_api(request, patient_id):
-    """Create a quadrant (write). The list comes with the state."""
-    patient = _patient(request, patient_id, "write")
+    """Create a quadrant (admin). The list comes with the state."""
+    patient = _patient(request, patient_id, "admin")
     try:
         body = _json_body(request)
         label = service.create_label(
@@ -74,20 +82,5 @@ def quadrant_labels_api(request, patient_id):
 @login_required
 @require_http_methods(["PATCH", "DELETE"])
 def quadrant_label_detail_api(request, patient_id, code):
-    """Rename/recolour/restore (PATCH) or retire (DELETE) one quadrant."""
-    patient = _patient(request, patient_id, "write")
-    try:
-        project = _project(patient)
-        if request.method == "DELETE":
-            changes = {"active": False}
-        else:
-            body = _json_body(request)
-            changes = {k: body[k] for k in ("name", "color", "active") if k in body}
-        label = service.update_label(project, code, **changes)
-    except _BadRequest as exc:
-        return JsonResponse({"error": str(exc)}, status=exc.status)
-    except LookupError:
-        return JsonResponse({"error": "No such quadrant."}, status=404)
-    except ValidationError as exc:
-        return JsonResponse({"error": _first_message(exc)}, status=400)
-    return JsonResponse({"label": label})
+    """Rename/restore (PATCH, admin), recolour for yourself (PATCH) or retire (DELETE, admin)."""
+    return label_detail_response(request, patient_id, code, service, "No such quadrant.")

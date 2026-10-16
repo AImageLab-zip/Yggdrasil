@@ -96,6 +96,9 @@ export const SEGMENT_TOOLS = Object.freeze([
     { id: 'polygon', label: 'Polygon', fill: 'PolygonFill', erase: null },
 ]);
 
+/** The Assist tool: not a Cornerstone tool, its clicks are prompt points (`bootstrap.js`). */
+export const ASSIST_TOOL = 'assist';
+
 /** Every registered name, for the tool group to add and to switch off. */
 export const ALL_TOOL_NAMES = Object.freeze(
     SEGMENT_TOOLS.flatMap((tool) => [tool.fill, tool.erase]).filter(Boolean)

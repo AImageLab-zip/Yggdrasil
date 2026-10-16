@@ -129,10 +129,11 @@ Where the bundle fits in the system as a whole: [docs/architecture.md](docs/arch
 
 ### Third-party CDNs
 
-CDNs are allowed. Today exactly one template uses one:
-`templates/common/user_activity_stats.html` loads two pinned Chart.js scripts from
-jsDelivr, both with SRI. `templates/base.html` loads **no** CDN scripts at all. Three
-rules apply to anything new:
+CDNs are allowed. Today two templates use one, both jsDelivr with SRI:
+`templates/common/user_activity_stats.html` loads two pinned Chart.js scripts, and
+`templates/laparoscopy/patient_detail_content.html` loads driver.js for the Tutorial (its
+stylesheet is vendored under `static/vendor/`, because the CSP's `style-src` is `'self'`).
+`templates/base.html` loads **no** CDN scripts at all. Three rules apply to anything new:
 
 - **Webfonts stay self-hosted.** A font CDN sees every page view of every visitor,
   which is a GDPR question a JavaScript library does not raise. IBM Plex and Font

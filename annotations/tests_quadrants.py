@@ -9,7 +9,7 @@ import uuid
 
 from django.apps import apps
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from annotations.models import AnnotationSet, LabelSchema
@@ -51,6 +51,11 @@ class QuadrantApiTests(TestCase):
         self.user = User.objects.create_user(username=f"u{uuid.uuid4().hex[:8]}", password="pw")  # noqa: S106
         ProjectAccess.objects.create(user=self.user, project=self.project, role="annotator")
         self.client.force_login(self.user)
+        # Quadrants are a project admin's to add, rename and retire.
+        admin = User.objects.create_user(username=f"a{uuid.uuid4().hex[:8]}", password="pw")  # noqa: S106
+        ProjectAccess.objects.create(user=admin, project=self.project, role="admin")
+        self.admin_client = Client()
+        self.admin_client.force_login(admin)
         kw = {"patient_id": self.patient.patient_id}
         self.url = reverse("laparoscopy:api_quadrants", kwargs=kw)
         self.labels_url = reverse("laparoscopy:api_quadrant_labels", kwargs=kw)
@@ -59,7 +64,7 @@ class QuadrantApiTests(TestCase):
         self.lower = self._label("Lower right")
 
     def _label(self, name):
-        response = self.client.post(
+        response = self.admin_client.post(
             self.labels_url, json.dumps({"name": name}), content_type="application/json"
         )
         self.assertEqual(response.status_code, 201, response.content)
@@ -72,7 +77,7 @@ class QuadrantApiTests(TestCase):
         return self.client.put(self.url, json.dumps(body), content_type="application/json")
 
     def test_the_vocabulary_is_separate_from_the_segmentation_labels(self):
-        self.client.post(
+        self.admin_client.post(
             self.seg_labels_url, json.dumps({"name": "Liver"}), content_type="application/json"
         )
         quadrants = self.client.get(self.url).json()["labels"]
@@ -131,10 +136,32 @@ class QuadrantApiTests(TestCase):
             "laparoscopy:api_quadrant_label",
             kwargs={"patient_id": self.patient.patient_id, "code": self.upper},
         )
-        self.assertFalse(self.client.delete(url).json()["label"]["active"])
+        self.assertFalse(self.admin_client.delete(url).json()["label"]["active"])
         state = self.client.get(self.client.get(self.url).wsgi_request.path).json()
         self.assertEqual(state["markers"], [{"timeMs": 0, "code": self.upper}])
         self.assertEqual(self._put(state["markers"]).status_code, 200)
+
+    def test_quadrants_are_an_admins_but_their_colours_are_each_users(self):
+        url = reverse(
+            "laparoscopy:api_quadrant_label",
+            kwargs={"patient_id": self.patient.patient_id, "code": self.upper},
+        )
+        refused = [
+            self.client.post(self.labels_url, json.dumps({"name": "Middle"}), content_type="application/json"),
+            self.client.patch(url, json.dumps({"name": "Top"}), content_type="application/json"),
+            self.client.delete(url),
+        ]
+        self.assertEqual([response.status_code for response in refused], [403] * 3)
+
+        shared = self.admin_client.get(self.url).json()["labels"][0]["color"]
+        response = self.client.patch(url, json.dumps({"color": "#123456"}), content_type="application/json")
+        self.assertEqual(response.status_code, 200, response.content)
+        mine = {label["code"]: label for label in self.client.get(self.url).json()["labels"]}
+        self.assertEqual((mine[self.upper]["name"], mine[self.upper]["color"]), ("Upper left", "#123456"))
+        self.assertEqual(self.admin_client.get(self.url).json()["labels"][0]["color"], shared)
+        # Saving markers sends the state back: still in this user's colours.
+        saved = self._put([{"timeMs": 0, "code": self.upper}]).json()
+        self.assertEqual(saved["labels"][0]["color"], "#123456")
 
     def test_a_project_without_the_method_cannot_save(self):
         self.project.annotation_methods.clear()
