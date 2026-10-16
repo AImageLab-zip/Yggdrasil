@@ -18,12 +18,18 @@ VIDEO_FILE_TYPES = ("video_raw", "video_processed")
 
 def purge(apps, schema_editor):
     AnnotationSet = apps.get_model("annotations", "AnnotationSet")
+    AnnotationRevision = apps.get_model("annotations", "AnnotationRevision")
     AnnotationTarget = apps.get_model("annotations", "AnnotationTarget")
     LabelSchema = apps.get_model("annotations", "LabelSchema")
     SourceResource = apps.get_model("annotations", "SourceResource")
 
-    # Cascades to targets, selectors, revisions, payloads and every item table.
-    AnnotationSet.objects.filter(kind__in=KINDS).delete()
+    sets = AnnotationSet.objects.filter(kind__in=KINDS)
+    # Items PROTECT their target, so deleting a set refuses outright even though the
+    # same items would also go through the revision. Revisions first: that cascades
+    # every item table and the payloads out of the way.
+    AnnotationRevision.objects.filter(annotation_set__in=sets).delete()
+    # Now only targets and selectors are left to cascade.
+    sets.delete()
     # PROTECTed by the sets just deleted, so only reachable now.
     LabelSchema.objects.filter(slug__startswith=SCHEMA_SLUG_PREFIX).delete()
     # A video handle nothing is drawn on any more.

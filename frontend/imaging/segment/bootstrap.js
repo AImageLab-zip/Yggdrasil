@@ -10,9 +10,22 @@
 import { createApi, createQuadrantsApi, endpointFor, quadrantsEndpointFor } from './api.js';
 import { mountQuadrants } from './quadrants.js';
 import { createFrameSource } from './frameSource.js';
-import { renderLabelPanel, describeSave, labelAfterRemoval, paintableLabels } from './labelPanel.js';
+import { renderLabelPanel, describeSave, labelAfterRemoval } from './labelPanel.js';
 import { createSaver, SaveStatus } from './saver.js';
-import { SEGMENT_TOOLS } from './tools.js';
+import { ASSIST_TOOL, SEGMENT_TOOLS } from './tools.js';
+import {
+    assistSocketUrl,
+    createAssistChannel,
+    createPromptPoints,
+    frameTimeMs,
+    hasPixels,
+    labelIsEmptyOn,
+    maskTarget,
+    mergeTrackedPlane,
+    packMask,
+    unpackMask,
+} from './assist.js';
+import { decodePlane, encodePlane } from './planes.js';
 
 const DATA_ELEMENT_ID = 'imageSegmentData';
 
@@ -141,6 +154,162 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
     let navigating = false;
     const hidden = new Set();
 
+    // Assisted segmentation ---------------------------------------------------------
+    // The relay opens with the page, so the worker precomputes while the annotator is
+    // still watching the video; leaving the page closes it (and the worker session).
+    const assistButton = doc.querySelector(`[data-segment-tool="${ASSIST_TOOL}"]`);
+    const assistStatus = $(doc, 'assist-status');
+    const assistModes = [...doc.querySelectorAll('[data-assist-mode]')];
+    const assistWindow = $(doc, 'assist-window');
+    // Masks the worker tracked onto later frames, waiting for the autosaver: timeMs -> {code, plane}.
+    const tracked = new Map();
+    const assistOverlay = $(doc, 'segment-assist-points');
+    const promptPoints = createPromptPoints();
+    const ASSIST_STATUS = {
+        connecting: 'Connecting…',
+        preparing: 'Preparing video…',
+        ready: 'Ready',
+        busy: 'Working…',
+        closed: 'Unavailable',
+    };
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    let includeNext = true;
+    const assist =
+        data.canAssist && assistButton
+            ? createAssistChannel({
+                  url: assistSocketUrl(doc.defaultView.location, data),
+                  onStatus: describeAssist,
+                  onMask: applyAssistMask,
+                  onError: (text) => say(text, true),
+              })
+            : null;
+
+    function describeAssist(status) {
+        assistButton.disabled = status !== 'ready' && status !== 'busy';
+        if (assistStatus) {
+            assistStatus.textContent = ASSIST_STATUS[status] ?? '';
+            assistStatus.dataset.state = status;
+        }
+        if (status === 'closed' && toolId === ASSIST_TOOL) {
+            say('The assistant is unavailable', true);
+            doc.querySelector('[data-segment-tool="brush"]')?.click();
+        }
+    }
+
+    function applyAssistMask(message, sent) {
+        // A prompt's answers count only while the annotator is still where they clicked.
+        if (!session || !sent || session.frame.frameIndex !== sent.frameIndex || selected !== sent.code) {
+            return;
+        }
+        if (message.frameIndex > sent.frameIndex) {
+            trackAssistMask(message, sent);
+            return;
+        }
+        const code = maskTarget(sent, message, { frameIndex: session.frame.frameIndex, code: selected });
+        if (!code) {
+            return;
+        }
+        try {
+            const { width, height } = session.frame;
+            session.applyMask(code, unpackMask(message.mask, message.shape, width, height));
+            // The answered points are done: the mask they made steers the next prompt.
+            promptPoints.forget(sent.frameIndex, sent.code, sent.points);
+            renderAssistPoints();
+            refreshUndoRedoSoon();
+        } catch (error) {
+            say(error.message, true);
+        }
+    }
+
+    function renderAssistPoints() {
+        if (!assistOverlay) {
+            return;
+        }
+        assistOverlay.replaceChildren();
+        if (toolId !== ASSIST_TOOL || !session || !selected) {
+            return;
+        }
+        for (const point of promptPoints.for(session.frame.frameIndex, selected)) {
+            const [cx, cy] = session.canvasPointOf([point.x, point.y]);
+            const dot = doc.createElementNS(SVG_NS, 'circle');
+            dot.setAttribute('cx', String(cx));
+            dot.setAttribute('cy', String(cy));
+            dot.setAttribute('r', '5');
+            dot.setAttribute('class', point.label ? 'is-add' : 'is-remove');
+            assistOverlay.appendChild(dot);
+        }
+    }
+
+    /**
+     * A mask tracked onto a later frame: queued on the autosaver (the one writer, so no
+     * revision conflicts with brush strokes), and only where the label is still empty there.
+     */
+    function trackAssistMask(message, sent) {
+        if (!saver) {
+            return;
+        }
+        const timeMs = frameTimeMs(message.frameIndex, data.fps);
+        if (!labelIsEmptyOn(state?.sources?.[String(data.fileId)]?.frames, timeMs, sent.code)) {
+            return;
+        }
+        let plane;
+        try {
+            plane = unpackMask(message.mask, message.shape, data.width, data.height);
+        } catch (error) {
+            say(error.message, true);
+            return;
+        }
+        if (!hasPixels(plane)) {
+            return; // tracking lost the object on this frame
+        }
+        tracked.set(String(timeMs), { code: sent.code, plane });
+        saver.markDirty(timeMs);
+    }
+
+    /** A tracked frame as the save endpoint wants it: what is stored there, plus the tracked plane. */
+    async function trackedFrame(timeMs, { code, plane }) {
+        const stored = {};
+        if (String(timeMs) in (state.sources?.[String(data.fileId)]?.frames ?? {})) {
+            const saved = await api.frame(data.fileId, timeMs);
+            for (const [savedCode, encoded] of Object.entries(saved.planes)) {
+                stored[savedCode] = await decodePlane(encoded, saved.width, saved.height);
+            }
+        }
+        const planes = {};
+        for (const [planeCode, merged] of Object.entries(mergeTrackedPlane(stored, code, plane))) {
+            planes[planeCode] = await encodePlane(merged);
+        }
+        return { timeMs, width: data.width, height: data.height, planes };
+    }
+
+    function windowFrames() {
+        const value = Number(assistWindow?.value ?? 0);
+        return Number.isInteger(value) ? Math.max(0, Math.min(50, value)) : 0;
+    }
+
+    /** Built when the channel is free: the points still unanswered, the mask as it is now. */
+    function buildAssistPrompt() {
+        if (!session || !selected) {
+            return null;
+        }
+        const { frameIndex } = session.frame;
+        const points = [...promptPoints.for(frameIndex, selected)];
+        if (!points.length) {
+            return null;
+        }
+        const plane = session.labels.readPlane(selected);
+        return {
+            payload: {
+                frameIndex,
+                window: windowFrames(),
+                points: points.map((point) => [point.x, point.y]),
+                labels: points.map((point) => point.label),
+                ...(hasPixels(plane) ? { mask: packMask(plane) } : {}),
+            },
+            context: { frameIndex, code: selected, points },
+        };
+    }
+
     function formatTime(seconds) {
         const wholeSeconds = Math.max(0, Math.floor(seconds || 0));
         return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`;
@@ -200,28 +369,12 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
         }
     }
 
-    function refreshPicker() {
-        const picker = $(doc, 'segment-label-select');
-        if (!picker || !state) {
-            return;
-        }
-        picker.replaceChildren(
-            ...paintableLabels(state.labels).map((label) => {
-                const option = doc.createElement('option');
-                option.value = label.code;
-                option.textContent = label.name;
-                option.selected = label.code === selected;
-                return option;
-            })
-        );
-        picker.disabled = !picker.options.length;
-    }
 
     function refreshPanel() {
         if (!labelContainer || !state) {
             return;
         }
-        refreshPicker();
+        renderAssistPoints();
         renderLabelPanel({
             container: labelContainer,
             labels: state.labels,
@@ -326,22 +479,39 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
     }
 
     async function send(keys, expectedRevision) {
-        // Only the open frame can be dirty (one session = one frame), so the batch is it.
-        if (!session || !keys.includes(String(session.frame.timeMs))) {
+        // The open frame (one session = one frame) and any frames Assist tracked onto.
+        const frames = [];
+        const open = session ? String(session.frame.timeMs) : null;
+        if (open && keys.includes(open)) {
+            frames.push(await session.collect());
+        }
+        const sentTracked = [];
+        for (const key of keys) {
+            const entry = tracked.get(key);
+            if (entry && key !== open) {
+                frames.push(await trackedFrame(Number(key), entry));
+                sentTracked.push([key, entry]);
+            }
+        }
+        if (!frames.length) {
             return { revision: expectedRevision };
         }
-        const frame = await session.collect();
         const result = await api.save(
             buildSaveBody({
                 fileId: data.fileId,
                 revision: expectedRevision,
                 fps: data.fps,
-                frames: [frame],
+                frames,
             })
         );
         // A frame may be revisited before Annotation Mode closes, so keep the manifest used
         // by openSession current rather than treating this freshly saved frame as empty.
         state.sources = result.sources ?? state.sources;
+        for (const [key, entry] of sentTracked) {
+            if (tracked.get(key) === entry) {
+                tracked.delete(key);
+            }
+        }
         return { revision: result.revision };
     }
 
@@ -630,12 +800,7 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
     });
 
     // Toolbar --------------------------------------------------------------------
-    $(doc, 'segment-label-select')?.addEventListener('change', (event) => {
-        selected = event.target.value || null;
-        session?.selectLabel(selected);
-        refreshPanel();
-    });
-    for (const tool of SEGMENT_TOOLS) {
+    for (const tool of [...SEGMENT_TOOLS, { id: ASSIST_TOOL }]) {
         const button = doc.querySelector(`[data-segment-tool="${tool.id}"]`);
         button?.addEventListener('click', () => {
             toolId = tool.id;
@@ -645,6 +810,7 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
             }
             const sizeRow = $(doc, 'segment-size-row');
             sizeRow?.classList.toggle('d-none', !tool.hasSize);
+            renderAssistPoints();
         });
     }
     $(doc, 'segment-brush-size')?.addEventListener('input', (event) => {
@@ -662,6 +828,23 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
         session?.redo();
         refreshUndoRedo();
     });
+    // Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes (Cmd on macOS). Through the buttons, so a
+    // disabled one does nothing; a text field keeps its own undo.
+    doc.addEventListener('keydown', (event) => {
+        if (!session || !(event.ctrlKey || event.metaKey) || event.altKey) {
+            return;
+        }
+        if (event.target?.closest?.('textarea, select, [contenteditable="true"], input:not([type="range"])')) {
+            return;
+        }
+        const key = event.key.toLowerCase();
+        const redo = key === 'y' || (key === 'z' && event.shiftKey);
+        if (key !== 'z' && !redo) {
+            return;
+        }
+        event.preventDefault();
+        $(doc, redo ? 'segment-redo' : 'segment-undo')?.click();
+    });
 
     // Leaving the page with unsaved work: the browser's own prompt, and a best-effort save.
     doc.defaultView?.addEventListener('beforeunload', (event) => {
@@ -670,6 +853,30 @@ export async function bootstrapSegmentation({ doc, openSession, fetchImpl, ask }
             event.returnValue = '';
         }
     });
+
+    viewportElement.addEventListener('click', (event) => {
+        if (!assist || toolId !== ASSIST_TOOL || !session || !selected || event.button !== 0) {
+            return;
+        }
+        const { frameIndex, width, height } = session.frame;
+        const [x, y] = session.imagePointAt(event.clientX, event.clientY);
+        if (!(x >= 0 && y >= 0 && x < width && y < height)) {
+            return;
+        }
+        promptPoints.add(frameIndex, selected, x, y, includeNext ? 1 : 0);
+        renderAssistPoints();
+        assist.request(buildAssistPrompt);
+    });
+    // coreEnums.Events.CAMERA_MODIFIED: zoom and pan move the points with the frame.
+    viewportElement.addEventListener('CORNERSTONE_CAMERA_MODIFIED', () => renderAssistPoints());
+    for (const button of assistModes) {
+        button.addEventListener('click', () => {
+            includeNext = button.dataset.assistMode === 'add';
+            for (const other of assistModes) {
+                other.setAttribute('aria-checked', String(other === button));
+            }
+        });
+    }
 
     return { enter, leave, get session() { return session; } };
 }

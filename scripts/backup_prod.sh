@@ -4,20 +4,33 @@ set -euo pipefail
 # Create a compressed, read-only MySQL backup from the running Docker db service.
 #
 # Usage:
-#   scripts/backup_prod.sh [output_dir]
+#   scripts/backup_prod.sh [output_dir | output_file.sql.gz]
 #
 # Example:
-#   scripts/backup_prod.sh ./backups
+#   scripts/backup_prod.sh ./backups                          # ./backups/prod_backup_<ts>.sql.gz
+#   scripts/backup_prod.sh ./backups/before_deploy.sql.gz     # exactly this file (must not exist)
 #
 # Optional env:
 #   DB_SERVICE=db                   # Docker Compose db service name
 #   CHECK_SCHEMA=1                 # 1=verify the core 2.0 tables exist in the dump
 
-OUTPUT_DIR="${1:-./backups}"
+OUTPUT_ARG="${1:-./backups}"
 DB_SERVICE="${DB_SERVICE:-db}"
 CHECK_SCHEMA="${CHECK_SCHEMA:-${CHECK_LEGACY_TABLES:-1}}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUTPUT_FILE="${OUTPUT_DIR%/}/prod_backup_${TIMESTAMP}.sql.gz"
+# A *.sql.gz argument names the file itself, so a caller (deploy_prod.sh) knows the
+# exact path it gets back instead of guessing "the newest file in the directory".
+if [[ "$OUTPUT_ARG" == *.sql.gz ]]; then
+    OUTPUT_FILE="$OUTPUT_ARG"
+    OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
+    if [[ -e "$OUTPUT_FILE" ]]; then
+        echo "Error: refusing to overwrite an existing backup: $OUTPUT_FILE"
+        exit 1
+    fi
+else
+    OUTPUT_DIR="$OUTPUT_ARG"
+    OUTPUT_FILE="${OUTPUT_DIR%/}/prod_backup_${TIMESTAMP}.sql.gz"
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "Error: docker is not installed or not in PATH"

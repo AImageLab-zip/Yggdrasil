@@ -2,6 +2,7 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
+from django.db import transaction
 from django.http import JsonResponse
 import json
 import logging
@@ -87,6 +88,35 @@ def delete_voice_caption(request, patient_id, caption_id):
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+@require_POST
+def reset_voice_captions(request, patient_id):
+    """Delete every caption on the patient this user may delete, in one go.
+
+    The rule is ``delete_voice_caption``'s: an annotator removes their own
+    captions, a patient admin removes everyone's. The page asks for confirmation
+    before posting, so there is no second admin handshake here.
+    """
+    domain_models = get_domain_models(request)
+    Patient = domain_models['Patient']
+    VoiceCaption = domain_models['VoiceCaption']
+
+    patient = get_patient_for(request.user, Patient, patient_id, 'write')
+    captions = VoiceCaption.objects.filter(patient=patient)
+    if not user_is_patient_admin(request.user, patient):
+        captions = captions.filter(user=request.user)
+
+    deleted = 0
+    with transaction.atomic():
+        for caption in captions.select_for_update():
+            audio_file = caption.get_audio_file()
+            if audio_file:
+                audio_file.delete()
+            caption.delete()
+            deleted += 1
+    return JsonResponse({'success': True, 'deleted': deleted})
 
 
 @login_required

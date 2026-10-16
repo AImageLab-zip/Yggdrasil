@@ -142,3 +142,33 @@ current certificate contains the IP address but not that DNS name.
 The public reverse proxy must pass WebSocket upgrade requests for
 `/ws/live-transcription/` to the web container. The standard nginx-proxy setup
 used by `docker-compose.yml` handles WebSocket upgrades automatically.
+
+## 8. Configure assisted segmentation (optional)
+
+The **Assist** tool in laparoscopy Annotation Mode turns clicked points into masks using a
+model on the DjangoWorker GPU worker. The browser never reaches the worker. Its WebSocket
+(`/ws/assist/…`) ends at Yggdrasil, which opens the worker session itself. Leave both
+values empty to hide the tool.
+
+```dotenv
+# Base URL, no path. Yggdrasil calls <url>/api/session/... and opens <url>/ws/session/...
+ASSIST_WORKER_URL=https://zip-dgx.ing.unimore.it
+# The worker's WORKER_API_TOKEN
+ASSIST_WORKER_TOKEN=replace-with-the-worker-token
+# ASSIST_CONNECT_TIMEOUT=10
+```
+
+- **Where the worker is.** Behind a reverse proxy (zip-dgx's Traefik routes `/api/session`
+  and `/ws/session` to it), use its public `https://` URL; the socket then uses `wss://`.
+  If it shares a Docker network with `web`, use `http://djangoworker-api:8000`. Only
+  `http(s)` URLs are accepted, and certificates are checked against the system CAs.
+- **The worker reads the video from object storage itself.** Yggdrasil sends it only a
+  storage key, so the worker's own `OBJECT_STORAGE_*` must name *this* deployment's bucket
+  (same endpoint and bucket as Yggdrasil's), reachable from the worker. The worker glues its
+  `OBJECT_STORAGE_KEY_PREFIX` to the key as is: if Yggdrasil's is `foo`, set the worker's to
+  `foo/` (both empty is fine). A worker therefore serves one deployment's storage at a time.
+- **The project.** The tool also needs the `assisted_segmentation` annotation method on the
+  project. Migration `0063` enables it on every laparoscopy project, and
+  `setup_laparoscopy_modalities` does the same for a new one.
+- After changing `.env`, recreate `web` (`docker compose up -d web`); a restart does not
+  re-read `env_file`. The page shows the tool as *Unavailable* if the worker cannot be reached.

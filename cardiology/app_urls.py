@@ -27,6 +27,11 @@ urlpatterns = [
     # Text notes (voice captions)
     path("patient/<int:patient_id>/text-caption/", shared_captions.upload_text_caption, name="upload_text_caption"),
     path(
+        "patient/<int:patient_id>/voice-captions/reset/",
+        shared_captions.reset_voice_captions,
+        name="reset_voice_captions",
+    ),
+    path(
         "patient/<int:patient_id>/voice-caption/<int:caption_id>/delete/",
         shared_captions.delete_voice_caption,
         name="delete_voice_caption",
@@ -44,6 +49,7 @@ urlpatterns = [
 
     # The AF/NSR/Other/NI rhythm call
     path("patient/<int:patient_id>/classification/", views.classification_update, name="classification_update"),
+    path("patient/<int:patient_id>/classification/clear/", views.classification_clear, name="classification_clear"),
 
     # Files and the browser-generated plot
     path("api/processing/files/serve/<int:file_id>/", views.serve_file, name="api_serve_file"),

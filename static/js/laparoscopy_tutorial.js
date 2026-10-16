@@ -104,7 +104,8 @@
             popover: {
                 title: 'Paint on the frame',
                 description: 'Left mouse button paints. Right-drag or Ctrl + scroll zooms, middle-drag pans. ' +
-                    'The buttons at the top right of the toolbar zoom, reset the view and undo / redo.'
+                    'The buttons at the top right of the toolbar zoom, reset the view and undo / redo ' +
+                    '(<b>Ctrl+Z</b> / <b>Ctrl+Y</b>).'
             }
         },
         {
@@ -117,11 +118,21 @@
             }
         },
         {
-            element: '.segment-toolbar__label',
+            element: '#segment-size-row',
             popover: {
-                title: 'Label and size',
-                description: 'The label you paint with, from the <b>Labels</b> card. <b>Size</b>, ' +
-                    'next to it, sets the brush and eraser width.'
+                title: 'Brush size',
+                description: 'Sets the brush and eraser width. You paint with the label selected in the ' +
+                    '<b>Labels</b> card.'
+            }
+        },
+        {
+            element: '#assist-card',
+            popover: {
+                title: 'Assist',
+                description: 'Choose <b>Segment by clicking</b>, then click the object on the frame: the ' +
+                    'model paints it into the selected label. <b>Add</b> (green) / <b>Remove</b> (red) ' +
+                    'set what the next click does; each click refines the mask, and undo works as usual. ' +
+                    'The result is also tracked onto the next <b>N</b> frames, wherever the label is still empty.'
             }
         },
         {

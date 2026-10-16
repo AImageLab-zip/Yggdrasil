@@ -22,7 +22,7 @@
 
 import { decodePlane, encodePlane } from './planes.js';
 import { createLabelmapStack } from './labelmapStack.js';
-import { ALL_TOOL_NAMES, toolNameFor } from './tools.js';
+import { ALL_TOOL_NAMES, ASSIST_TOOL, toolNameFor } from './tools.js';
 import { frameImageId } from './frameImageLoader.js';
 
 /**
@@ -201,6 +201,10 @@ export async function openSession({
         for (const name of ALL_TOOL_NAMES) {
             toolGroup.setToolPassive(name);
         }
+        // Assist paints nothing itself: its clicks are prompt points for the worker.
+        if (toolId === ASSIST_TOOL) {
+            return;
+        }
         toolGroup.setToolActive(toolNameFor(toolId), {
             bindings: [{ mouseButton: toolsEnums.MouseBindings.Primary }],
         });
@@ -257,6 +261,28 @@ export async function openSession({
         },
         opacityOf: (code) => opacity.get(code) ?? DEFAULT_OPACITY,
         setColor: (code, color) => stack.setColor(code, color),
+
+        /** The frame pixel under a page point (an event's clientX/clientY), at any zoom or pan. */
+        imagePointAt(clientX, clientY) {
+            const box = element.getBoundingClientRect();
+            const world = viewport.canvasToWorld([clientX - box.left, clientY - box.top]);
+            return cornerstone.worldToImageCoords(imageId, world);
+        },
+        /** Where a frame pixel is drawn, in the element's CSS pixels. */
+        canvasPointOf([x, y]) {
+            return viewport.worldToCanvas(cornerstone.imageToWorldCoords(imageId, [x, y]));
+        },
+        /**
+         * Replace a label's mask with the assistant's, as one undoable edit. `writePlane`
+         * fires the data-modified event, so the saver saves it like a brush stroke.
+         */
+        applyMask(code, plane) {
+            const before = stack.readPlane(code);
+            stack.writePlane(code, plane);
+            HistoryMemo.DefaultHistoryMemo.push({
+                restoreMemo: (undo) => stack.writePlane(code, undo ? before : plane),
+            });
+        },
 
         undo() {
             HistoryMemo.DefaultHistoryMemo.undo();

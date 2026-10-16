@@ -21,7 +21,7 @@ from common.models import AnnotationMethod, FileRegistry, Project, ProjectAccess
 
 from .exports import collect_ecg_classification, count_ecg_classifications
 from .file_utils import InvalidEcgFile, validate_ecg_json
-from .models import Folder, Patient
+from .models import Folder, Patient, VoiceCaption
 from .views import _next_patient_id
 
 
@@ -180,6 +180,70 @@ class RhythmClassificationTests(CardiologyTestCase):
         empty = self.client.get(url, {"no_annotations": "yes"})
         self.assertContains(empty, other.name)
         self.assertNotContains(empty, f'data-patient-id="{self.patient.patient_id}"')
+
+
+class ResetTests(CardiologyTestCase):
+    def _clear(self, revision, user=None):
+        self._login(user or self.annotator)
+        return self.client.post(
+            reverse("cardiology:classification_clear", args=[self.patient.patient_id]),
+            json.dumps({"revision": revision}),
+            content_type="application/json",
+        )
+
+    def _reset_captions(self, user):
+        self._login(user)
+        return self.client.post(
+            reverse("cardiology:reset_voice_captions", args=[self.patient.patient_id]),
+            "{}", content_type="application/json",
+        )
+
+    def _caption(self, user):
+        return VoiceCaption.objects.create(
+            patient=self.patient, user=user, text_caption="a caption long enough", duration=0,
+        )
+
+    def test_clearing_the_call_is_a_revision_readers_see_as_no_call(self):
+        self._classify("AF")
+        cleared = self._clear(revision=1)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual((cleared.json()["value"], cleared.json()["revision"]), ("", 2))
+        self.assertEqual(ecg_rhythm_values(Patient.objects.all()), {})
+        self.assertEqual(list(collect_ecg_classification(self.patient, mock.Mock(filename=None))), [])
+
+        # The cleared state is the one a later save must quote.
+        self.assertEqual(self._classify("NSR", revision=2).json()["revision"], 3)
+
+    def test_a_stale_clear_is_refused_and_an_empty_one_is_a_no_op(self):
+        self.assertEqual(self._clear(revision=0).json()["revision"], 0)
+        self._classify("AF")
+        self._classify("NSR", revision=1)
+        stale = self._clear(revision=1)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()["value"], "NSR")
+
+    def test_viewers_cannot_clear(self):
+        self._classify("AF")
+        self.assertEqual(self._clear(revision=1, user=self.viewer).status_code, 403)
+
+    def test_an_annotator_resets_only_their_own_captions(self):
+        mine = self._caption(self.annotator)
+        theirs = self._caption(self.admin)
+        response = self._reset_captions(self.annotator)
+        self.assertEqual(response.json(), {"success": True, "deleted": 1})
+        self.assertFalse(VoiceCaption.objects.filter(pk=mine.pk).exists())
+        self.assertTrue(VoiceCaption.objects.filter(pk=theirs.pk).exists())
+
+    def test_an_admin_resets_every_caption(self):
+        self._caption(self.annotator)
+        self._caption(self.admin)
+        self.assertEqual(self._reset_captions(self.admin).json()["deleted"], 2)
+        self.assertFalse(VoiceCaption.objects.filter(patient=self.patient).exists())
+
+    def test_viewers_cannot_reset_captions(self):
+        self._caption(self.annotator)
+        self.assertEqual(self._reset_captions(self.viewer).status_code, 403)
+        self.assertEqual(VoiceCaption.objects.filter(patient=self.patient).count(), 1)
 
 
 class PatientPageTests(CardiologyTestCase):

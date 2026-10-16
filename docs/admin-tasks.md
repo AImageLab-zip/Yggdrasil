@@ -100,6 +100,57 @@ restoring on top of an already-migrated schema corrupts `django_migrations`.
 `FORCE=1` overrides it, destructively. To move an instance to a new host:
 restore into a fresh, empty database *first*, then run `migrate`.
 
+## Migration rehearsal
+
+The web container runs `migrate` on start, so a migration that fails on production
+data crash-loops it and takes the site down. Tests and dev databases don't contain
+production's data. On 2026-10-09 a `ProtectedError` that only real rows could trigger
+caused a day-long 502. To prevent that, `scripts/deploy_prod.sh` rehearses the
+migrations first (step 5, after the build and before anything restarts):
+
+1. The **new** web image runs `migrate --plan` against the production database. This
+   is read-only: Django returns before its first write. If nothing is pending, the
+   rehearsal is skipped and the deploy says so. The check also catches migrations
+   left pending by an earlier failed deploy, which a git diff would miss.
+2. Otherwise `scripts/rehearse_migrations.sh` loads the backup from step 2 into a
+   throwaway MySQL container. That container uses the same image as the compose `db`
+   service and has no published ports or named volume. The new image then runs
+   `migrate` against it, followed by `migrate --check`.
+
+The scratch database lives on its own `--internal` Docker network, so it can't
+reach app-net, proxy-net, the host's ports or the internet. The migrate container gets
+only the settings Django needs to boot, not `.env`. Redis, the Celery broker and object
+storage point at addresses that don't exist. The scratch container, its volume and the
+network are always removed, on success, failure or Ctrl-C, because they hold a full copy
+of patient data. The full output goes to `./backups/migration_rehearsal_<ts>.log`
+(mode 600).
+
+Run it on its own against any dump, from the repo root:
+
+```bash
+scripts/rehearse_migrations.sh backups/prod_backup_<ts>.sql.gz yggdrasil-$DOCKER_SUFFIX-web:latest
+```
+
+It checks for free disk space before loading the dump. The default requirement is the
+compressed dump size × 10 + 2 GiB; set `REHEARSAL_SPACE_FACTOR` to change the factor.
+The scratch copy sits on the same disk as the production database, so don't override
+this check lightly.
+
+**When it fails during a deploy**, the deploy prints `migration rehearsal failed, prod
+unchanged`, the log path and the error. Before that, it has already put each image's
+`:latest` back to its `:rollback` and returned the checkout to the commit it started
+from with `git reset --keep`. The pulled commits are still on the upstream branch.
+Production is still serving the old version: nothing was restarted. Fix the migration
+in a PR, merge it, and deploy again. Read the error in the log, not just the summary.
+
+`SKIP_REHEARSAL=1 scripts/deploy_prod.sh` skips the rehearsal, with a loud warning.
+Use it only when the rehearsal itself is broken (for example, the host can't pull the
+MySQL image), never to get past a migration that fails it.
+
+To check that nothing was left behind:
+`docker ps -a --filter label=yggdrasil.rehearsal`,
+`docker network ls --filter label=yggdrasil.rehearsal` (both should be empty).
+
 ## Jobs
 
 ### Re-run processing for existing patients

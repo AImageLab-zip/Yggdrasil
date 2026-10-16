@@ -112,6 +112,8 @@ function prepare() {
             ToolGroupManager,
             segmentation,
             HistoryMemo: coreUtilities.HistoryMemo,
+            worldToImageCoords: coreUtilities.worldToImageCoords,
+            imageToWorldCoords: coreUtilities.imageToWorldCoords,
             Pan: PanTool,
             Zoom: ZoomTool,
             toolConfiguration: configuration,

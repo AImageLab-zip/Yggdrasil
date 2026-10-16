@@ -56,11 +56,6 @@
                             <i class="fas fa-draw-polygon"></i> Polygon
                         </button>
                     </div>
-                    <label class="segment-toolbar__label" title="The label you paint with">
-                        Label
-                        <select id="segment-label-select" class="form-select form-select-sm"
-                                aria-label="Label to paint with"></select>
-                    </label>
                     <label id="segment-size-row" class="segment-toolbar__size">
                         Size
                         <input type="range" id="segment-brush-size" min="1" max="240" value="48">
@@ -75,16 +70,21 @@
                         <button type="button" id="segment-reset-view" class="btn btn-outline-light" title="Reset view">
                             <i class="fas fa-expand-arrows-alt"></i>
                         </button>
-                        <button type="button" id="segment-undo" class="btn btn-outline-light" title="Undo" disabled>
+                        <button type="button" id="segment-undo" class="btn btn-outline-light" title="Undo (Ctrl+Z)" disabled>
                             <i class="fas fa-undo"></i>
                         </button>
-                        <button type="button" id="segment-redo" class="btn btn-outline-light" title="Redo" disabled>
+                        <button type="button" id="segment-redo" class="btn btn-outline-light" title="Redo (Ctrl+Y)" disabled>
                             <i class="fas fa-redo"></i>
                         </button>
                     </div>
                 </div>
-                <div id="segment-viewport" class="segment-viewport"
-                     style="aspect-ratio: {{ image_segment_data.width }} / {{ image_segment_data.height }};"></div>
+                <div class="segment-viewport-wrap">
+                    <div id="segment-viewport" class="segment-viewport"
+                         style="aspect-ratio: {{ image_segment_data.width }} / {{ image_segment_data.height }};"></div>
+                    {% if image_segment_data.canAssist %}
+                    <svg id="segment-assist-points" class="segment-assist-points" aria-hidden="true"></svg>
+                    {% endif %}
+                </div>
                 <div class="segment-status">
                     <span id="segment-save-status"></span>
                     <span id="segment-message" class="d-none"></span>
@@ -167,6 +167,33 @@
                 <div id="quadrant-labels" class="segment-labels-list"></div>
             </div>
         </section>
+        {% if image_segment_data.canAssist %}
+        <section id="assist-card" class="segment-labels-card assist-card mb-3" aria-labelledby="assist-card-title">
+            <div class="assist-card__head">
+                <h2 id="assist-card-title" class="segment-labels-card__title">Assist</h2>
+                <span id="assist-status" class="assist-card__status" role="status" data-state="preparing">Preparing…</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary w-100 mb-2" data-segment-tool="assist" disabled
+                    title="In Annotation Mode, click the object on the frame: the selected label is painted and tracked onto the next frames where it is still empty.">
+                <i class="fas fa-wand-magic-sparkles me-1"></i>Segment by clicking
+            </button>
+            <div class="assist-card__row">
+                <div class="assist-mode" role="radiogroup" aria-label="What the next click does">
+                    <button type="button" class="assist-mode__btn is-add" role="radio" aria-checked="true" data-assist-mode="add" title="Positive point: add to mask">
+                        <i class="fas fa-plus" aria-hidden="true"></i> Add
+                    </button>
+                    <button type="button" class="assist-mode__btn is-remove" role="radio" aria-checked="false" data-assist-mode="remove" title="Negative point: remove from mask">
+                        <i class="fas fa-minus" aria-hidden="true"></i> Remove
+                    </button>
+                </div>
+                <label class="assist-window" for="assist-window" title="Track the mask onto the next N frames">
+                    <i class="fas fa-forward" aria-hidden="true"></i>
+                    <input type="number" id="assist-window" class="form-control form-control-sm" min="0" max="50" step="1" value="5">
+                    frames
+                </label>
+            </div>
+        </section>
+        {% endif %}
         {% endif %}
         <div class="side-panel mb-3">
             <div class="side-panel__tabs" role="tablist">

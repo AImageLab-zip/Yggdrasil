@@ -2129,18 +2129,6 @@
     grid-column: 1 / -1;
 }
 
-.laparoscopy-patient-detail .segment-toolbar__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85rem;
-}
-
-.laparoscopy-patient-detail .segment-toolbar__label select {
-    width: auto;
-    max-width: 12rem;
-}
-
 .laparoscopy-patient-detail .segment-label__swatch {
     width: 1.25rem;
     height: 1.25rem;
@@ -2621,3 +2609,89 @@
 .ygg-tour .driver-popover-arrow-side-right { border-right-color: var(--ygg-surface); }
 .ygg-tour .driver-popover-arrow-side-top { border-top-color: var(--ygg-surface); }
 .ygg-tour .driver-popover-arrow-side-bottom { border-bottom-color: var(--ygg-surface); }
+
+/* Assist (assisted segmentation): the prompt points drawn over the frame. */
+.laparoscopy-patient-detail .segment-viewport-wrap {
+    position: relative;
+}
+.laparoscopy-patient-detail .segment-assist-points {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+.laparoscopy-patient-detail .segment-assist-points circle {
+    stroke: #fff;
+    stroke-width: 2;
+}
+.laparoscopy-patient-detail .segment-assist-points .is-add { fill: var(--ygg-accent2); }
+.laparoscopy-patient-detail .segment-assist-points .is-remove { fill: var(--ygg-danger); }
+.laparoscopy-patient-detail .assist-card__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 0.55rem;
+}
+.laparoscopy-patient-detail .assist-card__head .segment-labels-card__title { margin: 0; }
+/* The relay's state (bootstrap.js describeAssist): a dot plus one word. */
+.laparoscopy-patient-detail .assist-card__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.75rem;
+    color: var(--ygg-text-muted);
+}
+.laparoscopy-patient-detail .assist-card__status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ygg-warn);
+}
+.laparoscopy-patient-detail .assist-card__status[data-state="ready"]::before { background: var(--ygg-ok); }
+.laparoscopy-patient-detail .assist-card__status[data-state="closed"]::before { background: var(--ygg-danger); }
+.laparoscopy-patient-detail .assist-card__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+/* Positive (green) and negative (red) prompt points, matching the dots on the frame. */
+.laparoscopy-patient-detail .assist-mode {
+    display: flex;
+    flex: 1;
+}
+.laparoscopy-patient-detail .assist-mode__btn {
+    --assist-tone: var(--ygg-accent2);
+    flex: 1;
+    border: 1px solid var(--assist-tone);
+    background: transparent;
+    color: var(--assist-tone);
+    padding: 3px 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.laparoscopy-patient-detail .assist-mode__btn.is-add { border-radius: var(--ygg-radius-sm) 0 0 var(--ygg-radius-sm); }
+.laparoscopy-patient-detail .assist-mode__btn.is-remove {
+    --assist-tone: var(--ygg-danger);
+    border-left: 0;
+    border-radius: 0 var(--ygg-radius-sm) var(--ygg-radius-sm) 0;
+}
+.laparoscopy-patient-detail .assist-mode__btn[aria-checked="true"] {
+    background: var(--assist-tone);
+    color: var(--ygg-surface);
+}
+.laparoscopy-patient-detail .assist-window {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--ygg-text-muted);
+    white-space: nowrap;
+}
+.laparoscopy-patient-detail .assist-window input {
+    width: 3.5rem;
+}
