@@ -10,3 +10,9 @@ class BrainConfig(AppConfig):
 		from .export_config import install_brain_export_mappings
 
 		install_brain_export_mappings()
+
+		from common import domain_uploads
+
+		from .upload_api import BrainUploadHandler
+
+		domain_uploads.register("brain", BrainUploadHandler())

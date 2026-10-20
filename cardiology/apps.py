@@ -13,3 +13,9 @@ class CardiologyConfig(AppConfig):
         export_catalog.register_collector(
             COLLECTOR, produce=collect_ecg_classification, count=count_ecg_classifications
         )
+
+        from common import domain_uploads
+
+        from .upload_api import CardiologyUploadHandler
+
+        domain_uploads.register("cardiology", CardiologyUploadHandler())
