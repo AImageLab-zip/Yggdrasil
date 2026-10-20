@@ -120,29 +120,57 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ```
 
 **Enable the modalities you intend to upload.** A new project starts with none,
-and an upload silently drops files of any modality the project doesn't enable.
-The creator gets the `admin` role on the new project.
+and an upload is refused (`400`) for any file whose modality the project doesn't
+enable. The creator gets the `admin` role on the new project.
 
 The usual pattern for an unattended uploader is: look the project up, create it
 on `404` (treating `409` as "already there"), then upload.
 
-### Uploading (maxillo projects)
+### Folders, patients and uploads (every domain)
 
-| Request | Returns |
+These work the same in every domain (maxillo, brain, laparoscopy, urology,
+cardiology). The project's domain decides where patients are stored.
+
+| Request | Who | Returns |
+|---|---|---|
+| `GET /api/<slug>/folders/` | readers | the project's folders (`id`, `name`, `full_path`) |
+| `POST /api/<slug>/folders/` | project admins | JSON `{"name": "..."}`. Get-or-create: `201` if created, `200` if it already existed |
+| `GET /api/<slug>/patients/[?folder=<id>&name=<name>]` | readers | the project's patients, their folder and modalities |
+| `GET /api/<slug>/patients/<id>/files/` | readers | one patient's stored files |
+| `POST /api/<slug>/upload/` | `annotator`s and admins | creates one patient. See below |
+
+**Upload** takes `multipart/form-data`: `name`, `folder` (a folder id of this
+project), optional `tags` (comma-separated), and one part per file. The file
+field names depend on the domain:
+
+| Domain | File fields |
 |---|---|
-| `GET /api/<slug>/folders/` | the project's top-level folders (`id`, `name`) |
-| `GET /api/<slug>/patients/` | the project's patients and their modalities |
-| `POST /api/<slug>/upload/` | `multipart/form-data`: `name`, `project` (id), `folder` (id), and the files: `cbct`, `ios_upper`, `ios_lower`, `panoramic`, `teleradiography` |
+| maxillo | `cbct`, `ios_upper` + `ios_lower` (sent together), `intraoral-photos` (up to 10 files), `panoramic`, `teleradiography`, `rawzip` |
+| brain | `braintumor-mri-t1`, `braintumor-mri-t2`, `braintumor-mri-flair`, `braintumor-mri-t1c`, `braintumor-mri-seg` |
+| urology | `urology-mri`, `urology-wsi`, `urology-confocal`, each with an optional `<field>-segmentation` |
+| laparoscopy | `video` |
+| cardiology | `ecg` |
+
+A project accepts only the fields of the modalities it enables, and
+`GET /api/projects/<slug>/` lists them under `upload_fields`. Sending any other
+field gets a `400` naming the `rejected` and `accepted` fields, and nothing is
+created. If storing a file fails, the patient isn't created either, so you can
+safely retry.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-  -F name="Patient 001" -F project=7 -F folder=12 -F cbct=@scan.nii.gz \
-  $YGG/api/maxillo-study/upload/
+  -F name="BraTS-GLI-00002-000" -F folder=12 \
+  -F braintumor-mri-t1=@BraTS-GLI-00002-000-t1n.nii.gz \
+  -F braintumor-mri-flair=@BraTS-GLI-00002-000-t2f.nii.gz \
+  $YGG/api/brain-study/upload/
 ```
 
-Uploading needs a role that can write to the folder (`annotator` or `admin`).
-The upload endpoint currently stores **maxillo** patients only, so don't use it
-on projects in other domains.
+A typical uploader goes through four steps:
+
+1. Look the project up, or create it.
+2. Create its folders with `POST /folders/`.
+3. List `GET /patients/?folder=<id>` to skip patients already there.
+4. Upload the rest.
 
 ## Documentation
 

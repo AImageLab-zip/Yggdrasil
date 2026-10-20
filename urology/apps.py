@@ -10,3 +10,9 @@ class UrologyConfig(AppConfig):
         from .export_config import install_urology_export_mappings
 
         install_urology_export_mappings()
+
+        from common import domain_uploads
+
+        from .upload_api import UrologyUploadHandler
+
+        domain_uploads.register("urology", UrologyUploadHandler())

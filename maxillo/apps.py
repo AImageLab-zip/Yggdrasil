@@ -9,3 +9,9 @@ class MaxilloConfig(AppConfig):
 
 	def ready(self):
 		import maxillo.signals  # noqa: F401  (registers signal receivers)
+
+		from common import domain_uploads
+
+		from .upload_api import MaxilloUploadHandler
+
+		domain_uploads.register("maxillo", MaxilloUploadHandler())

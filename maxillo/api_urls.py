@@ -1,6 +1,7 @@
 from django.urls import path
 
 from annotations import views as annotations_views
+from common import project_data_api
 
 from . import api_views
 
@@ -84,25 +85,26 @@ urlpatterns = [
         annotations_views.measurements_state_api,
         name="api_measurements_state",
     ),
-    # Project-based API endpoints
+    # Project-based API endpoints. Shared by every domain: the project's own
+    # domain picks the tables (common/project_data_api.py).
     path(
         "<str:project_slug>/upload/",
-        api_views.project_upload_api,
+        project_data_api.project_upload,
         name="api_project_upload",
     ),
     path(
         "<str:project_slug>/folders/",
-        api_views.get_project_folders,
+        project_data_api.project_folders,
         name="api_project_folders",
     ),
     path(
         "<str:project_slug>/patients/",
-        api_views.project_patients_handler,
+        project_data_api.project_patients,
         name="api_project_patients",
     ),
     path(
         "<str:project_slug>/patients/<int:patient_id>/files/",
-        api_views.get_patient_files,
+        project_data_api.patient_files,
         name="api_get_patient_files",
     ),
 ]

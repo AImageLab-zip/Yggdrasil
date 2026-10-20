@@ -7,17 +7,17 @@ intended loop is ``GET /api/projects/<slug>/``; on 404, ``POST /api/projects/``
 
 * **Existence is not leaked.** A project the caller cannot read is a 404, the
   same answer as one that does not exist -- the rule of
-  ``maxillo.api_views.projects._accessible_project``.
+  ``common.project_data_api._accessible_project``.
 * **Creating a project is a superuser act**, as it is in the admin
   (``DomainProjectAdmin.has_add_permission``): it is the top of the ownership
   tree.
 * **Modalities and annotation methods are limited to the project's domain** plus
   the domain-blank rows, the admin's rule. A project starts with none, and the
-  upload API drops every modality the project does not enable, so a caller that
-  means to upload should name them here.
+  upload API refuses every field whose modality the project does not enable, so
+  a caller that means to upload should name them here.
 
-Shared code at a shared address: this is ``common``, not ``maxillo``, even
-though the older project endpoints under ``/api/<slug>/`` live there.
+Shared code at a shared address: this is ``common``, not ``maxillo``, as are
+the per-project endpoints under ``/api/<slug>/`` (``common/project_data_api.py``).
 """
 import json
 
@@ -31,6 +31,7 @@ from django.views.decorators.http import require_http_methods
 from common.domains import DOMAINS, accessible_project_ids
 from common.models import AnnotationMethod, Modality, Project, ProjectAccess
 from common.permissions import user_has_project_access
+from common.project_data_api import upload_fields
 
 #: Slugs a project may not take, because ``/api/<slug>/…`` would collide with a
 #: fixed ``/api/`` route (``/api/projects/folders/`` is this module's detail URL,
@@ -97,7 +98,9 @@ def project_detail_api(request, project_slug):
     project = Project.objects.filter(slug=project_slug).first()
     if project is None or not user_has_project_access(request.user, project):
         return _error("Project not found", 404)
-    return JsonResponse(_serialize(project, request.user))
+    return JsonResponse(
+        {**_serialize(project, request.user), "upload_fields": upload_fields(project)}
+    )
 
 
 def _slugs(body, field, model, domain):
