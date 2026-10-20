@@ -61,6 +61,89 @@ the database, and serves the app at <http://localhost:8000>.
 
 Full instructions: [docs/setup.md](docs/setup.md).
 
+## API access for scripts
+
+Everything under `/api/` can be called from a script with a **personal API
+token** instead of a browser session. A token acts as its user, with exactly that
+user's project permissions. It is not a separate role.
+
+**Getting a token.** A superuser issues it, either in the admin (*Projects &
+access → API tokens → Add*) or from the shell:
+
+```bash
+python manage.py create_api_token alice --name "nightly upload" --days 90
+```
+
+The token (`ygg_…`) is shown **once**. Only a hash is stored, so a lost token
+can't be recovered: revoke it in the admin and issue a new one. Tokens can
+expire, are refused once revoked or once their user is deactivated, and record
+when they were last used.
+
+**Using it.** Send the token as a bearer header. Token requests need no CSRF
+token and create no session:
+
+```bash
+export YGG=https://yggdrasil.example.org
+export TOKEN=ygg_...
+curl -H "Authorization: Bearer $TOKEN" $YGG/api/projects/
+```
+
+A missing, revoked or expired token gets `401`. After 20 bad tokens from one
+address in 15 minutes, that address gets `429` until the window passes. Tokens
+work only under `/api/`. The HTML pages still need a login, and the runner API
+(`/api/runner/`) keeps its own `RUNNER_API_TOKENS`.
+
+### Projects
+
+| Request | Who | Returns |
+|---|---|---|
+| `GET /api/projects/[?domain=brain&name=Study]` | any user | the projects you can read |
+| `GET /api/projects/<slug>/` | any user | one project. `404` if it doesn't exist **or** you can't read it |
+| `POST /api/projects/` | superusers | `201` with the new project. `409` with the existing `slug` if the name (in that domain) or the slug is taken |
+
+A project as returned:
+
+```json
+{"id": 7, "slug": "new-study", "name": "New Study", "domain": "brain",
+ "description": "", "is_active": true, "modalities": ["t1", "t2"],
+ "annotation_methods": [], "role": "admin", "created_at": "2026-10-19T15:47:13+00:00"}
+```
+
+Creating one (JSON body). `slug` is optional and defaults to the slugified name.
+`modalities` and `annotation_methods` take slugs and must belong to the project's
+domain or to every domain:
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "New Study", "domain": "brain", "modalities": ["t1", "t2"]}' \
+  $YGG/api/projects/
+```
+
+**Enable the modalities you intend to upload.** A new project starts with none,
+and an upload silently drops files of any modality the project doesn't enable.
+The creator gets the `admin` role on the new project.
+
+The usual pattern for an unattended uploader is: look the project up, create it
+on `404` (treating `409` as "already there"), then upload.
+
+### Uploading (maxillo projects)
+
+| Request | Returns |
+|---|---|
+| `GET /api/<slug>/folders/` | the project's top-level folders (`id`, `name`) |
+| `GET /api/<slug>/patients/` | the project's patients and their modalities |
+| `POST /api/<slug>/upload/` | `multipart/form-data`: `name`, `project` (id), `folder` (id), and the files: `cbct`, `ios_upper`, `ios_lower`, `panoramic`, `teleradiography` |
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -F name="Patient 001" -F project=7 -F folder=12 -F cbct=@scan.nii.gz \
+  $YGG/api/maxillo-study/upload/
+```
+
+Uploading needs a role that can write to the folder (`annotator` or `admin`).
+The upload endpoint currently stores **maxillo** patients only, so don't use it
+on projects in other domains.
+
 ## Documentation
 
 - [docs/setup.md](docs/setup.md) — first-time setup: `.env`, `DOCKER_SUFFIX`, Docker networks

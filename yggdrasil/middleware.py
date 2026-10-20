@@ -392,6 +392,9 @@ class PresenceMiddleware(MiddlewareMixin):
     def process_request(self, request):
         if getattr(request, "maintenance_mode", "normal") != "normal" and not getattr(request.user, "is_staff", False):
             return None
+        # A script holding an API token is not a person on the site.
+        if getattr(request, "api_token", None) is not None:
+            return None
         if request.user.is_authenticated:
             presence.touch(request.user, request.path)
         return None
