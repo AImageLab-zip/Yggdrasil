@@ -56,6 +56,7 @@ SECTIONS = (
             ("cardiology", "CardiologyProject"),
             ("common", "ProjectAccess"),
             ("common", "Invitation"),
+            ("common", "ApiToken"),
             ("maxillo", "Folder"),
             ("brain", "Folder"),
             ("laparoscopy", "Folder"),

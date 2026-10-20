@@ -40,6 +40,7 @@ from common.domains import fk_fields_for
 from common.models import (
     ActivityEvent,
     AnnotationMethod,
+    ApiToken,
     FileRegistry,
     Invitation,
     Job,
@@ -490,6 +491,115 @@ class InvitationAdmin(admin.ModelAdmin):
         if obj:  # Editing existing object
             return self.readonly_fields + ['created_by']
         return self.readonly_fields
+
+
+class ApiTokenForm(forms.ModelForm):
+    class Meta:
+        model = ApiToken
+        fields = ['user', 'name', 'expires_at']
+
+    def clean_user(self):
+        from common.demo import is_demo_guest
+
+        user = self.cleaned_data['user']
+        if is_demo_guest(user):
+            raise ValidationError("The public demo account cannot hold an API token.")
+        if not user.is_active:
+            raise ValidationError("An inactive user cannot hold an API token.")
+        return user
+
+
+@admin.register(ApiToken)
+class ApiTokenAdmin(admin.ModelAdmin):
+    """Personal API tokens (:mod:`common.api_tokens`).
+
+    **Superusers only, for every operation.** A token logs its holder in as its
+    user, so anyone who could issue one for another account could become that
+    account -- a staff user given ``add_apitoken`` would be one click from
+    superuser. Django's per-model permissions cannot express "only for yourself",
+    so the model is closed to everyone else.
+
+    The plaintext is shown once, in the message after saving the add form. It is
+    never stored and cannot be shown again; a lost token is revoked and reissued.
+    """
+
+    form = ApiTokenForm
+    list_display = ['name', 'user', 'key_start', 'created_at', 'last_used_at', 'expires_at', 'revoked_at']
+    list_filter = ['created_at', 'revoked_at']
+    list_select_related = ['user']
+    search_fields = ['name', 'user__username', 'key_start']
+    autocomplete_fields = ['user']
+    actions = ['revoke']
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return []
+        return ['user', 'key_start', 'created_at', 'created_by', 'last_used_at', 'revoked_at']
+
+    #: Shown on the add page, where a token is issued: the one moment the
+    #: person holding it is certainly reading. Full reference: README "API
+    #: access for scripts".
+    USAGE = """
+<p>The token acts as the chosen user on <code>/api/</code>, with exactly that
+user's project permissions. It is shown <strong>once</strong>, after saving, and
+cannot be recovered. If it is lost, revoke it and issue another.</p>
+<p>Send it as a header. No CSRF token or session is needed:</p>
+<pre>curl -H "Authorization: Bearer ygg_…" https://&lt;host&gt;/api/projects/</pre>
+<table>
+<tr><td><code>GET /api/projects/</code></td><td>projects the user can read (<code>?domain=</code>, <code>?name=</code>)</td></tr>
+<tr><td><code>GET /api/projects/&lt;slug&gt;/</code></td><td>one project. 404 if missing <em>or</em> unreadable</td></tr>
+<tr><td><code>POST /api/projects/</code></td><td>superusers only. JSON <code>{"name", "domain", "slug"?, "description"?, "modalities"?: [slugs], "annotation_methods"?: [slugs]}</code>.
+201 if created, 409 with the existing <code>slug</code> if taken</td></tr>
+<tr><td><code>GET /api/&lt;slug&gt;/folders/</code></td><td>the project's folders (ids for uploading)</td></tr>
+<tr><td><code>POST /api/&lt;slug&gt;/upload/</code></td><td>maxillo projects. Multipart <code>name</code>, <code>project</code> (id), <code>folder</code> (id),
+<code>cbct</code>, <code>ios_upper</code>, <code>ios_lower</code>, <code>panoramic</code>, <code>teleradiography</code></td></tr>
+</table>
+<p>A new project enables no modalities, and uploads of a modality it doesn't enable are dropped,
+so list them when creating it. A bad token gets 401. 20 bad tokens from one address in
+15 minutes get 429. Tokens do not work on HTML pages or on the runner API.</p>
+"""
+
+    def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return [(None, {'fields': ['user', 'name', 'expires_at'], 'description': self.USAGE})]
+        return [(None, {'fields': ['user', 'name', 'key_start', 'expires_at', 'created_at', 'created_by', 'last_used_at', 'revoked_at']})]
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            key = ApiToken.new_key()
+            obj.set_key(key)
+            _stamp_author(request, obj)
+            super().save_model(request, obj, form, change)
+            messages.warning(
+                request,
+                format_html(
+                    "API token for {}: <code>{}</code> — copy it now, it will not be shown again.",
+                    obj.user.get_username(),
+                    key,
+                ),
+            )
+            return
+        super().save_model(request, obj, form, change)
+
+    @admin.action(description="Revoke selected tokens")
+    def revoke(self, request, queryset):
+        count = queryset.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
+        self.message_user(request, f"Revoked {count} token(s).")
 
 
 class FolderInlineBase(admin.TabularInline):

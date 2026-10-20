@@ -11,6 +11,25 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] - 2026-10-19
+
+Scripts can now work with Yggdrasil directly, using personal API tokens.
+
+### Added
+- **Scripts can use Yggdrasil without a browser.** An administrator can issue a
+  personal API token for any account. A script that sends it can do through
+  `/api/` exactly what that person can do on the site: no more, no less. Tokens
+  can be given an expiry date and revoked at any time. Each one shows when it was
+  last used, and it is displayed only once, when it is created.
+- **Projects can be looked up and created through the API.** An upload script can
+  check whether its project exists before uploading, and an administrator's
+  script can create it, with its modalities, if it doesn't. See "API access for
+  scripts" in the README.
+
+### Security
+- **Guessing tokens is throttled.** An address that sends 20 invalid tokens in 15
+  minutes is refused for the rest of that window.
+
 ## [3.3.0] - 2026-09-24
 
 Yggdrasil now works on a phone -- as the public demo.

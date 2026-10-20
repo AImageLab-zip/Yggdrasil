@@ -1013,3 +1013,67 @@ class Notification(models.Model):
     def __str__(self):
         return f"[{self.level}] {self.message[:40]} → {self.user.username}"
 
+
+
+class ApiToken(models.Model):
+    """A personal access token: lets a script call ``/api/`` as its user.
+
+    The token carries exactly its user's permissions -- it is a way to log in
+    without a browser, not a role. Only a SHA-256 of it is stored; the plaintext
+    is shown once, when it is issued (admin or ``manage.py create_api_token``),
+    and cannot be recovered. Tokens are long and random, so an unsalted fast hash
+    is enough: there is no dictionary to try against it.
+
+    Checked by :class:`common.api_tokens.ApiTokenMiddleware`. Not related to the
+    runner API's ``RUNNER_API_TOKENS``, which authenticate machines, not users.
+    """
+
+    #: Every token starts with this, so a leaked one is recognisable in a log,
+    #: a paste or a secret scanner.
+    KEY_PREFIX = "ygg_"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="api_tokens")
+    name = models.CharField(max_length=100, help_text="What the token is for, e.g. 'nightly upload script'.")
+    # The first characters of the token, kept in clear so a token can be told
+    # apart from its siblings without the secret.
+    key_start = models.CharField(max_length=16, editable=False)
+    key_hash = models.CharField(max_length=64, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="Leave empty for a token that does not expire.")
+    last_used_at = models.DateTimeField(null=True, blank=True, editable=False)
+    revoked_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.key_start}…) → {self.user.username}"
+
+    @staticmethod
+    def hash_key(key):
+        import hashlib
+
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def new_key(cls):
+        import secrets
+
+        return cls.KEY_PREFIX + secrets.token_urlsafe(32)
+
+    def set_key(self, key):
+        self.key_start = key[: len(self.KEY_PREFIX) + 6]
+        self.key_hash = self.hash_key(key)
+
+    def is_usable(self, now=None):
+        from django.utils import timezone
+
+        now = now or timezone.now()
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at is not None and self.expires_at <= now:
+            return False
+        return self.user.is_active

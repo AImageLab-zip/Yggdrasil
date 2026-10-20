@@ -21,6 +21,7 @@ from django.contrib.auth import views as auth_views
 from maxillo import views as scans_views
 from common import views as common_views
 from common import password_reset
+from common import project_api
 
 urlpatterns = [
     # App-agnostic admin control panel (must come before Django admin route)
@@ -53,6 +54,14 @@ urlpatterns = [
         "api/preferences/report-language/",
         common_views.set_report_language,
         name="set_report_language",
+    ),
+    # Before the maxillo include: its /api/<project_slug>/... routes would
+    # otherwise read "projects" as a project slug.
+    path("api/projects/", project_api.projects_api, name="projects_api"),
+    path(
+        "api/projects/<slug:project_slug>/",
+        project_api.project_detail_api,
+        name="project_detail_api",
     ),
     path("api/notifications/", common_views.notifications_api, name="notifications_api"),
     path(
