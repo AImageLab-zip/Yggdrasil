@@ -1,7 +1,7 @@
 """Centralized project-scoped ACL permission checks.
 
 Access is granted per Project via ``ProjectAccess`` with roles
-``viewer`` / ``annotator`` / ``admin``. Patients and folders live inside a
+``viewer`` / ``agent`` / ``annotator`` / ``admin``. Patients and folders live inside a
 project, so every check resolves the patient's/folder's project and consults
 ``ProjectAccess``. The legacy ``FolderAccess`` tables are kept for data
 preservation but are no longer read for authorization.
@@ -10,14 +10,28 @@ The public-demo guest is an ordinary user here: it sees a project because it
 holds a ``viewer`` ``ProjectAccess`` on it, through the same code path as
 everyone else. Granting that role is therefore what publishes a project to the
 anonymous demo -- there is no separate demo flag.
+
+An ``agent`` writes like an ``annotator`` -- uploads, annotations, captions,
+exports -- but never deletes. "Delete" is read broadly: anything that removes or
+overwrites stored data the agent did not just create (soft-deleting a patient,
+deleting a file, a tag or a caption, clearing a classification, replacing a scan
+or a processed image) needs ``DELETE_ROLES``, checked with ``"delete"`` in
+``get_patient_for`` or ``user_can_delete_in_project``. Annotation edits are not
+deletions: every save is a new revision and the previous ones are kept. The
+role exists for automated accounts (API-token scripts, AI agents) that should be
+able to add work but must not be able to destroy anyone's.
 """
 
 
 from common.domains import normalize_domain
 from common.models import Project, ProjectAccess
 
-WRITE_ROLES = {"annotator", "admin"}
-READ_ROLES = {"viewer", "annotator", "admin"}
+WRITE_ROLES = {"agent", "annotator", "admin"}
+READ_ROLES = {"viewer", "agent", "annotator", "admin"}
+# Write roles that may also delete; ``agent`` is the one write role left out.
+DELETE_ROLES = WRITE_ROLES - {"agent"}
+# Roles shown only their own captions (bias guard).
+BLINDED_ROLES = {"agent", "annotator"}
 
 
 def current_project(request):
@@ -145,6 +159,22 @@ def user_can_write_annotations(user, folder, project=None):
     return bool(access and access.role in WRITE_ROLES)
 
 
+def user_can_delete_in_project(user, project):
+    """Whether ``user`` may delete, clear or overwrite stored data in ``project``.
+
+    ``user_can_write_annotations`` minus the ``agent`` role. Staff and project
+    admins always may; the demo guest never does.
+    """
+    from common.demo import is_demo_guest
+    if is_demo_guest(user):
+        return False
+    project = _as_project(project)
+    if user_is_project_admin(user, project):
+        return True
+    access = _access_for(user, project)
+    return bool(access and access.role in DELETE_ROLES)
+
+
 def user_can_read_patient(user, patient):
     """Read check for a patient (any role) against the patient's own project."""
     if not user or not user.is_authenticated or patient is None:
@@ -159,6 +189,13 @@ def user_can_write_patient_annotations(user, patient):
     return user_can_write_annotations(user, None, patient.project)
 
 
+def user_can_delete_patient_data(user, patient):
+    """Delete check for a patient's data (annotator/admin, not agent)."""
+    if not user or not user.is_authenticated or patient is None:
+        return False
+    return user_can_delete_in_project(user, patient.project)
+
+
 def user_is_patient_admin(user, patient):
     """Admin check against the patient's own project."""
     return patient is not None and user_is_project_admin(user, patient.project)
@@ -167,6 +204,7 @@ def user_is_patient_admin(user, patient):
 PATIENT_PERMISSIONS = {
     "read": user_can_read_patient,
     "write": user_can_write_patient_annotations,
+    "delete": user_can_delete_patient_data,
     "admin": user_is_patient_admin,
 }
 
@@ -205,7 +243,7 @@ def project_allows_annotation(patient, method_slug):
 
 
 def user_can_delete_single_patient(user, folder, project=None):
-    return user_can_write_annotations(user, folder, project)
+    return user_can_delete_in_project(user, _project_for_folder(folder, project))
 
 
 def user_can_move_patient(user, patient):
@@ -264,9 +302,9 @@ def user_can_view_caption_content(user, caption, project=None):
     access = _access_for(user, patient.project)
     if not access:
         return False
-    # Annotators see only their own captions (bias guard); viewers and admins
-    # see everything in the project.
-    if access.role == "annotator":
+    # Annotators and agents see only their own captions (bias guard); viewers
+    # and admins see everything in the project.
+    if access.role in BLINDED_ROLES:
         return False
     return access.role in READ_ROLES
 
@@ -315,7 +353,10 @@ class PermissionChecker:
         return bool(self.access and self.access.role == "admin")
 
     def is_annotator(self):
-        return bool(self.access and self.access.role in {"annotator", "admin"})
+        return bool(self.access and self.access.role in WRITE_ROLES)
+
+    def can_delete_data(self):
+        return bool(self.access and self.access.role in DELETE_ROLES)
 
     def is_project_manager(self):
         return False
@@ -324,7 +365,7 @@ class PermissionChecker:
         return False
 
     def can_upload_scans(self):
-        return bool(self.access and self.access.role in {"annotator", "admin"})
+        return bool(self.access and self.access.role in WRITE_ROLES)
 
     def can_see_debug_scans(self):
         return self.is_admin()

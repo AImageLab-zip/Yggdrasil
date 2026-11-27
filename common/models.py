@@ -295,6 +295,7 @@ class UserSession(models.Model):
 class ProjectAccess(models.Model):
 	ROLE_CHOICES = [
 		('viewer', 'Viewer'),
+		('agent', 'Agent'),
 		('annotator', 'Annotator'),
 		('admin', 'Administrator'),
 	]
@@ -311,6 +312,10 @@ class ProjectAccess(models.Model):
 		return f"{self.user.username} -> {self.project.name}"
 
 	def is_annotator(self):
+		return self.role in ['agent', 'annotator', 'admin']
+
+	def can_delete_data(self):
+		# An agent writes like an annotator but never deletes, clears or replaces.
 		return self.role in ['annotator', 'admin']
 
 	def is_project_manager(self):
@@ -323,7 +328,7 @@ class ProjectAccess(models.Model):
 		return False
 
 	def can_upload_scans(self):
-		return self.role in ['admin', 'annotator']
+		return self.role in ['admin', 'annotator', 'agent']
 
 	def can_see_debug_scans(self):
 		return self.role == 'admin'
@@ -353,6 +358,7 @@ class ProjectAccess(models.Model):
 class Invitation(models.Model):
 	ROLE_CHOICES = [
 		('viewer', 'Viewer'),
+		('agent', 'Agent'),
 		('annotator', 'Annotator'),
 		('admin', 'Administrator'),
 	]

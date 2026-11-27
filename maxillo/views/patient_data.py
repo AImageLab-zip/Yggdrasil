@@ -20,6 +20,7 @@ from PIL import Image
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.file_access import exists as artifact_exists, streaming_response
 from common.permissions import (
+    user_can_delete_patient_data,
     user_can_read_patient,
     user_can_write_patient_annotations,
 )
@@ -1493,6 +1494,13 @@ def save_rgb_image_edit(request, patient_id):
     source_file = get_object_or_404(FileRegistry, id=source_file_id, patient=patient)
     if source_file.file_type != raw_type:
         return JsonResponse({"success": False, "error": "Source file type mismatch"}, status=400)
+    # A new edit replaces (deletes) the previous one below, which an agent may not do.
+    if not user_can_delete_patient_data(request.user, patient) and patient.files.filter(
+        file_type=processed_type, metadata__source_file_id=source_file_id
+    ).exists():
+        return JsonResponse(
+            {"success": False, "error": "Your role cannot replace an existing edit."}, status=403
+        )
 
     ext = os.path.splitext(edited_image.name or "")[1].lower()
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:

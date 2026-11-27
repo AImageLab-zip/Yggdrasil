@@ -50,7 +50,7 @@ def delete_voice_caption(request, patient_id, caption_id):
     Patient = domain_models['Patient']
     VoiceCaption = domain_models['VoiceCaption']
     
-    patient = get_patient_for(request.user, Patient, patient_id, 'write')
+    patient = get_patient_for(request.user, Patient, patient_id, 'delete')
     voice_caption = get_object_or_404(VoiceCaption, id=caption_id, patient=patient)
     
     # Check permissions
@@ -96,14 +96,15 @@ def reset_voice_captions(request, patient_id):
     """Delete every caption on the patient this user may delete, in one go.
 
     The rule is ``delete_voice_caption``'s: an annotator removes their own
-    captions, a patient admin removes everyone's. The page asks for confirmation
-    before posting, so there is no second admin handshake here.
+    captions, a patient admin removes everyone's, an agent removes none. The page
+    asks for confirmation before posting, so there is no second admin handshake
+    here.
     """
     domain_models = get_domain_models(request)
     Patient = domain_models['Patient']
     VoiceCaption = domain_models['VoiceCaption']
 
-    patient = get_patient_for(request.user, Patient, patient_id, 'write')
+    patient = get_patient_for(request.user, Patient, patient_id, 'delete')
     captions = VoiceCaption.objects.filter(patient=patient)
     if not user_is_patient_admin(request.user, patient):
         captions = captions.filter(user=request.user)

@@ -16,6 +16,7 @@ import logging
 from common.deletion import FolderNotEmpty, delete_folder as _delete_folder
 from common.domain_models import get_domain_models
 from common.permissions import (
+    user_can_delete_patient_data,
     user_can_write_patient_annotations,
     user_is_project_admin,
 )
@@ -229,7 +230,7 @@ def remove_patient_tag(request, patient_id):
     Tag = domain_models['Tag']
     try:
         patient = get_object_or_404(Patient, patient_id=patient_id)
-        if not user_can_write_patient_annotations(request.user, patient):
+        if not user_can_delete_patient_data(request.user, patient):
             return JsonResponse({'error': 'Permission denied'}, status=403)
         data = json.loads(request.body) if request.body else request.POST
         tag_name = (data.get('tag') or '').strip()

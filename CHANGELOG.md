@@ -11,6 +11,21 @@ number in the footer.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-11-27
+
+A new project role, **Agent**, for accounts that should add work but never remove it.
+
+### Added
+- **The Agent role.** An agent works like an annotator — it can upload patients,
+  annotate, tag, record captions, classify and export — but it cannot delete
+  anything. Deleting a patient, a file, a tag or a voice caption, resetting
+  captions, clearing an ECG rhythm call, replacing an uploaded scan and
+  replacing an edited image are all refused. It is meant for scripts and AI
+  agents using API tokens, and for anyone whose access should be add-only.
+  Administrators can grant it wherever a role is chosen (project access and
+  invitations).
+- Like annotators, agents see only their own voice captions.
+
 ## [3.4.0] - 2026-10-19
 
 Scripts can now work with Yggdrasil directly, using personal API tokens.

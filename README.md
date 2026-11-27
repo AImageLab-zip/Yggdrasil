@@ -67,6 +67,13 @@ Everything under `/api/` can be called from a script with a **personal API
 token** instead of a browser session. A token acts as its user, with exactly that
 user's project permissions. It is not a separate role.
 
+**For automated accounts, use the `agent` role.** An agent can do everything an
+annotator can (upload patients, annotate, tag, caption, classify, export) but
+can never delete, clear or replace data: it is refused deleting patients, files,
+tags and captions, clearing a classification, and replacing a scan or an image
+edit. Give a script's or an AI agent's account `agent` access on its projects,
+so a bug or a bad instruction can add work but not destroy anyone's.
+
 **Getting a token.** A superuser issues it, either in the admin (*Projects &
 access → API tokens → Add*) or from the shell:
 
@@ -137,7 +144,7 @@ cardiology). The project's domain decides where patients are stored.
 | `POST /api/<slug>/folders/` | project admins | JSON `{"name": "..."}`. Get-or-create: `201` if created, `200` if it already existed |
 | `GET /api/<slug>/patients/[?folder=<id>&name=<name>]` | readers | the project's patients, their folder and modalities |
 | `GET /api/<slug>/patients/<id>/files/` | readers | one patient's stored files |
-| `POST /api/<slug>/upload/` | `annotator`s and admins | creates one patient. See below |
+| `POST /api/<slug>/upload/` | `agent`s, `annotator`s and admins | creates one patient. See below |
 
 **Upload** takes `multipart/form-data`: `name`, `folder` (a folder id of this
 project), optional `tags` (comma-separated), and one part per file. The file

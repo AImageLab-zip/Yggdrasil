@@ -81,7 +81,7 @@ Processing is configured per modality with `common.ProcessingStep` rows (admin: 
 
 Both `common/permissions.py` and `common/job_routing.py` are **registry-driven** and need no per-domain edits:
 
-- Authorization is per `Project` through `ProjectAccess` (viewer / annotator / admin). The legacy `FolderAccess` tables are **not** read for authorization. Every object check takes the object's own project: load patients with `get_patient_for(user, Patient, id, perm)`, never pass `request` or a domain name to a permission helper (they raise `TypeError`). `current_project(request)` is the session's project for UI defaults only.
+- Authorization is per `Project` through `ProjectAccess` (viewer / agent / annotator / admin). A view that deletes, clears or replaces data authorizes with `"delete"`, not `"write"`, so that an agent is refused; `common/tests_agent_role.py` makes you classify any new destructive route; endpoint tests go in the domain (`maxillo/tests_agent_role.py`). The legacy `FolderAccess` tables are **not** read for authorization. Every object check takes the object's own project: load patients with `get_patient_for(user, Patient, id, perm)`, never pass `request` or a domain name to a permission helper (they raise `TypeError`). `current_project(request)` is the session's project for UI defaults only.
 - `_project_slug_for_job()` resolves the job's patient via `fk_fields_for(domain)` — the FK columns you added in step 4 are all it needs.
 
 ## 7. Sanity check

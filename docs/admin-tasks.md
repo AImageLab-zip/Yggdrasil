@@ -29,7 +29,7 @@ docker exec -it yggdrasil-web-$DOCKER_SUFFIX python manage.py shell -c \
 ```
 
 Note that being staff is not the same as having project access: authorization is
-`Project` + `ProjectAccess` (viewer / annotator / admin). Staff bypass the
+`Project` + `ProjectAccess` (viewer / agent / annotator / admin). Staff bypass the
 maintenance modes and are auto-provisioned access, which is convenient and easy
 to mistake for a permission check working.
 
