@@ -15,6 +15,7 @@ from common import assist
 from common.annotation_lock import annotation_lock_reasons, lock_message
 from common.permissions import (
     project_allows_annotation,
+    user_can_delete_patient_data,
     user_can_edit_caption,
     user_can_read_patient,
     user_can_view_caption_content,
@@ -332,6 +333,12 @@ def patient_detail(request, patient_id):
                 messages.success(request, 'Scan settings updated successfully!')
                 return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
         
+        elif action == 'update_files' and not user_can_delete_patient_data(request.user, patient):
+            # Replacing a scan discards the one it replaces (and its pipeline
+            # results), so it needs delete rights, which an agent does not have.
+            messages.error(request, 'Your role cannot replace existing scans.')
+            return redirect_with_namespace(request, 'patient_detail', patient_id=patient_id)
+
         elif action == 'update_files':
             updated_files = []
             reprocess_ios = False

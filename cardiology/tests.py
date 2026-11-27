@@ -337,3 +337,36 @@ class BrowserPlotTests(CardiologyTestCase):
             with self.assertRaises(RuntimeError):
                 self._save()
         self.storage.delete.assert_called_once()
+
+
+class AgentRoleTests(CardiologyTestCase):
+    """An agent classifies like an annotator but cannot withdraw or reset anything."""
+
+    def setUp(self):
+        super().setUp()
+        self.agent = self._user("card-agent", "agent")
+
+    def test_agent_classifies_but_cannot_clear(self):
+        self.assertEqual(self._classify("AF", user=self.agent).status_code, 200)
+        self._login(self.agent)
+        cleared = self.client.post(
+            reverse("cardiology:classification_clear", args=[self.patient.patient_id]),
+            json.dumps({"revision": 1}), content_type="application/json",
+        )
+        self.assertEqual(cleared.status_code, 403)
+
+        from annotations.services.ecg_rhythm import ecg_rhythm_state
+
+        self.assertEqual(ecg_rhythm_state(self.patient)["value"], "AF")
+
+    def test_agent_cannot_reset_its_captions(self):
+        caption = VoiceCaption.objects.create(
+            patient=self.patient, user=self.agent, text_caption="a caption long enough", duration=0,
+        )
+        self._login(self.agent)
+        response = self.client.post(
+            reverse("cardiology:reset_voice_captions", args=[self.patient.patient_id]),
+            "{}", content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(VoiceCaption.objects.filter(pk=caption.pk).exists())

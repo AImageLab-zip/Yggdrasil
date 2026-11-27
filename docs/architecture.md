@@ -113,8 +113,11 @@ Two consequences worth internalising:
   a server-side refusal in the write endpoint. The same goes for modality
   gating on upload.
 
-Authorization is `Project` + `ProjectAccess` (roles: viewer / annotator /
-admin), resolved through `common/permissions.py`. A namespace is "the projects
+Authorization is `Project` + `ProjectAccess` (roles: viewer / agent / annotator /
+admin), resolved through `common/permissions.py`. An agent writes like an
+annotator but holds no delete rights: anything that deletes, clears or replaces
+stored data checks `"delete"` (`get_patient_for(..., "delete")`,
+`user_can_delete_in_project`), which only annotators, admins and staff pass. A namespace is "the projects
 whose `domain` equals this slug" — `Project.domain`, not `Project.slug`. The
 `FolderAccess` tables still exist and still carry rows, but **they are not read
 for authorization**.

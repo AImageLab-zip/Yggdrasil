@@ -1351,7 +1351,7 @@ def add_raw_file(request, patient_id):
 @login_required
 @require_POST
 def delete_raw_file(request, patient_id, file_id):
-    patient = get_patient_for(request.user, Patient, patient_id, "write")
+    patient = get_patient_for(request.user, Patient, patient_id, "delete")
 
     reasons = annotation_lock_reasons(patient)
     if reasons:

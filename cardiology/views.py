@@ -603,8 +603,9 @@ def classification_clear(request, patient_id):
 
     Same revision handshake as :func:`classification_update`: a reset quoting a
     revision somebody has since moved past is answered 409 with the current call.
+    Withdrawing a call is a deletion, so an agent cannot.
     """
-    patient = get_patient_for(request.user, Patient, patient_id, "write")
+    patient = get_patient_for(request.user, Patient, patient_id, "delete")
     try:
         data = _json.loads(request.body)
     except _json.JSONDecodeError:

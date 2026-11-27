@@ -229,7 +229,7 @@ def add_raw_file(request, patient_id):
 def delete_raw_file(request, patient_id, file_id):
     Patient = get_domain_models(request)["Patient"]
     domain = get_namespace(request)
-    patient = get_patient_for(request.user, Patient, patient_id, "write")
+    patient = get_patient_for(request.user, Patient, patient_id, "delete")
 
     locked = _raw_lock_response(patient)
     if locked:

@@ -9,7 +9,7 @@ their own copy of a thing, it belongs here.
   are the single source of truth for which domains exist; permissions, job
   routing and the landing page all derive from it.
 - **Projects and authorization** — `Project`, `ProjectAccess` (viewer /
-  annotator / admin), `Invitation`, and `permissions.py`. A namespace is "the
+  agent / annotator / admin), `Invitation`, and `permissions.py`. A namespace is "the
   projects whose `domain` equals this slug".
 - **The processing pipeline** — `Modality`, `ProcessingStep`, `Job`,
   `ProcessingJob`, the dispatch signal in `signals.py`, queue selection in
